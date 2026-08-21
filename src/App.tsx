@@ -13,7 +13,9 @@ import {
   useConversation,
   type AutonomousContext,
   type AutonomousDecision,
+  type ChatCardContext,
 } from './conversation/useConversation';
+import type { CardSwapResult } from './cards/useCardGamePrototype';
 
 const STATUS_LABELS = {
   idle: '話しかけてください。',
@@ -127,27 +129,41 @@ export default function App() {
     [zones.brain, zones.forcedCardId],
   );
 
-  const startAutonomous = useCallback(async () => {
-    beginReply();
-    prepare();
-    const decision = await sendAutonomous(
-      readCardContext(),
-      autonomousContext,
+  const startAutonomous = useCallback(
+    async (cardContextOverride?: ChatCardContext) => {
+      beginReply();
+      prepare();
+      const decision = await sendAutonomous(
+        cardContextOverride ?? readCardContext(),
+        autonomousContext,
+        acceptReply,
+      );
+      if (!decision) return false;
+      setAutonomousContext((current) =>
+        advanceAutonomousContext(current, decision),
+      );
+      return true;
+    },
+    [
       acceptReply,
-    );
-    if (!decision) return false;
-    setAutonomousContext((current) =>
-      advanceAutonomousContext(current, decision),
-    );
-    return true;
-  }, [
-    acceptReply,
-    autonomousContext,
-    beginReply,
-    prepare,
-    readCardContext,
-    sendAutonomous,
-  ]);
+      autonomousContext,
+      beginReply,
+      prepare,
+      readCardContext,
+      sendAutonomous,
+    ],
+  );
+
+  const handleCardInserted = useCallback(
+    (result: CardSwapResult) => {
+      if (isMuted) return;
+      void startAutonomous({
+        brainCardIds: result.brainCardIds,
+        forcedCardId: result.forcedCardId,
+      });
+    },
+    [isMuted, startAutonomous],
+  );
 
   useAutonomousTalk({
     cancelAutonomous,
@@ -260,6 +276,7 @@ export default function App() {
         <CardGamePrototype
           game={cardGame}
           isInteractionLocked={isBusy}
+          onCardInserted={handleCardInserted}
         />
       </section>
 
