@@ -41,11 +41,71 @@ input {
   z-index: 2;
   top: 1rem;
   left: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   color: #c9c5bd;
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
+}
+
+.audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #aaa69f;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.mute-button {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(126 132 142 / 58%);
+  border-radius: 999px;
+  background: rgb(20 23 29 / 78%);
+  color: #f4f2ed;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  text-transform: none;
+}
+
+.mute-button:hover {
+  border-color: #c9c5bd;
+  background: rgb(31 35 43 / 92%);
+}
+
+.mute-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.volume-slider {
+  width: clamp(4.5rem, 8vw, 6rem);
+  height: 1rem;
+  margin: 0;
+  accent-color: #f09a68;
+  cursor: pointer;
+}
+
+.volume-slider:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+.volume-value {
+  width: 2.4rem;
+  color: #aaa69f;
+  text-align: right;
 }
 
 .avatar-area {

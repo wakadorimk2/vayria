@@ -12,27 +12,49 @@ export type PlayAudio = (
   options?: PlayAudioOptions,
 ) => Promise<void>;
 
-export function useAudioLipSync() {
+function clampVolume(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(0, Math.min(value, 1));
+}
+
+export function useAudioLipSync(volume = 1) {
+  const normalizedVolume = clampVolume(volume);
   const [mouthOpen, setMouthOpen] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const contextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const animationFrameRef = useRef(0);
   const smoothedRmsRef = useRef(0);
   const generationRef = useRef(0);
+  const volumeRef = useRef(normalizedVolume);
 
-  const prepare = useCallback(() => {
+  const ensureAudioContext = useCallback(() => {
     if (!contextRef.current || contextRef.current.state === 'closed') {
       contextRef.current = new AudioContext();
+      gainRef.current = null;
     }
 
-    if (contextRef.current.state === 'suspended') {
-      void contextRef.current.resume().catch(() => {
+    if (!gainRef.current) {
+      const gain = contextRef.current.createGain();
+      gain.gain.value = volumeRef.current;
+      gain.connect(contextRef.current.destination);
+      gainRef.current = gain;
+    }
+
+    return contextRef.current;
+  }, []);
+
+  const prepare = useCallback(() => {
+    const context = ensureAudioContext();
+
+    if (context.state === 'suspended') {
+      void context.resume().catch(() => {
         // play() retries and reports the error through the conversation flow.
       });
     }
-  }, []);
+  }, [ensureAudioContext]);
 
   const clearPlayback = useCallback(() => {
     if (sourceRef.current) {
@@ -50,6 +72,7 @@ export function useAudioLipSync() {
       animationFrameRef.current = 0;
     }
 
+    analyserRef.current?.disconnect();
     analyserRef.current = null;
     smoothedRmsRef.current = 0;
     setMouthOpen(0);
@@ -67,10 +90,7 @@ export function useAudioLipSync() {
       generationRef.current = generation;
       clearPlayback();
 
-      if (!contextRef.current || contextRef.current.state === 'closed') {
-        contextRef.current = new AudioContext();
-      }
-      const context = contextRef.current;
+      const context = ensureAudioContext();
       if (context.state === 'suspended') {
         await context.resume();
       }
@@ -83,7 +103,7 @@ export function useAudioLipSync() {
       analyser.fftSize = 2048;
       source.buffer = decodedAudio;
       source.connect(analyser);
-      analyser.connect(context.destination);
+      analyser.connect(gainRef.current!);
       sourceRef.current = source;
       analyserRef.current = analyser;
 
@@ -120,12 +140,23 @@ export function useAudioLipSync() {
         options?.onStart?.();
       });
     },
-    [clearPlayback],
+    [clearPlayback, ensureAudioContext],
   );
+
+  useEffect(() => {
+    volumeRef.current = normalizedVolume;
+    const context = contextRef.current;
+    const gain = gainRef.current;
+    if (context && gain && context.state !== 'closed') {
+      gain.gain.setValueAtTime(normalizedVolume, context.currentTime);
+    }
+  }, [normalizedVolume]);
 
   useEffect(() => {
     return () => {
       stop();
+      gainRef.current?.disconnect();
+      gainRef.current = null;
       if (contextRef.current?.state !== 'closed') {
         void contextRef.current?.close();
       }
