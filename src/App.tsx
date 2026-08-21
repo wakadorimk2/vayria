@@ -9,7 +9,11 @@ import { useAudioLipSync } from './audio/useAudioLipSync';
 import { CardGamePrototype } from './cards/CardGamePrototype';
 import { useCardGamePrototype } from './cards/useCardGamePrototype';
 import { useAutonomousTalk } from './conversation/useAutonomousTalk';
-import { useConversation } from './conversation/useConversation';
+import {
+  useConversation,
+  type AutonomousContext,
+  type AutonomousDecision,
+} from './conversation/useConversation';
 
 const STATUS_LABELS = {
   idle: '話しかけてください。',
@@ -65,10 +69,27 @@ function readAudioControlState(): AudioControlState {
   }
 }
 
+function advanceAutonomousContext(
+  current: AutonomousContext,
+  decision: AutonomousDecision,
+): AutonomousContext {
+  if (decision.action === 'silence') return current;
+
+  return {
+    topic: decision.topic,
+    topicTurns:
+      decision.action === 'new_topic' || current.topic === null
+        ? 1
+        : current.topicTurns + 1,
+  };
+}
+
 export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [audioControl, setAudioControl] = useState(readAudioControlState);
+  const [autonomousContext, setAutonomousContext] =
+    useState<AutonomousContext>({ topic: null, topicTurns: 0 });
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, zones } = cardGame;
@@ -109,9 +130,19 @@ export default function App() {
   const startAutonomous = useCallback(async () => {
     beginReply();
     prepare();
-    return sendAutonomous(readCardContext(), acceptReply);
+    const decision = await sendAutonomous(
+      readCardContext(),
+      autonomousContext,
+      acceptReply,
+    );
+    if (!decision) return false;
+    setAutonomousContext((current) =>
+      advanceAutonomousContext(current, decision),
+    );
+    return true;
   }, [
     acceptReply,
+    autonomousContext,
     beginReply,
     prepare,
     readCardContext,

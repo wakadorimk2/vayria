@@ -11,10 +11,30 @@ export type ConversationStatus =
 
 export type ConversationSource = 'manual' | 'autonomous';
 
+export const AUTONOMOUS_ACTIONS = [
+  'continue',
+  'new_topic',
+  'silence',
+] as const;
+
+export type AutonomousAction = (typeof AUTONOMOUS_ACTIONS)[number];
+
+export interface AutonomousContext {
+  topic: string | null;
+  topicTurns: number;
+}
+
+export interface AutonomousDecision {
+  action: AutonomousAction;
+  topic: string;
+}
+
 interface ChatResponse {
+  action?: unknown;
   activatedCards: unknown;
   emotion: unknown;
   text: string;
+  topic?: unknown;
 }
 
 export interface ChatCardContext {
@@ -36,6 +56,11 @@ interface ErrorResponse {
   error?: string;
 }
 
+interface ProcessTurnResult {
+  completed: boolean;
+  decision: AutonomousDecision | null;
+}
+
 const DEFAULT_HISTORY_LIMIT = 6;
 const MAX_HISTORY_LIMIT = 10;
 const ACTIVE_STATUSES: ConversationStatus[] = [
@@ -53,10 +78,10 @@ async function readError(response: Response, fallback: string): Promise<string> 
   }
 }
 
-function readActivatedCards(value: unknown): string[] {
+function readActivatedCards(value: unknown, allowEmpty = false): string[] {
   if (
     !Array.isArray(value) ||
-    value.length < 1 ||
+    (!allowEmpty && value.length < 1) ||
     value.length > 3 ||
     !value.every((id): id is string => typeof id === 'string') ||
     new Set(value).size !== value.length
@@ -64,6 +89,39 @@ function readActivatedCards(value: unknown): string[] {
     throw new Error('AI の発動カード形式が正しくありません。');
   }
   return value;
+}
+
+function isAutonomousAction(value: unknown): value is AutonomousAction {
+  return (
+    typeof value === 'string' &&
+    (AUTONOMOUS_ACTIONS as readonly string[]).includes(value)
+  );
+}
+
+function readAutonomousDecision(
+  action: unknown,
+  topic: unknown,
+  forcedCardId: string | null,
+): AutonomousDecision {
+  if (!isAutonomousAction(action)) {
+    throw new Error('AI の自律発話アクション形式が正しくありません。');
+  }
+  if (typeof topic !== 'string') {
+    throw new Error('AI の自律発話トピック形式が正しくありません。');
+  }
+
+  const normalizedTopic = topic.trim();
+  if (normalizedTopic.length > 120) {
+    throw new Error('AI の自律発話トピックが長すぎます。');
+  }
+  if (action !== 'silence' && !normalizedTopic) {
+    throw new Error('発話する自律応答にはトピックが必要です。');
+  }
+  if (action === 'silence' && forcedCardId) {
+    throw new Error('交換カードがある自律応答は沈黙できません。');
+  }
+
+  return { action, topic: normalizedTopic };
 }
 
 function isAbortError(error: unknown): boolean {
@@ -148,17 +206,18 @@ export function useConversation(
       message: string | null,
       cardContext: ChatCardContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
-    ): Promise<boolean> => {
+      autonomousContext: AutonomousContext | null,
+    ): Promise<ProcessTurnResult> => {
       if (turnSource === 'autonomous') {
         if (
           isMutedRef.current ||
           ACTIVE_STATUSES.includes(statusRef.current)
         ) {
-          return false;
+          return { completed: false, decision: null };
         }
       } else {
         if (sourceRef.current === 'manual' && statusRef.current !== 'idle') {
-          return false;
+          return { completed: false, decision: null };
         }
         if (sourceRef.current === 'autonomous') invalidateCurrentTurn(true);
       }
@@ -183,10 +242,18 @@ export function useConversation(
             ...(message === null ? {} : { message }),
             history: historyRef.current,
             ...cardContext,
+            ...(turnSource === 'autonomous'
+              ? {
+                  topic: autonomousContext?.topic ?? null,
+                  topicTurns: autonomousContext?.topicTurns ?? 0,
+                }
+              : {}),
           }),
           signal: chatController.signal,
         });
-        if (generation !== generationRef.current) return false;
+        if (generation !== generationRef.current) {
+          return { completed: false, decision: null };
+        }
         if (!chatResponse.ok) {
           throw new Error(
             await readError(chatResponse, 'AI の返答を取得できませんでした。'),
@@ -194,14 +261,40 @@ export function useConversation(
         }
 
         const chatPayload = (await chatResponse.json()) as ChatResponse;
-        if (generation !== generationRef.current) return false;
+        if (generation !== generationRef.current) {
+          return { completed: false, decision: null };
+        }
         if (abortControllerRef.current === chatController) {
           abortControllerRef.current = null;
         }
-        if (typeof chatPayload.text !== 'string' || !chatPayload.text.trim()) {
+        if (typeof chatPayload.text !== 'string') {
           throw new Error('AI の返答形式が正しくありません。');
         }
-        const activatedCards = readActivatedCards(chatPayload.activatedCards);
+        const responseText = chatPayload.text.trim();
+        const autonomousDecision =
+          turnSource === 'autonomous'
+            ? readAutonomousDecision(
+                chatPayload.action,
+                chatPayload.topic,
+                cardContext.forcedCardId,
+              )
+            : null;
+        if (
+          (turnSource === 'manual' && !responseText) ||
+          (autonomousDecision?.action !== 'silence' &&
+            autonomousDecision !== null &&
+            !responseText) ||
+          (autonomousDecision?.action === 'silence' && responseText)
+        ) {
+          throw new Error('AI の返答形式が正しくありません。');
+        }
+        const activatedCards = readActivatedCards(
+          chatPayload.activatedCards,
+          autonomousDecision?.action === 'silence',
+        );
+        if (autonomousDecision?.action === 'silence' && activatedCards.length) {
+          throw new Error('沈黙する自律応答はカードを発動できません。');
+        }
         const brainCardIds = new Set(cardContext.brainCardIds);
         if (activatedCards.some((id) => !brainCardIds.has(id))) {
           throw new Error('AI が脳内にないカードを発動しました。');
@@ -213,21 +306,28 @@ export function useConversation(
           throw new Error('AI が交換したカードを発動しませんでした。');
         }
 
+        if (autonomousDecision?.action === 'silence') {
+          setEmotion('neutral');
+          onReplyAccepted([]);
+          setConversationState('idle', null);
+          return { completed: true, decision: autonomousDecision };
+        }
+
         const responseEmotion = normalizeEmotion(chatPayload.emotion);
-        setReply(chatPayload.text);
+        setReply(responseText);
         setEmotion(responseEmotion);
         onReplyAccepted(activatedCards);
 
         if (turnSource === 'manual') {
           appendHistory([
             { role: 'user', content: message ?? '' },
-            { role: 'assistant', content: chatPayload.text },
+            { role: 'assistant', content: responseText },
           ]);
         }
 
         if (isMutedRef.current) {
           setConversationState('idle', null);
-          return true;
+          return { completed: turnSource === 'manual', decision: null };
         }
 
         setConversationState('synthesizing', turnSource);
@@ -238,12 +338,14 @@ export function useConversation(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: chatPayload.text,
+            text: responseText,
             emotion: responseEmotion,
           }),
           signal: ttsController.signal,
         });
-        if (generation !== generationRef.current) return false;
+        if (generation !== generationRef.current) {
+          return { completed: false, decision: null };
+        }
         if (!ttsResponse.ok) {
           throw new Error(
             await readError(ttsResponse, '返答音声を生成できませんでした。'),
@@ -258,7 +360,10 @@ export function useConversation(
           if (generation === generationRef.current) {
             setConversationState('idle', null);
           }
-          return turnSource === 'manual';
+          return {
+            completed: turnSource === 'manual',
+            decision: null,
+          };
         }
 
         await playAudio(audioData, {
@@ -268,25 +373,32 @@ export function useConversation(
             }
           },
         });
-        if (generation !== generationRef.current) return false;
+        if (generation !== generationRef.current) {
+          return { completed: false, decision: null };
+        }
 
         if (turnSource === 'autonomous') {
-          appendHistory([{ role: 'assistant', content: chatPayload.text }]);
+          appendHistory([{ role: 'assistant', content: responseText }]);
         }
         setConversationState('idle', null);
         emotionHoldTimerRef.current = setTimeout(() => {
           emotionHoldTimerRef.current = null;
           if (generation === generationRef.current) setEmotion('neutral');
         }, 800);
-        return true;
+        return { completed: true, decision: autonomousDecision };
       } catch (caughtError) {
         if (abortControllerRef.current === requestController) {
           abortControllerRef.current = null;
         }
-        if (generation !== generationRef.current) return false;
+        if (generation !== generationRef.current) {
+          return { completed: false, decision: null };
+        }
         if (isAbortError(caughtError)) {
           setConversationState('idle', null);
-          return turnSource === 'manual' && isMutedRef.current;
+          return {
+            completed: turnSource === 'manual' && isMutedRef.current,
+            decision: null,
+          };
         }
 
         clearEmotionHold();
@@ -297,7 +409,7 @@ export function useConversation(
             : '会話処理に失敗しました。',
         );
         setConversationState('error', null);
-        return false;
+        return { completed: false, decision: null };
       }
     },
     [
@@ -310,19 +422,38 @@ export function useConversation(
   );
 
   const sendManual = useCallback(
-    (
+    async (
       message: string,
       cardContext: ChatCardContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
-    ) => processTurn('manual', message, cardContext, onReplyAccepted),
+    ) =>
+      (
+        await processTurn(
+          'manual',
+          message,
+          cardContext,
+          onReplyAccepted,
+          null,
+        )
+      ).completed,
     [processTurn],
   );
 
   const sendAutonomous = useCallback(
-    (
+    async (
       cardContext: ChatCardContext,
+      autonomousContext: AutonomousContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
-    ) => processTurn('autonomous', null, cardContext, onReplyAccepted),
+    ) => {
+      const result = await processTurn(
+        'autonomous',
+        null,
+        cardContext,
+        onReplyAccepted,
+        autonomousContext,
+      );
+      return result.completed ? result.decision : null;
+    },
     [processTurn],
   );
 
