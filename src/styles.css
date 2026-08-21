@@ -51,6 +51,17 @@ input {
   text-transform: uppercase;
 }
 
+.audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #aaa69f;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .mute-button {
   display: inline-grid;
   width: 2rem;
@@ -75,6 +86,26 @@ input {
 .mute-button:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
+}
+
+.volume-slider {
+  width: clamp(4.5rem, 8vw, 6rem);
+  height: 1rem;
+  margin: 0;
+  accent-color: #f09a68;
+  cursor: pointer;
+}
+
+.volume-slider:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+.volume-value {
+  width: 2.4rem;
+  color: #aaa69f;
+  text-align: right;
 }
 
 .avatar-area {

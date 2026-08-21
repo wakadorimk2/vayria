@@ -1,4 +1,9 @@
-import { useCallback, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type FormEvent,
+} from 'react';
 import { VrmStage } from './avatar/VrmStage';
 import { useAudioLipSync } from './audio/useAudioLipSync';
 import { CardGamePrototype } from './cards/CardGamePrototype';
@@ -14,13 +19,60 @@ const STATUS_LABELS = {
   error: '処理を完了できませんでした。',
 } as const;
 
+const AUDIO_SETTINGS_STORAGE_KEY = 'wildcard.audio-settings.v1';
+
+interface AudioControlState {
+  isMuted: boolean;
+  lastAudibleVolume: number;
+  volume: number;
+}
+
+function createDefaultAudioControlState(): AudioControlState {
+  return { isMuted: false, lastAudibleVolume: 1, volume: 1 };
+}
+
+function readStoredVolume(value: unknown, allowZero: boolean): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  if (value < (allowZero ? 0 : Number.EPSILON) || value > 1) return null;
+  return value;
+}
+
+function readAudioControlState(): AudioControlState {
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(AUDIO_SETTINGS_STORAGE_KEY) ?? 'null',
+    ) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return createDefaultAudioControlState();
+    }
+
+    const record = parsed as Record<string, unknown>;
+    const volume = readStoredVolume(record.volume, true);
+    const lastAudibleVolume = readStoredVolume(
+      record.lastAudibleVolume,
+      false,
+    );
+    if (volume === null || lastAudibleVolume === null) {
+      return createDefaultAudioControlState();
+    }
+    return {
+      isMuted: volume === 0,
+      lastAudibleVolume,
+      volume,
+    };
+  } catch {
+    return createDefaultAudioControlState();
+  }
+}
+
 export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [audioControl, setAudioControl] = useState(readAudioControlState);
+  const { isMuted, lastAudibleVolume, volume } = audioControl;
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, zones } = cardGame;
-  const { mouthOpen, play, prepare, stop } = useAudioLipSync();
+  const { mouthOpen, play, prepare, stop } = useAudioLipSync(volume);
   const {
     cancelAutonomous,
     emotion,
@@ -33,6 +85,18 @@ export default function App() {
     status,
   } = useConversation(play, stop, { historyLimit: 6, isMuted });
   const trimmedInput = input.trim();
+  const volumePercent = Math.round(volume * 100);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        AUDIO_SETTINGS_STORAGE_KEY,
+        JSON.stringify({ volume, lastAudibleVolume }),
+      );
+    } catch {
+      // Playback remains usable when storage is unavailable.
+    }
+  }, [lastAudibleVolume, volume]);
 
   const readCardContext = useCallback(
     () => ({
@@ -73,11 +137,39 @@ export default function App() {
 
   const handleMuteToggle = () => {
     if (isMuted) {
+      const restoredVolume = volume > 0 ? volume : lastAudibleVolume;
       prepare();
+      setAudioControl({
+        isMuted: false,
+        lastAudibleVolume: restoredVolume,
+        volume: restoredVolume,
+      });
     } else {
       stop();
+      setAudioControl((current) => ({ ...current, isMuted: true }));
     }
-    setIsMuted(!isMuted);
+  };
+
+  const handleVolumeInput = (event: FormEvent<HTMLInputElement>) => {
+    const inputVolume = Number(event.currentTarget.value) / 100;
+    if (!Number.isFinite(inputVolume)) return;
+    const nextVolume = Math.max(0, Math.min(inputVolume, 1));
+    if (nextVolume === 0) {
+      stop();
+      setAudioControl((current) => ({
+        ...current,
+        isMuted: true,
+        volume: 0,
+      }));
+      return;
+    }
+
+    if (isMuted) prepare();
+    setAudioControl({
+      isMuted: false,
+      lastAudibleVolume: nextVolume,
+      volume: nextVolume,
+    });
   };
 
   const handleAvatarReady = useCallback(() => {
@@ -89,16 +181,43 @@ export default function App() {
     <main className="app-shell">
       <header className="app-title">
         <span>Wildcard</span>
-        <button
-          aria-label={isMuted ? '音声をオンにする' : '音声をミュートする'}
-          aria-pressed={isMuted}
-          className="mute-button"
-          onClick={handleMuteToggle}
-          title={isMuted ? 'Muted' : 'Autonomous talk active'}
-          type="button"
+        <div
+          className="audio-controls"
+          aria-label="音声コントロール"
+          role="group"
         >
-          <span aria-hidden="true">{isMuted ? '🔇' : '🔊'}</span>
-        </button>
+          <button
+            aria-label={isMuted ? '音声をオンにする' : '音声をミュートする'}
+            aria-pressed={isMuted}
+            className="mute-button"
+            onClick={handleMuteToggle}
+            title={isMuted ? 'Muted' : 'Autonomous talk active'}
+            type="button"
+          >
+            <span aria-hidden="true">{isMuted ? '🔇' : '🔊'}</span>
+          </button>
+          <label className="visually-hidden" htmlFor="playback-volume">
+            再生音量
+          </label>
+          <input
+            aria-valuetext={
+              isMuted
+                ? `ミュート中、設定音量 ${volumePercent}%`
+                : `音量 ${volumePercent}%`
+            }
+            className="volume-slider"
+            id="playback-volume"
+            max="100"
+            min="0"
+            onInput={handleVolumeInput}
+            step="5"
+            type="range"
+            value={volumePercent}
+          />
+          <span className="volume-value" aria-hidden="true">
+            {volumePercent}%
+          </span>
+        </div>
       </header>
 
       <section className="avatar-area" aria-label="VRM character">
