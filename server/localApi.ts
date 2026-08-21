@@ -7,14 +7,30 @@ const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
   '@aituber-onair/chat',
 ) as typeof import('@aituber-onair/chat');
-const { VoiceEngineAdapter } = require(
-  '@aituber-onair/voice',
-) as typeof import('@aituber-onair/voice');
 
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_TEXT_LENGTH = 1_000;
 const CHAT_PATH = '/api/chat';
 const TTS_PATH = '/api/tts';
+const DEFAULT_AIVIS_BASE_URL = 'http://127.0.0.1:10101';
+const AIVIS_CONNECTION_ERROR =
+  'AivisSpeech Engine に接続できません。AivisSpeech を起動しているか確認してください。';
+
+interface LocalApiConfig {
+  openAiApiKey?: string;
+  aivisBaseUrl?: string;
+  aivisStyleId?: string;
+}
+
+interface AivisStyle {
+  id: number;
+  name: string;
+}
+
+interface AivisSpeaker {
+  name: string;
+  styles: AivisStyle[];
+}
 
 class RequestError extends Error {
   constructor(
@@ -22,6 +38,12 @@ class RequestError extends Error {
     readonly statusCode: number,
   ) {
     super(message);
+  }
+}
+
+class AivisSpeechError extends Error {
+  constructor(readonly userMessage: string) {
+    super(userMessage);
   }
 }
 
@@ -122,32 +144,189 @@ async function generateReply(apiKey: string, message: string): Promise<string> {
   return reply;
 }
 
+function readAivisBaseUrl(configuredBaseUrl: string | undefined): URL {
+  const value = configuredBaseUrl?.trim() || DEFAULT_AIVIS_BASE_URL;
+
+  try {
+    const baseUrl = new URL(value);
+    if (baseUrl.protocol !== 'http:' && baseUrl.protocol !== 'https:') {
+      throw new Error('Unsupported protocol.');
+    }
+    return baseUrl;
+  } catch {
+    throw new RequestError(
+      'AIVIS_BASE_URL must be a valid HTTP or HTTPS URL.',
+      503,
+    );
+  }
+}
+
+function readAivisStyleId(configuredStyleId: string | undefined): number {
+  const value = configuredStyleId?.trim();
+  if (!value) {
+    throw new RequestError(
+      'AIVIS_STYLE_ID is not configured in .env.local.',
+      503,
+    );
+  }
+
+  if (!/^-?\d+$/.test(value)) {
+    throw new RequestError('AIVIS_STYLE_ID must be an integer.', 503);
+  }
+
+  const styleId = Number(value);
+  if (
+    !Number.isInteger(styleId) ||
+    styleId < -2_147_483_648 ||
+    styleId > 2_147_483_647
+  ) {
+    throw new RequestError(
+      'AIVIS_STYLE_ID must be a signed 32-bit integer.',
+      503,
+    );
+  }
+  return styleId;
+}
+
+function createAivisUrl(
+  baseUrl: URL,
+  pathname: string,
+  parameters?: Record<string, string>,
+): URL {
+  const url = new URL(pathname, baseUrl);
+  for (const [name, value] of Object.entries(parameters ?? {})) {
+    url.searchParams.set(name, value);
+  }
+  return url;
+}
+
+function summarizeEngineError(body: string): string {
+  const summary = body.replace(/\s+/g, ' ').trim();
+  return summary.slice(0, 500) || '(empty response body)';
+}
+
+async function requestAivis(
+  url: URL,
+  init: RequestInit,
+  endpoint: string,
+  styleId?: number,
+): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    console.error('AivisSpeech Engine connection failed.', {
+      endpoint,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new AivisSpeechError(AIVIS_CONNECTION_ERROR);
+  }
+
+  if (!response.ok) {
+    const detail = summarizeEngineError(await response.text());
+    console.error('AivisSpeech Engine request failed.', {
+      endpoint,
+      status: response.status,
+      styleId,
+      detail,
+    });
+    throw new AivisSpeechError(
+      styleId === undefined
+        ? 'AivisSpeech Engine の話者情報を取得できませんでした。'
+        : `AivisSpeech の音声合成に失敗しました。AIVIS_STYLE_ID=${styleId} が利用可能か確認してください。`,
+    );
+  }
+  return response;
+}
+
 async function synthesizeSpeech(
-  apiKey: string,
+  baseUrl: URL,
+  styleId: number,
   text: string,
 ): Promise<ArrayBuffer> {
-  let generatedAudio: ArrayBuffer | undefined;
-  const voice = new VoiceEngineAdapter({
-    engineType: 'openai',
-    apiKey,
-    speaker: 'alloy',
-    openAiModel: 'gpt-4o-mini-tts',
-    onPlay: async (audioBuffer) => {
-      generatedAudio = audioBuffer;
-    },
-  });
+  const speaker = String(styleId);
+  const audioQueryResponse = await requestAivis(
+    createAivisUrl(baseUrl, '/audio_query', { text, speaker }),
+    { method: 'POST' },
+    '/audio_query',
+    styleId,
+  );
 
-  await voice.speakText(text);
-  if (!generatedAudio) {
-    throw new Error('The voice provider returned no audio.');
+  // Preserve the AudioQuery bytes exactly as returned by AivisSpeech Engine.
+  const audioQuery = await audioQueryResponse.arrayBuffer();
+  const synthesisResponse = await requestAivis(
+    createAivisUrl(baseUrl, '/synthesis', { speaker }),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: audioQuery,
+    },
+    '/synthesis',
+    styleId,
+  );
+  return synthesisResponse.arrayBuffer();
+}
+
+async function reportAivisSelection(config: LocalApiConfig): Promise<void> {
+  let baseUrl: URL;
+  try {
+    baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
+  } catch (error) {
+    console.warn(
+      error instanceof Error ? error.message : 'AIVIS_BASE_URL is invalid.',
+    );
+    return;
   }
-  return generatedAudio;
+
+  let response: Response;
+  try {
+    response = await requestAivis(
+      createAivisUrl(baseUrl, '/speakers'),
+      { method: 'GET' },
+      '/speakers',
+    );
+  } catch (error) {
+    console.warn(
+      error instanceof AivisSpeechError ? error.userMessage : String(error),
+    );
+    return;
+  }
+
+  let speakers: AivisSpeaker[];
+  try {
+    speakers = (await response.json()) as AivisSpeaker[];
+  } catch {
+    console.warn('AivisSpeech Engine の /speakers 応答を解析できませんでした。');
+    return;
+  }
+
+  let styleId: number;
+  try {
+    styleId = readAivisStyleId(config.aivisStyleId);
+  } catch (error) {
+    console.warn(error instanceof Error ? error.message : String(error));
+    return;
+  }
+
+  for (const speaker of speakers) {
+    const style = speaker.styles.find((candidate) => candidate.id === styleId);
+    if (style) {
+      console.info(
+        `AivisSpeech voice: ${speaker.name} / ${style.name} (style ID: ${style.id})`,
+      );
+      return;
+    }
+  }
+
+  console.warn(
+    `AIVIS_STYLE_ID=${styleId} was not found in AivisSpeech Engine /speakers.`,
+  );
 }
 
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  apiKey: string | undefined,
+  config: LocalApiConfig,
 ): Promise<void> {
   const pathname = new URL(
     request.url ?? '/',
@@ -159,29 +338,30 @@ async function handleRequest(
     return;
   }
 
-  if (!apiKey) {
-    sendJson(response, 503, {
-      error: 'OPENAI_API_KEY is not configured in .env.local.',
-    });
-    return;
-  }
-
   try {
     const payload = await readJsonBody(request);
 
     if (pathname === CHAT_PATH) {
+      if (!config.openAiApiKey) {
+        throw new RequestError(
+          'OPENAI_API_KEY is not configured in .env.local.',
+          503,
+        );
+      }
       const message = readTextField(payload, 'message');
-      const reply = await generateReply(apiKey, message);
+      const reply = await generateReply(config.openAiApiKey, message);
       sendJson(response, 200, { reply });
       return;
     }
 
     const text = readTextField(payload, 'text');
-    const audio = Buffer.from(await synthesizeSpeech(apiKey, text));
+    const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
+    const styleId = readAivisStyleId(config.aivisStyleId);
+    const audio = Buffer.from(await synthesizeSpeech(baseUrl, styleId, text));
     response.writeHead(200, {
       'Cache-Control': 'no-store',
       'Content-Length': audio.byteLength,
-      'Content-Type': 'audio/mpeg',
+      'Content-Type': 'audio/wav',
       'X-Content-Type-Options': 'nosniff',
     });
     response.end(audio);
@@ -191,10 +371,16 @@ async function handleRequest(
       return;
     }
 
+    if (error instanceof AivisSpeechError) {
+      sendJson(response, 502, { error: error.userMessage });
+      return;
+    }
+
     console.error(
       pathname === CHAT_PATH
         ? 'Local chat provider request failed.'
         : 'Local TTS provider request failed.',
+      error,
     );
     sendJson(response, 502, {
       error:
@@ -205,10 +391,11 @@ async function handleRequest(
   }
 }
 
-export function localApiPlugin(apiKey: string | undefined): Plugin {
+export function localApiPlugin(config: LocalApiConfig): Plugin {
   return {
     name: 'wildcard-local-api',
     configureServer(server) {
+      void reportAivisSelection(config);
       server.middlewares.use((request, response, next) => {
         const pathname = new URL(
           request.url ?? '/',
@@ -219,7 +406,7 @@ export function localApiPlugin(apiKey: string | undefined): Plugin {
           return;
         }
 
-        void handleRequest(request, response, apiKey);
+        void handleRequest(request, response, config);
       });
     },
   };
