@@ -11,6 +11,8 @@ import {
   type AssistantResponse,
   type Emotion,
 } from '../src/character/emotion';
+import { cardPool } from '../src/cards/cardPool';
+import type { WildcardCardData } from '../src/cards/cardTypes';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -25,6 +27,12 @@ const DEFAULT_AIVIS_BASE_URL = 'http://127.0.0.1:10101';
 const AIVIS_CONNECTION_ERROR =
   'AivisSpeech Engine に接続できません。AivisSpeech を起動しているか確認してください。';
 const NORMAL_VOICE_STYLE_NAME = VOICE_STYLE_BY_EMOTION.neutral;
+const BRAIN_CARD_COUNT = 5;
+const MAX_ACTIVATED_CARDS = 3;
+const CARD_IDS = cardPool.map((card) => card.id);
+const CARD_BY_ID: ReadonlyMap<string, WildcardCardData> = new Map(
+  cardPool.map((card) => [card.id, card]),
+);
 
 interface LocalApiConfig {
   openAiApiKey?: string;
@@ -47,6 +55,16 @@ interface AivisStyle {
   name: string;
 }
 
+interface ChatRequestPayload {
+  message: string;
+  brainCardIds: string[];
+  forcedCardId: string | null;
+}
+
+interface CardAssistantResponse extends AssistantResponse {
+  activatedCards: string[];
+}
+
 interface AivisSpeaker {
   name: string;
   styles: AivisStyle[];
@@ -66,6 +84,8 @@ class AivisSpeechError extends Error {
     super(userMessage);
   }
 }
+
+class CardContractError extends Error {}
 
 function sendJson(
   response: ServerResponse,
@@ -103,31 +123,70 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   }
 }
 
-function readTextField(payload: unknown, field: 'message' | 'text'): string {
+function readChatRequest(payload: unknown): ChatRequestPayload {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new RequestError('Request body must be a JSON object.', 400);
   }
 
   const record = payload as Record<string, unknown>;
-  const allowedKeys = Object.keys(record);
-  if (allowedKeys.length !== 1 || allowedKeys[0] !== field) {
-    throw new RequestError(`Request body must contain only ${field}.`, 400);
-  }
-
-  const value = record[field];
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new RequestError(`${field} must be non-empty text.`, 400);
-  }
-
-  const normalized = value.trim();
-  if (normalized.length > MAX_TEXT_LENGTH) {
+  const allowedKeys = new Set(['message', 'brainCardIds', 'forcedCardId']);
+  if (
+    Object.keys(record).length !== allowedKeys.size ||
+    Object.keys(record).some((key) => !allowedKeys.has(key))
+  ) {
     throw new RequestError(
-      `${field} must be ${MAX_TEXT_LENGTH} characters or fewer.`,
+      'Request body must contain only message, brainCardIds, and forcedCardId.',
       400,
     );
   }
 
-  return normalized;
+  const message = record.message;
+  if (typeof message !== 'string' || !message.trim()) {
+    throw new RequestError('message must be non-empty text.', 400);
+  }
+
+  const normalizedMessage = message.trim();
+  if (normalizedMessage.length > MAX_TEXT_LENGTH) {
+    throw new RequestError(
+      `message must be ${MAX_TEXT_LENGTH} characters or fewer.`,
+      400,
+    );
+  }
+
+  const brainCardIds = record.brainCardIds;
+  if (
+    !Array.isArray(brainCardIds) ||
+    brainCardIds.length !== BRAIN_CARD_COUNT ||
+    !brainCardIds.every((id): id is string => typeof id === 'string')
+  ) {
+    throw new RequestError(
+      `brainCardIds must contain exactly ${BRAIN_CARD_COUNT} card IDs.`,
+      400,
+    );
+  }
+  if (new Set(brainCardIds).size !== BRAIN_CARD_COUNT) {
+    throw new RequestError('brainCardIds must not contain duplicates.', 400);
+  }
+  if (brainCardIds.some((id) => !CARD_BY_ID.has(id))) {
+    throw new RequestError('brainCardIds contains an unknown card ID.', 400);
+  }
+
+  const forcedCardId = record.forcedCardId;
+  if (forcedCardId !== null && typeof forcedCardId !== 'string') {
+    throw new RequestError('forcedCardId must be a card ID or null.', 400);
+  }
+  if (forcedCardId !== null && !brainCardIds.includes(forcedCardId)) {
+    throw new RequestError(
+      'forcedCardId must be one of the current brainCardIds.',
+      400,
+    );
+  }
+
+  return {
+    message: normalizedMessage,
+    brainCardIds,
+    forcedCardId,
+  };
 }
 
 function readTtsRequest(payload: unknown): {
@@ -164,7 +223,11 @@ function readTtsRequest(payload: unknown): {
   };
 }
 
-function parseAssistantResponse(value: string): AssistantResponse {
+function parseAssistantResponse(
+  value: string,
+  brainCardIds: readonly string[],
+  forcedCardId: string | null,
+): CardAssistantResponse {
   let payload: unknown;
   try {
     payload = JSON.parse(value);
@@ -186,16 +249,44 @@ function parseAssistantResponse(value: string): AssistantResponse {
     throw new Error('The chat provider returned response text that is too long.');
   }
 
+  const activatedCards = record.activatedCards;
+  if (
+    !Array.isArray(activatedCards) ||
+    activatedCards.length < 1 ||
+    activatedCards.length > MAX_ACTIVATED_CARDS ||
+    !activatedCards.every((id): id is string => typeof id === 'string')
+  ) {
+    throw new CardContractError(
+      `activatedCards must contain 1 to ${MAX_ACTIVATED_CARDS} card IDs.`,
+    );
+  }
+  if (new Set(activatedCards).size !== activatedCards.length) {
+    throw new CardContractError('activatedCards must not contain duplicates.');
+  }
+  if (activatedCards.some((id) => !brainCardIds.includes(id))) {
+    throw new CardContractError(
+      'activatedCards must be a subset of the current brain cards.',
+    );
+  }
+  if (forcedCardId && !activatedCards.includes(forcedCardId)) {
+    throw new CardContractError(
+      'activatedCards must include the forced card.',
+    );
+  }
+
   return {
     text,
     emotion: normalizeEmotion(record.emotion),
+    activatedCards,
   };
 }
 
 async function generateReply(
   apiKey: string,
   message: string,
-): Promise<AssistantResponse> {
+  brainCardIds: readonly string[],
+  forcedCardId: string | null,
+): Promise<CardAssistantResponse> {
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey,
     model: MODEL_GPT_5_NANO,
@@ -214,38 +305,83 @@ async function generateReply(
               type: 'string',
               enum: EMOTIONS,
             },
+            activatedCards: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: CARD_IDS,
+              },
+              minItems: 1,
+              maxItems: MAX_ACTIVATED_CARDS,
+            },
           },
-          required: ['text', 'emotion'],
+          required: ['text', 'emotion', 'activatedCards'],
           additionalProperties: false,
         },
       },
     },
   });
-  let streamedReply = '';
-  let completedReply = '';
+  const brainCards = brainCardIds.map((id) => CARD_BY_ID.get(id)!);
+  const cardInstructions = brainCards
+    .map((card) => `- ${card.id} (${card.label}): ${card.prompt}`)
+    .join('\n');
+  const forcedInstruction = forcedCardId
+    ? `The card ${forcedCardId} is forced for this reply. It must visibly influence the reply, and activatedCards must include ${forcedCardId}.`
+    : 'No card is forced for this reply.';
+  const systemPrompt = [
+    "Reply in the same language as the user with one or two short sentences and no Markdown. Choose emotion as the character's own feeling while replying. Prefer neutral when ambiguous and avoid exaggerated changes. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.",
+    'The character has the following five brain cards:',
+    cardInstructions,
+    'Let one or two natural cards influence the reply. Do not force all five cards into it. You may use up to three cards when a combination is natural.',
+    forcedInstruction,
+    'Return only card IDs from the current five cards in activatedCards. List every card that actually influenced the reply.',
+  ].join('\n');
 
-  await chat.processChat(
-    [
-      {
-        role: 'system',
-        content:
-          "Reply in the same language as the user with one or two short sentences and no Markdown. Choose emotion as the character's own feeling while replying. Prefer neutral when ambiguous and avoid exaggerated changes. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.",
+  const requestReply = async (correction?: string): Promise<string> => {
+    let streamedReply = '';
+    let completedReply = '';
+    await chat.processChat(
+      [
+        {
+          role: 'system',
+          content: correction
+            ? `${systemPrompt}\n${correction}`
+            : systemPrompt,
+        },
+        { role: 'user', content: message },
+      ],
+      (partial) => {
+        streamedReply += partial;
       },
-      { role: 'user', content: message },
-    ],
-    (partial) => {
-      streamedReply += partial;
-    },
-    async (complete) => {
-      completedReply = complete;
-    },
-  );
+      async (complete) => {
+        completedReply = complete;
+      },
+    );
+    const responseText = (completedReply || streamedReply).trim();
+    if (!responseText) {
+      throw new Error('The chat provider returned an empty reply.');
+    }
+    return responseText;
+  };
 
-  const responseText = (completedReply || streamedReply).trim();
-  if (!responseText) {
-    throw new Error('The chat provider returned an empty reply.');
+  try {
+    return parseAssistantResponse(
+      await requestReply(),
+      brainCardIds,
+      forcedCardId,
+    );
+  } catch (error) {
+    if (!(error instanceof CardContractError)) throw error;
+    console.warn('Chat card contract failed. Retrying once.', error.message);
   }
-  return parseAssistantResponse(responseText);
+
+  return parseAssistantResponse(
+    await requestReply(
+      'Your previous attempt violated the card contract. Follow the current brain-card subset and forced-card requirements exactly.',
+    ),
+    brainCardIds,
+    forcedCardId,
+  );
 }
 
 function readAivisBaseUrl(configuredBaseUrl: string | undefined): URL {
@@ -556,10 +692,12 @@ async function handleRequest(
           503,
         );
       }
-      const message = readTextField(payload, 'message');
+      const { message, brainCardIds, forcedCardId } = readChatRequest(payload);
       const assistantResponse = await generateReply(
         config.openAiApiKey,
         message,
+        brainCardIds,
+        forcedCardId,
       );
       sendJson(response, 200, assistantResponse);
       return;

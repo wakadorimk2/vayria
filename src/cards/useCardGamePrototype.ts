@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { cardPool } from './cardPool';
-import type { WildcardCardData } from './WildcardCard';
+import type { WildcardCardData } from './cardTypes';
 
 const MAX_STAMINA = 1;
 
@@ -26,6 +26,8 @@ export interface CardZoneState {
   brain: WildcardCardData[];
   hand: WildcardCardData[];
   stamina: number;
+  activatedCardIds: string[];
+  forcedCardId: string | null;
 }
 
 function selectCards(ids: readonly string[]): WildcardCardData[] {
@@ -41,6 +43,8 @@ function createInitialState(): CardZoneState {
     brain: selectCards(INITIAL_BRAIN_IDS),
     hand: selectCards(INITIAL_HAND_IDS),
     stamina: MAX_STAMINA,
+    activatedCardIds: [],
+    forcedCardId: null,
   };
 }
 
@@ -83,20 +87,49 @@ export function useCardGamePrototype() {
         brain[brainIndex],
       ];
 
-      return { brain, hand, stamina: 0 };
+      return {
+        brain,
+        hand,
+        stamina: 0,
+        activatedCardIds: [],
+        forcedCardId: brain[brainIndex].id,
+      };
     });
     setSelectedBrainCardId(null);
     setSelectedHandCardId(null);
   }, [selectedBrainCardId, selectedHandCardId]);
 
   const resetTurn = useCallback(() => {
-    setZones((current) => ({ ...current, stamina: MAX_STAMINA }));
+    setZones((current) => ({
+      ...current,
+      stamina: MAX_STAMINA,
+      activatedCardIds: [],
+      forcedCardId: null,
+    }));
     setSelectedBrainCardId(null);
     setSelectedHandCardId(null);
   }, []);
 
+  const beginReply = useCallback(() => {
+    setZones((current) => ({ ...current, activatedCardIds: [] }));
+  }, []);
+
+  const acceptReply = useCallback((activatedCardIds: string[]) => {
+    setZones((current) => {
+      const brainCardIds = new Set(current.brain.map((card) => card.id));
+      return {
+        ...current,
+        stamina: MAX_STAMINA,
+        activatedCardIds: activatedCardIds.filter((id) => brainCardIds.has(id)),
+        forcedCardId: null,
+      };
+    });
+  }, []);
+
   return {
     maxStamina: MAX_STAMINA,
+    acceptReply,
+    beginReply,
     resetTurn,
     selectCard,
     selectedBrainCardId,
