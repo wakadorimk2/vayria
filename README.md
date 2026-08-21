@@ -163,10 +163,46 @@ VRM 表情も `neutral` へ戻ります。音声の速度、ピッチ、抑揚�
 ## 検証
 
 ```powershell
+npm run test
 npm run lint
 npm run typecheck
 npm run build
 ```
+
+## 展示向け同時操作ストレステスト
+
+開発サーバーとAivisSpeechを起動した状態で、仮想5ユーザーの短時間バーストを実行できます。
+既定では、各ユーザーが4ターンを150ms間隔で送信します。
+
+```powershell
+npm run stress -- --users 5 --rounds 4 --gap-ms 150
+```
+
+CLIは`/api/chat`と`/api/tts`へ同時にリクエストを送ります。
+固定seedは`exhibition-burst-v1`です。
+同じseedを指定すると、同じ入力列を再現できます。
+
+OpenAIとAivisSpeechを実際に呼び出すため、実行回数と利用料に注意してください。
+CLIは自動リトライを行いません。
+結果は`stress-results/`へ保存します。
+
+Chat、TTS、全体ターンのp95を任意の閾値で判定できます。
+
+```powershell
+npm run stress -- `
+  --max-p95-chat-ms 8000 `
+  --max-p95-tts-ms 8000 `
+  --max-p95-turn-ms 20000
+```
+
+ブラウザーは開発時に、次の会話イベントを構造化ログへ出力します。
+
+`input_received`、`llm_start`、`llm_done`、`tts_start`、`tts_ready`、
+`animation_start`、`turn_completed`、`turn_aborted`、`turn_failed`
+
+ログはブラウザーのコンソールとViteのターミナルへ出力します。
+入力本文、返答本文、履歴、API keyはイベントログへ含めません。
+`animation_start`は音声再生とリップシンク開始時点です。
 
 ## 現時点で実装しないもの
 
@@ -176,7 +212,7 @@ npm run build
 - カードのweight、TTL、コスト、自動ランダム交換
 - コメント取得、fake audience、配信サービス連携
 - TTSキュー、発話分割、ストリーミング、割り込み再開
-- 話題の永続記憶、発話イベントログ
+- 話題の永続記憶
 - VRMA、長期的な mood、感情履歴、モーション選択
 - production server と deployment
 
