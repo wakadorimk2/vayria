@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  AmbientLight,
   Box3,
   Clock,
-  DirectionalLight,
   PerspectiveCamera,
   Scene,
+  sRGBEncoding,
   Vector3,
   WebGLRenderer,
 } from 'three';
@@ -16,6 +15,9 @@ import {
   VRMLoaderPlugin,
   VRMUtils,
 } from '@pixiv/three-vrm';
+import { frameAvatar } from './cameraPreset';
+import { setupStageLighting } from './stageLighting';
+import { STAGE_PRESET } from './stagePreset';
 
 const MODEL_URL = `${import.meta.env.BASE_URL}avatar/model.vrm`;
 
@@ -24,35 +26,6 @@ interface VrmStageProps {
 }
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
-
-function frameAvatar(
-  vrm: VRM,
-  camera: PerspectiveCamera,
-  width: number,
-  height: number,
-): void {
-  const bounds = new Box3().setFromObject(vrm.scene);
-  const size = bounds.getSize(new Vector3());
-  const modelHeight = Math.max(size.y, 1);
-  const modelWidth = Math.max(size.x, 0.5);
-  const verticalFov = (camera.fov * Math.PI) / 180;
-  const aspect = Math.max(width / Math.max(height, 1), 0.1);
-  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * aspect);
-  const visibleHeight = modelHeight * 0.72;
-  const visibleWidth = modelWidth * 0.82;
-  const distance = Math.max(
-    visibleHeight / (2 * Math.tan(verticalFov / 2)),
-    visibleWidth / (2 * Math.tan(horizontalFov / 2)),
-  );
-  const lookAtY = modelHeight * 0.68;
-
-  camera.aspect = aspect;
-  camera.position.set(0, lookAtY, distance);
-  camera.near = 0.01;
-  camera.far = Math.max(50, distance * 20);
-  camera.lookAt(0, lookAtY, 0);
-  camera.updateProjectionMatrix();
-}
 
 export function VrmStage({ mouthOpen }: VrmStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -71,11 +44,13 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
     if (!container || !canvas) return;
 
     const scene = new Scene();
-    const camera = new PerspectiveCamera(30, 1, 0.01, 50);
-    scene.add(new AmbientLight(0xffffff, 1.2));
-    const keyLight = new DirectionalLight(0xffffff, 1.4);
-    keyLight.position.set(1.5, 2.5, 2);
-    scene.add(keyLight);
+    const camera = new PerspectiveCamera(
+      STAGE_PRESET.camera.fov,
+      1,
+      0.01,
+      50,
+    );
+    setupStageLighting(scene);
 
     let renderer: WebGLRenderer;
     try {
@@ -86,11 +61,7 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
     }
     renderer.setClearAlpha(0);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    (
-      renderer as WebGLRenderer & {
-        outputColorSpace?: string;
-      }
-    ).outputColorSpace = 'srgb';
+    renderer.outputEncoding = sRGBEncoding;
 
     let disposed = false;
     let loadedVrm: VRM | null = null;
