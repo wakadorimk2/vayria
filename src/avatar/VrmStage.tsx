@@ -25,28 +25,35 @@ import {
   STAGE_PRESET,
 } from './stagePreset';
 import type { Emotion } from '../character/emotion';
+import type { PerformancePlan } from '../performer/types';
 
 const MODEL_URL = `${import.meta.env.BASE_URL}avatar/model.vrm`;
 
 interface VrmStageProps {
+  attentionTarget?: 'viewer' | 'chat' | 'game' | 'none';
   emotion: Emotion;
   isExhibitionMode?: boolean;
   mouthOpen: number;
   onReady?: () => void;
+  performancePlan?: PerformancePlan;
 }
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
 
 export function VrmStage({
+  attentionTarget = 'none',
   emotion,
   isExhibitionMode = false,
   mouthOpen,
   onReady,
+  performancePlan,
 }: VrmStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouthOpenRef = useRef(mouthOpen);
   const emotionRef = useRef(emotion);
+  const attentionTargetRef = useRef(attentionTarget);
+  const performancePlanRef = useRef(performancePlan);
   const onReadyRef = useRef(onReady);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [expressionWarning, setExpressionWarning] = useState('');
@@ -58,6 +65,14 @@ export function VrmStage({
   useEffect(() => {
     emotionRef.current = emotion;
   }, [emotion]);
+
+  useEffect(() => {
+    attentionTargetRef.current = attentionTarget;
+  }, [attentionTarget]);
+
+  useEffect(() => {
+    performancePlanRef.current = performancePlan;
+  }, [performancePlan]);
 
   useEffect(() => {
     onReadyRef.current = onReady;
@@ -219,7 +234,24 @@ export function VrmStage({
       if (disposed) return;
       const delta = clock.getDelta();
       if (loadedVrm) {
-        idleController?.update(delta);
+        const plan = performancePlanRef.current;
+        const avatarProfile = plan?.avatarProfile;
+        const preReaction = plan?.preReaction;
+        const gazeTarget = preReaction?.gaze?.target ?? attentionTargetRef.current;
+        const gazeYawBias =
+          gazeTarget === 'viewer'
+            ? 0.6
+            : gazeTarget === 'chat'
+              ? -0.45
+              : gazeTarget === 'game'
+                ? 0.35
+                : 0;
+        const idleMotionWeight =
+          avatarProfile?.idleMotionWeight ?? preReaction?.motion?.weight ?? 1;
+        const headYawBias =
+          (avatarProfile?.headYawBias ?? preReaction?.motion?.headYawBias ?? 0) +
+          gazeYawBias * (avatarProfile?.gazeDirectness ?? preReaction?.gaze?.directness ?? 0.72);
+        idleController?.update(delta, idleMotionWeight, headYawBias);
         if (
           emotionController &&
           appliedEmotion !== emotionRef.current

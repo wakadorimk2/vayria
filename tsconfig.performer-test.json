@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/performer-test",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/performer-test.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/character/emotion.ts",
+    "src/performer/runtime.ts",
+    "src/performer/profile.ts",
+    "src/performer/types.ts",
+    "scripts/performer-runtime.test.ts"
+  ]
+}

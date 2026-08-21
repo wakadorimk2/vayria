@@ -6,19 +6,22 @@ VRM キャラクターと一往復会話するための最小ローカルアプ�
 実際の再生音量に合わせて VRM の `aa` 表情が動きます。返答の感情に合わせて、
 VRM の表情と zonoko の音声スタイルも切り替わります。
 
+Performer Runtimeは、カードなしでも動作するAITuberのbaselineを提供します。
+WildCardは、演者へ一時的または背景的な効果を加えるLive Directionです。
+
 画面には、キャラクターの脳内カード5枚とプレイヤーの手札5枚があります。
 手札と脳内のカードを1枚ずつ交換すると、交換したカードが次の返答へ必ず影響します。
 返答後は、実際に作用した脳内カードが浮いて発光します。テキスト返答を取得すると、
 スタミナが1へ戻ります。
 
-カード作用はローカルの定義からserverが取得します。ブラウザーはカードIDだけを送ります。
+カード作用はローカルの定義からserverが取得します。ブラウザーはカードIDとDirectionの結果を送ります。
 LLMが返す`activatedCards`は、現在の脳内カードだけに制限します。交換したカードを
 欠落した場合は1回だけ再生成します。
 
 ## 自律発話
 
 アバターの準備と音声が有効な状態では、自律発話ループが動きます。初回は4秒後に発話を試み、
-その後は8〜18秒の間隔で次の発話候補を作ります。
+その後は8〜18秒を基準に、Performer Profileのinitiativeで次の発話候補の間隔を調整します。
 
 自律発話の候補は、LLMが次の3つから1つを選びます。
 
@@ -157,8 +160,9 @@ API key と AivisSpeech の設定は Vite の Node middleware だけが読みま
 | `angry` | `angry` | `D` |
 | `surprised` | `surprised` | `ノーマル` |
 
-想定外の emotion は `neutral` へ戻します。音声再生が終わると、800ms 後に
-VRM 表情も `neutral` へ戻ります。音声の速度、ピッチ、抑揚、テンポは全感情で共通です。
+想定外の emotion は `neutral` へ戻します。Performer Runtimeはemotionをturn開始時に
+neutralへresetしません。activationは設定したhalf-lifeでbaselineへ減衰します。
+カードやPerformance Planは、発話前reaction、視線、音声速度、抑揚、idle motionを変更できます。
 
 ## 検証
 
@@ -203,6 +207,9 @@ npm run stress -- `
 ログはブラウザーのコンソールとViteのターミナルへ出力します。
 入力本文、返答本文、履歴、API keyはイベントログへ含めません。
 `animation_start`は音声再生とリップシンク開始時点です。
+
+各provider requestは`X-Wildcard-Turn-Id`で会話イベントと関連付けます。
+`/api/events`は開発時の構造化イベントを受け取り、providerの同時実行数も記録します。
 
 ## 現時点で実装しないもの
 
