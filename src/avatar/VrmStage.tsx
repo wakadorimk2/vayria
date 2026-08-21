@@ -15,6 +15,8 @@ import {
   VRMLoaderPlugin,
   VRMUtils,
 } from '@pixiv/three-vrm';
+import { BlinkController } from './BlinkController';
+import { applyBasePose, IdleController } from './idleMotion';
 import { frameAvatar } from './cameraPreset';
 import { setupStageLighting } from './stageLighting';
 import { STAGE_PRESET } from './stagePreset';
@@ -67,6 +69,8 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
     let loadedVrm: VRM | null = null;
     let animationFrame = 0;
     let mouthExpression: string | null = null;
+    let idleController: IdleController | null = null;
+    let blinkController: BlinkController | null = null;
 
     const resize = () => {
       const width = Math.max(container.clientWidth, 1);
@@ -109,6 +113,9 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
           vrm.scene.position.set(-center.x, -initialBounds.min.y, -center.z);
           scene.add(vrm.scene);
           loadedVrm = vrm;
+          applyBasePose(vrm);
+          idleController = new IdleController(vrm);
+          blinkController = new BlinkController(vrm);
 
           const expression = vrm.expressionManager?.getExpression(
             VRMExpressionPresetName.Aa,
@@ -142,13 +149,15 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
       if (disposed) return;
       const delta = clock.getDelta();
       if (loadedVrm) {
+        idleController?.update(delta);
+        blinkController?.update(delta);
         if (mouthExpression) {
           loadedVrm.expressionManager?.setValue(
             mouthExpression,
             mouthOpenRef.current,
           );
-          loadedVrm.expressionManager?.update();
         }
+        loadedVrm.expressionManager?.update();
         loadedVrm.update(delta);
       }
       renderer.render(scene, camera);
@@ -160,6 +169,10 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
       disposed = true;
       cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
+      blinkController?.dispose();
+      idleController?.dispose();
+      blinkController = null;
+      idleController = null;
       if (loadedVrm) {
         scene.remove(loadedVrm.scene);
         VRMUtils.deepDispose(loadedVrm.scene);
