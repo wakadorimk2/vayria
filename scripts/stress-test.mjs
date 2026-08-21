@@ -309,7 +309,7 @@ async function requestBytes({ state, turn, phase, path, body }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Wildcard-Turn-Id': turn.turnId,
+        'X-Performer-Turn-Id': turn.turnId,
       },
       body: JSON.stringify(body),
       signal: controller.signal,

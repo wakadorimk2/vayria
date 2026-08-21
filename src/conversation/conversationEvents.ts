@@ -56,7 +56,7 @@ function sendEventToLocalApi(event: ConversationEvent): void {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Wildcard-Turn-Id': event.turnId,
+      'X-Performer-Turn-Id': event.turnId,
     },
     body: JSON.stringify(event),
     keepalive: true,
@@ -86,12 +86,12 @@ export function createConversationEventEmitter(
 
       try {
         performance.mark(
-          `wildcard:${event}:${turnId}:${payload.elapsedMs}`,
+          `performer:${event}:${turnId}:${payload.elapsedMs}`,
         );
       } catch {
         // Performance marks are optional diagnostics.
       }
-      console.info('[wildcard-event]', payload);
+      console.info('[performer-event]', payload);
       sendEventToLocalApi(payload);
     },
     turnId,

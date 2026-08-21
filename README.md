@@ -1,6 +1,6 @@
-# Wildcard
+# Vayria
 
-VRM キャラクターと一往復会話するための最小ローカルアプリです。
+Vayria（ヴァイリア）は、VRM キャラクターと一往復会話するための最小ローカル AI Performer アプリです。
 
 テキストを送信すると、OpenAI が短い返答と感情を生成します。返答は音声で再生され、
 実際の再生音量に合わせて VRM の `aa` 表情が動きます。返答の感情に合わせて、
@@ -208,7 +208,8 @@ npm run stress -- `
 入力本文、返答本文、履歴、API keyはイベントログへ含めません。
 `animation_start`は音声再生とリップシンク開始時点です。
 
-各provider requestは`X-Wildcard-Turn-Id`で会話イベントと関連付けます。
+各provider requestは`X-Performer-Turn-Id`で会話イベントと関連付けます。
+serverは既存clientの`X-Wildcard-Turn-Id`も互換目的で受理します。
 `/api/events`は開発時の構造化イベントを受け取り、providerの同時実行数も記録します。
 
 ## 現時点で実装しないもの
