@@ -177,7 +177,7 @@ export function VrmStage({
             vrm.expressionManager?.expressions.map(
               (candidate) => candidate.expressionName,
             ) ?? [];
-          console.info('Wildcard VRM expressions:', availableExpressions);
+          console.info('Performer VRM expressions:', availableExpressions);
           if (emotionController.missingExpressions.length > 0) {
             const missingExpressions =
               emotionController.missingExpressions.join(', ');
@@ -296,7 +296,7 @@ export function VrmStage({
   return (
     <div className="vrm-stage" ref={containerRef}>
       <canvas
-        aria-label="Wildcard VRM character"
+        aria-label="Performer avatar"
         className="vrm-canvas"
         ref={canvasRef}
       />

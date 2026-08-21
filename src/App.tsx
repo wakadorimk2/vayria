@@ -36,7 +36,8 @@ const STATUS_LABELS = {
 
 type ExhibitionPresentationState = 'idle' | 'selecting' | 'reacting';
 
-const AUDIO_SETTINGS_STORAGE_KEY = 'wildcard.audio-settings.v1';
+const AUDIO_SETTINGS_STORAGE_KEY = 'vayria.audio-settings.v1';
+const LEGACY_AUDIO_SETTINGS_STORAGE_KEY = 'wildcard.audio-settings.v1';
 
 interface AudioControlState {
   isMuted: boolean;
@@ -54,13 +55,13 @@ function readStoredVolume(value: unknown, allowZero: boolean): number | null {
   return value;
 }
 
-function readAudioControlState(): AudioControlState {
+function parseAudioControlState(rawValue: string | null): AudioControlState | null {
+  if (rawValue === null) return null;
+
   try {
-    const parsed = JSON.parse(
-      localStorage.getItem(AUDIO_SETTINGS_STORAGE_KEY) ?? 'null',
-    ) as unknown;
+    const parsed = JSON.parse(rawValue) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return createDefaultAudioControlState();
+      return null;
     }
 
     const record = parsed as Record<string, unknown>;
@@ -70,7 +71,7 @@ function readAudioControlState(): AudioControlState {
       false,
     );
     if (volume === null || lastAudibleVolume === null) {
-      return createDefaultAudioControlState();
+      return null;
     }
     return {
       isMuted: volume === 0,
@@ -78,8 +79,24 @@ function readAudioControlState(): AudioControlState {
       volume,
     };
   } catch {
-    return createDefaultAudioControlState();
+    return null;
   }
+}
+
+function readAudioControlState(): AudioControlState {
+  try {
+    for (const storageKey of [
+      AUDIO_SETTINGS_STORAGE_KEY,
+      LEGACY_AUDIO_SETTINGS_STORAGE_KEY,
+    ]) {
+      const state = parseAudioControlState(localStorage.getItem(storageKey));
+      if (state !== null) return state;
+    }
+  } catch {
+    // Playback remains usable when storage is unavailable.
+  }
+
+  return createDefaultAudioControlState();
 }
 
 function advanceAutonomousContext(
@@ -208,13 +225,16 @@ export default function App() {
   const volumePercent = Math.round(volume * 100);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        AUDIO_SETTINGS_STORAGE_KEY,
-        JSON.stringify({ volume, lastAudibleVolume }),
-      );
-    } catch {
-      // Playback remains usable when storage is unavailable.
+    const serialized = JSON.stringify({ volume, lastAudibleVolume });
+    for (const storageKey of [
+      AUDIO_SETTINGS_STORAGE_KEY,
+      LEGACY_AUDIO_SETTINGS_STORAGE_KEY,
+    ]) {
+      try {
+        localStorage.setItem(storageKey, serialized);
+      } catch {
+        // Playback remains usable when storage is unavailable.
+      }
     }
   }, [lastAudibleVolume, volume]);
 
@@ -427,7 +447,7 @@ export default function App() {
     >
       {(!isExhibitionMode || !isAudioUnlocked) && (
         <header className="app-title">
-          {!isExhibitionMode && <span>Wildcard</span>}
+          {!isExhibitionMode && <span>Vayria</span>}
           <div
             className="audio-controls"
             aria-label="音声コントロール"

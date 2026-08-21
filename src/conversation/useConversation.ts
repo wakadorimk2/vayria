@@ -328,7 +328,7 @@ export function useConversation(
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Wildcard-Turn-Id': eventEmitter.turnId,
+            'X-Performer-Turn-Id': eventEmitter.turnId,
           },
           body: JSON.stringify({
             mode: turnSource,
@@ -469,7 +469,7 @@ export function useConversation(
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Wildcard-Turn-Id': eventEmitter.turnId,
+            'X-Performer-Turn-Id': eventEmitter.turnId,
           },
           body: JSON.stringify({
             text: responseText,

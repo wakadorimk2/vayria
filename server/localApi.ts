@@ -167,15 +167,24 @@ function sendNoContent(response: ServerResponse): void {
 }
 
 function readTurnIdHeader(request: IncomingMessage): string | null {
-  const value = request.headers['x-wildcard-turn-id'];
-  const candidate = Array.isArray(value) ? value[0] : value;
-  if (
-    typeof candidate !== 'string' ||
-    !/^[A-Za-z0-9:_-]{1,128}$/.test(candidate)
-  ) {
-    return null;
+  const values = [
+    request.headers['x-performer-turn-id'],
+    request.headers['x-wildcard-turn-id'],
+  ];
+
+  for (const value of values) {
+    if (value === undefined) continue;
+    const candidate = Array.isArray(value) ? value[0] : value;
+    if (
+      typeof candidate !== 'string' ||
+      !/^[A-Za-z0-9:_-]{1,128}$/.test(candidate)
+    ) {
+      return null;
+    }
+    return candidate;
   }
-  return candidate;
+
+  return null;
 }
 
 function logStructuredEvent(
@@ -183,7 +192,7 @@ function logStructuredEvent(
   fields: Record<string, unknown>,
 ): void {
   console.info(
-    '[wildcard-event]',
+    '[performer-event]',
     JSON.stringify({
       at: new Date().toISOString(),
       event,
@@ -1231,7 +1240,7 @@ async function reportAivisSelection(config: LocalApiConfig): Promise<void> {
   try {
     for (const emotion of EMOTIONS) {
       const style = resolveZonokoStyle(speakers, emotion);
-      console.info('Wildcard AivisSpeech style:', {
+      console.info('Performer AivisSpeech style:', {
         emotion,
         speaker: ZONOKO_SPEAKER_NAME,
         style: style.name,
@@ -1370,7 +1379,7 @@ async function handleRequest(
     });
     const speakers = await loadAivisSpeakers(baseUrl);
     const style = resolveZonokoStyle(speakers, emotion);
-    console.info('Wildcard TTS:', {
+    console.info('Performer TTS:', {
       emotion,
       speaker: ZONOKO_SPEAKER_NAME,
       style: style.name,
@@ -1455,7 +1464,7 @@ async function handleRequest(
 
 export function localApiPlugin(config: LocalApiConfig): Plugin {
   return {
-    name: 'wildcard-local-api',
+    name: 'performer-local-api',
     configureServer(server) {
       void reportAivisSelection(config);
       server.middlewares.use((request, response, next) => {

@@ -5,13 +5,21 @@ import { localApiPlugin } from './server/localApi';
 const DEFAULT_DEV_HOST = '127.0.0.1';
 const DEFAULT_DEV_PORT = 5187;
 
-function readDevPort(value: string | undefined): number {
+function readEnvironmentValue(
+  environment: Record<string, string>,
+  canonicalName: string,
+  legacyName: string,
+): string | undefined {
+  return environment[canonicalName]?.trim() || environment[legacyName]?.trim();
+}
+
+function readDevPort(value: string | undefined, variableName: string): number {
   const rawValue = value?.trim();
   if (!rawValue) return DEFAULT_DEV_PORT;
 
   const port = Number(rawValue);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('WILDCARD_PORT must be an integer from 1 to 65535.');
+    throw new Error(`${variableName} must be an integer from 1 to 65535.`);
   }
 
   return port;
@@ -20,8 +28,18 @@ function readDevPort(value: string | undefined): number {
 export default defineConfig(({ mode }) => {
   const serverEnvironment = loadEnv(mode, process.cwd(), '');
   const devHost =
-    serverEnvironment.WILDCARD_BIND_HOST?.trim() || DEFAULT_DEV_HOST;
-  const devPort = readDevPort(serverEnvironment.WILDCARD_PORT);
+    readEnvironmentValue(
+      serverEnvironment,
+      'VAYRIA_BIND_HOST',
+      'WILDCARD_BIND_HOST',
+    ) || DEFAULT_DEV_HOST;
+  const portVariableName = serverEnvironment.VAYRIA_PORT?.trim()
+    ? 'VAYRIA_PORT'
+    : 'WILDCARD_PORT';
+  const devPort = readDevPort(
+    readEnvironmentValue(serverEnvironment, 'VAYRIA_PORT', 'WILDCARD_PORT'),
+    portVariableName,
+  );
 
   return {
     plugins: [

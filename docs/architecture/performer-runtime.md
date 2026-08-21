@@ -8,7 +8,7 @@ WildCard is a `Live Direction`.
 
 The performer runtime is the product core.
 
-The runtime does not contain WildCard-specific concepts.
+The runtime does not contain Vayria- or WildCard-specific concepts.
 
 ## 1. Current architecture
 
@@ -75,7 +75,8 @@ The current source mapping is:
 The stream includes input, LLM, TTS, playback, and terminal events.
 Each event has a turn ID and excludes message text, reply text, history, and secrets.
 
-Provider requests carry the same turn ID through `X-Wildcard-Turn-Id`.
+Provider requests carry the same turn ID through `X-Performer-Turn-Id`.
+The local API also accepts the legacy `X-Wildcard-Turn-Id` header.
 The Vite local API accepts development events at `/api/events` and logs provider concurrency.
 The exhibition stress test uses the same chat and TTS endpoints with deterministic input.
 
@@ -440,12 +441,12 @@ The current MVP uses the existing VRM stage and a small head-yaw gaze approximat
 
 The implementation is organized around these boundaries:
 
-1. `WILD-PERFORMER-01`: Core, State, Profile, generic Trigger, baseline policy, autonomous delay.
-2. `WILD-PERFORMANCE-02`: Intent, Plan, pre-reaction, Result, State reducer.
-3. `WILD-DIRECTION-03`: Direction Contribution, Effect, Constraint, central resolver.
-4. `WILD-WILDCARD-04`: card translation, card modifiers, effect lifecycle, WildCard constraint.
-5. `WILD-AVATAR-05`: gaze, expression hold, idle motion weight, pre-reaction executor.
-6. `WILD-EXHIBITION-06`: baseline comparison, owner playcheck, exhibition calibration.
+1. `VAYRIA-PERFORMER-01`: Core, State, Profile, generic Trigger, baseline policy, autonomous delay.
+2. `VAYRIA-PERFORMANCE-02`: Intent, Plan, pre-reaction, Result, State reducer.
+3. `VAYRIA-DIRECTION-03`: Direction Contribution, Effect, Constraint, central resolver.
+4. `VAYRIA-WILDCARD-04`: card translation, card modifiers, effect lifecycle, WildCard constraint.
+5. `VAYRIA-AVATAR-05`: gaze, expression hold, idle motion weight, pre-reaction executor.
+6. `VAYRIA-EXHIBITION-06`: baseline comparison, owner playcheck, exhibition calibration.
 
 The current code implements the vertical slice for all six boundaries.
 

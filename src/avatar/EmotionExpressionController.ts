@@ -57,7 +57,7 @@ export class EmotionExpressionController {
     this.elapsedSeconds = 0;
 
     console.info(
-      `Wildcard emotion: emotion=${emotion}, vrmExpression=${this.targetExpression ?? '(unavailable)'}, voiceStyle=${VOICE_STYLE_BY_EMOTION[emotion]}`,
+      `Performer emotion: emotion=${emotion}, vrmExpression=${this.targetExpression ?? '(unavailable)'}, voiceStyle=${VOICE_STYLE_BY_EMOTION[emotion]}`,
     );
   }
 

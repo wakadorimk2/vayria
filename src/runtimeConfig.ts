@@ -21,7 +21,7 @@ function readApiBaseUrl(value: unknown): string {
 
   let parsed: URL;
   try {
-    parsed = new URL(rawValue, 'http://wildcard.invalid');
+    parsed = new URL(rawValue, 'http://performer.invalid');
   } catch {
     throw new Error('VITE_API_BASE_URL must be a valid URL or path.');
   }
