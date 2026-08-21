@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@aituber-onair/chat": "0.52.0",
-    "@aituber-onair/voice": "0.20.0",
     "@pixiv/three-vrm": "^1.0.9",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
