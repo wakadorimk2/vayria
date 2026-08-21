@@ -312,7 +312,7 @@ export function useConversation(
       let speechStartedAt: number | undefined;
 
       try {
-        await waitMilliseconds(plan.preReaction?.delayMs ?? 0);
+        await waitMilliseconds(plan.preReaction?.leadBeforeSpeechMs ?? 0);
         if (generation !== generationRef.current) {
           emitResult(plan, 'interrupted');
           emitTerminalEvent('turn_aborted', { reason: 'superseded' });

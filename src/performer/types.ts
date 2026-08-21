@@ -1,4 +1,8 @@
-import type { Emotion } from '../character/emotion';
+import type { Emotion } from '../character/emotion.js';
+
+export type AttentionTarget = 'viewer' | 'chat' | 'game' | 'none';
+
+export type ExternalStimulusMetadata = Readonly<Record<string, string>>;
 
 export type PerformerPhase =
   | 'idle'
@@ -20,8 +24,8 @@ export type PerformerTrigger =
     }
   | {
       kind: 'external_stimulus';
-      source: 'wildcard' | 'game' | 'tip' | 'system';
       semanticCue: string;
+      metadata?: ExternalStimulusMetadata;
     }
   | {
       kind: 'memory_callback';
@@ -37,11 +41,10 @@ export interface PerformerState {
     updatedAt: number;
   };
   attention: {
-    target: 'viewer' | 'chat' | 'game' | 'none';
+    target: AttentionTarget;
     strength: number;
     updatedAt: number;
   };
-  currentTopic: string | null;
   lastSpeechAt: number | null;
   lastViewerMessageAt: number | null;
 }
@@ -56,7 +59,7 @@ export interface PerformerProfile {
   attentionDecayHalfLifeMs: number;
   energyBaseline: number;
   responseDelayBaselineMs: number;
-  preReactionDelayMs: number;
+  leadBeforeSpeechMs: number;
   autonomousInitialDelayMs: number;
   autonomousMinDelayMs: number;
   autonomousMaxDelayMs: number;
@@ -100,12 +103,13 @@ export interface DirectionContribution {
   constraints: DirectionConstraint[];
   semanticCues: string[];
   triggers: PerformerTrigger[];
+  attentionTarget?: AttentionTarget;
 }
 
 export interface ActionIntent {
   trigger: PerformerTrigger['kind'];
   preferredIntent: 'speak' | 'wait' | 'ignore' | 'react_nonverbally';
-  attentionTarget: 'viewer' | 'chat' | 'game' | 'none';
+  attentionTarget: AttentionTarget;
   emotionCue?: {
     emotion: Emotion;
     intensity: number;
@@ -122,9 +126,9 @@ export interface PerformancePlan {
   trigger: PerformerTrigger['kind'];
   intent: 'speak' | 'wait' | 'ignore' | 'react_nonverbally';
   preReaction?: {
-    delayMs: number;
+    leadBeforeSpeechMs: number;
     gaze?: {
-      target: 'viewer' | 'chat' | 'none';
+      target: AttentionTarget;
       directness: number;
     };
     expression?: {

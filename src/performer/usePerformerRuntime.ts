@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DEFAULT_PERFORMER_PROFILE } from './profile';
+import { DEFAULT_PERFORMER_PROFILE } from './profile.js';
 import {
   applyDirectionModifiers,
+  applyPlanLocalModifiers,
   applyTriggerToState,
   aggregateDirectionContributions,
   createActionIntent,
@@ -10,7 +11,8 @@ import {
   getNextAutonomousDelay as getDelay,
   reducePerformanceResult,
   resolvePerformancePlan,
-} from './runtime';
+  schedulePerformancePlan,
+} from './runtime.js';
 import type {
   DirectionContribution,
   PerformancePlan,
@@ -18,7 +20,7 @@ import type {
   PerformerProfile,
   PerformerState,
   PerformerTrigger,
-} from './types';
+} from './types.js';
 
 export function usePerformerRuntime(
   profile: PerformerProfile = DEFAULT_PERFORMER_PROFILE,
@@ -59,7 +61,7 @@ export function usePerformerRuntime(
       );
       const intent = createActionIntent(
         trigger,
-        currentState,
+        applyPlanLocalModifiers(currentState, aggregate.modifiers),
         effectiveProfile,
       );
       const plan = resolvePerformancePlan(
@@ -71,24 +73,7 @@ export function usePerformerRuntime(
       );
       planProfileRef.current.set(plan.planId, effectiveProfile);
       activePlanIdRef.current = plan.planId;
-      updateState({
-        ...currentState,
-        energy: Math.max(
-          0,
-          Math.min(1, currentState.energy + aggregate.modifiers.energy),
-        ),
-        attention: {
-          ...currentState.attention,
-          strength: Math.max(
-            0,
-            Math.min(1, currentState.attention.strength + aggregate.modifiers.attentionStrength),
-          ),
-        },
-        phase:
-          plan.intent === 'speak' || plan.intent === 'react_nonverbally'
-            ? 'scheduled'
-            : 'waiting',
-      });
+      updateState(schedulePerformancePlan(currentState, plan));
       return plan;
     },
     [updateState],

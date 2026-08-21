@@ -7,7 +7,8 @@
     "dev": "vite",
     "dev:exhibition": "vite --mode exhibition",
     "build": "tsc -b && vite build",
-    "test": "node --test scripts/stress-test.test.mjs",
+    "test": "npm run test:performer && node --test scripts/stress-test.test.mjs",
+    "test:performer": "tsc -p tsconfig.performer-test.json && node scripts/run-performer-tests.mjs",
     "stress": "node scripts/stress-test.mjs",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint ."

@@ -1,4 +1,4 @@
-import type { PerformerProfile } from './types';
+import type { PerformerProfile } from './types.js';
 
 export const DEFAULT_PERFORMER_PROFILE: PerformerProfile = {
   initiativeBaseline: 0.58,
@@ -10,7 +10,7 @@ export const DEFAULT_PERFORMER_PROFILE: PerformerProfile = {
   attentionDecayHalfLifeMs: 7_000,
   energyBaseline: 0.68,
   responseDelayBaselineMs: 260,
-  preReactionDelayMs: 180,
+  leadBeforeSpeechMs: 180,
   autonomousInitialDelayMs: 4_000,
   autonomousMinDelayMs: 8_000,
   autonomousMaxDelayMs: 18_000,

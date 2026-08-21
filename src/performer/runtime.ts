@@ -1,7 +1,8 @@
-import { normalizeEmotion } from '../character/emotion';
-import { DEFAULT_PERFORMER_PROFILE } from './profile';
+import { normalizeEmotion } from '../character/emotion.js';
+import { DEFAULT_PERFORMER_PROFILE } from './profile.js';
 import type {
   ActionIntent,
+  AttentionTarget,
   DirectionContribution,
   DirectionEffect,
   DirectionModifiers,
@@ -10,7 +11,7 @@ import type {
   PerformerProfile,
   PerformerState,
   PerformerTrigger,
-} from './types';
+} from './types.js';
 
 const MIN_EFFECT_INTENSITY = 0.001;
 const MAX_SEMANTIC_BIASES = 12;
@@ -38,7 +39,6 @@ export function createInitialPerformerState(
       strength: 0,
       updatedAt: now,
     },
-    currentTopic: null,
     lastSpeechAt: null,
     lastViewerMessageAt: null,
   };
@@ -108,24 +108,13 @@ function updateStateForTrigger(
         lastViewerMessageAt: now,
       };
     case 'external_stimulus':
-      return {
-        ...state,
-        attention: {
-          target:
-            trigger.source === 'game'
-              ? 'game'
-              : trigger.source === 'wildcard'
-                ? 'viewer'
-                : 'chat',
-          strength: 0.82,
-          updatedAt: now,
-        },
-      };
     case 'memory_callback':
-      return {
-        ...state,
-        attention: { target: 'chat', strength: 0.55, updatedAt: now },
-      };
+      return trigger.kind === 'memory_callback'
+        ? {
+            ...state,
+            attention: { target: 'chat', strength: 0.55, updatedAt: now },
+          }
+        : state;
     case 'idle_tick':
       return state;
   }
@@ -159,14 +148,8 @@ export function createActionIntent(
     case 'external_stimulus':
       return {
         trigger: trigger.kind,
-        preferredIntent:
-          trigger.source === 'wildcard' ? 'speak' : 'react_nonverbally',
-        attentionTarget:
-          trigger.source === 'game'
-            ? 'game'
-            : trigger.source === 'wildcard'
-              ? 'viewer'
-              : 'chat',
+        preferredIntent: 'react_nonverbally',
+        attentionTarget,
         speechContext,
       };
     case 'memory_callback':
@@ -233,6 +216,7 @@ export interface AggregatedDirectionState {
   constraints: DirectionContribution['constraints'];
   semanticCues: string[];
   activeDirectionIds: string[];
+  attentionTarget: AttentionTarget | null;
 }
 
 export function aggregateDirectionContributions(
@@ -241,10 +225,13 @@ export function aggregateDirectionContributions(
 ): AggregatedDirectionState {
   const modifiers = createEmptyModifiers();
   const constraints: DirectionContribution['constraints'] = [];
-  const semanticCues: string[] = [];
+  const semanticCues = new Set<string>();
   const activeDirectionIds = new Set<string>();
+  const sortedContributions = [...contributions].sort((left, right) =>
+    left.directionId.localeCompare(right.directionId),
+  );
 
-  for (const contribution of contributions) {
+  for (const contribution of sortedContributions) {
     for (const constraint of contribution.constraints) {
       if (
         !constraints.some(
@@ -257,9 +244,12 @@ export function aggregateDirectionContributions(
       }
     }
     for (const cue of contribution.semanticCues) {
-      if (cue.trim() && !semanticCues.includes(cue)) semanticCues.push(cue);
+      if (cue.trim()) semanticCues.add(cue.trim());
     }
-    for (const effect of contribution.effects) {
+    const sortedEffects = [...contribution.effects].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+    for (const effect of sortedEffects) {
       const intensity = getEffectIntensity(effect, now);
       if (intensity < MIN_EFFECT_INTENSITY) continue;
       activeDirectionIds.add(effect.directionId);
@@ -271,19 +261,51 @@ export function aggregateDirectionContributions(
         }
       }
       for (const cue of effect.modifiers.semanticBiases ?? []) {
-        if (cue.trim() && !semanticCues.includes(cue)) semanticCues.push(cue);
+        if (cue.trim()) semanticCues.add(cue.trim());
       }
     }
   }
 
+  const attentionTarget = sortedContributions
+    .filter((contribution) => contribution.attentionTarget !== undefined)
+    .map((contribution) => contribution.attentionTarget as AttentionTarget)
+    .sort((left, right) => left.localeCompare(right))[0] ?? null;
+  const sortedSemanticCues = [...semanticCues].sort();
+
   return {
     modifiers: {
       ...modifiers,
-      semanticBiases: semanticCues.slice(0, MAX_SEMANTIC_BIASES),
+      semanticBiases: sortedSemanticCues.slice(0, MAX_SEMANTIC_BIASES),
     },
-    constraints,
-    semanticCues: semanticCues.slice(0, MAX_SEMANTIC_BIASES),
-    activeDirectionIds: [...activeDirectionIds],
+    constraints: [...constraints].sort((left, right) =>
+      `${left.kind}:${left.scope}`.localeCompare(`${right.kind}:${right.scope}`),
+    ),
+    semanticCues: sortedSemanticCues.slice(0, MAX_SEMANTIC_BIASES),
+    activeDirectionIds: [...activeDirectionIds].sort(),
+    attentionTarget,
+  };
+}
+
+export function applyPlanLocalModifiers(
+  state: PerformerState,
+  modifiers: DirectionModifiers,
+): PerformerState {
+  return {
+    ...state,
+    energy: clamp(state.energy + modifiers.energy),
+  };
+}
+
+export function schedulePerformancePlan(
+  state: PerformerState,
+  plan: PerformancePlan,
+): PerformerState {
+  return {
+    ...state,
+    phase:
+      plan.intent === 'speak' || plan.intent === 'react_nonverbally'
+        ? 'scheduled'
+        : 'waiting',
   };
 }
 
@@ -314,8 +336,8 @@ export function applyDirectionModifiers(
 
 function getAttentionTarget(
   target: ActionIntent['attentionTarget'],
-): 'viewer' | 'chat' | 'none' {
-  return target === 'game' ? 'chat' : target;
+): AttentionTarget {
+  return target;
 }
 
 function createPlanId(): string {
@@ -340,15 +362,18 @@ export function resolvePerformancePlan(
     requiresSpeech && intent.preferredIntent !== 'speak'
       ? 'speak'
       : intent.preferredIntent;
-  const directness = clamp(effectiveProfile.gazeDirectnessBaseline);
-  const attentionTarget = getAttentionTarget(intent.attentionTarget);
+  const directness = clamp(
+    effectiveProfile.gazeDirectnessBaseline + aggregate.modifiers.attentionStrength,
+  );
+  const attentionTarget =
+    aggregate.attentionTarget ?? getAttentionTarget(intent.attentionTarget);
   const planId = createPlanId();
   const activeDirectionIds = aggregate.activeDirectionIds;
   const preReaction =
     resolvedIntent === 'speak' || resolvedIntent === 'react_nonverbally'
       ? {
-          delayMs: Math.round(
-            clamp(effectiveProfile.preReactionDelayMs, 0, 1_000),
+          leadBeforeSpeechMs: Math.round(
+            clamp(effectiveProfile.leadBeforeSpeechMs, 0, 1_000),
           ),
           gaze: {
             target: attentionTarget,
@@ -385,7 +410,9 @@ export function resolvePerformancePlan(
                   ...intent.speechContext.semanticBiases,
                   ...aggregate.semanticCues,
                 ]),
-              ].slice(0, MAX_SEMANTIC_BIASES),
+              ]
+                .sort()
+                .slice(0, MAX_SEMANTIC_BIASES),
             },
           }
         : undefined,

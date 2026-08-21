@@ -91,15 +91,20 @@ type PerformerTrigger =
   | { kind: 'idle_tick'; elapsedMs: number }
   | {
       kind: 'external_stimulus';
-      source: 'wildcard' | 'game' | 'tip' | 'system';
       semanticCue: string;
+      metadata?: Readonly<Record<string, string>>;
     }
   | { kind: 'memory_callback'; semanticCue: string };
 ```
 
 `card_insert` does not exist in the Core type.
 
-WildCard translates a card insertion into `external_stimulus`.
+The Core does not interpret external stimulus metadata.
+WildCard translates a card insertion into `external_stimulus` and submits
+`{ origin: 'wildcard' }` as opaque metadata.
+
+The baseline intent for `external_stimulus` is `react_nonverbally`.
+WildCard adds `require_speech` and `attentionTarget: 'viewer'` through its Direction Contribution.
 
 The same boundary can receive a game event, a tip, or a system event later.
 
@@ -129,13 +134,16 @@ It does not own emotion state.
 - energy
 - emotion value and activation
 - attention target and strength
-- current topic
 - last speech timestamp
 - last viewer message timestamp
 
 `responseDelayMs` is not state.
 
 The resolver calculates it for each `PerformancePlan`.
+
+Topic is conversation-owned in v0.1.
+`App.tsx` and `useConversation` keep `AutonomousContext`, `topic`, and `topicTurns`.
+Moving topic into the Runtime is a v0.2 decision.
 
 ### Performer Profile
 
@@ -163,8 +171,8 @@ Examples:
 
 - `viewer_message` prefers `speak`.
 - `idle_tick` can choose `speak`, `react_nonverbally`, or `ignore`.
-- a generic non-WildCard external stimulus can prefer a non-verbal reaction.
-- a WildCard external stimulus can prefer speech, subject to the WildCard constraint.
+- a generic external stimulus prefers a non-verbal reaction.
+- a Direction constraint can resolve an external stimulus to speech.
 
 `resolvePerformancePlan()` is the only final plan resolver.
 
@@ -177,6 +185,7 @@ interface DirectionContribution {
   constraints: DirectionConstraint[];
   semanticCues: string[];
   triggers: PerformerTrigger[];
+  attentionTarget?: 'viewer' | 'chat' | 'game' | 'none';
 }
 ```
 
@@ -195,11 +204,13 @@ The result does not depend on Direction execution order.
 
 ```text
 viewer message
-      ↓ 180ms
-gaze / idle motion reaction
+      ↓ t=0
+gaze / idle motion reaction starts
       ↓ response delay
 LLM → TTS → playback
 ```
+
+`leadBeforeSpeechMs` is the lead time from plan activation to `/api/chat`.
 
 The v0.1 plan does not implement a general timeline engine.
 
@@ -279,7 +290,7 @@ WildCard contribution
   ↓
 Performance Plan
   ↓
-pre-reaction delay
+leadBeforeSpeechMs: body reaction starts at t=0
   ↓
 /api/chat with performanceContext
   ↓
@@ -299,7 +310,7 @@ card inserted
   ↓
 WildCard creates forced effect and generic external_stimulus
   ↓
-WildCard adds require_speech for the current plan
+WildCard adds require_speech and attentionTarget: viewer
   ↓
 Performer Core creates intent
   ↓
@@ -445,7 +456,8 @@ The current code implements the vertical slice for all six boundaries.
 - The current audio path still plays one complete WAV at a time.
 - The current VRM gaze implementation uses head-yaw bias, not a full eye target controller.
 - The current LLM contract still contains WildCard card validation in the local API.
-- The current topic state remains in `App.tsx` and is not yet a generic memory store.
+- Topic remains conversation-owned in v0.1. Runtime topic ownership is a v0.2 migration.
+- Energy and attention modifiers are plan-local in v0.1. Persistent impulses need a separate contract.
 - React hook callback ref synchronization occurs in an effect, so a callback should not be changed during an in-flight render.
 
 ### Open questions
@@ -458,6 +470,10 @@ The current code implements the vertical slice for all six boundaries.
 
 ## 12. Verification contract
 
+Pure Runtime tests compile the NodeNext-compatible runtime modules into
+`node_modules/.tmp/performer-test` and run with Node's built-in test runner.
+`npm test` runs these tests before the exhibition stress test.
+
 The following checks are required for future changes:
 
 - `card_insert` is absent from Performer Core types and implementation.
@@ -465,7 +481,8 @@ The following checks are required for future changes:
 - initiative decisions stay outside `useAutonomousTalk`.
 - state changes use `PerformanceResult` and the reducer.
 - no-card baseline still speaks, waits, and reacts.
-- pre-reaction runs before `/api/chat` and TTS.
+- `PerformancePlan` activation starts gaze and motion at t=0.
+- `leadBeforeSpeechMs` delays `/api/chat` after the body reaction begins.
 - effect result does not depend on contribution order.
 - `require_speech` remains a WildCard contribution.
 - stale generation, cancellation, and TTS failure return safely to `idle`.

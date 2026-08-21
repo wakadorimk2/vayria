@@ -150,6 +150,7 @@ function createContribution(
   trigger: PerformerTrigger,
   effects: DirectionEffect[],
   now: number,
+  requiresSpeech = false,
 ): DirectionContribution {
   const activeEffects = effects.filter(
     (effect) => getEffectIntensity(effect, now) > 0.001,
@@ -157,17 +158,15 @@ function createContribution(
   const semanticCues = activeEffects.flatMap(
     (effect) => effect.modifiers.semanticBiases ?? [],
   );
-  const isCardInsertion =
-    trigger.kind === 'external_stimulus' && trigger.source === 'wildcard';
-
   return {
     directionId: 'wildcard',
     effects: activeEffects,
-    constraints: isCardInsertion
+    constraints: requiresSpeech
       ? [{ kind: 'require_speech', scope: 'current_plan' }]
       : [],
     semanticCues: [...new Set(semanticCues)],
     triggers: [trigger],
+    ...(requiresSpeech ? { attentionTarget: 'viewer' as const } : {}),
   };
 }
 
@@ -224,10 +223,10 @@ function createController(zones: CardZoneState): WildcardDirectionController {
       forcedEffects.push(forcedEffect);
       const trigger: PerformerTrigger = {
         kind: 'external_stimulus',
-        source: 'wildcard',
         semanticCue: `something_changed:${result.insertedCardId}`,
+        metadata: { origin: 'wildcard' },
       };
-      return createContribution(trigger, getEffects(now), now);
+      return createContribution(trigger, getEffects(now), now, true);
     },
     getContribution: (trigger, now = Date.now()) =>
       direction.contribute({ trigger, now }),

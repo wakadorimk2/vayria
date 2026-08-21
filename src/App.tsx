@@ -176,7 +176,7 @@ export default function App() {
           trigger: plan.trigger,
           intent: plan.intent,
         });
-      }, plan.preReaction?.delayMs ?? 0);
+      }, plan.preReaction?.leadBeforeSpeechMs ?? 0);
       return false;
     }, [handlePerformancePlan, handlePerformanceResult]);
 
@@ -319,8 +319,8 @@ export default function App() {
     (result: CardSwapResult) => {
       const trigger: PerformerTrigger = {
         kind: 'external_stimulus',
-        source: 'wildcard',
         semanticCue: `something_changed:${result.insertedCardId}`,
+        metadata: { origin: 'wildcard' },
       };
       const contribution = activateCardSwap(result);
       if (isMuted || isBusy) return;
