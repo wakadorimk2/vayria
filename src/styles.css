@@ -113,22 +113,58 @@ input {
   letter-spacing: 0.08em;
 }
 
-.card-zone__eyebrow {
-  color: #a9a49b;
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-}
-
 .card-zone__cards {
   display: flex;
   align-items: end;
   gap: clamp(4px, 0.65vw, 8px);
 }
 
-.card-zone .wildcard-card {
+.brain-card-float,
+.card-zone--hand .wildcard-card {
   flex: 0 0 var(--wildcard-card-width);
   width: var(--wildcard-card-width);
+}
+
+.brain-card-float {
+  --brain-float-distance: -3px;
+  animation: brain-card-float 6s ease-in-out infinite alternate;
+}
+
+.brain-card-float:nth-child(2n) {
+  --brain-float-distance: -4px;
+  animation-delay: -1.7s;
+  animation-duration: 7s;
+}
+
+.brain-card-float:nth-child(3n) {
+  --brain-float-distance: -2px;
+  animation-delay: -3.1s;
+  animation-duration: 5s;
+}
+
+.brain-card-float:nth-child(4n) {
+  animation-delay: -4.3s;
+  animation-duration: 6.5s;
+}
+
+.brain-card-float:nth-child(5n) {
+  --brain-float-distance: -2px;
+  animation-delay: -5.2s;
+  animation-duration: 5.5s;
+}
+
+.brain-card-float .wildcard-card {
+  width: 100%;
+}
+
+@keyframes brain-card-float {
+  from {
+    translate: 0 0;
+  }
+
+  to {
+    translate: 0 var(--brain-float-distance);
+  }
 }
 
 .card-zone--brain .card-zone__cards {
@@ -148,20 +184,57 @@ input {
   gap: 0.55rem;
 }
 
-.stamina {
+.interference-counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   color: #d9d5cc;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
-.stamina--ready span {
-  color: #f09a68;
+.interference-counter--spent {
+  color: #96928b;
 }
 
-.stamina--spent {
-  color: #96928b;
+.interference-counter__label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.interference-counter__slots {
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.2rem 0.24rem;
+  border: 1px solid rgb(114 105 93 / 64%);
+  border-radius: 999px;
+  background: rgb(24 26 32 / 72%);
+  box-shadow:
+    inset 0 1px 2px rgb(0 0 0 / 52%),
+    0 1px 0 rgb(255 255 255 / 8%);
+}
+
+.interference-counter__chip {
+  display: block;
+  width: 0.68rem;
+  height: 0.68rem;
+  border: 1px solid #5f5a52;
+  border-radius: 50%;
+}
+
+.interference-counter__chip--available {
+  border-color: #f0aa7e;
+  background: radial-gradient(circle at 35% 30%, #ffd0ad, #e98d5c 62%, #a94f31);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 45%),
+    inset 0 1px 1px rgb(255 255 255 / 54%);
+}
+
+.interference-counter__chip--spent {
+  background: #191b21;
+  box-shadow:
+    inset 0 2px 3px rgb(0 0 0 / 72%),
+    0 1px 0 rgb(255 255 255 / 6%);
 }
 
 .reset-turn-button,
@@ -439,10 +512,6 @@ input {
     font-size: 0.78rem;
   }
 
-  .card-zone__eyebrow {
-    font-size: 0.5rem;
-  }
-
   .card-zone--brain .wildcard-card__label,
   .card-zone--hand .wildcard-card__label {
     max-width: calc(100% - 0.75rem);
@@ -467,7 +536,7 @@ input {
     gap: 0.35rem;
   }
 
-  .stamina,
+  .interference-counter__label,
   .card-zone__action {
     font-size: 0.6rem;
   }
@@ -475,5 +544,11 @@ input {
   .reset-turn-button {
     padding-inline: 0.42rem;
     font-size: 0.55rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brain-card-float {
+    animation: none;
   }
 }
