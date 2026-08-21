@@ -40,8 +40,24 @@ VRM の表情と zonoko の音声スタイルも切り替わります。
    ```dotenv
    OPENAI_API_KEY=your_key_here
    AIVIS_BASE_URL=http://127.0.0.1:10101
+   AIVIS_SPEED_SCALE=1.15
+   AIVIS_PITCH_SCALE=0
+   AIVIS_INTONATION_SCALE=1.0
+   AIVIS_TEMPO_DYNAMICS_SCALE=1.0
    ```
 
+   アプリは emotion に対応する zonoko style ID を `/speakers` から取得します。
+   音声パラメーターは省略できます。省略時は上記の値を使います。
+
+   | 環境変数 | AivisSpeech の項目 | 許容範囲 |
+   | --- | --- | --- |
+   | `AIVIS_SPEED_SCALE` | 話速 (`speedScale`) | `0.5` ～ `2.0` |
+   | `AIVIS_PITCH_SCALE` | 音高 (`pitchScale`) | `-0.15` ～ `0.15` |
+   | `AIVIS_INTONATION_SCALE` | 感情表現の強弱 (`intonationScale`) | `0.0` ～ `2.0` |
+   | `AIVIS_TEMPO_DYNAMICS_SCALE` | テンポの緩急 (`tempoDynamicsScale`) | `0.0` ～ `2.0` |
+
+   zonoko の一部スタイルでは、AivisSpeech が
+   `AIVIS_INTONATION_SCALE` を無視する場合があります。
 5. 自作または利用許可を持つ VRM を次の場所へ置きます。
 
    ```text

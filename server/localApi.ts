@@ -29,6 +29,17 @@ const NORMAL_VOICE_STYLE_NAME = VOICE_STYLE_BY_EMOTION.neutral;
 interface LocalApiConfig {
   openAiApiKey?: string;
   aivisBaseUrl?: string;
+  aivisSpeedScale?: string;
+  aivisPitchScale?: string;
+  aivisIntonationScale?: string;
+  aivisTempoDynamicsScale?: string;
+}
+
+interface AivisTtsSettings {
+  speedScale: number;
+  pitchScale: number;
+  intonationScale: number;
+  tempoDynamicsScale: number;
 }
 
 interface AivisStyle {
@@ -254,6 +265,63 @@ function readAivisBaseUrl(configuredBaseUrl: string | undefined): URL {
   }
 }
 
+function readAivisScale(
+  configuredValue: string | undefined,
+  variableName: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const value = configuredValue?.trim();
+  if (!value) {
+    return defaultValue;
+  }
+
+  const scale = Number(value);
+  if (!Number.isFinite(scale)) {
+    throw new RequestError(`${variableName} must be a finite number.`, 503);
+  }
+  if (scale < minimum || scale > maximum) {
+    throw new RequestError(
+      `${variableName} must be between ${minimum} and ${maximum}.`,
+      503,
+    );
+  }
+  return scale;
+}
+
+function readAivisTtsSettings(config: LocalApiConfig): AivisTtsSettings {
+  return {
+    speedScale: readAivisScale(
+      config.aivisSpeedScale,
+      'AIVIS_SPEED_SCALE',
+      AIVIS_VOICE_PARAMETERS.speedScale,
+      0.5,
+      2,
+    ),
+    pitchScale: readAivisScale(
+      config.aivisPitchScale,
+      'AIVIS_PITCH_SCALE',
+      AIVIS_VOICE_PARAMETERS.pitchScale,
+      -0.15,
+      0.15,
+    ),
+    intonationScale: readAivisScale(
+      config.aivisIntonationScale,
+      'AIVIS_INTONATION_SCALE',
+      AIVIS_VOICE_PARAMETERS.intonationScale,
+      0,
+      2,
+    ),
+    tempoDynamicsScale: readAivisScale(
+      config.aivisTempoDynamicsScale,
+      'AIVIS_TEMPO_DYNAMICS_SCALE',
+      AIVIS_VOICE_PARAMETERS.tempoDynamicsScale,
+      0,
+      2,
+    ),
+  };
+}
 function createAivisUrl(
   baseUrl: URL,
   pathname: string,
@@ -368,6 +436,7 @@ function resolveZonokoStyle(
 async function synthesizeSpeech(
   baseUrl: URL,
   styleId: number,
+  settings: AivisTtsSettings,
   text: string,
 ): Promise<ArrayBuffer> {
   const speaker = String(styleId);
@@ -382,15 +451,23 @@ async function synthesizeSpeech(
   try {
     const payload = (await audioQueryResponse.json()) as unknown;
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      throw new Error('AudioQuery must be an object.');
+      throw new Error('AudioQuery must be a JSON object.');
     }
     audioQuery = payload as Record<string, unknown>;
-  } catch {
+  } catch (error) {
+    console.error('AivisSpeech Engine returned an invalid AudioQuery.', {
+      styleId,
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw new AivisSpeechError(
-      'AivisSpeech Engine の AudioQuery 応答を解析できませんでした。',
+      'AivisSpeech Engine から有効な音声合成クエリを取得できませんでした。',
     );
   }
-  Object.assign(audioQuery, AIVIS_VOICE_PARAMETERS);
+
+  audioQuery.speedScale = settings.speedScale;
+  audioQuery.pitchScale = settings.pitchScale;
+  audioQuery.intonationScale = settings.intonationScale;
+  audioQuery.tempoDynamicsScale = settings.tempoDynamicsScale;
   const synthesisResponse = await requestAivis(
     createAivisUrl(baseUrl, '/synthesis', { speaker }),
     {
@@ -425,6 +502,14 @@ async function reportAivisSelection(config: LocalApiConfig): Promise<void> {
     return;
   }
 
+  let settings: AivisTtsSettings;
+  try {
+    settings = readAivisTtsSettings(config);
+  } catch (error) {
+    console.warn(error instanceof Error ? error.message : String(error));
+    return;
+  }
+
   try {
     for (const emotion of EMOTIONS) {
       const style = resolveZonokoStyle(speakers, emotion);
@@ -433,6 +518,10 @@ async function reportAivisSelection(config: LocalApiConfig): Promise<void> {
         speaker: ZONOKO_SPEAKER_NAME,
         style: style.name,
         styleId: style.id,
+        speed: settings.speedScale,
+        pitch: settings.pitchScale,
+        emotionalIntensity: settings.intonationScale,
+        tempoDynamics: settings.tempoDynamicsScale,
       });
     }
   } catch (error) {
@@ -478,6 +567,7 @@ async function handleRequest(
 
     const { text, emotion } = readTtsRequest(payload);
     const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
+    const settings = readAivisTtsSettings(config);
     const speakers = await loadAivisSpeakers(baseUrl);
     const style = resolveZonokoStyle(speakers, emotion);
     console.info('Wildcard TTS:', {
@@ -486,7 +576,9 @@ async function handleRequest(
       style: style.name,
       styleId: style.id,
     });
-    const audio = Buffer.from(await synthesizeSpeech(baseUrl, style.id, text));
+    const audio = Buffer.from(
+      await synthesizeSpeech(baseUrl, style.id, settings, text),
+    );
     response.writeHead(200, {
       'Cache-Control': 'no-store',
       'Content-Length': audio.byteLength,
