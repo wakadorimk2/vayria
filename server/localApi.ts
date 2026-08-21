@@ -31,7 +31,9 @@ const AIVIS_CONNECTION_ERROR =
 const NORMAL_VOICE_STYLE_NAME = VOICE_STYLE_BY_EMOTION.neutral;
 const BRAIN_CARD_COUNT = 5;
 const MAX_ACTIVATED_CARDS = 3;
-const CARD_IDS = cardPool.map((card) => card.id);
+const MAX_TOPIC_LENGTH = 120;
+const MAX_TOPIC_TURNS = 100;
+const AUTONOMOUS_ACTIONS = ['continue', 'new_topic', 'silence'] as const;
 const CARD_BY_ID: ReadonlyMap<string, WildcardCardData> = new Map(
   cardPool.map((card) => [card.id, card]),
 );
@@ -58,6 +60,7 @@ interface AivisStyle {
 }
 
 type ChatMode = 'manual' | 'autonomous';
+type AutonomousAction = (typeof AUTONOMOUS_ACTIONS)[number];
 
 interface ChatHistoryItem {
   role: 'user' | 'assistant';
@@ -70,10 +73,14 @@ interface ChatRequestPayload {
   history: ChatHistoryItem[];
   brainCardIds: string[];
   forcedCardId: string | null;
+  topic: string | null;
+  topicTurns: number;
 }
 
 interface CardAssistantResponse extends AssistantResponse {
   activatedCards: string[];
+  action?: AutonomousAction;
+  topic?: string;
 }
 
 interface AivisSpeaker {
@@ -146,6 +153,8 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'history',
     'brainCardIds',
     'forcedCardId',
+    'topic',
+    'topicTurns',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError(
@@ -238,12 +247,62 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     );
   }
 
+  const topicValue = record.topic;
+  if (
+    topicValue !== undefined &&
+    topicValue !== null &&
+    typeof topicValue !== 'string'
+  ) {
+    throw new RequestError('topic must be a string or null.', 400);
+  }
+  const topic =
+    typeof topicValue === 'string' ? topicValue.trim() || null : null;
+  if (topic && topic.length > MAX_TOPIC_LENGTH) {
+    throw new RequestError(
+      `topic must be ${MAX_TOPIC_LENGTH} characters or fewer.`,
+      400,
+    );
+  }
+
+  const topicTurnsValue = record.topicTurns;
+  if (
+    topicTurnsValue !== undefined &&
+    (typeof topicTurnsValue !== 'number' ||
+      !Number.isSafeInteger(topicTurnsValue) ||
+      topicTurnsValue < 0)
+  ) {
+    throw new RequestError(
+      'topicTurns must be a non-negative safe integer.',
+      400,
+    );
+  }
+  const topicTurns =
+    typeof topicTurnsValue === 'number' ? topicTurnsValue : 0;
+
+  if (
+    mode === 'autonomous' &&
+    (topicValue === undefined || topicTurnsValue === undefined)
+  ) {
+    throw new RequestError(
+      'autonomous requests must contain topic and topicTurns.',
+      400,
+    );
+  }
+  if (topicTurns > MAX_TOPIC_TURNS) {
+    throw new RequestError(
+      `topicTurns must be ${MAX_TOPIC_TURNS} or fewer.`,
+      400,
+    );
+  }
+
   return {
     mode,
     message: normalizedMessage,
     history: normalizedHistory,
     brainCardIds,
     forcedCardId,
+    topic,
+    topicTurns,
   };
 }
 
@@ -281,8 +340,16 @@ function readTtsRequest(payload: unknown): {
   };
 }
 
+function isAutonomousAction(value: unknown): value is AutonomousAction {
+  return (
+    typeof value === 'string' &&
+    (AUTONOMOUS_ACTIONS as readonly string[]).includes(value)
+  );
+}
+
 function parseAssistantResponse(
   value: string,
+  mode: ChatMode,
   brainCardIds: readonly string[],
   forcedCardId: string | null,
 ): CardAssistantResponse {
@@ -298,8 +365,8 @@ function parseAssistantResponse(
   }
 
   const record = payload as Record<string, unknown>;
-  if (typeof record.text !== 'string' || !record.text.trim()) {
-    throw new Error('The chat provider returned empty response text.');
+  if (typeof record.text !== 'string') {
+    throw new Error('The chat provider returned invalid response text.');
   }
 
   const text = record.text.trim();
@@ -307,10 +374,45 @@ function parseAssistantResponse(
     throw new Error('The chat provider returned response text that is too long.');
   }
 
+  let action: AutonomousAction | undefined;
+  let topic: string | undefined;
+  if (mode === 'autonomous') {
+    if (!isAutonomousAction(record.action)) {
+      throw new CardContractError(
+        'Autonomous response action must be continue, new_topic, or silence.',
+      );
+    }
+    action = record.action;
+    if (typeof record.topic !== 'string') {
+      throw new CardContractError('Autonomous response topic must be text.');
+    }
+    topic = record.topic.trim();
+    if (topic.length > MAX_TOPIC_LENGTH) {
+      throw new CardContractError(
+        `Autonomous response topic must be ${MAX_TOPIC_LENGTH} characters or fewer.`,
+      );
+    }
+    if (action !== 'silence' && !text) {
+      throw new CardContractError(
+        'Autonomous speaking responses must contain text.',
+      );
+    }
+    if (action === 'silence' && text) {
+      throw new CardContractError(
+        'Autonomous silence responses must contain empty text.',
+      );
+    }
+  } else if (!text) {
+    throw new Error('The chat provider returned empty response text.');
+  }
+
   const activatedCards = record.activatedCards;
   if (
     !Array.isArray(activatedCards) ||
-    activatedCards.length < 1 ||
+    (mode === 'manual' && activatedCards.length < 1) ||
+    (mode === 'autonomous' &&
+      action !== 'silence' &&
+      activatedCards.length < 1) ||
     activatedCards.length > MAX_ACTIVATED_CARDS ||
     !activatedCards.every((id): id is string => typeof id === 'string')
   ) {
@@ -321,22 +423,37 @@ function parseAssistantResponse(
   if (new Set(activatedCards).size !== activatedCards.length) {
     throw new CardContractError('activatedCards must not contain duplicates.');
   }
+  if (mode === 'autonomous' && action === 'silence' && activatedCards.length) {
+    throw new CardContractError(
+      'Autonomous silence responses must not activate cards.',
+    );
+  }
   if (activatedCards.some((id) => !brainCardIds.includes(id))) {
     throw new CardContractError(
       'activatedCards must be a subset of the current brain cards.',
     );
   }
-  if (forcedCardId && !activatedCards.includes(forcedCardId)) {
+  if (action === 'silence' && forcedCardId) {
+    throw new CardContractError(
+      'Autonomous silence is not allowed when a card is forced.',
+    );
+  }
+  if (forcedCardId && action !== 'silence' && !activatedCards.includes(forcedCardId)) {
     throw new CardContractError(
       'activatedCards must include the forced card.',
     );
   }
 
-  return {
+  const response: CardAssistantResponse = {
     text,
     emotion: normalizeEmotion(record.emotion),
     activatedCards,
   };
+  if (mode === 'autonomous') {
+    response.action = action;
+    response.topic = topic;
+  }
+  return response;
 }
 
 async function generateReply(
@@ -346,7 +463,40 @@ async function generateReply(
   history: readonly ChatHistoryItem[],
   brainCardIds: readonly string[],
   forcedCardId: string | null,
+  topic: string | null,
+  topicTurns: number,
 ): Promise<CardAssistantResponse> {
+  const responseProperties = {
+    text: { type: 'string' },
+    emotion: {
+      type: 'string',
+      enum: EMOTIONS,
+    },
+    activatedCards: {
+      type: 'array',
+      items: {
+        type: 'string',
+        enum: brainCardIds,
+      },
+      minItems: mode === 'autonomous' ? 0 : 1,
+      maxItems: MAX_ACTIVATED_CARDS,
+    },
+    ...(mode === 'autonomous'
+      ? {
+          action: {
+            type: 'string',
+            enum: AUTONOMOUS_ACTIONS,
+          },
+          topic: { type: 'string' },
+        }
+      : {}),
+  };
+  const responseRequired = [
+    'text',
+    'emotion',
+    'activatedCards',
+    ...(mode === 'autonomous' ? ['action', 'topic'] : []),
+  ];
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey,
     model: MODEL_GPT_5_NANO,
@@ -359,23 +509,8 @@ async function generateReply(
         strict: true,
         schema: {
           type: 'object',
-          properties: {
-            text: { type: 'string' },
-            emotion: {
-              type: 'string',
-              enum: EMOTIONS,
-            },
-            activatedCards: {
-              type: 'array',
-              items: {
-                type: 'string',
-                enum: CARD_IDS,
-              },
-              minItems: 1,
-              maxItems: MAX_ACTIVATED_CARDS,
-            },
-          },
-          required: ['text', 'emotion', 'activatedCards'],
+          properties: responseProperties,
+          required: responseRequired,
           additionalProperties: false,
         },
       },
@@ -386,14 +521,27 @@ async function generateReply(
     .map((card) => `- ${card.id} (${card.label}): ${card.prompt}`)
     .join('\n');
   const forcedInstruction = forcedCardId
-    ? `The card ${forcedCardId} is forced for this reply. It must visibly influence the reply, and activatedCards must include ${forcedCardId}.`
+    ? `The card ${forcedCardId} is forced for this reply. It must visibly influence a spoken reply, activatedCards must include ${forcedCardId}, and action must not be silence.`
     : 'No card is forced for this reply.';
   const responseInstruction =
     mode === 'autonomous'
       ? 'You are not replying to the user. As a Japanese AI Tuber filling a natural pause in a live stream, say one or two short Japanese sentences of about 20 to 80 characters with no Markdown. Use a passing thought, light topic, or quiet observation. Do not give a lecture, act like an AI assistant, or ask the viewer a question every time.'
       : "Reply in the same language as the user with one or two short sentences and no Markdown.";
+  const autonomousDirectorInstruction =
+    mode === 'autonomous'
+      ? [
+          `Current topic: ${topic ?? '(none)'}`,
+          `Current topic spoken-turn count: ${topicTurns}`,
+          'Choose exactly one action for this autonomous candidate.',
+          'continue means speak while staying with the current topic.',
+          'new_topic means speak about a different topic and return a short topic label.',
+          'silence means deliberately say nothing: text must be empty, emotion must be neutral, and activatedCards must be empty.',
+          'For continue and new_topic, return a non-empty short topic label and spoken text.',
+        ].join('\n')
+      : '';
   const systemPrompt = [
     `${responseInstruction} Choose emotion as the character's own feeling while speaking. Prefer neutral when ambiguous and avoid exaggerated changes. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.`,
+    autonomousDirectorInstruction,
     'The character has the following five brain cards:',
     cardInstructions,
     'Let one or two natural cards influence the reply. Do not force all five cards into it. You may use up to three cards when a combination is natural.',
@@ -437,6 +585,7 @@ async function generateReply(
   try {
     return parseAssistantResponse(
       await requestReply(),
+      mode,
       brainCardIds,
       forcedCardId,
     );
@@ -449,6 +598,7 @@ async function generateReply(
     await requestReply(
       'Your previous attempt violated the card contract. Follow the current brain-card subset and forced-card requirements exactly.',
     ),
+    mode,
     brainCardIds,
     forcedCardId,
   );
@@ -762,8 +912,15 @@ async function handleRequest(
           503,
         );
       }
-      const { mode, message, history, brainCardIds, forcedCardId } =
-        readChatRequest(payload);
+      const {
+        mode,
+        message,
+        history,
+        brainCardIds,
+        forcedCardId,
+        topic,
+        topicTurns,
+      } = readChatRequest(payload);
       const assistantResponse = await generateReply(
         config.openAiApiKey,
         mode,
@@ -771,6 +928,8 @@ async function handleRequest(
         history,
         brainCardIds,
         forcedCardId,
+        topic,
+        topicTurns,
       );
       sendJson(response, 200, assistantResponse);
       return;
