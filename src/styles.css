@@ -62,6 +62,29 @@ input {
   text-transform: none;
 }
 
+.audio-unlock-button {
+  min-height: 2rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #d78256;
+  border-radius: 999px;
+  background: #e49264;
+  color: #20150f;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.audio-unlock-button:hover,
+.audio-unlock-button:focus-visible {
+  background: #f0a174;
+}
+
+.audio-unlock-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
 .mute-button {
   display: inline-grid;
   width: 2rem;

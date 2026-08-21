@@ -16,6 +16,7 @@ import {
   type ChatCardContext,
 } from './conversation/useConversation';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
+import { runtimeConfig } from './runtimeConfig';
 
 const STATUS_LABELS = {
   idle: '話しかけてください。',
@@ -93,9 +94,16 @@ export default function App() {
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>({ topic: null, topicTurns: 0 });
   const { isMuted, lastAudibleVolume, volume } = audioControl;
+  const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, zones } = cardGame;
-  const { mouthOpen, play, prepare, stop } = useAudioLipSync(volume);
+  const {
+    isAudioUnlocked,
+    mouthOpen,
+    play,
+    prepare,
+    stop,
+  } = useAudioLipSync(volume);
   const {
     cancelAutonomous,
     emotion,
@@ -131,8 +139,13 @@ export default function App() {
 
   const startAutonomous = useCallback(
     async (cardContextOverride?: ChatCardContext) => {
+      if (isExhibitionMode) {
+        const audioReady = await prepare();
+        if (!audioReady) return false;
+      } else {
+        void prepare();
+      }
       beginReply();
-      prepare();
       const decision = await sendAutonomous(
         cardContextOverride ?? readCardContext(),
         autonomousContext,
@@ -148,6 +161,7 @@ export default function App() {
       acceptReply,
       autonomousContext,
       beginReply,
+      isExhibitionMode,
       prepare,
       readCardContext,
       sendAutonomous,
@@ -169,7 +183,8 @@ export default function App() {
     cancelAutonomous,
     isBusy,
     isMuted,
-    isReady: isAvatarReady,
+    isReady:
+      isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
     startAutonomous,
   });
 
@@ -177,7 +192,7 @@ export default function App() {
     event.preventDefault();
     if (!trimmedInput || isManualBusy) return;
     beginReply();
-    if (!isMuted) prepare();
+    if (!isMuted) void prepare();
     setInput('');
     void sendManual(trimmedInput, readCardContext(), acceptReply);
   };
@@ -185,7 +200,7 @@ export default function App() {
   const handleMuteToggle = () => {
     if (isMuted) {
       const restoredVolume = volume > 0 ? volume : lastAudibleVolume;
-      prepare();
+      void prepare();
       setAudioControl({
         isMuted: false,
         lastAudibleVolume: restoredVolume,
@@ -211,7 +226,7 @@ export default function App() {
       return;
     }
 
-    if (isMuted) prepare();
+    if (isMuted) void prepare();
     setAudioControl({
       isMuted: false,
       lastAudibleVolume: nextVolume,
@@ -220,7 +235,7 @@ export default function App() {
   };
 
   const handleAvatarReady = useCallback(() => {
-    prepare();
+    void prepare();
     setIsAvatarReady(true);
   }, [prepare]);
 
@@ -233,6 +248,19 @@ export default function App() {
           aria-label="音声コントロール"
           role="group"
         >
+          {isExhibitionMode && !isAudioUnlocked && !isMuted && (
+            <button
+              aria-label="音声を有効化する"
+              className="audio-unlock-button"
+              onClick={() => {
+                void prepare();
+              }}
+              title="最初の音声再生を有効にします"
+              type="button"
+            >
+              音声を有効化
+            </button>
+          )}
           <button
             aria-label={isMuted ? '音声をオンにする' : '音声をミュートする'}
             aria-pressed={isMuted}
