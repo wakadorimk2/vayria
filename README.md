@@ -10,6 +10,7 @@ VRM キャラクターと一往復会話するための最小ローカルアプ�
 - Node.js 24（現在の検証環境）
 - npm
 - OpenAI API key
+- AivisSpeech と利用する音声合成モデル
 - 自分で利用権を持つ VRM ファイル
 - Chrome または Chromium 系ブラウザー
 
@@ -27,29 +28,39 @@ VRM キャラクターと一往復会話するための最小ローカルアプ�
    Copy-Item -LiteralPath '.env.example' -Destination '.env.local'
    ```
 
-3. `.env.local` に API key を設定します。
+3. AivisSpeech を起動します。
+
+   `http://127.0.0.1:10101/speakers` を開き、利用する話者スタイルの
+   `styles[].id` を確認します。API の詳細は
+   `http://127.0.0.1:10101/docs` でも確認できます。
+
+4. `.env.local` に API key と AivisSpeech の設定を記述します。
 
    ```dotenv
    OPENAI_API_KEY=your_key_here
+   AIVIS_BASE_URL=http://127.0.0.1:10101
+   AIVIS_STYLE_ID=your_style_id
    ```
 
-4. 自作または利用許可を持つ VRM を次の場所へ置きます。
+   声を変更する場合は、`AIVIS_STYLE_ID` だけを変更します。
+
+5. 自作または利用許可を持つ VRM を次の場所へ置きます。
 
    ```text
    public/avatar/model.vrm
    ```
 
-5. 開発サーバーを起動します。
+6. 開発サーバーを起動します。
 
    ```powershell
    npm run dev
    ```
 
-6. `http://127.0.0.1:5187/` をブラウザーで開きます。
+7. `http://127.0.0.1:5187/` をブラウザーで開きます。
 
 `.env.local` と `public/avatar/*.vrm` は Git の追跡対象外です。
-API key は Vite のローカル Node middleware だけが読みます。ブラウザー bundle
-には埋め込みません。
+API key と AivisSpeech の設定は Vite のローカル Node middleware だけが読みます。
+ブラウザー bundle には埋め込みません。
 
 ## 検証
 

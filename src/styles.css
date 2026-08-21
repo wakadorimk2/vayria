@@ -32,7 +32,7 @@ input {
 .app-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  min-height: 100dvh;
+  height: 100dvh;
   background: #111419;
 }
 
@@ -59,7 +59,7 @@ input {
   height: 100%;
   min-height: 55dvh;
   overflow: hidden;
-  background: #171b21;
+  background: #242633;
 }
 
 .vrm-canvas {

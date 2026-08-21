@@ -6,7 +6,14 @@ export default defineConfig(({ mode }) => {
   const serverEnvironment = loadEnv(mode, process.cwd(), '');
 
   return {
-    plugins: [react(), localApiPlugin(serverEnvironment.OPENAI_API_KEY)],
+    plugins: [
+      react(),
+      localApiPlugin({
+        openAiApiKey: serverEnvironment.OPENAI_API_KEY,
+        aivisBaseUrl: serverEnvironment.AIVIS_BASE_URL,
+        aivisStyleId: serverEnvironment.AIVIS_STYLE_ID,
+      }),
+    ],
     server: {
       host: '127.0.0.1',
       port: 5187,
