@@ -482,7 +482,7 @@
     0 8px 16px rgb(0 0 0 / 30%),
     0 0 0 5px color-mix(in srgb, var(--kind-accent) 28%, transparent),
     inset 0 1px 0 rgb(255 255 255 / 70%);
-  animation: wildcard-card-drop-target 460ms ease-in-out infinite alternate;
+  animation: wildcard-card-drop-target 520ms ease-in-out infinite alternate;
 }
 
 .wildcard-card.wildcard-card--pending-insertion {
@@ -502,12 +502,12 @@
 
 @keyframes wildcard-card-drop-target {
   from {
-    transform: translateY(calc(var(--card-lift) - 4px))
+    transform: translateY(calc(var(--card-lift) - 14px))
       rotate(var(--card-rotation));
   }
 
   to {
-    transform: translateY(calc(var(--card-lift) - 9px))
+    transform: translateY(calc(var(--card-lift) - 20px))
       rotate(var(--card-rotation));
   }
 }

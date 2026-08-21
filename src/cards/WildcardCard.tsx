@@ -13,6 +13,7 @@ import './cards.css';
 
 export interface WildcardCardProps {
   card: WildcardCardData;
+  interactionDisabled?: boolean;
   onSelect?: (event?: MouseEvent<HTMLElement>) => void;
   onPointerDown?: PointerEventHandler<HTMLElement>;
   motion?: CardMotion;
@@ -57,6 +58,7 @@ const CARD_MOTIFS: Partial<Record<string, string>> = {
 
 export function WildcardCard({
   card,
+  interactionDisabled = false,
   motion = 'none',
   onSelect,
   onPointerDown,
@@ -64,11 +66,12 @@ export function WildcardCard({
 }: WildcardCardProps) {
   const isInteractive = Boolean(onSelect);
   const isDisabled = state === 'disabled';
+  const isInputDisabled = isDisabled || interactionDisabled;
   const stateLabel = state === 'active' ? '、発動' : '';
   const motionClass = motion === 'none' ? '' : `wildcard-card--${motion}`;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (isDisabled || !onSelect) return;
+    if (isInputDisabled || !onSelect) return;
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     onSelect();
@@ -76,7 +79,7 @@ export function WildcardCard({
 
   return (
     <article
-      aria-disabled={isDisabled || undefined}
+      aria-disabled={isInputDisabled || undefined}
       aria-grabbed={motion === 'dragging' || undefined}
       aria-label={`${card.label}、${KIND_LABELS[card.kind]}${stateLabel}${MOTION_LABELS[motion]}`}
       aria-pressed={isInteractive ? state === 'selected' : undefined}
@@ -85,12 +88,12 @@ export function WildcardCard({
       data-motion={motion}
       data-state={state}
       onClick={
-        isDisabled ? undefined : (event) => onSelect?.(event)
+        isInputDisabled ? undefined : (event) => onSelect?.(event)
       }
-      onKeyDown={isInteractive ? handleKeyDown : undefined}
-      onPointerDown={isDisabled ? undefined : onPointerDown}
+      onKeyDown={isInteractive && !isInputDisabled ? handleKeyDown : undefined}
+      onPointerDown={isInputDisabled ? undefined : onPointerDown}
       role={isInteractive ? 'button' : undefined}
-      tabIndex={isInteractive && !isDisabled ? 0 : undefined}
+      tabIndex={isInteractive && !isInputDisabled ? 0 : undefined}
     >
       <span
         className="wildcard-card__pip wildcard-card__pip--top"

@@ -518,15 +518,27 @@ async function generateReply(
   });
   const brainCards = brainCardIds.map((id) => CARD_BY_ID.get(id)!);
   const cardInstructions = brainCards
-    .map((card) => `- ${card.id} (${card.label}): ${card.prompt}`)
+    .map(
+      (card) =>
+        [
+          `- ${card.id} (${card.label})`,
+          `  content influence: ${card.prompt}`,
+          `  speaking-form influence: ${card.stylePrompt}`,
+        ].join('\n'),
+    )
     .join('\n');
   const forcedInstruction = forcedCardId
-    ? `The card ${forcedCardId} is forced for this reply. It must visibly influence a spoken reply, activatedCards must include ${forcedCardId}, and action must not be silence.`
+    ? [
+        `The card ${forcedCardId} is forced for this reply.`,
+        'Make it the primary visible influence on what is said and how the sentence moves.',
+        'Use its speaking-form influence in the spoken text, not only in hidden reasoning.',
+        `activatedCards must include ${forcedCardId}, and action must not be silence.`,
+      ].join(' ')
     : 'No card is forced for this reply.';
   const responseInstruction =
     mode === 'autonomous'
-      ? 'You are not replying to the user. As a Japanese AI Tuber filling a natural pause in a live stream, say one or two short Japanese sentences of about 20 to 80 characters with no Markdown. Use a passing thought, light topic, or quiet observation. Do not give a lecture, act like an AI assistant, or ask the viewer a question every time.'
-      : "Reply in the same language as the user with one or two short sentences and no Markdown.";
+      ? 'You are not replying to the user. As a Japanese AI Tuber filling a natural pause in a live stream, usually say one short Japanese sentence of about 20 to 40 characters with no Markdown. When a card strongly affects the speaking form, allow one short second sentence for an interruption, self-correction, private aside, or unfinished thought. Keep the reply to at most two short sentences. Use a passing thought, light topic, or quiet observation. Do not give a lecture, act like an AI assistant, or ask the viewer a question every time.'
+      : 'Reply in the same language as the user. Usually use one short Japanese sentence of about 20 to 40 characters with no Markdown. When a card strongly affects the speaking form, allow one short second sentence for an interruption, self-correction, private aside, or unfinished thought. Keep the reply to at most two short sentences.';
   const autonomousDirectorInstruction =
     mode === 'autonomous'
       ? [
@@ -540,13 +552,14 @@ async function generateReply(
         ].join('\n')
       : '';
   const systemPrompt = [
-    `${responseInstruction} Choose emotion as the character's own feeling while speaking. Prefer neutral when ambiguous and avoid exaggerated changes. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.`,
+    `${responseInstruction} Choose emotion as the character's overall feeling while speaking. Keep the emotion subtle when the wording is calm. A card may disrupt the sentence form without requiring a strong emotion. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.`,
     autonomousDirectorInstruction,
     'The character has the following five brain cards:',
     cardInstructions,
-    'Let one or two natural cards influence the reply. Do not force all five cards into it. You may use up to three cards when a combination is natural.',
+    'Use the forced card first when one exists. Make its content or speaking-form influence legible through a concrete, observable cue in the spoken text. For a forced concept card, include at least one concrete word or image from its content influence. For a forced style card, show its speaking-form cue. It is acceptable to use the card label itself. Do not satisfy the forced card only through hidden reasoning, a generic emotion, or an unrelated topic. Do not let the most natural topic erase the forced card. Add at most two supporting cards only when their influence is visible in the spoken text. Do not force all five cards into the reply. Do not explain or list the card names.',
     forcedInstruction,
-    'Return only card IDs from the current five cards in activatedCards. List every card that actually influenced the reply.',
+    'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
+    'Return only card IDs from the current five cards in activatedCards. Include the forced card. Include a supporting card only when its content or speaking-form influence is visible in the reply.',
   ].join('\n');
 
   const requestReply = async (correction?: string): Promise<string> => {

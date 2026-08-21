@@ -15,4 +15,5 @@ export interface WildcardCardData {
   label: string;
   kind: CardKind;
   prompt: string;
+  stylePrompt: string;
 }
