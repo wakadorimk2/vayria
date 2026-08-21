@@ -2,6 +2,15 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Buffer } from 'node:buffer';
 import { createRequire } from 'node:module';
 import type { Plugin } from 'vite';
+import {
+  AIVIS_VOICE_PARAMETERS,
+  EMOTIONS,
+  VOICE_STYLE_BY_EMOTION,
+  ZONOKO_SPEAKER_NAME,
+  normalizeEmotion,
+  type AssistantResponse,
+  type Emotion,
+} from '../src/character/emotion';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -13,18 +22,13 @@ const MAX_TEXT_LENGTH = 1_000;
 const CHAT_PATH = '/api/chat';
 const TTS_PATH = '/api/tts';
 const DEFAULT_AIVIS_BASE_URL = 'http://127.0.0.1:10101';
-const DEFAULT_AIVIS_STYLE_ID = 1_599_412_416;
-const DEFAULT_AIVIS_SPEED_SCALE = 1.15;
-const DEFAULT_AIVIS_PITCH_SCALE = 0;
-const DEFAULT_AIVIS_INTONATION_SCALE = 1;
-const DEFAULT_AIVIS_TEMPO_DYNAMICS_SCALE = 1;
 const AIVIS_CONNECTION_ERROR =
   'AivisSpeech Engine に接続できません。AivisSpeech を起動しているか確認してください。';
+const NORMAL_VOICE_STYLE_NAME = VOICE_STYLE_BY_EMOTION.neutral;
 
 interface LocalApiConfig {
   openAiApiKey?: string;
   aivisBaseUrl?: string;
-  aivisStyleId?: string;
   aivisSpeedScale?: string;
   aivisPitchScale?: string;
   aivisIntonationScale?: string;
@@ -32,7 +36,6 @@ interface LocalApiConfig {
 }
 
 interface AivisTtsSettings {
-  styleId: number;
   speedScale: number;
   pitchScale: number;
   intonationScale: number;
@@ -67,7 +70,7 @@ class AivisSpeechError extends Error {
 function sendJson(
   response: ServerResponse,
   statusCode: number,
-  payload: Record<string, unknown>,
+  payload: object,
 ): void {
   const body = JSON.stringify(payload);
   response.writeHead(statusCode, {
@@ -127,12 +130,96 @@ function readTextField(payload: unknown, field: 'message' | 'text'): string {
   return normalized;
 }
 
-async function generateReply(apiKey: string, message: string): Promise<string> {
+function readTtsRequest(payload: unknown): {
+  text: string;
+  emotion: Emotion;
+} {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new RequestError('Request body must be a JSON object.', 400);
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== 'text' && key !== 'emotion')) {
+    throw new RequestError(
+      'Request body may contain only text and emotion.',
+      400,
+    );
+  }
+
+  const text = record.text;
+  if (typeof text !== 'string' || !text.trim()) {
+    throw new RequestError('text must be non-empty text.', 400);
+  }
+  const normalizedText = text.trim();
+  if (normalizedText.length > MAX_TEXT_LENGTH) {
+    throw new RequestError(
+      `text must be ${MAX_TEXT_LENGTH} characters or fewer.`,
+      400,
+    );
+  }
+
+  return {
+    text: normalizedText,
+    emotion: normalizeEmotion(record.emotion),
+  };
+}
+
+function parseAssistantResponse(value: string): AssistantResponse {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(value);
+  } catch {
+    throw new Error('The chat provider returned invalid JSON.');
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('The chat provider returned an invalid response object.');
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (typeof record.text !== 'string' || !record.text.trim()) {
+    throw new Error('The chat provider returned empty response text.');
+  }
+
+  const text = record.text.trim();
+  if (text.length > MAX_TEXT_LENGTH) {
+    throw new Error('The chat provider returned response text that is too long.');
+  }
+
+  return {
+    text,
+    emotion: normalizeEmotion(record.emotion),
+  };
+}
+
+async function generateReply(
+  apiKey: string,
+  message: string,
+): Promise<AssistantResponse> {
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey,
     model: MODEL_GPT_5_NANO,
     responseLength: 'veryShort',
     gpt5Preset: 'casual',
+    responseFormat: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'wildcard_assistant_response',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+            emotion: {
+              type: 'string',
+              enum: EMOTIONS,
+            },
+          },
+          required: ['text', 'emotion'],
+          additionalProperties: false,
+        },
+      },
+    },
   });
   let streamedReply = '';
   let completedReply = '';
@@ -142,7 +229,7 @@ async function generateReply(apiKey: string, message: string): Promise<string> {
       {
         role: 'system',
         content:
-          'Reply in the same language as the user. Use one or two short sentences. Do not use Markdown or emotion tags.',
+          "Reply in the same language as the user with one or two short sentences and no Markdown. Choose emotion as the character's own feeling while replying. Prefer neutral when ambiguous and avoid exaggerated changes. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.",
       },
       { role: 'user', content: message },
     ],
@@ -154,11 +241,11 @@ async function generateReply(apiKey: string, message: string): Promise<string> {
     },
   );
 
-  const reply = (completedReply || streamedReply).trim();
-  if (!reply) {
+  const responseText = (completedReply || streamedReply).trim();
+  if (!responseText) {
     throw new Error('The chat provider returned an empty reply.');
   }
-  return reply;
+  return parseAssistantResponse(responseText);
 }
 
 function readAivisBaseUrl(configuredBaseUrl: string | undefined): URL {
@@ -176,30 +263,6 @@ function readAivisBaseUrl(configuredBaseUrl: string | undefined): URL {
       503,
     );
   }
-}
-
-function readAivisStyleId(configuredStyleId: string | undefined): number {
-  const value = configuredStyleId?.trim();
-  if (!value) {
-    return DEFAULT_AIVIS_STYLE_ID;
-  }
-
-  if (!/^-?\d+$/.test(value)) {
-    throw new RequestError('AIVIS_STYLE_ID must be an integer.', 503);
-  }
-
-  const styleId = Number(value);
-  if (
-    !Number.isInteger(styleId) ||
-    styleId < -2_147_483_648 ||
-    styleId > 2_147_483_647
-  ) {
-    throw new RequestError(
-      'AIVIS_STYLE_ID must be a signed 32-bit integer.',
-      503,
-    );
-  }
-  return styleId;
 }
 
 function readAivisScale(
@@ -229,38 +292,36 @@ function readAivisScale(
 
 function readAivisTtsSettings(config: LocalApiConfig): AivisTtsSettings {
   return {
-    styleId: readAivisStyleId(config.aivisStyleId),
     speedScale: readAivisScale(
       config.aivisSpeedScale,
       'AIVIS_SPEED_SCALE',
-      DEFAULT_AIVIS_SPEED_SCALE,
+      AIVIS_VOICE_PARAMETERS.speedScale,
       0.5,
       2,
     ),
     pitchScale: readAivisScale(
       config.aivisPitchScale,
       'AIVIS_PITCH_SCALE',
-      DEFAULT_AIVIS_PITCH_SCALE,
+      AIVIS_VOICE_PARAMETERS.pitchScale,
       -0.15,
       0.15,
     ),
     intonationScale: readAivisScale(
       config.aivisIntonationScale,
       'AIVIS_INTONATION_SCALE',
-      DEFAULT_AIVIS_INTONATION_SCALE,
+      AIVIS_VOICE_PARAMETERS.intonationScale,
       0,
       2,
     ),
     tempoDynamicsScale: readAivisScale(
       config.aivisTempoDynamicsScale,
       'AIVIS_TEMPO_DYNAMICS_SCALE',
-      DEFAULT_AIVIS_TEMPO_DYNAMICS_SCALE,
+      AIVIS_VOICE_PARAMETERS.tempoDynamicsScale,
       0,
       2,
     ),
   };
 }
-
 function createAivisUrl(
   baseUrl: URL,
   pathname: string,
@@ -306,18 +367,78 @@ async function requestAivis(
     throw new AivisSpeechError(
       styleId === undefined
         ? 'AivisSpeech Engine の話者情報を取得できませんでした。'
-        : `AivisSpeech の音声合成に失敗しました。AIVIS_STYLE_ID=${styleId} が利用可能か確認してください。`,
+        : `AivisSpeech の音声合成に失敗しました。style ID ${styleId} が利用可能か確認してください。`,
     );
   }
   return response;
 }
 
+async function loadAivisSpeakers(baseUrl: URL): Promise<AivisSpeaker[]> {
+  const response = await requestAivis(
+    createAivisUrl(baseUrl, '/speakers'),
+    { method: 'GET' },
+    '/speakers',
+  );
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new AivisSpeechError(
+      'AivisSpeech Engine の /speakers 応答を解析できませんでした。',
+    );
+  }
+
+  if (!Array.isArray(payload)) {
+    throw new AivisSpeechError(
+      'AivisSpeech Engine の /speakers 応答形式が正しくありません。',
+    );
+  }
+  return payload as AivisSpeaker[];
+}
+
+function resolveZonokoStyle(
+  speakers: AivisSpeaker[],
+  emotion: Emotion,
+): AivisStyle {
+  const zonoko = speakers.find(
+    (speaker) =>
+      speaker.name === ZONOKO_SPEAKER_NAME && Array.isArray(speaker.styles),
+  );
+  if (!zonoko) {
+    throw new AivisSpeechError(
+      'AivisSpeech Engine に zonoko がありません。zonoko モデルを確認してください。',
+    );
+  }
+
+  const normalStyle = zonoko.styles.find(
+    (style) => style.name === NORMAL_VOICE_STYLE_NAME,
+  );
+  if (!normalStyle) {
+    throw new AivisSpeechError(
+      `zonoko に ${NORMAL_VOICE_STYLE_NAME} スタイルがありません。`,
+    );
+  }
+
+  const requestedName = VOICE_STYLE_BY_EMOTION[emotion];
+  const requestedStyle = zonoko.styles.find(
+    (style) => style.name === requestedName,
+  );
+  if (!requestedStyle) {
+    console.warn(
+      `zonoko style ${requestedName} was not found. Falling back to ${NORMAL_VOICE_STYLE_NAME}.`,
+    );
+  }
+
+  return requestedStyle ?? normalStyle;
+}
+
 async function synthesizeSpeech(
   baseUrl: URL,
+  styleId: number,
   settings: AivisTtsSettings,
   text: string,
 ): Promise<ArrayBuffer> {
-  const { styleId } = settings;
   const speaker = String(styleId);
   const audioQueryResponse = await requestAivis(
     createAivisUrl(baseUrl, '/audio_query', { text, speaker }),
@@ -347,7 +468,6 @@ async function synthesizeSpeech(
   audioQuery.pitchScale = settings.pitchScale;
   audioQuery.intonationScale = settings.intonationScale;
   audioQuery.tempoDynamicsScale = settings.tempoDynamicsScale;
-
   const synthesisResponse = await requestAivis(
     createAivisUrl(baseUrl, '/synthesis', { speaker }),
     {
@@ -372,25 +492,13 @@ async function reportAivisSelection(config: LocalApiConfig): Promise<void> {
     return;
   }
 
-  let response: Response;
+  let speakers: AivisSpeaker[];
   try {
-    response = await requestAivis(
-      createAivisUrl(baseUrl, '/speakers'),
-      { method: 'GET' },
-      '/speakers',
-    );
+    speakers = await loadAivisSpeakers(baseUrl);
   } catch (error) {
     console.warn(
       error instanceof AivisSpeechError ? error.userMessage : String(error),
     );
-    return;
-  }
-
-  let speakers: AivisSpeaker[];
-  try {
-    speakers = (await response.json()) as AivisSpeaker[];
-  } catch {
-    console.warn('AivisSpeech Engine の /speakers 応答を解析できませんでした。');
     return;
   }
 
@@ -402,21 +510,25 @@ async function reportAivisSelection(config: LocalApiConfig): Promise<void> {
     return;
   }
 
-  for (const speaker of speakers) {
-    const style = speaker.styles.find(
-      (candidate) => candidate.id === settings.styleId,
-    );
-    if (style) {
-      console.info(
-        `AivisSpeech voice: ${speaker.name} / ${style.name} (style ID: ${style.id}, speed: ${settings.speedScale}, pitch: ${settings.pitchScale}, emotional intensity: ${settings.intonationScale}, tempo dynamics: ${settings.tempoDynamicsScale})`,
-      );
-      return;
+  try {
+    for (const emotion of EMOTIONS) {
+      const style = resolveZonokoStyle(speakers, emotion);
+      console.info('Wildcard AivisSpeech style:', {
+        emotion,
+        speaker: ZONOKO_SPEAKER_NAME,
+        style: style.name,
+        styleId: style.id,
+        speed: settings.speedScale,
+        pitch: settings.pitchScale,
+        emotionalIntensity: settings.intonationScale,
+        tempoDynamics: settings.tempoDynamicsScale,
+      });
     }
+  } catch (error) {
+    console.warn(
+      error instanceof AivisSpeechError ? error.userMessage : String(error),
+    );
   }
-
-  console.warn(
-    `AIVIS_STYLE_ID=${settings.styleId} was not found in AivisSpeech Engine /speakers.`,
-  );
 }
 
 async function handleRequest(
@@ -445,15 +557,28 @@ async function handleRequest(
         );
       }
       const message = readTextField(payload, 'message');
-      const reply = await generateReply(config.openAiApiKey, message);
-      sendJson(response, 200, { reply });
+      const assistantResponse = await generateReply(
+        config.openAiApiKey,
+        message,
+      );
+      sendJson(response, 200, assistantResponse);
       return;
     }
 
-    const text = readTextField(payload, 'text');
+    const { text, emotion } = readTtsRequest(payload);
     const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
     const settings = readAivisTtsSettings(config);
-    const audio = Buffer.from(await synthesizeSpeech(baseUrl, settings, text));
+    const speakers = await loadAivisSpeakers(baseUrl);
+    const style = resolveZonokoStyle(speakers, emotion);
+    console.info('Wildcard TTS:', {
+      emotion,
+      speaker: ZONOKO_SPEAKER_NAME,
+      style: style.name,
+      styleId: style.id,
+    });
+    const audio = Buffer.from(
+      await synthesizeSpeech(baseUrl, style.id, settings, text),
+    );
     response.writeHead(200, {
       'Cache-Control': 'no-store',
       'Content-Length': audio.byteLength,

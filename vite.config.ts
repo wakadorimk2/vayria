@@ -11,7 +11,6 @@ export default defineConfig(({ mode }) => {
       localApiPlugin({
         openAiApiKey: serverEnvironment.OPENAI_API_KEY,
         aivisBaseUrl: serverEnvironment.AIVIS_BASE_URL,
-        aivisStyleId: serverEnvironment.AIVIS_STYLE_ID,
         aivisSpeedScale: serverEnvironment.AIVIS_SPEED_SCALE,
         aivisPitchScale: serverEnvironment.AIVIS_PITCH_SCALE,
         aivisIntonationScale: serverEnvironment.AIVIS_INTONATION_SCALE,
