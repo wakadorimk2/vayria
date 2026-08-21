@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { cardPool } from './cardPool';
 import type { WildcardCardData } from './cardTypes';
 
-const MAX_STAMINA = 1;
+const MAX_INTERFERENCE_COUNT = 1;
 
 const INITIAL_BRAIN_IDS = [
   'chicken',
@@ -25,7 +25,7 @@ export type CardZone = 'brain' | 'hand';
 export interface CardZoneState {
   brain: WildcardCardData[];
   hand: WildcardCardData[];
-  stamina: number;
+  remainingInterferenceCount: number;
   activatedCardIds: string[];
   forcedCardId: string | null;
 }
@@ -42,7 +42,7 @@ function createInitialState(): CardZoneState {
   return {
     brain: selectCards(INITIAL_BRAIN_IDS),
     hand: selectCards(INITIAL_HAND_IDS),
-    stamina: MAX_STAMINA,
+    remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
     activatedCardIds: [],
     forcedCardId: null,
   };
@@ -59,19 +59,19 @@ export function useCardGamePrototype() {
 
   const selectCard = useCallback(
     (zone: CardZone, cardId: string) => {
-      if (zones.stamina === 0) return;
+      if (zones.remainingInterferenceCount === 0) return;
       const setSelected =
         zone === 'brain' ? setSelectedBrainCardId : setSelectedHandCardId;
       setSelected((current) => (current === cardId ? null : cardId));
     },
-    [zones.stamina],
+    [zones.remainingInterferenceCount],
   );
 
   const swapSelectedCards = useCallback(() => {
     if (!selectedBrainCardId || !selectedHandCardId) return;
 
     setZones((current) => {
-      if (current.stamina === 0) return current;
+      if (current.remainingInterferenceCount === 0) return current;
       const brainIndex = current.brain.findIndex(
         (card) => card.id === selectedBrainCardId,
       );
@@ -90,7 +90,7 @@ export function useCardGamePrototype() {
       return {
         brain,
         hand,
-        stamina: 0,
+        remainingInterferenceCount: 0,
         activatedCardIds: [],
         forcedCardId: brain[brainIndex].id,
       };
@@ -102,7 +102,7 @@ export function useCardGamePrototype() {
   const resetTurn = useCallback(() => {
     setZones((current) => ({
       ...current,
-      stamina: MAX_STAMINA,
+      remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
       activatedCardIds: [],
       forcedCardId: null,
     }));
@@ -119,7 +119,7 @@ export function useCardGamePrototype() {
       const brainCardIds = new Set(current.brain.map((card) => card.id));
       return {
         ...current,
-        stamina: MAX_STAMINA,
+        remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
         activatedCardIds: activatedCardIds.filter((id) => brainCardIds.has(id)),
         forcedCardId: null,
       };
@@ -127,7 +127,7 @@ export function useCardGamePrototype() {
   }, []);
 
   return {
-    maxStamina: MAX_STAMINA,
+    maxInterferenceCount: MAX_INTERFERENCE_COUNT,
     acceptReply,
     beginReply,
     resetTurn,

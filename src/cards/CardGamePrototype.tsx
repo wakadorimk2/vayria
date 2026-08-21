@@ -14,7 +14,7 @@ export function CardGamePrototype({
   isInteractionLocked = false,
 }: CardGamePrototypeProps) {
   const {
-    maxStamina,
+    maxInterferenceCount,
     resetTurn,
     selectCard,
     selectedBrainCardId,
@@ -22,7 +22,7 @@ export function CardGamePrototype({
     swapSelectedCards,
     zones,
   } = game;
-  const isSpent = zones.stamina === 0;
+  const isSpent = zones.remainingInterferenceCount === 0;
   const isLocked = isSpent || isInteractionLocked;
   const isSwapReady = Boolean(
     selectedBrainCardId && selectedHandCardId && !isLocked,
@@ -46,7 +46,7 @@ export function CardGamePrototype({
     return zones[zone].map((card) => {
       const isActive =
         zone === 'brain' && zones.activatedCardIds.includes(card.id);
-      return (
+      const renderedCard = (
         <WildcardCard
           card={card}
           key={card.id}
@@ -62,6 +62,12 @@ export function CardGamePrototype({
           }
         />
       );
+
+      return zone === 'brain' ? (
+        <div className="brain-card-float" key={card.id}>
+          {renderedCard}
+        </div>
+      ) : renderedCard;
     });
   };
 
@@ -69,7 +75,6 @@ export function CardGamePrototype({
     <div className="card-prototype" aria-label="Brain and hand cards">
       <section className="card-zone card-zone--brain" aria-label="脳内">
         <header className="card-zone__header">
-          <span className="card-zone__eyebrow">CHARACTER</span>
           <h2>脳内</h2>
         </header>
         <div className="card-zone__cards">{renderCards('brain')}</div>
@@ -77,17 +82,23 @@ export function CardGamePrototype({
 
       <section className="card-zone card-zone--hand" aria-label="手札">
         <header className="card-zone__header card-zone__header--hand">
-          <div>
-            <span className="card-zone__eyebrow">PLAYER</span>
-            <h2>手札</h2>
-          </div>
+          <h2>手札</h2>
           <div className="card-zone__turn-status">
             <span
-              className={`stamina stamina--${isSpent ? 'spent' : 'ready'}`}
-              aria-label={`stamina ${zones.stamina} / ${maxStamina}`}
+              className={`interference-counter interference-counter--${isSpent ? 'spent' : 'ready'}`}
+              aria-label={`残り干渉回数 ${zones.remainingInterferenceCount} / ${maxInterferenceCount}`}
             >
-              <span aria-hidden="true">{isSpent ? '○' : '●'}</span>{' '}
-              {zones.stamina} / {maxStamina}
+              <span className="interference-counter__label" aria-hidden="true">
+                干渉
+              </span>
+              <span className="interference-counter__slots" aria-hidden="true">
+                {Array.from({ length: maxInterferenceCount }, (_, index) => (
+                  <span
+                    className={`interference-counter__chip ${index < zones.remainingInterferenceCount ? 'interference-counter__chip--available' : 'interference-counter__chip--spent'}`}
+                    key={index}
+                  />
+                ))}
+              </span>
             </span>
             {import.meta.env.DEV && (
               <button
