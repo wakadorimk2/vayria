@@ -13,6 +13,11 @@ const MAX_TEXT_LENGTH = 1_000;
 const CHAT_PATH = '/api/chat';
 const TTS_PATH = '/api/tts';
 const DEFAULT_AIVIS_BASE_URL = 'http://127.0.0.1:10101';
+const DEFAULT_AIVIS_STYLE_ID = 1_599_412_416;
+const DEFAULT_AIVIS_SPEED_SCALE = 1.15;
+const DEFAULT_AIVIS_PITCH_SCALE = 0;
+const DEFAULT_AIVIS_INTONATION_SCALE = 1;
+const DEFAULT_AIVIS_TEMPO_DYNAMICS_SCALE = 1;
 const AIVIS_CONNECTION_ERROR =
   'AivisSpeech Engine に接続できません。AivisSpeech を起動しているか確認してください。';
 
@@ -20,6 +25,18 @@ interface LocalApiConfig {
   openAiApiKey?: string;
   aivisBaseUrl?: string;
   aivisStyleId?: string;
+  aivisSpeedScale?: string;
+  aivisPitchScale?: string;
+  aivisIntonationScale?: string;
+  aivisTempoDynamicsScale?: string;
+}
+
+interface AivisTtsSettings {
+  styleId: number;
+  speedScale: number;
+  pitchScale: number;
+  intonationScale: number;
+  tempoDynamicsScale: number;
 }
 
 interface AivisStyle {
@@ -164,10 +181,7 @@ function readAivisBaseUrl(configuredBaseUrl: string | undefined): URL {
 function readAivisStyleId(configuredStyleId: string | undefined): number {
   const value = configuredStyleId?.trim();
   if (!value) {
-    throw new RequestError(
-      'AIVIS_STYLE_ID is not configured in .env.local.',
-      503,
-    );
+    return DEFAULT_AIVIS_STYLE_ID;
   }
 
   if (!/^-?\d+$/.test(value)) {
@@ -186,6 +200,65 @@ function readAivisStyleId(configuredStyleId: string | undefined): number {
     );
   }
   return styleId;
+}
+
+function readAivisScale(
+  configuredValue: string | undefined,
+  variableName: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const value = configuredValue?.trim();
+  if (!value) {
+    return defaultValue;
+  }
+
+  const scale = Number(value);
+  if (!Number.isFinite(scale)) {
+    throw new RequestError(`${variableName} must be a finite number.`, 503);
+  }
+  if (scale < minimum || scale > maximum) {
+    throw new RequestError(
+      `${variableName} must be between ${minimum} and ${maximum}.`,
+      503,
+    );
+  }
+  return scale;
+}
+
+function readAivisTtsSettings(config: LocalApiConfig): AivisTtsSettings {
+  return {
+    styleId: readAivisStyleId(config.aivisStyleId),
+    speedScale: readAivisScale(
+      config.aivisSpeedScale,
+      'AIVIS_SPEED_SCALE',
+      DEFAULT_AIVIS_SPEED_SCALE,
+      0.5,
+      2,
+    ),
+    pitchScale: readAivisScale(
+      config.aivisPitchScale,
+      'AIVIS_PITCH_SCALE',
+      DEFAULT_AIVIS_PITCH_SCALE,
+      -0.15,
+      0.15,
+    ),
+    intonationScale: readAivisScale(
+      config.aivisIntonationScale,
+      'AIVIS_INTONATION_SCALE',
+      DEFAULT_AIVIS_INTONATION_SCALE,
+      0,
+      2,
+    ),
+    tempoDynamicsScale: readAivisScale(
+      config.aivisTempoDynamicsScale,
+      'AIVIS_TEMPO_DYNAMICS_SCALE',
+      DEFAULT_AIVIS_TEMPO_DYNAMICS_SCALE,
+      0,
+      2,
+    ),
+  };
 }
 
 function createAivisUrl(
@@ -241,9 +314,10 @@ async function requestAivis(
 
 async function synthesizeSpeech(
   baseUrl: URL,
-  styleId: number,
+  settings: AivisTtsSettings,
   text: string,
 ): Promise<ArrayBuffer> {
+  const { styleId } = settings;
   const speaker = String(styleId);
   const audioQueryResponse = await requestAivis(
     createAivisUrl(baseUrl, '/audio_query', { text, speaker }),
@@ -252,14 +326,34 @@ async function synthesizeSpeech(
     styleId,
   );
 
-  // Preserve the AudioQuery bytes exactly as returned by AivisSpeech Engine.
-  const audioQuery = await audioQueryResponse.arrayBuffer();
+  let audioQuery: Record<string, unknown>;
+  try {
+    const payload = (await audioQueryResponse.json()) as unknown;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('AudioQuery must be a JSON object.');
+    }
+    audioQuery = payload as Record<string, unknown>;
+  } catch (error) {
+    console.error('AivisSpeech Engine returned an invalid AudioQuery.', {
+      styleId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new AivisSpeechError(
+      'AivisSpeech Engine から有効な音声合成クエリを取得できませんでした。',
+    );
+  }
+
+  audioQuery.speedScale = settings.speedScale;
+  audioQuery.pitchScale = settings.pitchScale;
+  audioQuery.intonationScale = settings.intonationScale;
+  audioQuery.tempoDynamicsScale = settings.tempoDynamicsScale;
+
   const synthesisResponse = await requestAivis(
     createAivisUrl(baseUrl, '/synthesis', { speaker }),
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: audioQuery,
+      body: JSON.stringify(audioQuery),
     },
     '/synthesis',
     styleId,
@@ -300,26 +394,28 @@ async function reportAivisSelection(config: LocalApiConfig): Promise<void> {
     return;
   }
 
-  let styleId: number;
+  let settings: AivisTtsSettings;
   try {
-    styleId = readAivisStyleId(config.aivisStyleId);
+    settings = readAivisTtsSettings(config);
   } catch (error) {
     console.warn(error instanceof Error ? error.message : String(error));
     return;
   }
 
   for (const speaker of speakers) {
-    const style = speaker.styles.find((candidate) => candidate.id === styleId);
+    const style = speaker.styles.find(
+      (candidate) => candidate.id === settings.styleId,
+    );
     if (style) {
       console.info(
-        `AivisSpeech voice: ${speaker.name} / ${style.name} (style ID: ${style.id})`,
+        `AivisSpeech voice: ${speaker.name} / ${style.name} (style ID: ${style.id}, speed: ${settings.speedScale}, pitch: ${settings.pitchScale}, emotional intensity: ${settings.intonationScale}, tempo dynamics: ${settings.tempoDynamicsScale})`,
       );
       return;
     }
   }
 
   console.warn(
-    `AIVIS_STYLE_ID=${styleId} was not found in AivisSpeech Engine /speakers.`,
+    `AIVIS_STYLE_ID=${settings.styleId} was not found in AivisSpeech Engine /speakers.`,
   );
 }
 
@@ -356,8 +452,8 @@ async function handleRequest(
 
     const text = readTextField(payload, 'text');
     const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
-    const styleId = readAivisStyleId(config.aivisStyleId);
-    const audio = Buffer.from(await synthesizeSpeech(baseUrl, styleId, text));
+    const settings = readAivisTtsSettings(config);
+    const audio = Buffer.from(await synthesizeSpeech(baseUrl, settings, text));
     response.writeHead(200, {
       'Cache-Control': 'no-store',
       'Content-Length': audio.byteLength,
