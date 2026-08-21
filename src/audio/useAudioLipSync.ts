@@ -21,6 +21,7 @@ export function useAudioLipSync(volume = 1) {
   const normalizedVolume = clampVolume(volume);
   const [mouthOpen, setMouthOpen] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
   const contextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
@@ -46,14 +47,25 @@ export function useAudioLipSync(volume = 1) {
     return contextRef.current;
   }, []);
 
-  const prepare = useCallback(() => {
-    const context = ensureAudioContext();
-
-    if (context.state === 'suspended') {
-      void context.resume().catch(() => {
-        // play() retries and reports the error through the conversation flow.
-      });
+  const prepare = useCallback(async () => {
+    let context: AudioContext;
+    try {
+      context = ensureAudioContext();
+    } catch {
+      return false;
     }
+
+    if (context.state !== 'running') {
+      try {
+        await context.resume();
+      } catch {
+        return false;
+      }
+    }
+
+    const unlocked = context.state === 'running';
+    if (unlocked) setIsAudioUnlocked(true);
+    return unlocked;
   }, [ensureAudioContext]);
 
   const clearPlayback = useCallback(() => {
@@ -91,9 +103,13 @@ export function useAudioLipSync(volume = 1) {
       clearPlayback();
 
       const context = ensureAudioContext();
-      if (context.state === 'suspended') {
+      if (context.state !== 'running') {
         await context.resume();
       }
+      if (context.state !== 'running') {
+        throw new Error('AudioContext is not running');
+      }
+      setIsAudioUnlocked(true);
 
       const decodedAudio = await context.decodeAudioData(audioData.slice(0));
       if (generation !== generationRef.current) return;
@@ -163,5 +179,12 @@ export function useAudioLipSync(volume = 1) {
     };
   }, [stop]);
 
-  return { isSpeaking, mouthOpen, play, prepare, stop };
+  return {
+    isAudioUnlocked,
+    isSpeaking,
+    mouthOpen,
+    play,
+    prepare,
+    stop,
+  };
 }

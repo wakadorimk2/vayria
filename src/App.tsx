@@ -16,6 +16,7 @@ import {
   type ChatCardContext,
 } from './conversation/useConversation';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
+import { runtimeConfig } from './runtimeConfig';
 
 const STATUS_LABELS = {
   idle: '話しかけてください。',
@@ -24,6 +25,8 @@ const STATUS_LABELS = {
   speaking: '話しています。',
   error: '処理を完了できませんでした。',
 } as const;
+
+type ExhibitionPresentationState = 'idle' | 'selecting' | 'reacting';
 
 const AUDIO_SETTINGS_STORAGE_KEY = 'wildcard.audio-settings.v1';
 
@@ -89,13 +92,21 @@ function advanceAutonomousContext(
 export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
+  const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
   const [audioControl, setAudioControl] = useState(readAudioControlState);
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>({ topic: null, topicTurns: 0 });
   const { isMuted, lastAudibleVolume, volume } = audioControl;
+  const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, zones } = cardGame;
-  const { mouthOpen, play, prepare, stop } = useAudioLipSync(volume);
+  const {
+    isAudioUnlocked,
+    mouthOpen,
+    play,
+    prepare,
+    stop,
+  } = useAudioLipSync(volume);
   const {
     cancelAutonomous,
     emotion,
@@ -107,6 +118,11 @@ export default function App() {
     sendManual,
     status,
   } = useConversation(play, stop, { historyLimit: 6, isMuted });
+  const exhibitionPresentationState: ExhibitionPresentationState = isBusy
+    ? 'reacting'
+    : isCardSelectionActive
+      ? 'selecting'
+      : 'idle';
   const trimmedInput = input.trim();
   const volumePercent = Math.round(volume * 100);
 
@@ -131,8 +147,13 @@ export default function App() {
 
   const startAutonomous = useCallback(
     async (cardContextOverride?: ChatCardContext) => {
+      if (isExhibitionMode) {
+        const audioReady = await prepare();
+        if (!audioReady) return false;
+      } else {
+        void prepare();
+      }
       beginReply();
-      prepare();
       const decision = await sendAutonomous(
         cardContextOverride ?? readCardContext(),
         autonomousContext,
@@ -148,6 +169,7 @@ export default function App() {
       acceptReply,
       autonomousContext,
       beginReply,
+      isExhibitionMode,
       prepare,
       readCardContext,
       sendAutonomous,
@@ -169,7 +191,8 @@ export default function App() {
     cancelAutonomous,
     isBusy,
     isMuted,
-    isReady: isAvatarReady,
+    isReady:
+      isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
     startAutonomous,
   });
 
@@ -177,7 +200,7 @@ export default function App() {
     event.preventDefault();
     if (!trimmedInput || isManualBusy) return;
     beginReply();
-    if (!isMuted) prepare();
+    if (!isMuted) void prepare();
     setInput('');
     void sendManual(trimmedInput, readCardContext(), acceptReply);
   };
@@ -185,7 +208,7 @@ export default function App() {
   const handleMuteToggle = () => {
     if (isMuted) {
       const restoredVolume = volume > 0 ? volume : lastAudibleVolume;
-      prepare();
+      void prepare();
       setAudioControl({
         isMuted: false,
         lastAudibleVolume: restoredVolume,
@@ -195,6 +218,14 @@ export default function App() {
       stop();
       setAudioControl((current) => ({ ...current, isMuted: true }));
     }
+  };
+
+  const handleExhibitionAudioUnlock = () => {
+    if (isMuted) {
+      handleMuteToggle();
+      return;
+    }
+    void prepare();
   };
 
   const handleVolumeInput = (event: FormEvent<HTMLInputElement>) => {
@@ -211,7 +242,7 @@ export default function App() {
       return;
     }
 
-    if (isMuted) prepare();
+    if (isMuted) void prepare();
     setAudioControl({
       isMuted: false,
       lastAudibleVolume: nextVolume,
@@ -220,56 +251,81 @@ export default function App() {
   };
 
   const handleAvatarReady = useCallback(() => {
-    prepare();
+    void prepare();
     setIsAvatarReady(true);
   }, [prepare]);
 
   return (
-    <main className="app-shell">
-      <header className="app-title">
-        <span>Wildcard</span>
-        <div
-          className="audio-controls"
-          aria-label="音声コントロール"
-          role="group"
-        >
-          <button
-            aria-label={isMuted ? '音声をオンにする' : '音声をミュートする'}
-            aria-pressed={isMuted}
-            className="mute-button"
-            onClick={handleMuteToggle}
-            title={isMuted ? 'Muted' : 'Autonomous talk active'}
-            type="button"
+    <main
+      className="app-shell"
+      data-app-mode={runtimeConfig.mode}
+      data-exhibition-state={exhibitionPresentationState}
+    >
+      {(!isExhibitionMode || !isAudioUnlocked) && (
+        <header className="app-title">
+          {!isExhibitionMode && <span>Wildcard</span>}
+          <div
+            className="audio-controls"
+            aria-label="音声コントロール"
+            role="group"
           >
-            <span aria-hidden="true">{isMuted ? '🔇' : '🔊'}</span>
-          </button>
-          <label className="visually-hidden" htmlFor="playback-volume">
-            再生音量
-          </label>
-          <input
-            aria-valuetext={
-              isMuted
-                ? `ミュート中、設定音量 ${volumePercent}%`
-                : `音量 ${volumePercent}%`
-            }
-            className="volume-slider"
-            id="playback-volume"
-            max="100"
-            min="0"
-            onInput={handleVolumeInput}
-            step="5"
-            type="range"
-            value={volumePercent}
-          />
-          <span className="volume-value" aria-hidden="true">
-            {volumePercent}%
-          </span>
-        </div>
-      </header>
+            {isExhibitionMode ? (
+              <button
+                aria-label={
+                  isMuted ? '音声をオンにする' : '音声を有効化する'
+                }
+                className="audio-unlock-button"
+                onClick={handleExhibitionAudioUnlock}
+                title="最初の音声再生を有効にします"
+                type="button"
+              >
+                {isMuted ? '音声をオンにする' : '音声を有効化'}
+              </button>
+            ) : (
+              <>
+                <button
+                  aria-label={
+                    isMuted ? '音声をオンにする' : '音声をミュートする'
+                  }
+                  aria-pressed={isMuted}
+                  className="mute-button"
+                  onClick={handleMuteToggle}
+                  title={isMuted ? 'Muted' : 'Autonomous talk active'}
+                  type="button"
+                >
+                  <span aria-hidden="true">{isMuted ? '🔇' : '🔊'}</span>
+                </button>
+                <label className="visually-hidden" htmlFor="playback-volume">
+                  再生音量
+                </label>
+                <input
+                  aria-valuetext={
+                    isMuted
+                      ? `ミュート中、設定音量 ${volumePercent}%`
+                      : `音量 ${volumePercent}%`
+                  }
+                  className="volume-slider"
+                  id="playback-volume"
+                  max="100"
+                  min="0"
+                  onInput={handleVolumeInput}
+                  step="5"
+                  type="range"
+                  value={volumePercent}
+                />
+                <span className="volume-value" aria-hidden="true">
+                  {volumePercent}%
+                </span>
+              </>
+            )}
+          </div>
+        </header>
+      )}
 
       <section className="avatar-area" aria-label="VRM character">
         <VrmStage
           emotion={emotion}
+          isExhibitionMode={isExhibitionMode}
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
         />
@@ -277,10 +333,14 @@ export default function App() {
           game={cardGame}
           isInteractionLocked={isBusy}
           onCardInserted={handleCardInserted}
+          onSelectionActiveChange={setIsCardSelectionActive}
         />
       </section>
 
-      <section className="conversation" aria-label="Character conversation">
+      <section
+        className={`conversation conversation--${status}`}
+        aria-label="Character conversation"
+      >
         <div className="conversation-copy" aria-live="polite">
           {reply && <p className="reply">{reply}</p>}
           <p className="status">
