@@ -16,9 +16,30 @@ export interface WildcardCardProps {
 }
 
 const KIND_LABELS: Record<CardKind, string> = {
-  concept: 'CONCEPT',
-  mood: 'MOOD',
-  effect: 'EFFECT',
+  concept: 'concept',
+  mood: 'mood',
+  effect: 'effect',
+};
+
+const KIND_MARKS: Record<CardKind, string> = {
+  concept: '◇',
+  mood: '●',
+  effect: '✦',
+};
+
+const CARD_MOTIFS: Partial<Record<string, string>> = {
+  chicken: '○',
+  suspicious: '••',
+  sleepy: '˘',
+  rain: '•••',
+  secret: '●',
+  panic: '!',
+  sparkle: '✦ ･ ✧',
+  underwater: '≈',
+  lonely: '·',
+  confident: '—',
+  'deja-vu': '〃',
+  'distant-thunder': 'ϟ',
 };
 
 export function WildcardCard({
@@ -28,27 +49,34 @@ export function WildcardCard({
   return (
     <article
       aria-disabled={state === 'disabled' || undefined}
-      aria-label={`${card.label}、${KIND_LABELS[card.kind].toLowerCase()}`}
+      aria-label={`${card.label}、${KIND_LABELS[card.kind]}`}
       className={`wildcard-card wildcard-card--${card.kind} wildcard-card--${state}`}
       data-card-id={card.id}
       data-state={state}
     >
-      <span className="wildcard-card__pattern" aria-hidden="true" />
-      <span className="wildcard-card__corner" aria-hidden="true" />
+      <span
+        className="wildcard-card__pip wildcard-card__pip--top"
+        aria-hidden="true"
+      >
+        {KIND_MARKS[card.kind]}
+      </span>
 
-      <header className="wildcard-card__meta">
-        <span className="wildcard-card__kind-mark" aria-hidden="true" />
-        <span className="wildcard-card__kind-label">
-          {KIND_LABELS[card.kind]}
+      {CARD_MOTIFS[card.id] && (
+        <span className="wildcard-card__motif" aria-hidden="true">
+          {CARD_MOTIFS[card.id]}
         </span>
-      </header>
+      )}
 
-      <h2 className="wildcard-card__label">{card.label}</h2>
+      <h2 className="wildcard-card__label" data-label={card.label}>
+        {card.label}
+      </h2>
 
-      <footer className="wildcard-card__footer" aria-hidden="true">
-        <span className="wildcard-card__baseline" />
-        <span className="wildcard-card__state-mark" />
-      </footer>
+      <span
+        className="wildcard-card__pip wildcard-card__pip--bottom"
+        aria-hidden="true"
+      >
+        {KIND_MARKS[card.kind]}
+      </span>
     </article>
   );
 }
