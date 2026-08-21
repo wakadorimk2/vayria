@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { WildcardCard } from './WildcardCard';
+import { runtimeConfig } from '../runtimeConfig';
 import type { CardMotion } from './cardTypes';
 import type {
   CardGamePrototypeController,
@@ -38,6 +39,8 @@ interface DragSession {
 
 const DRAG_THRESHOLD_PX = 7;
 const DROP_TARGET_MARGIN_PX = 16;
+const SHOW_DEVELOPER_CONTROLS =
+  import.meta.env.DEV && runtimeConfig.mode === 'local';
 
 function readBrainCardIdAtPoint(
   clientX: number,
@@ -417,7 +420,7 @@ export function CardGamePrototype({
                 ))}
               </span>
             </span>
-            {import.meta.env.DEV && (
+            {SHOW_DEVELOPER_CONTROLS && (
               <button
                 className="reset-turn-button"
                 disabled={isInteractionLocked}

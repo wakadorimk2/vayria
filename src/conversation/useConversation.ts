@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayAudio } from '../audio/useAudioLipSync';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
+import { apiUrl } from '../runtimeConfig';
 
 export type ConversationStatus =
   | 'idle'
@@ -234,7 +235,7 @@ export function useConversation(
         const chatController = new AbortController();
         requestController = chatController;
         abortControllerRef.current = chatController;
-        const chatResponse = await fetch('/api/chat', {
+        const chatResponse = await fetch(apiUrl('/api/chat'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -334,7 +335,7 @@ export function useConversation(
         const ttsController = new AbortController();
         requestController = ttsController;
         abortControllerRef.current = ttsController;
-        const ttsResponse = await fetch('/api/tts', {
+        const ttsResponse = await fetch(apiUrl('/api/tts'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
