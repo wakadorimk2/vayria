@@ -29,3 +29,10 @@ export const STAGE_PRESET = {
     },
   },
 } as const;
+
+export const EXHIBITION_PORTRAIT_CAMERA = {
+  fov: 30,
+  visibleHeightRatio: 0.36,
+  topPaddingRatio: 0.08,
+  distanceMultiplier: 1,
+} as const;

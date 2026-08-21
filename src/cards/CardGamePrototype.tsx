@@ -20,6 +20,7 @@ interface CardGamePrototypeProps {
   game: CardGamePrototypeController;
   isInteractionLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
+  onSelectionActiveChange?: (isActive: boolean) => void;
 }
 
 interface DragSession {
@@ -112,6 +113,7 @@ export function CardGamePrototype({
   game,
   isInteractionLocked = false,
   onCardInserted,
+  onSelectionActiveChange,
 }: CardGamePrototypeProps) {
   const {
     maxInterferenceCount,
@@ -130,12 +132,20 @@ export function CardGamePrototype({
   const interactionLocked = isSpent || isInteractionLocked;
   const dragActive = dragState?.isDragging === true;
   const visualInteractionLocked = interactionLocked && !dragActive;
+  const selectionActive =
+    dragActive ||
+    selectedBrainCardId !== null ||
+    selectedHandCardId !== null;
   const brainDropTargetIndex =
     dragState?.isDragging === true && dragState.targetBrainCardId
       ? zones.brain.findIndex(
           (card) => card.id === dragState.targetBrainCardId,
         )
       : -1;
+
+  useEffect(() => {
+    onSelectionActiveChange?.(selectionActive);
+  }, [onSelectionActiveChange, selectionActive]);
 
   const commitSwap = useCallback(
     (
@@ -296,17 +306,28 @@ export function CardGamePrototype({
     };
   }, [cancelDrag, completeDrag]);
 
-  const selectionHint = isInteractionLocked
-    ? dragActive
-      ? '推論中ですが、掴んだカードを脳内へ放して挿入できます'
-      : '返答を待っています'
-    : isSpent
-      ? zones.forcedCardId
-        ? `脳へ干渉しました。「${zones.brain.find((card) => card.id === zones.forcedCardId)?.label ?? zones.forcedCardId}」の返答を待っています`
-        : 'このターンは操作済み'
-      : selectedBrainCardId || selectedHandCardId
-        ? '反対側のカードを選択すると交換します'
-        : '手札から脳内へカードをドラッグ';
+  const selectionHint =
+    runtimeConfig.mode === 'exhibition'
+      ? isInteractionLocked
+        ? dragActive
+          ? '脳内へドロップ'
+          : '反応中…'
+        : isSpent
+          ? 'このターンは操作済み'
+          : selectionActive
+            ? '脳内へカードを選択'
+            : 'カードを触ってみて'
+      : isInteractionLocked
+        ? dragActive
+          ? '推論中ですが、掴んだカードを脳内へ放して挿入できます'
+          : '返答を待っています'
+        : isSpent
+          ? zones.forcedCardId
+            ? `脳へ干渉しました。「${zones.brain.find((card) => card.id === zones.forcedCardId)?.label ?? zones.forcedCardId}」の返答を待っています`
+            : 'このターンは操作済み'
+          : selectedBrainCardId || selectedHandCardId
+            ? '反対側のカードを選択すると交換します'
+            : '手札から脳内へカードをドラッグ';
 
   const renderCards = (zone: CardZone) => {
     const selectedId =

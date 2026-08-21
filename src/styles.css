@@ -668,10 +668,276 @@ input {
   }
 }
 
+@media (orientation: portrait) and (min-width: 600px) {
+  .app-shell[data-app-mode="exhibition"] {
+    position: relative;
+    display: block;
+    overflow: hidden;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .app-title {
+    top: 1rem;
+    right: 1rem;
+    left: auto;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .app-title > span {
+    display: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .audio-controls {
+    gap: 0;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .audio-unlock-button {
+    min-height: 2.75rem;
+    padding: 0.6rem 1rem;
+    box-shadow: 0 6px 16px rgb(0 0 0 / 24%);
+    font-size: clamp(0.8rem, 2vw, 1rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"] .avatar-area {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .vrm-stage {
+    height: 100%;
+    min-height: 0;
+    background: #242633;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .vrm-stage::after {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    background:
+      linear-gradient(to bottom, transparent 55%, rgb(10 12 18 / 30%)),
+      radial-gradient(
+        ellipse at 50% 32%,
+        transparent 22%,
+        rgb(10 12 18 / 20%) 100%
+      );
+    content: "";
+    pointer-events: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .vrm-canvas {
+    position: relative;
+    z-index: 0;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .stage-message,
+  .app-shell[data-app-mode="exhibition"] .expression-warning {
+    z-index: 2;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .expression-warning {
+    display: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-prototype {
+    transition: opacity 220ms ease;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-zone--brain {
+    top: clamp(4.5rem, 7vh, 6rem);
+    right: clamp(0.75rem, 4vw, 2.5rem);
+    left: auto;
+    --wildcard-card-width: clamp(86px, 10vw, 102px);
+    transform: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-zone--hand {
+    bottom: clamp(1rem, 2.8dvh, 2rem);
+    --wildcard-card-width: clamp(74px, 10.5vw, 92px);
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-zone__cards {
+    gap: clamp(8px, 1.3vw, 14px);
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-zone--brain .card-zone__cards {
+    gap: clamp(6px, 1vw, 10px);
+    padding: 0.4rem;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-zone__header h2 {
+    font-size: clamp(1rem, 2.2vw, 1.3rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-zone__header--hand {
+    justify-content: center;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .interference-counter {
+    display: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-zone__action {
+    min-height: 2.25rem;
+    margin-top: 0.35rem;
+    font-size: clamp(0.85rem, 2.1vw, 1.2rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-zone--hand .wildcard-card__label {
+    font-size: clamp(0.8rem, 1.6vw, 1rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"] .card-zone--brain .wildcard-card__label {
+    font-size: clamp(0.9rem, 1.8vw, 1.1rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"] .conversation {
+    position: absolute;
+    z-index: 3;
+    right: clamp(1rem, 5vw, 3rem);
+    bottom: clamp(1rem, 4vh, 2.5rem);
+    left: clamp(1rem, 5vw, 3rem);
+    display: block;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    pointer-events: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .conversation-copy {
+    display: block;
+    min-height: 0;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .message-form,
+  .app-shell[data-app-mode="exhibition"] .status {
+    display: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .reply {
+    display: -webkit-box;
+    max-width: 100%;
+    margin-inline: auto;
+    overflow: hidden;
+    padding: 0.55rem 0.85rem;
+    border-radius: 0.7rem;
+    background: linear-gradient(
+      180deg,
+      rgb(10 12 18 / 18%),
+      rgb(10 12 18 / 68%)
+    );
+    font-size: clamp(1.1rem, 3.2vw, 1.75rem);
+    line-height: 1.35;
+    text-align: center;
+    text-shadow: 0 2px 7px rgb(0 0 0 / 80%);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    transition: opacity 220ms ease;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .conversation--thinking .reply,
+  .app-shell[data-app-mode="exhibition"] .conversation--synthesizing .reply {
+    opacity: 0;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .conversation--idle .reply {
+    opacity: 0.62;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .conversation--speaking .reply {
+    opacity: 1;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .conversation-error {
+    width: fit-content;
+    max-width: 100%;
+    margin-inline: auto;
+    padding: 0.5rem 0.7rem;
+    border-radius: 0.55rem;
+    background: rgb(82 26 31 / 84%);
+    pointer-events: auto;
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="idle"]
+    .conversation {
+    bottom: clamp(6.5rem, 13vh, 9rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+    .conversation--idle .reply {
+    opacity: 0;
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="idle"]
+    .card-zone--hand {
+    opacity: 0.55;
+    transform: translateX(-50%) scale(0.78);
+    transform-origin: bottom center;
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="idle"]
+    .card-zone--brain {
+    opacity: 0.18;
+    transform: scale(0.78);
+    transform-origin: top right;
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="idle"]
+    .card-zone--hand .wildcard-card__label {
+    font-size: clamp(0.78rem, 1.5vw, 0.95rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+    .vrm-stage {
+    height: 67dvh;
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+    .card-zone--hand {
+    --wildcard-card-width: clamp(110px, 15.2vw, 136px);
+    opacity: 1;
+    transform: translateX(-50%);
+    transform-origin: bottom center;
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+    .card-zone--brain {
+    opacity: 1;
+    transform: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+    .card-zone--hand .wildcard-card__label {
+    font-size: clamp(1.15rem, 2.7vw, 1.55rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+    .card-zone--brain .wildcard-card__label {
+    font-size: clamp(0.95rem, 2.2vw, 1.25rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+    .card-zone .wildcard-card__pip {
+    font-size: 0.85rem;
+  }
+
+  .app-shell[data-app-mode="exhibition"][data-exhibition-state="reacting"]
+    .card-prototype {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .brain-card-float {
     animation: none;
     transform: translateX(0);
+    transition: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .vrm-stage,
+  .app-shell[data-app-mode="exhibition"] .card-prototype,
+  .app-shell[data-app-mode="exhibition"] .reply {
     transition: none;
   }
 }
