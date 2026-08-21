@@ -6,41 +6,37 @@ export const AUTONOMOUS_MAX_DELAY_MS = 18_000;
 
 interface UseAutonomousTalkOptions {
   cancelAutonomous: () => void;
+  getNextAutonomousDelay: () => number;
   isBusy: boolean;
   isMuted: boolean;
   isReady: boolean;
-  startAutonomous: () => Promise<boolean>;
-}
-
-function createAutonomousDelay(): number {
-  return Math.round(
-    AUTONOMOUS_MIN_DELAY_MS +
-      Math.random() * (AUTONOMOUS_MAX_DELAY_MS - AUTONOMOUS_MIN_DELAY_MS),
-  );
+  onIdleTick: () => Promise<boolean>;
 }
 
 export function useAutonomousTalk({
   cancelAutonomous,
+  getNextAutonomousDelay,
   isBusy,
   isMuted,
   isReady,
-  startAutonomous,
+  onIdleTick,
 }: UseAutonomousTalkOptions) {
   const [isVisible, setIsVisible] = useState(
     () => document.visibilityState === 'visible',
   );
-  const initialDelayEligibleRef = useRef(true);
-  const startAutonomousRef = useRef(startAutonomous);
+  const [scheduleVersion, setScheduleVersion] = useState(0);
+  const onIdleTickRef = useRef(onIdleTick);
+  const getNextAutonomousDelayRef = useRef(getNextAutonomousDelay);
 
   useEffect(() => {
-    startAutonomousRef.current = startAutonomous;
-  }, [startAutonomous]);
+    onIdleTickRef.current = onIdleTick;
+    getNextAutonomousDelayRef.current = getNextAutonomousDelay;
+  }, [getNextAutonomousDelay, onIdleTick]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
       const visible = document.visibilityState === 'visible';
       if (!visible) {
-        initialDelayEligibleRef.current = false;
         cancelAutonomous();
       }
       setIsVisible(visible);
@@ -55,20 +51,28 @@ export function useAutonomousTalk({
 
   useEffect(() => {
     if (isMuted) {
-      initialDelayEligibleRef.current = false;
       cancelAutonomous();
       return;
     }
     if (!isReady || !isVisible || isBusy) return;
 
-    const delay = initialDelayEligibleRef.current
-      ? INITIAL_AUTONOMOUS_DELAY_MS
-      : createAutonomousDelay();
+    const delay = Math.max(
+      0,
+      Math.round(getNextAutonomousDelayRef.current()),
+    );
     const timer = setTimeout(() => {
-      initialDelayEligibleRef.current = false;
-      void startAutonomousRef.current();
+      void onIdleTickRef.current().finally(() => {
+        setScheduleVersion((current) => current + 1);
+      });
     }, delay);
 
     return () => clearTimeout(timer);
-  }, [cancelAutonomous, isBusy, isMuted, isReady, isVisible]);
+  }, [
+    cancelAutonomous,
+    isBusy,
+    isMuted,
+    isReady,
+    isVisible,
+    scheduleVersion,
+  ]);
 }

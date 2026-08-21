@@ -67,6 +67,12 @@ interface ChatHistoryItem {
   content: string;
 }
 
+interface PerformanceContextPayload {
+  callbackTendency: number;
+  fragmentation: number;
+  semanticBiases: string[];
+}
+
 interface ChatRequestPayload {
   mode: ChatMode;
   message: string | null;
@@ -76,6 +82,7 @@ interface ChatRequestPayload {
   topic: string | null;
   topicTurns: number;
   previousAutonomousReply: string | null;
+  performanceContext: PerformanceContextPayload;
 }
 
 interface CardAssistantResponse extends AssistantResponse {
@@ -157,6 +164,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'topic',
     'topicTurns',
     'previousAutonomousReply',
+    'performanceContext',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError(
@@ -306,6 +314,62 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   const topicTurns =
     typeof topicTurnsValue === 'number' ? topicTurnsValue : 0;
 
+  const performanceContextValue = record.performanceContext;
+  let performanceContext: PerformanceContextPayload = {
+    callbackTendency: 0,
+    fragmentation: 0,
+    semanticBiases: [],
+  };
+  if (performanceContextValue !== undefined) {
+    if (
+      !performanceContextValue ||
+      typeof performanceContextValue !== 'object' ||
+      Array.isArray(performanceContextValue)
+    ) {
+      throw new RequestError('performanceContext must be an object.', 400);
+    }
+    const context = performanceContextValue as Record<string, unknown>;
+    if (
+      Object.keys(context).some(
+        (key) =>
+          key !== 'callbackTendency' &&
+          key !== 'fragmentation' &&
+          key !== 'semanticBiases',
+      )
+    ) {
+      throw new RequestError(
+        'performanceContext contains an unsupported field.',
+        400,
+      );
+    }
+    const callbackTendency = context.callbackTendency;
+    const fragmentation = context.fragmentation;
+    const semanticBiases = context.semanticBiases;
+    if (
+      typeof callbackTendency !== 'number' ||
+      !Number.isFinite(callbackTendency) ||
+      callbackTendency < 0 ||
+      callbackTendency > 1 ||
+      typeof fragmentation !== 'number' ||
+      !Number.isFinite(fragmentation) ||
+      fragmentation < 0 ||
+      fragmentation > 1 ||
+      !Array.isArray(semanticBiases) ||
+      semanticBiases.length > 12 ||
+      !semanticBiases.every(
+        (cue): cue is string =>
+          typeof cue === 'string' && cue.trim().length <= 200,
+      )
+    ) {
+      throw new RequestError('performanceContext format is invalid.', 400);
+    }
+    performanceContext = {
+      callbackTendency,
+      fragmentation,
+      semanticBiases: semanticBiases.map((cue) => cue.trim()).filter(Boolean),
+    };
+  }
+
   if (
     mode === 'autonomous' &&
     (topicValue === undefined || topicTurnsValue === undefined)
@@ -331,21 +395,30 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     topic,
     topicTurns,
     previousAutonomousReply,
+    performanceContext,
   };
 }
 
 function readTtsRequest(payload: unknown): {
   text: string;
   emotion: Emotion;
+  ttsProfile?: {
+    rateScale: number;
+    intonationScale: number;
+  };
 } {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new RequestError('Request body must be a JSON object.', 400);
   }
 
   const record = payload as Record<string, unknown>;
-  if (Object.keys(record).some((key) => key !== 'text' && key !== 'emotion')) {
+  if (
+    Object.keys(record).some(
+      (key) => key !== 'text' && key !== 'emotion' && key !== 'ttsProfile',
+    )
+  ) {
     throw new RequestError(
-      'Request body may contain only text and emotion.',
+      'Request body may contain only text, emotion, and ttsProfile.',
       400,
     );
   }
@@ -362,9 +435,47 @@ function readTtsRequest(payload: unknown): {
     );
   }
 
+  let ttsProfile: {
+    rateScale: number;
+    intonationScale: number;
+  } | undefined;
+  if (record.ttsProfile !== undefined) {
+    if (
+      !record.ttsProfile ||
+      typeof record.ttsProfile !== 'object' ||
+      Array.isArray(record.ttsProfile)
+    ) {
+      throw new RequestError('ttsProfile must be an object.', 400);
+    }
+    const profile = record.ttsProfile as Record<string, unknown>;
+    if (
+      Object.keys(profile).some(
+        (key) => key !== 'rateScale' && key !== 'intonationScale',
+      )
+    ) {
+      throw new RequestError('ttsProfile contains an unsupported field.', 400);
+    }
+    const rateScale = profile.rateScale;
+    const intonationScale = profile.intonationScale;
+    if (
+      typeof rateScale !== 'number' ||
+      !Number.isFinite(rateScale) ||
+      rateScale < 0.5 ||
+      rateScale > 1.5 ||
+      typeof intonationScale !== 'number' ||
+      !Number.isFinite(intonationScale) ||
+      intonationScale < 0.5 ||
+      intonationScale > 1.5
+    ) {
+      throw new RequestError('ttsProfile format is invalid.', 400);
+    }
+    ttsProfile = { rateScale, intonationScale };
+  }
+
   return {
     text: normalizedText,
     emotion: normalizeEmotion(record.emotion),
+    ttsProfile,
   };
 }
 
@@ -492,6 +603,7 @@ async function generateReply(
   topic: string | null,
   topicTurns: number,
   previousAutonomousReply: string | null,
+  performanceContext: PerformanceContextPayload,
 ): Promise<CardAssistantResponse> {
   const responseProperties = {
     text: { type: 'string' },
@@ -603,6 +715,16 @@ async function generateReply(
       : forcedCardId
         ? 'Return the forced card and at most two supporting card IDs from the current five cards in activatedCards.'
         : 'Return zero or one card ID from the current five cards in activatedCards. An empty array is a normal autonomous speaking response.';
+  const performerPolicyInstruction = [
+    'The performer runtime has already selected the following behavior parameters.',
+    `callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
+    `speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
+    performanceContext.semanticBiases.length
+      ? `live direction cues: ${performanceContext.semanticBiases.join(' / ')}`
+      : 'live direction cues: none',
+    'Treat these values as behavior context. Do not mention the values or the runtime.',
+    'Use callback tendency to decide whether to refer back to the viewer. Use fragmentation for a small interruption or self-correction only when it sounds natural.',
+  ].join('\n');
   const systemPrompt = [
     `${responseInstruction} Choose emotion as the character's overall feeling while speaking. Keep the emotion subtle when the wording is calm. A card may disrupt the sentence form without requiring a strong emotion. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.`,
     autonomousDirectorInstruction,
@@ -611,6 +733,7 @@ async function generateReply(
     cardInstructions,
     cardInfluenceInstruction,
     forcedInstruction,
+    performerPolicyInstruction,
     'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
     activationInstruction,
   ].join('\n');
@@ -987,6 +1110,7 @@ async function handleRequest(
         topic,
         topicTurns,
         previousAutonomousReply,
+        performanceContext,
       } = readChatRequest(payload);
       const assistantResponse = await generateReply(
         config.openAiApiKey,
@@ -998,14 +1122,28 @@ async function handleRequest(
         topic,
         topicTurns,
         previousAutonomousReply,
+        performanceContext,
       );
       sendJson(response, 200, assistantResponse);
       return;
     }
 
-    const { text, emotion } = readTtsRequest(payload);
+    const { text, emotion, ttsProfile } = readTtsRequest(payload);
     const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
     const settings = readAivisTtsSettings(config);
+    const effectiveSettings = ttsProfile
+      ? {
+          ...settings,
+          speedScale: Math.max(
+            0.5,
+            Math.min(2, settings.speedScale * ttsProfile.rateScale),
+          ),
+          intonationScale: Math.max(
+            0,
+            Math.min(2, settings.intonationScale * ttsProfile.intonationScale),
+          ),
+        }
+      : settings;
     const speakers = await loadAivisSpeakers(baseUrl);
     const style = resolveZonokoStyle(speakers, emotion);
     console.info('Wildcard TTS:', {
@@ -1015,7 +1153,7 @@ async function handleRequest(
       styleId: style.id,
     });
     const audio = Buffer.from(
-      await synthesizeSpeech(baseUrl, style.id, settings, text),
+      await synthesizeSpeech(baseUrl, style.id, effectiveSettings, text),
     );
     response.writeHead(200, {
       'Cache-Control': 'no-store',

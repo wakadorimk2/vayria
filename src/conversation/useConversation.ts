@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayAudio } from '../audio/useAudioLipSync';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
 import { apiUrl } from '../runtimeConfig';
+import type {
+  PerformancePlan,
+  PerformanceResult,
+} from '../performer/types';
 
 export type ConversationStatus =
   | 'idle'
@@ -48,9 +52,21 @@ interface ConversationHistoryItem {
   content: string;
 }
 
+export interface PerformanceContextPayload {
+  callbackTendency: number;
+  fragmentation: number;
+  semanticBiases: string[];
+}
+
 interface ConversationOptions {
   historyLimit?: number;
   isMuted?: boolean;
+  onPerformanceCue?: (
+    planId: string,
+    cue: { emotion: Emotion; intensity: number },
+  ) => void;
+  onPerformancePlan?: (plan: PerformancePlan) => void;
+  onPerformanceResult?: (result: PerformanceResult) => void;
 }
 
 interface ErrorResponse {
@@ -134,6 +150,11 @@ function normalizeHistoryLimit(value: number | undefined): number {
   return Math.max(1, Math.min(Math.floor(value), MAX_HISTORY_LIMIT));
 }
 
+function waitMilliseconds(delayMs: number): Promise<void> {
+  if (delayMs <= 0) return Promise.resolve();
+  return new Promise((resolve) => window.setTimeout(resolve, delayMs));
+}
+
 export function useConversation(
   playAudio: PlayAudio,
   stopAudio: () => void,
@@ -141,19 +162,31 @@ export function useConversation(
 ) {
   const historyLimit = normalizeHistoryLimit(options.historyLimit);
   const isMuted = options.isMuted ?? false;
-  const [emotion, setEmotion] = useState<Emotion>('neutral');
   const [reply, setReply] = useState('');
   const [error, setError] = useState('');
   const [status, setStatus] = useState<ConversationStatus>('idle');
   const [source, setSource] = useState<ConversationSource | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const emotionHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
   const historyRef = useRef<ConversationHistoryItem[]>([]);
   const lastAutonomousReplyRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const sourceRef = useRef<ConversationSource | null>(null);
   const statusRef = useRef<ConversationStatus>('idle');
+  const activePlanRef = useRef<PerformancePlan | null>(null);
+  const onPerformanceCueRef = useRef(options.onPerformanceCue);
+  const onPerformancePlanRef = useRef(options.onPerformancePlan);
+  const onPerformanceResultRef = useRef(options.onPerformanceResult);
+
+  useEffect(() => {
+    onPerformanceCueRef.current = options.onPerformanceCue;
+    onPerformancePlanRef.current = options.onPerformancePlan;
+    onPerformanceResultRef.current = options.onPerformanceResult;
+  }, [
+    options.onPerformanceCue,
+    options.onPerformancePlan,
+    options.onPerformanceResult,
+  ]);
 
   const setConversationState = useCallback(
     (nextStatus: ConversationStatus, nextSource: ConversationSource | null) => {
@@ -165,12 +198,34 @@ export function useConversation(
     [],
   );
 
-  const clearEmotionHold = useCallback(() => {
-    if (emotionHoldTimerRef.current) {
-      clearTimeout(emotionHoldTimerRef.current);
-      emotionHoldTimerRef.current = null;
-    }
-  }, []);
+  const emitResult = useCallback(
+    (
+      plan: PerformancePlan,
+      outcome: PerformanceResult['outcome'],
+      extras: Omit<
+        Partial<PerformanceResult>,
+        'planId' | 'completedAt' | 'outcome' | 'trigger' | 'intent'
+      > = {},
+    ) => {
+      if (activePlanRef.current?.planId !== plan.planId) return;
+      activePlanRef.current = null;
+      onPerformanceResultRef.current?.({
+        planId: plan.planId,
+        completedAt: Date.now(),
+        outcome,
+        trigger: plan.trigger,
+        intent: plan.intent,
+        ...extras,
+      });
+    },
+    [],
+  );
+
+  const finishActivePlanAsCancelled = useCallback(() => {
+    const plan = activePlanRef.current;
+    if (!plan) return;
+    emitResult(plan, 'cancelled');
+  }, [emitResult]);
 
   const abortFetch = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -188,12 +243,11 @@ export function useConversation(
 
   const cancelAutonomous = useCallback(() => {
     if (sourceRef.current !== 'autonomous') return;
+    finishActivePlanAsCancelled();
     invalidateCurrentTurn(true);
-    clearEmotionHold();
-    setEmotion('neutral');
     setError('');
     setConversationState('idle', null);
-  }, [clearEmotionHold, invalidateCurrentTurn, setConversationState]);
+  }, [finishActivePlanAsCancelled, invalidateCurrentTurn, setConversationState]);
 
   const appendHistory = useCallback(
     (items: ConversationHistoryItem[]) => {
@@ -209,30 +263,38 @@ export function useConversation(
       cardContext: ChatCardContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
       autonomousContext: AutonomousContext | null,
+      plan: PerformancePlan,
     ): Promise<ProcessTurnResult> => {
       if (turnSource === 'autonomous') {
-        if (
-          isMutedRef.current ||
-          ACTIVE_STATUSES.includes(statusRef.current)
-        ) {
+        if (isMutedRef.current || ACTIVE_STATUSES.includes(statusRef.current)) {
           return { completed: false, decision: null };
         }
       } else {
         if (sourceRef.current === 'manual' && statusRef.current !== 'idle') {
           return { completed: false, decision: null };
         }
-        if (sourceRef.current === 'autonomous') invalidateCurrentTurn(true);
+        if (sourceRef.current === 'autonomous') {
+          finishActivePlanAsCancelled();
+          invalidateCurrentTurn(true);
+        }
       }
 
+      activePlanRef.current = plan;
+      onPerformancePlanRef.current?.(plan);
       const generation = generationRef.current + 1;
       generationRef.current = generation;
-      clearEmotionHold();
-      setEmotion('neutral');
       setError('');
       setConversationState('thinking', turnSource);
       let requestController: AbortController | null = null;
+      let responseEmotion: Emotion | undefined;
+      let speechStartedAt: number | undefined;
 
       try {
+        await waitMilliseconds(plan.preReaction?.delayMs ?? 0);
+        if (generation !== generationRef.current) {
+          return { completed: false, decision: null };
+        }
+
         const chatController = new AbortController();
         requestController = chatController;
         abortControllerRef.current = chatController;
@@ -244,6 +306,11 @@ export function useConversation(
             ...(message === null ? {} : { message }),
             history: historyRef.current,
             ...cardContext,
+            performanceContext: plan.speech?.llmContext ?? {
+              callbackTendency: 0,
+              fragmentation: 0,
+              semanticBiases: [],
+            },
             ...(turnSource === 'autonomous'
               ? {
                   topic: autonomousContext?.topic ?? null,
@@ -309,16 +376,21 @@ export function useConversation(
           throw new Error('AI が交換したカードを発動しませんでした。');
         }
 
+        responseEmotion = normalizeEmotion(chatPayload.emotion);
         if (autonomousDecision?.action === 'silence') {
-          setEmotion('neutral');
           onReplyAccepted([]);
           setConversationState('idle', null);
+          emitResult(plan, 'completed', {
+            emotionCue: { emotion: responseEmotion, intensity: 0 },
+          });
           return { completed: true, decision: autonomousDecision };
         }
 
-        const responseEmotion = normalizeEmotion(chatPayload.emotion);
         setReply(responseText);
-        setEmotion(responseEmotion);
+        onPerformanceCueRef.current?.(plan.planId, {
+          emotion: responseEmotion,
+          intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
+        });
         onReplyAccepted(activatedCards);
 
         if (turnSource === 'manual') {
@@ -330,10 +402,21 @@ export function useConversation(
 
         if (isMutedRef.current) {
           setConversationState('idle', null);
+          emitResult(plan, 'cancelled', {
+            emotionCue: {
+              emotion: responseEmotion,
+              intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
+            },
+          });
           return { completed: turnSource === 'manual', decision: null };
         }
 
         setConversationState('synthesizing', turnSource);
+        await waitMilliseconds(plan.speech?.delayMs ?? 0);
+        if (generation !== generationRef.current) {
+          return { completed: false, decision: null };
+        }
+
         const ttsController = new AbortController();
         requestController = ttsController;
         abortControllerRef.current = ttsController;
@@ -343,6 +426,7 @@ export function useConversation(
           body: JSON.stringify({
             text: responseText,
             emotion: responseEmotion,
+            ttsProfile: plan.ttsProfile,
           }),
           signal: ttsController.signal,
         });
@@ -362,6 +446,12 @@ export function useConversation(
         if (generation !== generationRef.current || isMutedRef.current) {
           if (generation === generationRef.current) {
             setConversationState('idle', null);
+            emitResult(plan, 'cancelled', {
+              emotionCue: {
+                emotion: responseEmotion,
+                intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
+              },
+            });
           }
           return {
             completed: turnSource === 'manual',
@@ -371,6 +461,7 @@ export function useConversation(
 
         await playAudio(audioData, {
           onStart: () => {
+            speechStartedAt = Date.now();
             if (generation === generationRef.current) {
               setConversationState('speaking', turnSource);
             }
@@ -385,10 +476,15 @@ export function useConversation(
           appendHistory([{ role: 'assistant', content: responseText }]);
         }
         setConversationState('idle', null);
-        emotionHoldTimerRef.current = setTimeout(() => {
-          emotionHoldTimerRef.current = null;
-          if (generation === generationRef.current) setEmotion('neutral');
-        }, 800);
+        emitResult(plan, 'completed', {
+          spokenText: responseText,
+          emotionCue: {
+            emotion: responseEmotion,
+            intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
+          },
+          speechStartedAt,
+          speechEndedAt: Date.now(),
+        });
         return { completed: true, decision: autonomousDecision };
       } catch (caughtError) {
         if (abortControllerRef.current === requestController) {
@@ -399,26 +495,27 @@ export function useConversation(
         }
         if (isAbortError(caughtError)) {
           setConversationState('idle', null);
+          emitResult(plan, 'cancelled');
           return {
             completed: turnSource === 'manual' && isMutedRef.current,
             decision: null,
           };
         }
 
-        clearEmotionHold();
-        setEmotion('neutral');
         setError(
           caughtError instanceof Error
             ? caughtError.message
             : '会話処理に失敗しました。',
         );
         setConversationState('error', null);
+        emitResult(plan, 'failed');
         return { completed: false, decision: null };
       }
     },
     [
       appendHistory,
-      clearEmotionHold,
+      emitResult,
+      finishActivePlanAsCancelled,
       invalidateCurrentTurn,
       playAudio,
       setConversationState,
@@ -430,6 +527,7 @@ export function useConversation(
       message: string,
       cardContext: ChatCardContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
+      plan: PerformancePlan,
     ) =>
       (
         await processTurn(
@@ -438,6 +536,7 @@ export function useConversation(
           cardContext,
           onReplyAccepted,
           null,
+          plan,
         )
       ).completed,
     [processTurn],
@@ -448,6 +547,7 @@ export function useConversation(
       cardContext: ChatCardContext,
       autonomousContext: AutonomousContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
+      plan: PerformancePlan,
     ) => {
       const result = await processTurn(
         'autonomous',
@@ -455,6 +555,7 @@ export function useConversation(
         cardContext,
         onReplyAccepted,
         autonomousContext,
+        plan,
       );
       return result.completed ? result.decision : null;
     },
@@ -465,7 +566,6 @@ export function useConversation(
     isMutedRef.current = isMuted;
     if (!isMuted) return;
 
-    stopAudio();
     if (sourceRef.current === 'autonomous') {
       cancelAutonomous();
       return;
@@ -475,24 +575,30 @@ export function useConversation(
       sourceRef.current === 'manual' &&
       ['synthesizing', 'speaking'].includes(statusRef.current)
     ) {
-      if (statusRef.current === 'synthesizing') abortFetch();
+      finishActivePlanAsCancelled();
+      invalidateCurrentTurn(true);
       setConversationState('idle', null);
     }
-  }, [abortFetch, cancelAutonomous, isMuted, setConversationState, stopAudio]);
+  }, [
+    cancelAutonomous,
+    finishActivePlanAsCancelled,
+    invalidateCurrentTurn,
+    isMuted,
+    setConversationState,
+  ]);
 
   useEffect(() => {
     return () => {
       generationRef.current += 1;
       abortFetch();
-      clearEmotionHold();
+      activePlanRef.current = null;
     };
-  }, [abortFetch, clearEmotionHold]);
+  }, [abortFetch]);
 
   const isBusy = ACTIVE_STATUSES.includes(status);
 
   return {
     cancelAutonomous,
-    emotion,
     error,
     isBusy,
     isManualBusy: isBusy && source === 'manual',

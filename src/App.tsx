@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
 } from 'react';
@@ -16,6 +17,13 @@ import {
   type ChatCardContext,
 } from './conversation/useConversation';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
+import { useWildcardDirection } from './cards/wildcardDirection';
+import { usePerformerRuntime } from './performer/usePerformerRuntime';
+import type {
+  PerformancePlan,
+  PerformanceResult,
+  PerformerTrigger,
+} from './performer/types';
 import { runtimeConfig } from './runtimeConfig';
 
 const STATUS_LABELS = {
@@ -100,6 +108,24 @@ export default function App() {
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, zones } = cardGame;
+  const performer = usePerformerRuntime();
+  const wildcardDirection = useWildcardDirection(zones);
+  const {
+    completePlan,
+    createPlan,
+    getNextAutonomousDelay: getRuntimeAutonomousDelay,
+    setPhase,
+  } = performer;
+  const {
+    activateCardSwap,
+    getContribution: getWildcardContribution,
+  } = wildcardDirection;
+  const [activePlan, setActivePlan] = useState<PerformancePlan | null>(null);
+  const [activeEmotionCue, setActiveEmotionCue] = useState<
+    { emotion: NonNullable<PerformanceResult['emotionCue']>['emotion']; intensity: number } | null
+  >(null);
+  const activePlanRef = useRef<PerformancePlan | null>(null);
+  const nonSpeechTimerRef = useRef<number | null>(null);
   const {
     isAudioUnlocked,
     mouthOpen,
@@ -107,18 +133,73 @@ export default function App() {
     prepare,
     stop,
   } = useAudioLipSync(volume);
+
+  const handlePerformancePlan = useCallback((plan: PerformancePlan) => {
+    activePlanRef.current = plan;
+    setActivePlan(plan);
+  }, []);
+
+  const handlePerformanceCue = useCallback(
+    (
+      planId: string,
+      cue: NonNullable<PerformanceResult['emotionCue']>,
+    ) => {
+      if (activePlanRef.current?.planId !== planId) return;
+      setActiveEmotionCue(cue);
+    },
+    [],
+  );
+
+  const handlePerformanceResult = useCallback(
+    (result: PerformanceResult) => {
+      completePlan(result);
+      if (activePlanRef.current?.planId !== result.planId) return;
+      activePlanRef.current = null;
+      setActivePlan(null);
+      setActiveEmotionCue(null);
+    },
+    [completePlan],
+  );
+
+  const executeNonSpeechPlan = useCallback(
+    (plan: PerformancePlan) => {
+      handlePerformancePlan(plan);
+      if (nonSpeechTimerRef.current !== null) {
+        window.clearTimeout(nonSpeechTimerRef.current);
+      }
+      nonSpeechTimerRef.current = window.setTimeout(() => {
+        nonSpeechTimerRef.current = null;
+        handlePerformanceResult({
+          planId: plan.planId,
+          completedAt: Date.now(),
+          outcome: 'completed',
+          trigger: plan.trigger,
+          intent: plan.intent,
+        });
+      }, plan.preReaction?.delayMs ?? 0);
+      return false;
+    }, [handlePerformancePlan, handlePerformanceResult]);
+
   const {
     cancelAutonomous,
-    emotion,
     error,
     isBusy,
     isManualBusy,
     reply,
     sendAutonomous,
     sendManual,
+    source,
     status,
-  } = useConversation(play, stop, { historyLimit: 6, isMuted });
-  const exhibitionPresentationState: ExhibitionPresentationState = isBusy
+  } = useConversation(play, stop, {
+    historyLimit: 6,
+    isMuted,
+    onPerformanceCue: handlePerformanceCue,
+    onPerformancePlan: handlePerformancePlan,
+    onPerformanceResult: handlePerformanceResult,
+  });
+  const displayEmotion = activeEmotionCue?.emotion ?? performer.state.emotion.value;
+  const isPerformerBusy = isBusy || activePlan !== null;
+  const exhibitionPresentationState: ExhibitionPresentationState = isPerformerBusy
     ? 'reacting'
     : isCardSelectionActive
       ? 'selecting'
@@ -137,6 +218,29 @@ export default function App() {
     }
   }, [lastAudibleVolume, volume]);
 
+  useEffect(() => {
+    if (status === 'idle' && activePlanRef.current !== null) return;
+    const phase =
+      status === 'thinking'
+        ? 'waiting'
+        : status === 'synthesizing'
+          ? 'synthesizing'
+          : status === 'speaking'
+            ? 'speaking'
+            : status === 'error'
+              ? 'error'
+              : 'idle';
+    setPhase(phase);
+  }, [setPhase, status]);
+
+  useEffect(() => {
+    return () => {
+      if (nonSpeechTimerRef.current !== null) {
+        window.clearTimeout(nonSpeechTimerRef.current);
+      }
+    };
+  }, []);
+
   const readCardContext = useCallback(
     () => ({
       brainCardIds: zones.brain.map((card) => card.id),
@@ -145,19 +249,49 @@ export default function App() {
     [zones.brain, zones.forcedCardId],
   );
 
+  const getDirectionContribution = useCallback(
+    (trigger: PerformerTrigger) =>
+      getWildcardContribution(trigger, Date.now()),
+    [getWildcardContribution],
+  );
+
+  const createPlanForTrigger = useCallback(
+    (
+      trigger: PerformerTrigger,
+      contribution = getDirectionContribution(trigger),
+    ) => createPlan(trigger, [contribution]),
+    [createPlan, getDirectionContribution],
+  );
+
   const startAutonomous = useCallback(
-    async (cardContextOverride?: ChatCardContext) => {
+    async (options: {
+      cardContextOverride?: ChatCardContext;
+      contribution?: ReturnType<typeof getDirectionContribution>;
+      trigger?: PerformerTrigger;
+    } = {}) => {
+      if (isMuted || isBusy || activePlanRef.current !== null) return false;
       if (isExhibitionMode) {
         const audioReady = await prepare();
         if (!audioReady) return false;
       } else {
         void prepare();
       }
+      if (isMuted || isBusy || activePlanRef.current !== null) return false;
+      const trigger =
+        options.trigger ?? ({ kind: 'idle_tick', elapsedMs: 0 } as const);
+      const plan = createPlanForTrigger(
+        trigger,
+        options.contribution ?? getDirectionContribution(trigger),
+      );
+      if (plan.intent !== 'speak') {
+        return executeNonSpeechPlan(plan);
+      }
       beginReply();
       const decision = await sendAutonomous(
-        cardContextOverride ?? readCardContext(),
+        options.cardContextOverride ?? readCardContext(),
         autonomousContext,
         acceptReply,
+        plan,
       );
       if (!decision) return false;
       setAutonomousContext((current) =>
@@ -169,7 +303,12 @@ export default function App() {
       acceptReply,
       autonomousContext,
       beginReply,
+      createPlanForTrigger,
+      executeNonSpeechPlan,
+      getDirectionContribution,
       isExhibitionMode,
+      isBusy,
+      isMuted,
       prepare,
       readCardContext,
       sendAutonomous,
@@ -178,31 +317,56 @@ export default function App() {
 
   const handleCardInserted = useCallback(
     (result: CardSwapResult) => {
-      if (isMuted) return;
+      const trigger: PerformerTrigger = {
+        kind: 'external_stimulus',
+        source: 'wildcard',
+        semanticCue: `something_changed:${result.insertedCardId}`,
+      };
+      const contribution = activateCardSwap(result);
+      if (isMuted || isBusy) return;
       void startAutonomous({
-        brainCardIds: result.brainCardIds,
-        forcedCardId: result.forcedCardId,
+        cardContextOverride: {
+          brainCardIds: result.brainCardIds,
+          forcedCardId: result.forcedCardId,
+        },
+        contribution,
+        trigger,
       });
     },
-    [isMuted, startAutonomous],
+    [activateCardSwap, isBusy, isMuted, startAutonomous],
+  );
+
+  const getNextAutonomousDelay = useCallback(
+    () =>
+      getRuntimeAutonomousDelay([
+        getDirectionContribution({ kind: 'idle_tick', elapsedMs: 0 }),
+      ]),
+    [getDirectionContribution, getRuntimeAutonomousDelay],
   );
 
   useAutonomousTalk({
     cancelAutonomous,
-    isBusy,
+    getNextAutonomousDelay,
+    isBusy: isPerformerBusy,
     isMuted,
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
-    startAutonomous,
+    onIdleTick: startAutonomous,
   });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!trimmedInput || isManualBusy) return;
+    if (source === 'autonomous') cancelAutonomous();
+    const trigger: PerformerTrigger = {
+      kind: 'viewer_message',
+      text: trimmedInput,
+    };
+    const plan = createPlanForTrigger(trigger);
     beginReply();
     if (!isMuted) void prepare();
     setInput('');
-    void sendManual(trimmedInput, readCardContext(), acceptReply);
+    void sendManual(trimmedInput, readCardContext(), acceptReply, plan);
   };
 
   const handleMuteToggle = () => {
@@ -324,14 +488,16 @@ export default function App() {
 
       <section className="avatar-area" aria-label="VRM character">
         <VrmStage
-          emotion={emotion}
+          attentionTarget={performer.state.attention.target}
+          emotion={displayEmotion}
           isExhibitionMode={isExhibitionMode}
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
+          performancePlan={activePlan ?? undefined}
         />
         <CardGamePrototype
           game={cardGame}
-          isInteractionLocked={isBusy}
+          isInteractionLocked={isPerformerBusy}
           onCardInserted={handleCardInserted}
           onSelectionActiveChange={setIsCardSelectionActive}
         />

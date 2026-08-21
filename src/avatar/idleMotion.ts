@@ -141,7 +141,7 @@ export class IdleController {
     this.captureBone(vrm, VRMHumanBoneName.Head);
   }
 
-  update(deltaSeconds: number, weight = 1): void {
+  update(deltaSeconds: number, weight = 1, headYawBias = 0): void {
     const safeDelta = Math.min(
       Math.max(deltaSeconds, 0),
       IDLE_MOTION.maxDeltaSeconds,
@@ -187,7 +187,7 @@ export class IdleController {
     this.setOffset(
       VRMHumanBoneName.Head,
       0,
-      headYaw * IDLE_MOTION.headYawDegrees * safeWeight,
+      headYaw * IDLE_MOTION.headYawDegrees * safeWeight + headYawBias,
       headRoll * IDLE_MOTION.headRollDegrees * safeWeight,
     );
   }
