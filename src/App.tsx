@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { VrmStage } from './avatar/VrmStage';
 import { useAudioLipSync } from './audio/useAudioLipSync';
+import { CardGamePrototype } from './cards/CardGamePrototype';
+import { useCardGamePrototype } from './cards/useCardGamePrototype';
 import { useConversation } from './conversation/useConversation';
 
 const STATUS_LABELS = {
@@ -13,6 +15,7 @@ const STATUS_LABELS = {
 
 export default function App() {
   const [input, setInput] = useState('');
+  const cardGame = useCardGamePrototype();
   const { mouthOpen, play, prepare } = useAudioLipSync();
   const { emotion, error, isBusy, reply, send, status } =
     useConversation(play);
@@ -34,6 +37,7 @@ export default function App() {
 
       <section className="avatar-area" aria-label="VRM character">
         <VrmStage emotion={emotion} mouthOpen={mouthOpen} />
+        <CardGamePrototype game={cardGame} />
       </section>
 
       <section className="conversation" aria-label="Character conversation">
