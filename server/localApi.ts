@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Buffer } from 'node:buffer';
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { performance } from 'node:perf_hooks';
 import type { Plugin } from 'vite';
 import type { Message } from '@aituber-onair/chat';
 import {
@@ -25,6 +27,7 @@ const MAX_TEXT_LENGTH = 1_000;
 const MAX_HISTORY_ITEMS = 10;
 const CHAT_PATH = '/api/chat';
 const TTS_PATH = '/api/tts';
+const EVENTS_PATH = '/api/events';
 const DEFAULT_AIVIS_BASE_URL = 'http://127.0.0.1:10101';
 const AIVIS_CONNECTION_ERROR =
   'AivisSpeech Engine に接続できません。AivisSpeech を起動しているか確認してください。';
@@ -33,10 +36,25 @@ const BRAIN_CARD_COUNT = 5;
 const MAX_ACTIVATED_CARDS = 3;
 const MAX_TOPIC_LENGTH = 120;
 const MAX_TOPIC_TURNS = 100;
+const MAX_EVENT_TURN_ID_LENGTH = 128;
+const MAX_EVENT_REASON_LENGTH = 120;
 const AUTONOMOUS_ACTIONS = ['continue', 'new_topic', 'silence'] as const;
+const CONVERSATION_EVENTS = [
+  'input_received',
+  'llm_start',
+  'llm_done',
+  'tts_start',
+  'tts_ready',
+  'animation_start',
+  'turn_completed',
+  'turn_aborted',
+  'turn_failed',
+] as const;
 const CARD_BY_ID: ReadonlyMap<string, WildcardCardData> = new Map(
   cardPool.map((card) => [card.id, card]),
 );
+
+let activeProviderRequests = 0;
 
 interface LocalApiConfig {
   openAiApiKey?: string;
@@ -61,6 +79,7 @@ interface AivisStyle {
 
 type ChatMode = 'manual' | 'autonomous';
 type AutonomousAction = (typeof AUTONOMOUS_ACTIONS)[number];
+type ConversationEventName = (typeof CONVERSATION_EVENTS)[number];
 
 interface ChatHistoryItem {
   role: 'user' | 'assistant';
@@ -86,6 +105,18 @@ interface CardAssistantResponse extends AssistantResponse {
 interface AivisSpeaker {
   name: string;
   styles: AivisStyle[];
+}
+
+interface ClientConversationEvent {
+  at: string;
+  elapsedMs: number;
+  event: ConversationEventName;
+  source: ChatMode;
+  turnId: string;
+  durationMs?: number;
+  emotion?: Emotion;
+  phase?: 'llm' | 'tts';
+  reason?: string;
 }
 
 class RequestError extends Error {
@@ -118,6 +149,148 @@ function sendJson(
     'X-Content-Type-Options': 'nosniff',
   });
   response.end(body);
+}
+
+function sendNoContent(response: ServerResponse): void {
+  response.writeHead(204, {
+    'Cache-Control': 'no-store',
+  });
+  response.end();
+}
+
+function readTurnIdHeader(request: IncomingMessage): string | null {
+  const value = request.headers['x-wildcard-turn-id'];
+  const candidate = Array.isArray(value) ? value[0] : value;
+  if (
+    typeof candidate !== 'string' ||
+    !/^[A-Za-z0-9:_-]{1,128}$/.test(candidate)
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
+function logStructuredEvent(
+  event: string,
+  fields: Record<string, unknown>,
+): void {
+  console.info(
+    '[wildcard-event]',
+    JSON.stringify({
+      at: new Date().toISOString(),
+      event,
+      ...fields,
+    }),
+  );
+}
+
+export function readConversationEvent(payload: unknown): ClientConversationEvent {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new RequestError('Event body must be a JSON object.', 400);
+  }
+
+  const record = payload as Record<string, unknown>;
+  const allowedKeys = new Set([
+    'at',
+    'elapsedMs',
+    'event',
+    'source',
+    'turnId',
+    'durationMs',
+    'emotion',
+    'phase',
+    'reason',
+  ]);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+    throw new RequestError('Event body contains an unsupported field.', 400);
+  }
+
+  const turnId = record.turnId;
+  if (
+    typeof turnId !== 'string' ||
+    !/^[A-Za-z0-9:_-]{1,128}$/.test(turnId) ||
+    turnId.length > MAX_EVENT_TURN_ID_LENGTH
+  ) {
+    throw new RequestError('turnId is invalid.', 400);
+  }
+
+  const source = record.source;
+  if (source !== 'manual' && source !== 'autonomous') {
+    throw new RequestError('source must be manual or autonomous.', 400);
+  }
+
+  const event = record.event;
+  if (
+    typeof event !== 'string' ||
+    !(CONVERSATION_EVENTS as readonly string[]).includes(event)
+  ) {
+    throw new RequestError('event is invalid.', 400);
+  }
+
+  const at = record.at;
+  if (
+    typeof at !== 'string' ||
+    !Number.isFinite(Date.parse(at))
+  ) {
+    throw new RequestError('at must be a valid timestamp.', 400);
+  }
+
+  const elapsedMs = record.elapsedMs;
+  if (
+    typeof elapsedMs !== 'number' ||
+    !Number.isSafeInteger(elapsedMs) ||
+    elapsedMs < 0
+  ) {
+    throw new RequestError('elapsedMs must be a non-negative integer.', 400);
+  }
+
+  const eventPayload: ClientConversationEvent = {
+    at,
+    elapsedMs,
+    event: event as ConversationEventName,
+    source,
+    turnId,
+  };
+
+  if (record.durationMs !== undefined) {
+    if (
+      typeof record.durationMs !== 'number' ||
+      !Number.isSafeInteger(record.durationMs) ||
+      record.durationMs < 0
+    ) {
+      throw new RequestError('durationMs must be a non-negative integer.', 400);
+    }
+    eventPayload.durationMs = record.durationMs;
+  }
+
+  if (record.emotion !== undefined) {
+    if (
+      typeof record.emotion !== 'string' ||
+      !(EMOTIONS as readonly string[]).includes(record.emotion)
+    ) {
+      throw new RequestError('emotion is invalid.', 400);
+    }
+    eventPayload.emotion = record.emotion as Emotion;
+  }
+
+  if (record.phase !== undefined) {
+    if (record.phase !== 'llm' && record.phase !== 'tts') {
+      throw new RequestError('phase is invalid.', 400);
+    }
+    eventPayload.phase = record.phase;
+  }
+
+  if (record.reason !== undefined) {
+    if (
+      typeof record.reason !== 'string' ||
+      record.reason.length > MAX_EVENT_REASON_LENGTH
+    ) {
+      throw new RequestError('reason is invalid.', 400);
+    }
+    eventPayload.reason = record.reason;
+  }
+
+  return eventPayload;
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -909,16 +1082,43 @@ async function handleRequest(
     request.url ?? '/',
     'http://127.0.0.1',
   ).pathname;
+  const requestId = randomUUID();
+  const headerTurnId = readTurnIdHeader(request);
+  const isProviderRequest = pathname === CHAT_PATH || pathname === TTS_PATH;
+  let requestPhase: 'llm' | 'tts' | null = null;
 
   if (request.method !== 'POST') {
     sendJson(response, 405, { error: 'Method not allowed.' });
     return;
   }
 
+  if (isProviderRequest) activeProviderRequests += 1;
+
   try {
     const payload = await readJsonBody(request);
 
+    if (pathname === EVENTS_PATH) {
+      const event = readConversationEvent(payload);
+      logStructuredEvent(event.event, {
+        origin: 'client',
+        requestId,
+        turnId: event.turnId,
+        source: event.source,
+        clientAt: event.at,
+        elapsedMs: event.elapsedMs,
+        ...(event.durationMs === undefined
+          ? {}
+          : { durationMs: event.durationMs }),
+        ...(event.emotion === undefined ? {} : { emotion: event.emotion }),
+        ...(event.phase === undefined ? {} : { phase: event.phase }),
+        ...(event.reason === undefined ? {} : { reason: event.reason }),
+      });
+      sendNoContent(response);
+      return;
+    }
+
     if (pathname === CHAT_PATH) {
+      requestPhase = 'llm';
       if (!config.openAiApiKey) {
         throw new RequestError(
           'OPENAI_API_KEY is not configured in .env.local.',
@@ -934,6 +1134,14 @@ async function handleRequest(
         topic,
         topicTurns,
       } = readChatRequest(payload);
+      const startedAt = performance.now();
+      logStructuredEvent('llm_start', {
+        origin: 'server',
+        requestId,
+        turnId: headerTurnId,
+        source: mode,
+        activeRequests: activeProviderRequests,
+      });
       const assistantResponse = await generateReply(
         config.openAiApiKey,
         mode,
@@ -944,13 +1152,29 @@ async function handleRequest(
         topic,
         topicTurns,
       );
+      logStructuredEvent('llm_done', {
+        origin: 'server',
+        requestId,
+        turnId: headerTurnId,
+        source: mode,
+        durationMs: Math.round(performance.now() - startedAt),
+        activeRequests: activeProviderRequests,
+      });
       sendJson(response, 200, assistantResponse);
       return;
     }
 
+    requestPhase = 'tts';
     const { text, emotion } = readTtsRequest(payload);
     const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
     const settings = readAivisTtsSettings(config);
+    const startedAt = performance.now();
+    logStructuredEvent('tts_start', {
+      origin: 'server',
+      requestId,
+      turnId: headerTurnId,
+      activeRequests: activeProviderRequests,
+    });
     const speakers = await loadAivisSpeakers(baseUrl);
     const style = resolveZonokoStyle(speakers, emotion);
     console.info('Wildcard TTS:', {
@@ -962,6 +1186,14 @@ async function handleRequest(
     const audio = Buffer.from(
       await synthesizeSpeech(baseUrl, style.id, settings, text),
     );
+    logStructuredEvent('tts_ready', {
+      origin: 'server',
+      requestId,
+      turnId: headerTurnId,
+      durationMs: Math.round(performance.now() - startedAt),
+      audioBytes: audio.byteLength,
+      activeRequests: activeProviderRequests,
+    });
     response.writeHead(200, {
       'Cache-Control': 'no-store',
       'Content-Length': audio.byteLength,
@@ -971,13 +1203,44 @@ async function handleRequest(
     response.end(audio);
   } catch (error) {
     if (error instanceof RequestError) {
+      if (requestPhase) {
+        logStructuredEvent('turn_failed', {
+          origin: 'server',
+          requestId,
+          turnId: headerTurnId,
+          phase: requestPhase,
+          reason: 'request_invalid',
+          activeRequests: activeProviderRequests,
+        });
+      }
       sendJson(response, error.statusCode, { error: error.message });
       return;
     }
 
     if (error instanceof AivisSpeechError) {
+      if (requestPhase) {
+        logStructuredEvent('turn_failed', {
+          origin: 'server',
+          requestId,
+          turnId: headerTurnId,
+          phase: requestPhase,
+          reason: 'provider_error',
+          activeRequests: activeProviderRequests,
+        });
+      }
       sendJson(response, 502, { error: error.userMessage });
       return;
+    }
+
+    if (requestPhase) {
+      logStructuredEvent('turn_failed', {
+        origin: 'server',
+        requestId,
+        turnId: headerTurnId,
+        phase: requestPhase,
+        reason: 'provider_error',
+        activeRequests: activeProviderRequests,
+      });
     }
 
     console.error(
@@ -992,6 +1255,8 @@ async function handleRequest(
           ? 'The chat provider request failed.'
           : 'The TTS provider request failed.',
     });
+  } finally {
+    if (isProviderRequest) activeProviderRequests -= 1;
   }
 }
 
@@ -1005,7 +1270,11 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
           request.url ?? '/',
           'http://127.0.0.1',
         ).pathname;
-        if (pathname !== CHAT_PATH && pathname !== TTS_PATH) {
+        if (
+          pathname !== CHAT_PATH &&
+          pathname !== TTS_PATH &&
+          pathname !== EVENTS_PATH
+        ) {
           next();
           return;
         }

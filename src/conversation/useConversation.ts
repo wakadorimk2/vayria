@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayAudio } from '../audio/useAudioLipSync';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
+import { createConversationEventEmitter } from './conversationEvents';
 
 export type ConversationStatus =
   | 'idle'
@@ -208,15 +209,32 @@ export function useConversation(
       onReplyAccepted: (activatedCardIds: string[]) => void,
       autonomousContext: AutonomousContext | null,
     ): Promise<ProcessTurnResult> => {
+      const eventEmitter = createConversationEventEmitter(turnSource);
+      let terminalEventEmitted = false;
+      const emitTerminalEvent = (
+        event: 'turn_completed' | 'turn_aborted' | 'turn_failed',
+        details: Parameters<typeof eventEmitter.emit>[1] = {},
+      ) => {
+        if (terminalEventEmitted) return;
+        terminalEventEmitted = true;
+        eventEmitter.emit(event, details);
+      };
+
+      eventEmitter.emit('input_received');
+
       if (turnSource === 'autonomous') {
         if (
           isMutedRef.current ||
           ACTIVE_STATUSES.includes(statusRef.current)
         ) {
+          emitTerminalEvent('turn_aborted', {
+            reason: isMutedRef.current ? 'muted' : 'busy',
+          });
           return { completed: false, decision: null };
         }
       } else {
         if (sourceRef.current === 'manual' && statusRef.current !== 'idle') {
+          emitTerminalEvent('turn_aborted', { reason: 'busy' });
           return { completed: false, decision: null };
         }
         if (sourceRef.current === 'autonomous') invalidateCurrentTurn(true);
@@ -229,14 +247,20 @@ export function useConversation(
       setError('');
       setConversationState('thinking', turnSource);
       let requestController: AbortController | null = null;
+      let currentPhase: 'llm' | 'tts' = 'llm';
 
       try {
         const chatController = new AbortController();
         requestController = chatController;
         abortControllerRef.current = chatController;
+        const llmStartedAt = performance.now();
+        eventEmitter.emit('llm_start', { phase: 'llm' });
         const chatResponse = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Wildcard-Turn-Id': eventEmitter.turnId,
+          },
           body: JSON.stringify({
             mode: turnSource,
             ...(message === null ? {} : { message }),
@@ -251,9 +275,6 @@ export function useConversation(
           }),
           signal: chatController.signal,
         });
-        if (generation !== generationRef.current) {
-          return { completed: false, decision: null };
-        }
         if (!chatResponse.ok) {
           throw new Error(
             await readError(chatResponse, 'AI の返答を取得できませんでした。'),
@@ -261,7 +282,12 @@ export function useConversation(
         }
 
         const chatPayload = (await chatResponse.json()) as ChatResponse;
+        eventEmitter.emit('llm_done', {
+          durationMs: performance.now() - llmStartedAt,
+          phase: 'llm',
+        });
         if (generation !== generationRef.current) {
+          emitTerminalEvent('turn_aborted', { reason: 'superseded', phase: 'llm' });
           return { completed: false, decision: null };
         }
         if (abortControllerRef.current === chatController) {
@@ -310,6 +336,7 @@ export function useConversation(
           setEmotion('neutral');
           onReplyAccepted([]);
           setConversationState('idle', null);
+          emitTerminalEvent('turn_completed', { reason: 'silence' });
           return { completed: true, decision: autonomousDecision };
         }
 
@@ -327,16 +354,23 @@ export function useConversation(
 
         if (isMutedRef.current) {
           setConversationState('idle', null);
+          emitTerminalEvent('turn_completed', { reason: 'muted' });
           return { completed: turnSource === 'manual', decision: null };
         }
 
         setConversationState('synthesizing', turnSource);
+        currentPhase = 'tts';
         const ttsController = new AbortController();
         requestController = ttsController;
         abortControllerRef.current = ttsController;
+        const ttsStartedAt = performance.now();
+        eventEmitter.emit('tts_start', { phase: 'tts' });
         const ttsResponse = await fetch('/api/tts', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Wildcard-Turn-Id': eventEmitter.turnId,
+          },
           body: JSON.stringify({
             text: responseText,
             emotion: responseEmotion,
@@ -344,6 +378,7 @@ export function useConversation(
           signal: ttsController.signal,
         });
         if (generation !== generationRef.current) {
+          emitTerminalEvent('turn_aborted', { reason: 'superseded', phase: 'tts' });
           return { completed: false, decision: null };
         }
         if (!ttsResponse.ok) {
@@ -353,12 +388,19 @@ export function useConversation(
         }
 
         const audioData = await ttsResponse.arrayBuffer();
+        eventEmitter.emit('tts_ready', {
+          durationMs: performance.now() - ttsStartedAt,
+          phase: 'tts',
+        });
         if (abortControllerRef.current === ttsController) {
           abortControllerRef.current = null;
         }
         if (generation !== generationRef.current || isMutedRef.current) {
           if (generation === generationRef.current) {
             setConversationState('idle', null);
+            emitTerminalEvent('turn_completed', { reason: 'muted' });
+          } else {
+            emitTerminalEvent('turn_aborted', { reason: 'superseded', phase: 'tts' });
           }
           return {
             completed: turnSource === 'manual',
@@ -369,11 +411,13 @@ export function useConversation(
         await playAudio(audioData, {
           onStart: () => {
             if (generation === generationRef.current) {
+              eventEmitter.emit('animation_start');
               setConversationState('speaking', turnSource);
             }
           },
         });
         if (generation !== generationRef.current) {
+          emitTerminalEvent('turn_aborted', { reason: 'superseded' });
           return { completed: false, decision: null };
         }
 
@@ -385,16 +429,22 @@ export function useConversation(
           emotionHoldTimerRef.current = null;
           if (generation === generationRef.current) setEmotion('neutral');
         }, 800);
+        emitTerminalEvent('turn_completed');
         return { completed: true, decision: autonomousDecision };
       } catch (caughtError) {
         if (abortControllerRef.current === requestController) {
           abortControllerRef.current = null;
         }
         if (generation !== generationRef.current) {
+          emitTerminalEvent('turn_aborted', {
+            reason: 'superseded',
+            phase: currentPhase,
+          });
           return { completed: false, decision: null };
         }
         if (isAbortError(caughtError)) {
           setConversationState('idle', null);
+          emitTerminalEvent('turn_aborted', { reason: 'aborted' });
           return {
             completed: turnSource === 'manual' && isMutedRef.current,
             decision: null,
@@ -409,6 +459,10 @@ export function useConversation(
             : '会話処理に失敗しました。',
         );
         setConversationState('error', null);
+        emitTerminalEvent('turn_failed', {
+          reason: 'request_failed',
+          phase: currentPhase,
+        });
         return { completed: false, decision: null };
       }
     },
