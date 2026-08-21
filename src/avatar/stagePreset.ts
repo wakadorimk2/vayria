@@ -10,21 +10,21 @@ export const STAGE_PRESET = {
     hemisphere: {
       skyColor: '#fff4ea',
       groundColor: '#3a4056',
-      intensity: 0.55,
+      intensity: 0.25,
     },
     key: {
       color: '#fff0e6',
-      intensity: 1,
+      intensity: 0.55,
       position: [1.5, 2.2, 2.5],
     },
     fill: {
       color: '#dce7ff',
-      intensity: 0.35,
+      intensity: 0.1,
       position: [-1.5, 1.4, 1.8],
     },
     back: {
       color: '#d9c8ff',
-      intensity: 0.2,
+      intensity: 0.12,
       position: [0.5, 2, -2],
     },
   },
