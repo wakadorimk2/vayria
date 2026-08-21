@@ -69,6 +69,16 @@ The current source mapping is:
 | LLM and TTS provider boundary | `server/localApi.ts` |
 | Expression, gaze approximation, and idle motion | `src/avatar/VrmStage.tsx`, `src/avatar/idleMotion.ts` |
 
+### Exhibition observability
+
+`useConversation` emits one event stream for each conversation turn.
+The stream includes input, LLM, TTS, playback, and terminal events.
+Each event has a turn ID and excludes message text, reply text, history, and secrets.
+
+Provider requests carry the same turn ID through `X-Wildcard-Turn-Id`.
+The Vite local API accepts development events at `/api/events` and logs provider concurrency.
+The exhibition stress test uses the same chat and TTS endpoints with deterministic input.
+
 ## 2. Core boundary
 
 ### Performer Core
@@ -217,6 +227,9 @@ The reducer applies these rules:
 The active LLM cue can drive the avatar during the current plan.
 
 The reducer preserves the cue as persistent Performer State after the plan completes.
+
+Audio completion does not force the emotion back to `neutral`.
+The avatar uses the current Performer State after the active plan is cleared.
 
 ## 6. WildCard Live Direction
 
