@@ -1,15 +1,10 @@
 import type { KeyboardEvent } from 'react';
+import type {
+  CardKind,
+  CardState,
+  WildcardCardData,
+} from './cardTypes';
 import './cards.css';
-
-export type CardKind = 'concept' | 'mood' | 'effect';
-
-export type CardState = 'normal' | 'selected' | 'active' | 'disabled';
-
-export interface WildcardCardData {
-  id: string;
-  label: string;
-  kind: CardKind;
-}
 
 export interface WildcardCardProps {
   card: WildcardCardData;
@@ -51,6 +46,7 @@ export function WildcardCard({
 }: WildcardCardProps) {
   const isInteractive = Boolean(onSelect);
   const isDisabled = state === 'disabled';
+  const stateLabel = state === 'active' ? '、発動' : '';
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (isDisabled || !onSelect) return;
@@ -62,7 +58,7 @@ export function WildcardCard({
   return (
     <article
       aria-disabled={isDisabled || undefined}
-      aria-label={`${card.label}、${KIND_LABELS[card.kind]}`}
+      aria-label={`${card.label}、${KIND_LABELS[card.kind]}${stateLabel}`}
       aria-pressed={isInteractive ? state === 'selected' : undefined}
       className={`wildcard-card wildcard-card--${card.kind} wildcard-card--${state}`}
       data-card-id={card.id}

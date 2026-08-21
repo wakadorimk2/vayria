@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { cardPool } from './cardPool';
-import type { WildcardCardData } from './WildcardCard';
+import type { WildcardCardData } from './cardTypes';
 
 const MAX_INTERFERENCE_COUNT = 1;
 
@@ -26,6 +26,8 @@ export interface CardZoneState {
   brain: WildcardCardData[];
   hand: WildcardCardData[];
   remainingInterferenceCount: number;
+  activatedCardIds: string[];
+  forcedCardId: string | null;
 }
 
 function selectCards(ids: readonly string[]): WildcardCardData[] {
@@ -41,6 +43,8 @@ function createInitialState(): CardZoneState {
     brain: selectCards(INITIAL_BRAIN_IDS),
     hand: selectCards(INITIAL_HAND_IDS),
     remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
+    activatedCardIds: [],
+    forcedCardId: null,
   };
 }
 
@@ -83,7 +87,13 @@ export function useCardGamePrototype() {
         brain[brainIndex],
       ];
 
-      return { brain, hand, remainingInterferenceCount: 0 };
+      return {
+        brain,
+        hand,
+        remainingInterferenceCount: 0,
+        activatedCardIds: [],
+        forcedCardId: brain[brainIndex].id,
+      };
     });
     setSelectedBrainCardId(null);
     setSelectedHandCardId(null);
@@ -93,13 +103,33 @@ export function useCardGamePrototype() {
     setZones((current) => ({
       ...current,
       remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
+      activatedCardIds: [],
+      forcedCardId: null,
     }));
     setSelectedBrainCardId(null);
     setSelectedHandCardId(null);
   }, []);
 
+  const beginReply = useCallback(() => {
+    setZones((current) => ({ ...current, activatedCardIds: [] }));
+  }, []);
+
+  const acceptReply = useCallback((activatedCardIds: string[]) => {
+    setZones((current) => {
+      const brainCardIds = new Set(current.brain.map((card) => card.id));
+      return {
+        ...current,
+        remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
+        activatedCardIds: activatedCardIds.filter((id) => brainCardIds.has(id)),
+        forcedCardId: null,
+      };
+    });
+  }, []);
+
   return {
     maxInterferenceCount: MAX_INTERFERENCE_COUNT,
+    acceptReply,
+    beginReply,
     resetTurn,
     selectCard,
     selectedBrainCardId,

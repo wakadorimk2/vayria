@@ -24,9 +24,14 @@ export default function App() {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!trimmedInput || isBusy) return;
+    const cardContext = {
+      brainCardIds: cardGame.zones.brain.map((card) => card.id),
+      forcedCardId: cardGame.zones.forcedCardId,
+    };
+    cardGame.beginReply();
     prepare();
     setInput('');
-    void send(trimmedInput);
+    void send(trimmedInput, cardContext, cardGame.acceptReply);
   };
 
   return (
@@ -37,7 +42,10 @@ export default function App() {
 
       <section className="avatar-area" aria-label="VRM character">
         <VrmStage emotion={emotion} mouthOpen={mouthOpen} />
-        <CardGamePrototype game={cardGame} />
+        <CardGamePrototype
+          game={cardGame}
+          isInteractionLocked={status === 'thinking'}
+        />
       </section>
 
       <section className="conversation" aria-label="Character conversation">

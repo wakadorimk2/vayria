@@ -6,9 +6,13 @@ import type {
 
 interface CardGamePrototypeProps {
   game: CardGamePrototypeController;
+  isInteractionLocked?: boolean;
 }
 
-export function CardGamePrototype({ game }: CardGamePrototypeProps) {
+export function CardGamePrototype({
+  game,
+  isInteractionLocked = false,
+}: CardGamePrototypeProps) {
   const {
     maxInterferenceCount,
     resetTurn,
@@ -19,33 +23,42 @@ export function CardGamePrototype({ game }: CardGamePrototypeProps) {
     zones,
   } = game;
   const isSpent = zones.remainingInterferenceCount === 0;
+  const isLocked = isSpent || isInteractionLocked;
   const isSwapReady = Boolean(
-    selectedBrainCardId && selectedHandCardId && !isSpent,
+    selectedBrainCardId && selectedHandCardId && !isLocked,
   );
 
-  const selectionHint = isSpent
-    ? 'このターンは操作済み'
-    : isSwapReady
-      ? '選んだ2枚を交換できます'
-      : selectedBrainCardId || selectedHandCardId
-        ? 'もう一方から1枚選択'
-        : '手札と脳内から1枚ずつ選択';
+  const selectionHint = isInteractionLocked
+    ? '返答を待っています'
+    : isSpent
+      ? zones.forcedCardId
+        ? `次の返答に「${zones.brain.find((card) => card.id === zones.forcedCardId)?.label ?? zones.forcedCardId}」が影響します`
+        : 'このターンは操作済み'
+      : isSwapReady
+        ? '選んだ2枚を交換できます'
+        : selectedBrainCardId || selectedHandCardId
+          ? 'もう一方から1枚選択'
+          : '手札と脳内から1枚ずつ選択';
 
   const renderCards = (zone: CardZone) => {
     const selectedId =
       zone === 'brain' ? selectedBrainCardId : selectedHandCardId;
     return zones[zone].map((card) => {
+      const isActive =
+        zone === 'brain' && zones.activatedCardIds.includes(card.id);
       const renderedCard = (
         <WildcardCard
           card={card}
           key={card.id}
           onSelect={() => selectCard(zone, card.id)}
           state={
-            isSpent
+            isLocked
               ? 'disabled'
               : selectedId === card.id
                 ? 'selected'
-                : 'normal'
+                : isActive
+                  ? 'active'
+                  : 'normal'
           }
         />
       );
@@ -90,6 +103,7 @@ export function CardGamePrototype({ game }: CardGamePrototypeProps) {
             {import.meta.env.DEV && (
               <button
                 className="reset-turn-button"
+                disabled={isInteractionLocked}
                 onClick={resetTurn}
                 type="button"
               >

@@ -13,8 +13,14 @@ type ConversationStatus =
   | 'error';
 
 interface ChatResponse {
+  activatedCards: unknown;
   emotion: unknown;
   text: string;
+}
+
+interface ChatCardContext {
+  brainCardIds: string[];
+  forcedCardId: string | null;
 }
 
 interface ErrorResponse {
@@ -28,6 +34,19 @@ async function readError(response: Response, fallback: string): Promise<string> 
   } catch {
     return fallback;
   }
+}
+
+function readActivatedCards(value: unknown): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > 3 ||
+    !value.every((id): id is string => typeof id === 'string') ||
+    new Set(value).size !== value.length
+  ) {
+    throw new Error('AI の発動カード形式が正しくありません。');
+  }
+  return value;
 }
 
 export function useConversation(playAudio: PlayAudio) {
@@ -47,7 +66,11 @@ export function useConversation(playAudio: PlayAudio) {
   }, []);
 
   const send = useCallback(
-    async (message: string) => {
+    async (
+      message: string,
+      cardContext: ChatCardContext,
+      onReplyAccepted: (activatedCardIds: string[]) => void,
+    ) => {
       clearEmotionHold();
       setEmotion('neutral');
       setError('');
@@ -57,7 +80,7 @@ export function useConversation(playAudio: PlayAudio) {
         const chatResponse = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message }),
+          body: JSON.stringify({ message, ...cardContext }),
         });
         if (!chatResponse.ok) {
           throw new Error(
@@ -69,9 +92,23 @@ export function useConversation(playAudio: PlayAudio) {
         if (typeof chatPayload.text !== 'string' || !chatPayload.text.trim()) {
           throw new Error('AI の返答形式が正しくありません。');
         }
+        const activatedCards = readActivatedCards(
+          chatPayload.activatedCards,
+        );
+        const brainCardIds = new Set(cardContext.brainCardIds);
+        if (activatedCards.some((id) => !brainCardIds.has(id))) {
+          throw new Error('AI が脳内にないカードを発動しました。');
+        }
+        if (
+          cardContext.forcedCardId &&
+          !activatedCards.includes(cardContext.forcedCardId)
+        ) {
+          throw new Error('AI が交換したカードを発動しませんでした。');
+        }
         const responseEmotion = normalizeEmotion(chatPayload.emotion);
         setReply(chatPayload.text);
         setEmotion(responseEmotion);
+        onReplyAccepted(activatedCards);
         setStatus('synthesizing');
 
         const ttsResponse = await fetch('/api/tts', {
