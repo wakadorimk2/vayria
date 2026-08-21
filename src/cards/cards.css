@@ -1,0 +1,454 @@
+:root {
+  --wildcard-card-width: 168px;
+  --wildcard-card-ratio: 5 / 7;
+  --wildcard-card-gap: 16px;
+  --wildcard-card-surface: #171b21;
+  --wildcard-card-border: rgb(244 242 237 / 13%);
+  --wildcard-card-pattern-opacity: 0.14;
+  --wildcard-concept-accent: #9da9ba;
+  --wildcard-mood-accent: #d69a78;
+  --wildcard-effect-accent: #9eaf9f;
+}
+
+.cards-preview {
+  height: 100dvh;
+  overflow: auto;
+  color: #f4f2ed;
+  background:
+    radial-gradient(circle at 50% -18%, rgb(97 105 120 / 14%), transparent 38rem),
+    #111419;
+}
+
+.cards-preview__content {
+  width: min(100% - clamp(2rem, 7vw, 7rem), 80rem);
+  margin-inline: auto;
+  padding-block: clamp(2rem, 6vh, 4.5rem) 5rem;
+}
+
+.cards-preview__header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-bottom: clamp(2rem, 5vh, 3.5rem);
+}
+
+.cards-preview__eyebrow {
+  margin: 0 0 0.65rem;
+  color: #7f858d;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+}
+
+.cards-preview h1 {
+  margin: 0;
+  color: #e9e6df;
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  font-weight: 620;
+  letter-spacing: -0.025em;
+}
+
+.cards-preview__intro {
+  margin: 0.55rem 0 0;
+  color: #8f9295;
+  font-size: 0.82rem;
+}
+
+.cards-preview__legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 0.9rem;
+  padding-bottom: 0.2rem;
+}
+
+.kind-key {
+  --kind-accent: #a3a7ac;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #8d9196;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+}
+
+.kind-key--concept {
+  --kind-accent: var(--wildcard-concept-accent);
+}
+
+.kind-key--mood {
+  --kind-accent: var(--wildcard-mood-accent);
+}
+
+.kind-key--effect {
+  --kind-accent: var(--wildcard-effect-accent);
+}
+
+.kind-key__mark {
+  display: block;
+  width: 0.46rem;
+  height: 0.46rem;
+  border: 1px solid var(--kind-accent);
+}
+
+.kind-key--concept .kind-key__mark {
+  transform: rotate(45deg) scale(0.78);
+}
+
+.kind-key--mood .kind-key__mark {
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+
+.kind-key--effect .kind-key__mark {
+  width: 0.55rem;
+  height: 0.18rem;
+  border-inline: 0;
+}
+
+.cards-preview__section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid rgb(244 242 237 / 8%);
+}
+
+.cards-preview__section-heading h2 {
+  margin: 0;
+  color: #aaa8a3;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.cards-preview__section-heading span {
+  color: #686e76;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card-grid,
+.state-grid {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(148px, 100%), var(--wildcard-card-width))
+  );
+  justify-content: center;
+  gap: var(--wildcard-card-gap);
+}
+
+.wildcard-card {
+  --kind-accent: #a3a7ac;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  width: 100%;
+  max-width: var(--wildcard-card-width);
+  aspect-ratio: var(--wildcard-card-ratio);
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--wildcard-card-border);
+  border-radius: 0.48rem;
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 2.8%), transparent 42%),
+    var(--wildcard-card-surface);
+  box-shadow:
+    0 1px 1px rgb(0 0 0 / 18%),
+    inset 0 1px 0 rgb(255 255 255 / 3.5%);
+  color: #f4f2ed;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.wildcard-card--concept {
+  --kind-accent: var(--wildcard-concept-accent);
+}
+
+.wildcard-card--mood {
+  --kind-accent: var(--wildcard-mood-accent);
+}
+
+.wildcard-card--effect {
+  --kind-accent: var(--wildcard-effect-accent);
+}
+
+.wildcard-card__pattern {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  opacity: var(--wildcard-card-pattern-opacity);
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, #000, transparent 72%);
+}
+
+.wildcard-card--concept .wildcard-card__pattern {
+  background-image: radial-gradient(var(--kind-accent) 0.55px, transparent 0.7px);
+  background-size: 10px 10px;
+}
+
+.wildcard-card--mood .wildcard-card__pattern {
+  background-image: repeating-radial-gradient(
+    circle at 50% 36%,
+    transparent 0 15px,
+    var(--kind-accent) 16px,
+    transparent 17px 26px
+  );
+}
+
+.wildcard-card--effect .wildcard-card__pattern {
+  background-image: repeating-linear-gradient(
+    118deg,
+    transparent 0 14px,
+    var(--kind-accent) 14.5px,
+    transparent 15px 27px
+  );
+}
+
+.wildcard-card__corner {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  background: color-mix(in srgb, var(--kind-accent) 45%, transparent);
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+  opacity: 0.68;
+}
+
+.wildcard-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.86rem 0.9rem 0;
+}
+
+.wildcard-card__kind-mark {
+  display: block;
+  width: 0.55rem;
+  height: 0.55rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--kind-accent);
+  opacity: 0.82;
+}
+
+.wildcard-card--concept .wildcard-card__kind-mark {
+  transform: rotate(45deg) scale(0.78);
+}
+
+.wildcard-card--mood .wildcard-card__kind-mark {
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+
+.wildcard-card--effect .wildcard-card__kind-mark {
+  width: 0.62rem;
+  height: 0.26rem;
+  border-inline: 0;
+}
+
+.wildcard-card__kind-label {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--kind-accent) 75%, #777d84);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 0.54rem;
+  letter-spacing: 0.14em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wildcard-card__label {
+  place-self: center;
+  max-width: calc(100% - 1.8rem);
+  margin: 0;
+  color: #f0ede7;
+  font-size: clamp(1.18rem, 1.6vw, 1.36rem);
+  font-weight: 640;
+  line-height: 1.35;
+  letter-spacing: 0.015em;
+  text-align: center;
+  text-wrap: balance;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 24%);
+}
+
+.wildcard-card__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.9rem 0.78rem;
+}
+
+.wildcard-card__baseline {
+  width: 1.8rem;
+  height: 1px;
+  background: var(--kind-accent);
+  opacity: 0.52;
+}
+
+.wildcard-card__state-mark {
+  position: relative;
+  width: 0.48rem;
+  height: 0.48rem;
+  margin-left: auto;
+  opacity: 0;
+}
+
+.wildcard-card:hover:not(.wildcard-card--disabled) {
+  z-index: 1;
+  border-color: color-mix(in srgb, var(--kind-accent) 48%, #535962);
+  background-color: #191e25;
+  box-shadow:
+    0 8px 20px rgb(0 0 0 / 20%),
+    inset 0 1px 0 rgb(255 255 255 / 5%);
+  transform: translateY(-2px) rotate(-0.38deg);
+}
+
+.card-grid .wildcard-card:nth-child(even):hover {
+  transform: translateY(-2px) rotate(0.38deg);
+}
+
+.wildcard-card--selected {
+  border-color: color-mix(in srgb, var(--kind-accent) 66%, #797f87);
+  outline: 1px solid color-mix(in srgb, var(--kind-accent) 42%, transparent);
+  outline-offset: 2px;
+}
+
+.wildcard-card--selected .wildcard-card__state-mark {
+  border: 1px solid var(--kind-accent);
+  opacity: 0.9;
+  transform: rotate(45deg) scale(0.72);
+}
+
+.wildcard-card--active {
+  border-color: color-mix(in srgb, var(--kind-accent) 76%, #858a91);
+  box-shadow:
+    inset 0 -3px 0 color-mix(in srgb, var(--kind-accent) 68%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+
+.wildcard-card--active .wildcard-card__state-mark {
+  border-radius: 50%;
+  background: var(--kind-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--kind-accent) 12%, transparent);
+  opacity: 0.9;
+}
+
+.wildcard-card--disabled {
+  filter: saturate(0.25);
+  opacity: 0.36;
+}
+
+.wildcard-card--disabled .wildcard-card__state-mark {
+  opacity: 0.8;
+}
+
+.wildcard-card--disabled .wildcard-card__state-mark::before,
+.wildcard-card--disabled .wildcard-card__state-mark::after {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: #c8c5bf;
+  content: "";
+}
+
+.wildcard-card--disabled .wildcard-card__state-mark::before {
+  transform: rotate(45deg);
+}
+
+.wildcard-card--disabled .wildcard-card__state-mark::after {
+  transform: rotate(-45deg);
+}
+
+.cards-preview__states {
+  margin-top: clamp(3rem, 7vh, 5rem);
+  padding-top: 0.1rem;
+}
+
+.state-grid {
+  justify-content: start;
+}
+
+.state-preview {
+  width: min(100%, var(--wildcard-card-width));
+  margin: 0;
+}
+
+.state-preview figcaption {
+  margin-top: 0.65rem;
+  color: #737981;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+@media (max-width: 620px) {
+  :root {
+    --wildcard-card-gap: 12px;
+  }
+
+  .cards-preview__content {
+    width: min(100% - 1.5rem, 34rem);
+    padding-block: 1.5rem 3rem;
+  }
+
+  .cards-preview__header {
+    display: grid;
+    gap: 1.25rem;
+    margin-bottom: 2rem;
+  }
+
+  .cards-preview__legend {
+    justify-content: start;
+  }
+
+  .card-grid,
+  .state-grid {
+    grid-template-columns: repeat(2, minmax(0, var(--wildcard-card-width)));
+  }
+
+  .wildcard-card__meta {
+    padding: 0.72rem 0.72rem 0;
+  }
+
+  .wildcard-card__footer {
+    padding: 0 0.72rem 0.66rem;
+  }
+
+  .wildcard-card__label {
+    font-size: clamp(1rem, 5.2vw, 1.24rem);
+  }
+}
+
+@media (max-width: 350px) {
+  .card-grid,
+  .state-grid {
+    grid-template-columns: minmax(0, var(--wildcard-card-width));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wildcard-card {
+    transition: border-color 100ms linear, background-color 100ms linear;
+  }
+
+  .wildcard-card:hover:not(.wildcard-card--disabled),
+  .card-grid .wildcard-card:nth-child(even):hover {
+    transform: none;
+  }
+}
