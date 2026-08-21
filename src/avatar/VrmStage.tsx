@@ -16,29 +16,37 @@ import {
   VRMUtils,
 } from '@pixiv/three-vrm';
 import { BlinkController } from './BlinkController';
+import { EmotionExpressionController } from './EmotionExpressionController';
 import { applyBasePose, IdleController } from './idleMotion';
 import { frameAvatar } from './cameraPreset';
 import { setupStageLighting } from './stageLighting';
 import { STAGE_PRESET } from './stagePreset';
+import type { Emotion } from '../character/emotion';
 
 const MODEL_URL = `${import.meta.env.BASE_URL}avatar/model.vrm`;
 
 interface VrmStageProps {
+  emotion: Emotion;
   mouthOpen: number;
 }
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
 
-export function VrmStage({ mouthOpen }: VrmStageProps) {
+export function VrmStage({ emotion, mouthOpen }: VrmStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouthOpenRef = useRef(mouthOpen);
+  const emotionRef = useRef(emotion);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [expressionWarning, setExpressionWarning] = useState('');
 
   useEffect(() => {
     mouthOpenRef.current = mouthOpen;
   }, [mouthOpen]);
+
+  useEffect(() => {
+    emotionRef.current = emotion;
+  }, [emotion]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -71,6 +79,8 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
     let mouthExpression: string | null = null;
     let idleController: IdleController | null = null;
     let blinkController: BlinkController | null = null;
+    let emotionController: EmotionExpressionController | null = null;
+    let appliedEmotion: Emotion | null = null;
 
     const resize = () => {
       const width = Math.max(container.clientWidth, 1);
@@ -116,6 +126,27 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
           applyBasePose(vrm);
           idleController = new IdleController(vrm);
           blinkController = new BlinkController(vrm);
+          emotionController = new EmotionExpressionController(vrm);
+
+          const availableExpressions =
+            vrm.expressionManager?.expressions.map(
+              (candidate) => candidate.expressionName,
+            ) ?? [];
+          console.info('Wildcard VRM expressions:', availableExpressions);
+          if (emotionController.missingExpressions.length > 0) {
+            const missingExpressions =
+              emotionController.missingExpressions.join(', ');
+            setExpressionWarning((current) =>
+              [
+                current,
+                `不足している感情表情は neutral に置き換えます: ${missingExpressions}`,
+              ]
+                .filter(Boolean)
+                .join(' '),
+            );
+          }
+          emotionController.setEmotion(emotionRef.current);
+          appliedEmotion = emotionRef.current;
 
           const expression = vrm.expressionManager?.getExpression(
             VRMExpressionPresetName.Aa,
@@ -123,8 +154,13 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
           if (expression) {
             mouthExpression = VRMExpressionPresetName.Aa;
           } else {
-            setExpressionWarning(
-              'この VRM には標準の aa 口形状がありません。モデルは表示できますが、口パクは利用できません。',
+            setExpressionWarning((current) =>
+              [
+                current,
+                'この VRM には標準の aa 口形状がありません。モデルは表示できますが、口パクは利用できません。',
+              ]
+                .filter(Boolean)
+                .join(' '),
             );
           }
 
@@ -150,6 +186,14 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
       const delta = clock.getDelta();
       if (loadedVrm) {
         idleController?.update(delta);
+        if (
+          emotionController &&
+          appliedEmotion !== emotionRef.current
+        ) {
+          emotionController.setEmotion(emotionRef.current);
+          appliedEmotion = emotionRef.current;
+        }
+        emotionController?.update(delta);
         blinkController?.update(delta);
         if (mouthExpression) {
           loadedVrm.expressionManager?.setValue(
@@ -170,8 +214,10 @@ export function VrmStage({ mouthOpen }: VrmStageProps) {
       cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
       blinkController?.dispose();
+      emotionController?.dispose();
       idleController?.dispose();
       blinkController = null;
+      emotionController = null;
       idleController = null;
       if (loadedVrm) {
         scene.remove(loadedVrm.scene);

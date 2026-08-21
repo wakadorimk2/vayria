@@ -14,7 +14,8 @@ const STATUS_LABELS = {
 export default function App() {
   const [input, setInput] = useState('');
   const { mouthOpen, play, prepare } = useAudioLipSync();
-  const { error, isBusy, reply, send, status } = useConversation(play);
+  const { emotion, error, isBusy, reply, send, status } =
+    useConversation(play);
   const trimmedInput = input.trim();
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -32,7 +33,7 @@ export default function App() {
       </header>
 
       <section className="avatar-area" aria-label="VRM character">
-        <VrmStage mouthOpen={mouthOpen} />
+        <VrmStage emotion={emotion} mouthOpen={mouthOpen} />
       </section>
 
       <section className="conversation" aria-label="Character conversation">
