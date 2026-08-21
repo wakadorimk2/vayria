@@ -28,6 +28,9 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 
 `topic`と`topicTurns`はブラウザー内の一時状態です。ページを閉じると破棄します。
 手札から交換したカードがある場合、`silence`は受理せず、カードが反映される発話を再生成します。
+交換直後の自律発話では、交換カードを強く反映します。通常の自律発話では、
+脳内カードは弱い内部状態として扱い、`activatedCards`が空のまま発話する場合があります。
+直前の自律発話と同じ目立つ表現、比喩、文型、テンションは自然に避けます。
 
 ## 必要なもの
 
@@ -36,7 +39,7 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 - OpenAI API key
 - AivisSpeech と利用する音声合成モデル
 - 自分で利用権を持つ VRM ファイル
-- Chrome または Chromium 系ブラウザー
+- Chrome、Chromium 系ブラウザー、または iPad の Safari
 
 ## セットアップ
 
@@ -95,8 +98,52 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 
 7. `http://127.0.0.1:5187/` をブラウザーで開きます。
 
+## 運用モード
+
+アプリは同じフロントエンドと API パスを、次のモードで使用します。
+
+| モード | 用途 | 初期接続先 |
+| --- | --- | --- |
+| `local` | Windows PC 内の開発 | `127.0.0.1:5187` |
+| `exhibition` | Windows PC と iPad の同一 LAN 接続 | `0.0.0.0:5187` 待受け |
+| `public` | 将来の HTTPS 公開 | 今回は公開サーバーを提供しません |
+
+### iPad 展示の確認
+
+1. `.env.example` を `.env.local` へコピーし、API key と AivisSpeech の設定を記述します。
+2. `.env.exhibition.example` を `.env.exhibition` へコピーします。
+
+   ```powershell
+   Copy-Item -LiteralPath '.env.exhibition.example' -Destination '.env.exhibition'
+   ```
+
+3. AivisSpeech を Windows PC で起動します。
+4. exhibition モードで Vite を起動します。
+
+   ```powershell
+   npm run dev:exhibition
+   ```
+
+5. Vite が表示する `Network` URL を iPad で開きます。
+
+   ```text
+   http://<Windows PC の LAN アドレス>:5187/
+   ```
+
+iPad と Windows PC は同一 LAN に接続してください。Wi-Fi と Ethernet のどちらも使用できます。
+LAN アドレスはソースへ記述しません。起動時に表示された URL を使用します。
+
+Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187` の受信を許可してください。
+インターネットへポート転送は設定しないでください。
+
+`VITE_API_BASE_URL=/` は現在のページと同じ接続先を使用します。別の HTTPS API を使用する場合だけ、`VITE_API_BASE_URL` を変更します。
+
+`public` モードは将来の公開用設定名です。公開 URL、公開中継、認証、セッション管理は今回の対象外です。
+`getUserMedia()` とカメラ背景も今回の対象外です。カメラを追加する場合は HTTPS または同等の Secure Context が必要です。
+
 `.env.local` と `public/avatar/*.vrm` は Git の追跡対象外です。
-API key と AivisSpeech の設定は Vite のローカル Node middleware だけが読みます。
+`.env.exhibition` も Git の追跡対象外です。
+API key と AivisSpeech の設定は Vite の Node middleware だけが読みます。
 ブラウザー bundle には埋め込みません。
 
 ## 感情マッピング
@@ -169,4 +216,5 @@ npm run stress -- `
 - VRMA、長期的な mood、感情履歴、モーション選択
 - production server と deployment
 
-`npm run dev` のローカル利用だけを対象にしています。
+`npm run dev` のローカル利用と、`npm run dev:exhibition` の同一 LAN 展示確認を対象にしています。
+production server、公開 URL、公開中継は対象外です。

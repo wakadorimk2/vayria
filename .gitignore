@@ -5,6 +5,7 @@ stress-results/
 
 .env*
 !.env.example
+!.env.exhibition.example
 
 public/avatar/*.vrm
 public/avatar/*.vrma

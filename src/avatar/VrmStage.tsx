@@ -20,20 +20,29 @@ import { EmotionExpressionController } from './EmotionExpressionController';
 import { applyBasePose, IdleController } from './idleMotion';
 import { frameAvatar } from './cameraPreset';
 import { setupStageLighting } from './stageLighting';
-import { STAGE_PRESET } from './stagePreset';
+import {
+  EXHIBITION_PORTRAIT_CAMERA,
+  STAGE_PRESET,
+} from './stagePreset';
 import type { Emotion } from '../character/emotion';
 
 const MODEL_URL = `${import.meta.env.BASE_URL}avatar/model.vrm`;
 
 interface VrmStageProps {
   emotion: Emotion;
+  isExhibitionMode?: boolean;
   mouthOpen: number;
   onReady?: () => void;
 }
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
 
-export function VrmStage({ emotion, mouthOpen, onReady }: VrmStageProps) {
+export function VrmStage({
+  emotion,
+  isExhibitionMode = false,
+  mouthOpen,
+  onReady,
+}: VrmStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouthOpenRef = useRef(mouthOpen);
@@ -87,12 +96,27 @@ export function VrmStage({ emotion, mouthOpen, onReady }: VrmStageProps) {
     let blinkController: BlinkController | null = null;
     let emotionController: EmotionExpressionController | null = null;
     let appliedEmotion: Emotion | null = null;
+    const usesExhibitionPortraitCamera = () =>
+      isExhibitionMode &&
+      window.matchMedia(
+        '(orientation: portrait) and (min-width: 600px)',
+      ).matches;
 
     const resize = () => {
       const width = Math.max(container.clientWidth, 1);
       const height = Math.max(container.clientHeight, 1);
       renderer.setSize(width, height, false);
-      if (loadedVrm) frameAvatar(loadedVrm, camera, width, height);
+      if (loadedVrm) {
+        frameAvatar(
+          loadedVrm,
+          camera,
+          width,
+          height,
+          usesExhibitionPortraitCamera()
+            ? EXHIBITION_PORTRAIT_CAMERA
+            : STAGE_PRESET.camera,
+        );
+      }
     };
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(container);
@@ -175,6 +199,9 @@ export function VrmStage({ emotion, mouthOpen, onReady }: VrmStageProps) {
             camera,
             container.clientWidth,
             container.clientHeight,
+            usesExhibitionPortraitCamera()
+              ? EXHIBITION_PORTRAIT_CAMERA
+              : STAGE_PRESET.camera,
           );
           setLoadState('ready');
           onReadyRef.current?.();
@@ -232,7 +259,7 @@ export function VrmStage({ emotion, mouthOpen, onReady }: VrmStageProps) {
       }
       renderer.dispose();
     };
-  }, []);
+  }, [isExhibitionMode]);
 
   return (
     <div className="vrm-stage" ref={containerRef}>

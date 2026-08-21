@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayAudio } from '../audio/useAudioLipSync';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
 import { createConversationEventEmitter } from './conversationEvents';
+import { apiUrl } from '../runtimeConfig';
 
 export type ConversationStatus =
   | 'idle'
@@ -150,6 +151,7 @@ export function useConversation(
   const emotionHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
   const historyRef = useRef<ConversationHistoryItem[]>([]);
+  const lastAutonomousReplyRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const sourceRef = useRef<ConversationSource | null>(null);
   const statusRef = useRef<ConversationStatus>('idle');
@@ -255,7 +257,7 @@ export function useConversation(
         abortControllerRef.current = chatController;
         const llmStartedAt = performance.now();
         eventEmitter.emit('llm_start', { phase: 'llm' });
-        const chatResponse = await fetch('/api/chat', {
+        const chatResponse = await fetch(apiUrl('/api/chat'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -270,6 +272,7 @@ export function useConversation(
               ? {
                   topic: autonomousContext?.topic ?? null,
                   topicTurns: autonomousContext?.topicTurns ?? 0,
+                  previousAutonomousReply: lastAutonomousReplyRef.current,
                 }
               : {}),
           }),
@@ -316,7 +319,7 @@ export function useConversation(
         }
         const activatedCards = readActivatedCards(
           chatPayload.activatedCards,
-          autonomousDecision?.action === 'silence',
+          autonomousDecision !== null,
         );
         if (autonomousDecision?.action === 'silence' && activatedCards.length) {
           throw new Error('沈黙する自律応答はカードを発動できません。');
@@ -365,7 +368,7 @@ export function useConversation(
         abortControllerRef.current = ttsController;
         const ttsStartedAt = performance.now();
         eventEmitter.emit('tts_start', { phase: 'tts' });
-        const ttsResponse = await fetch('/api/tts', {
+        const ttsResponse = await fetch(apiUrl('/api/tts'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -422,6 +425,7 @@ export function useConversation(
         }
 
         if (turnSource === 'autonomous') {
+          lastAutonomousReplyRef.current = responseText;
           appendHistory([{ role: 'assistant', content: responseText }]);
         }
         setConversationState('idle', null);
