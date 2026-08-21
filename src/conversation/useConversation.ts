@@ -150,6 +150,7 @@ export function useConversation(
   const emotionHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
   const historyRef = useRef<ConversationHistoryItem[]>([]);
+  const lastAutonomousReplyRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const sourceRef = useRef<ConversationSource | null>(null);
   const statusRef = useRef<ConversationStatus>('idle');
@@ -247,6 +248,7 @@ export function useConversation(
               ? {
                   topic: autonomousContext?.topic ?? null,
                   topicTurns: autonomousContext?.topicTurns ?? 0,
+                  previousAutonomousReply: lastAutonomousReplyRef.current,
                 }
               : {}),
           }),
@@ -291,7 +293,7 @@ export function useConversation(
         }
         const activatedCards = readActivatedCards(
           chatPayload.activatedCards,
-          autonomousDecision?.action === 'silence',
+          autonomousDecision !== null,
         );
         if (autonomousDecision?.action === 'silence' && activatedCards.length) {
           throw new Error('沈黙する自律応答はカードを発動できません。');
@@ -379,6 +381,7 @@ export function useConversation(
         }
 
         if (turnSource === 'autonomous') {
+          lastAutonomousReplyRef.current = responseText;
           appendHistory([{ role: 'assistant', content: responseText }]);
         }
         setConversationState('idle', null);
