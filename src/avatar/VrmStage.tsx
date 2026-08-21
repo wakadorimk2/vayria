@@ -28,15 +28,17 @@ const MODEL_URL = `${import.meta.env.BASE_URL}avatar/model.vrm`;
 interface VrmStageProps {
   emotion: Emotion;
   mouthOpen: number;
+  onReady?: () => void;
 }
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
 
-export function VrmStage({ emotion, mouthOpen }: VrmStageProps) {
+export function VrmStage({ emotion, mouthOpen, onReady }: VrmStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouthOpenRef = useRef(mouthOpen);
   const emotionRef = useRef(emotion);
+  const onReadyRef = useRef(onReady);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [expressionWarning, setExpressionWarning] = useState('');
 
@@ -47,6 +49,10 @@ export function VrmStage({ emotion, mouthOpen }: VrmStageProps) {
   useEffect(() => {
     emotionRef.current = emotion;
   }, [emotion]);
+
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -171,6 +177,7 @@ export function VrmStage({ emotion, mouthOpen }: VrmStageProps) {
             container.clientHeight,
           );
           setLoadState('ready');
+          onReadyRef.current?.();
         },
         undefined,
         () => {

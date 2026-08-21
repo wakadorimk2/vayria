@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Buffer } from 'node:buffer';
 import { createRequire } from 'node:module';
 import type { Plugin } from 'vite';
+import type { Message } from '@aituber-onair/chat';
 import {
   AIVIS_VOICE_PARAMETERS,
   EMOTIONS,
@@ -21,6 +22,7 @@ const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
 
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_TEXT_LENGTH = 1_000;
+const MAX_HISTORY_ITEMS = 10;
 const CHAT_PATH = '/api/chat';
 const TTS_PATH = '/api/tts';
 const DEFAULT_AIVIS_BASE_URL = 'http://127.0.0.1:10101';
@@ -55,8 +57,17 @@ interface AivisStyle {
   name: string;
 }
 
+type ChatMode = 'manual' | 'autonomous';
+
+interface ChatHistoryItem {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 interface ChatRequestPayload {
-  message: string;
+  mode: ChatMode;
+  message: string | null;
+  history: ChatHistoryItem[];
   brainCardIds: string[];
   forcedCardId: string | null;
 }
@@ -129,29 +140,74 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   }
 
   const record = payload as Record<string, unknown>;
-  const allowedKeys = new Set(['message', 'brainCardIds', 'forcedCardId']);
-  if (
-    Object.keys(record).length !== allowedKeys.size ||
-    Object.keys(record).some((key) => !allowedKeys.has(key))
-  ) {
+  const allowedKeys = new Set([
+    'mode',
+    'message',
+    'history',
+    'brainCardIds',
+    'forcedCardId',
+  ]);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError(
-      'Request body must contain only message, brainCardIds, and forcedCardId.',
+      'Request body contains an unsupported chat field.',
       400,
     );
+  }
+
+  const mode = record.mode;
+  if (mode !== 'manual' && mode !== 'autonomous') {
+    throw new RequestError('mode must be manual or autonomous.', 400);
   }
 
   const message = record.message;
-  if (typeof message !== 'string' || !message.trim()) {
-    throw new RequestError('message must be non-empty text.', 400);
-  }
-
-  const normalizedMessage = message.trim();
-  if (normalizedMessage.length > MAX_TEXT_LENGTH) {
+  let normalizedMessage: string | null = null;
+  if (mode === 'manual') {
+    if (typeof message !== 'string' || !message.trim()) {
+      throw new RequestError('manual message must be non-empty text.', 400);
+    }
+    normalizedMessage = message.trim();
+    if (normalizedMessage.length > MAX_TEXT_LENGTH) {
+      throw new RequestError(
+        `message must be ${MAX_TEXT_LENGTH} characters or fewer.`,
+        400,
+      );
+    }
+  } else if (message !== undefined) {
     throw new RequestError(
-      `message must be ${MAX_TEXT_LENGTH} characters or fewer.`,
+      'autonomous requests must not contain message.',
       400,
     );
   }
+
+  const history = record.history;
+  if (!Array.isArray(history) || history.length > MAX_HISTORY_ITEMS) {
+    throw new RequestError(
+      `history must contain at most ${MAX_HISTORY_ITEMS} items.`,
+      400,
+    );
+  }
+  const normalizedHistory = history.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new RequestError('history items must be objects.', 400);
+    }
+    const historyItem = item as Record<string, unknown>;
+    if (
+      Object.keys(historyItem).length !== 2 ||
+      (historyItem.role !== 'user' && historyItem.role !== 'assistant') ||
+      typeof historyItem.content !== 'string' ||
+      !historyItem.content.trim()
+    ) {
+      throw new RequestError('history item format is invalid.', 400);
+    }
+    const content = historyItem.content.trim();
+    if (content.length > MAX_TEXT_LENGTH) {
+      throw new RequestError(
+        `history content must be ${MAX_TEXT_LENGTH} characters or fewer.`,
+        400,
+      );
+    }
+    return { role: historyItem.role, content } as ChatHistoryItem;
+  });
 
   const brainCardIds = record.brainCardIds;
   if (
@@ -183,7 +239,9 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   }
 
   return {
+    mode,
     message: normalizedMessage,
+    history: normalizedHistory,
     brainCardIds,
     forcedCardId,
   };
@@ -283,7 +341,9 @@ function parseAssistantResponse(
 
 async function generateReply(
   apiKey: string,
-  message: string,
+  mode: ChatMode,
+  message: string | null,
+  history: readonly ChatHistoryItem[],
   brainCardIds: readonly string[],
   forcedCardId: string | null,
 ): Promise<CardAssistantResponse> {
@@ -328,8 +388,12 @@ async function generateReply(
   const forcedInstruction = forcedCardId
     ? `The card ${forcedCardId} is forced for this reply. It must visibly influence the reply, and activatedCards must include ${forcedCardId}.`
     : 'No card is forced for this reply.';
+  const responseInstruction =
+    mode === 'autonomous'
+      ? 'You are not replying to the user. As a Japanese AI Tuber filling a natural pause in a live stream, say one or two short Japanese sentences of about 20 to 80 characters with no Markdown. Use a passing thought, light topic, or quiet observation. Do not give a lecture, act like an AI assistant, or ask the viewer a question every time.'
+      : "Reply in the same language as the user with one or two short sentences and no Markdown.";
   const systemPrompt = [
-    "Reply in the same language as the user with one or two short sentences and no Markdown. Choose emotion as the character's own feeling while replying. Prefer neutral when ambiguous and avoid exaggerated changes. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.",
+    `${responseInstruction} Choose emotion as the character's own feeling while speaking. Prefer neutral when ambiguous and avoid exaggerated changes. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.`,
     'The character has the following five brain cards:',
     cardInstructions,
     'Let one or two natural cards influence the reply. Do not force all five cards into it. You may use up to three cards when a combination is natural.',
@@ -340,16 +404,22 @@ async function generateReply(
   const requestReply = async (correction?: string): Promise<string> => {
     let streamedReply = '';
     let completedReply = '';
+    const messages: Message[] = [
+      {
+        role: 'system',
+        content: correction ? `${systemPrompt}\n${correction}` : systemPrompt,
+      },
+      ...history,
+      {
+        role: 'user',
+        content:
+          mode === 'autonomous'
+            ? '配信中の次の自然な独り言を生成してください。'
+            : (message ?? ''),
+      },
+    ];
     await chat.processChat(
-      [
-        {
-          role: 'system',
-          content: correction
-            ? `${systemPrompt}\n${correction}`
-            : systemPrompt,
-        },
-        { role: 'user', content: message },
-      ],
+      messages,
       (partial) => {
         streamedReply += partial;
       },
@@ -692,10 +762,13 @@ async function handleRequest(
           503,
         );
       }
-      const { message, brainCardIds, forcedCardId } = readChatRequest(payload);
+      const { mode, message, history, brainCardIds, forcedCardId } =
+        readChatRequest(payload);
       const assistantResponse = await generateReply(
         config.openAiApiKey,
+        mode,
         message,
+        history,
         brainCardIds,
         forcedCardId,
       );
