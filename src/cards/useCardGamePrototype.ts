@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { cardPool } from './cardPool';
 import type { WildcardCardData } from './cardTypes';
 
@@ -30,6 +30,14 @@ export interface CardZoneState {
   forcedCardId: string | null;
 }
 
+export interface CardSwapResult {
+  animationSequence: number;
+  brainCardIds: string[];
+  ejectedCardId: string;
+  forcedCardId: string;
+  insertedCardId: string;
+}
+
 function selectCards(ids: readonly string[]): WildcardCardData[] {
   return ids.map((id) => {
     const card = cardPool.find((candidate) => candidate.id === id);
@@ -50,6 +58,7 @@ function createInitialState(): CardZoneState {
 
 export function useCardGamePrototype() {
   const [zones, setZones] = useState<CardZoneState>(createInitialState);
+  const swapSequenceRef = useRef(0);
   const [selectedBrainCardId, setSelectedBrainCardId] = useState<
     string | null
   >(null);
@@ -67,37 +76,49 @@ export function useCardGamePrototype() {
     [zones.remainingInterferenceCount],
   );
 
-  const swapSelectedCards = useCallback(() => {
-    if (!selectedBrainCardId || !selectedHandCardId) return;
+  const swapCards = useCallback(
+    (brainCardId: string, handCardId: string): CardSwapResult | null => {
+      if (zones.remainingInterferenceCount === 0) return null;
 
-    setZones((current) => {
-      if (current.remainingInterferenceCount === 0) return current;
-      const brainIndex = current.brain.findIndex(
-        (card) => card.id === selectedBrainCardId,
+      const brainIndex = zones.brain.findIndex(
+        (card) => card.id === brainCardId,
       );
-      const handIndex = current.hand.findIndex(
-        (card) => card.id === selectedHandCardId,
-      );
-      if (brainIndex < 0 || handIndex < 0) return current;
+      const handIndex = zones.hand.findIndex((card) => card.id === handCardId);
+      if (brainIndex < 0 || handIndex < 0) return null;
 
-      const brain = [...current.brain];
-      const hand = [...current.hand];
-      [brain[brainIndex], hand[handIndex]] = [
-        hand[handIndex],
-        brain[brainIndex],
-      ];
+      const brain = [...zones.brain];
+      const hand = [...zones.hand];
+      const insertedCard = hand[handIndex];
+      const ejectedCard = brain[brainIndex];
+      [brain[brainIndex], hand[handIndex]] = [insertedCard, ejectedCard];
+
+      const animationSequence = swapSequenceRef.current + 1;
+      swapSequenceRef.current = animationSequence;
+      setZones((current) => {
+        if (current.remainingInterferenceCount === 0) return current;
+
+        return {
+          brain,
+          hand,
+          remainingInterferenceCount: 0,
+          activatedCardIds: [],
+          forcedCardId: insertedCard.id,
+        };
+      });
+
+      setSelectedBrainCardId(null);
+      setSelectedHandCardId(null);
 
       return {
-        brain,
-        hand,
-        remainingInterferenceCount: 0,
-        activatedCardIds: [],
-        forcedCardId: brain[brainIndex].id,
+        animationSequence,
+        brainCardIds: brain.map((card) => card.id),
+        ejectedCardId: ejectedCard.id,
+        forcedCardId: insertedCard.id,
+        insertedCardId: insertedCard.id,
       };
-    });
-    setSelectedBrainCardId(null);
-    setSelectedHandCardId(null);
-  }, [selectedBrainCardId, selectedHandCardId]);
+    },
+    [zones],
+  );
 
   const resetTurn = useCallback(() => {
     setZones((current) => ({
@@ -134,7 +155,7 @@ export function useCardGamePrototype() {
     selectCard,
     selectedBrainCardId,
     selectedHandCardId,
-    swapSelectedCards,
+    swapCards,
     zones,
   };
 }
