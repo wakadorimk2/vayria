@@ -7,11 +7,18 @@ import {
 import { VRM, VRMHumanBoneName } from '@pixiv/three-vrm';
 
 const BASE_POSE_DEGREES = {
-  shoulderDrop: 4,
-  upperArmDrop: 68,
-  elbowBend: 6,
-  neckPitch: 1,
-  headTilt: 0.8,
+  hipsTilt: 1.8,
+  spineCounterTilt: 0.8,
+  leftShoulderDrop: 6,
+  rightShoulderDrop: 2,
+  leftUpperArmDrop: 64,
+  rightUpperArmDrop: 72,
+  leftElbowBend: 12,
+  rightElbowBend: 6,
+  relaxedKnee: 4,
+  neckPitch: 2,
+  headYaw: -1.5,
+  headTilt: 2,
 } as const;
 
 const IDLE_MOTION = {
@@ -54,34 +61,59 @@ function applyRotation(
 }
 
 export function applyBasePose(vrm: VRM): void {
+  applyRotation(vrm, VRMHumanBoneName.Hips, [
+    0,
+    0,
+    BASE_POSE_DEGREES.hipsTilt,
+  ]);
+  applyRotation(vrm, VRMHumanBoneName.Spine, [
+    0,
+    0,
+    -BASE_POSE_DEGREES.spineCounterTilt,
+  ]);
+  applyRotation(vrm, VRMHumanBoneName.LeftUpperLeg, [
+    0,
+    0,
+    -BASE_POSE_DEGREES.hipsTilt,
+  ]);
+  applyRotation(vrm, VRMHumanBoneName.RightUpperLeg, [
+    0,
+    0,
+    -BASE_POSE_DEGREES.hipsTilt,
+  ]);
+  applyRotation(vrm, VRMHumanBoneName.RightLowerLeg, [
+    BASE_POSE_DEGREES.relaxedKnee,
+    0,
+    0,
+  ]);
   applyRotation(vrm, VRMHumanBoneName.LeftShoulder, [
     0,
     0,
-    -BASE_POSE_DEGREES.shoulderDrop,
+    -BASE_POSE_DEGREES.leftShoulderDrop,
   ]);
   applyRotation(vrm, VRMHumanBoneName.RightShoulder, [
     0,
     0,
-    BASE_POSE_DEGREES.shoulderDrop,
+    BASE_POSE_DEGREES.rightShoulderDrop,
   ]);
   applyRotation(vrm, VRMHumanBoneName.LeftUpperArm, [
     0,
     0,
-    -BASE_POSE_DEGREES.upperArmDrop,
+    -BASE_POSE_DEGREES.leftUpperArmDrop,
   ]);
   applyRotation(vrm, VRMHumanBoneName.RightUpperArm, [
     0,
     0,
-    BASE_POSE_DEGREES.upperArmDrop,
+    BASE_POSE_DEGREES.rightUpperArmDrop,
   ]);
   applyRotation(vrm, VRMHumanBoneName.LeftLowerArm, [
     0,
-    -BASE_POSE_DEGREES.elbowBend,
+    -BASE_POSE_DEGREES.leftElbowBend,
     0,
   ]);
   applyRotation(vrm, VRMHumanBoneName.RightLowerArm, [
     0,
-    BASE_POSE_DEGREES.elbowBend,
+    BASE_POSE_DEGREES.rightElbowBend,
     0,
   ]);
   applyRotation(vrm, VRMHumanBoneName.Neck, [
@@ -91,7 +123,7 @@ export function applyBasePose(vrm: VRM): void {
   ]);
   applyRotation(vrm, VRMHumanBoneName.Head, [
     0,
-    0,
+    BASE_POSE_DEGREES.headYaw,
     BASE_POSE_DEGREES.headTilt,
   ]);
 }
