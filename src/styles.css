@@ -1,0 +1,221 @@
+:root {
+  color: #f4f2ed;
+  background: #111419;
+  font-family:
+    Inter, "Yu Gothic UI", "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 100dvh;
+  background: #111419;
+}
+
+.app-title {
+  position: absolute;
+  z-index: 2;
+  top: 1rem;
+  left: 1.25rem;
+  color: #c9c5bd;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.avatar-area {
+  grid-row: 1 / 3;
+  min-height: 0;
+}
+
+.vrm-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 55dvh;
+  overflow: hidden;
+  background: #171b21;
+}
+
+.vrm-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.stage-message {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: min(34rem, calc(100% - 2rem));
+  margin: 0;
+  color: #aaa69f;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.stage-message--action,
+.stage-message--error {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem 1.2rem;
+  border: 1px solid #454a52;
+  background: #1d2229;
+  color: #e9e5dd;
+}
+
+.stage-message--error {
+  border-color: #a65e5e;
+}
+
+.stage-message code {
+  color: #f3b68e;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.expression-warning {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  max-width: 32rem;
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid #a77e4b;
+  background: #2a241d;
+  color: #f3d8b5;
+  font-size: 0.82rem;
+}
+
+.conversation {
+  z-index: 1;
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.9rem clamp(1rem, 4vw, 3rem) 1.1rem;
+  border-top: 1px solid #30353d;
+  background: #111419;
+}
+
+.conversation-copy {
+  display: grid;
+  min-height: 2.6rem;
+  align-content: end;
+  gap: 0.25rem;
+}
+
+.reply,
+.status,
+.conversation-error {
+  margin: 0;
+}
+
+.reply {
+  color: #f4f2ed;
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  line-height: 1.55;
+}
+
+.status {
+  color: #918e88;
+  font-size: 0.8rem;
+}
+
+.conversation-error {
+  color: #ffaaa3;
+  font-size: 0.85rem;
+}
+
+.message-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  width: min(64rem, 100%);
+  margin-inline: auto;
+}
+
+.message-form input {
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid #434952;
+  border-radius: 0.35rem;
+  outline: none;
+  background: #1b2027;
+  color: #f4f2ed;
+}
+
+.message-form input:focus-visible {
+  border-color: #f09a68;
+  box-shadow: 0 0 0 2px rgb(240 154 104 / 25%);
+}
+
+.message-form input::placeholder {
+  color: #777b81;
+}
+
+.message-form button {
+  min-width: 5.5rem;
+  padding: 0.75rem 1.1rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: #f09a68;
+  color: #18130f;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.message-form button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.message-form button:disabled,
+.message-form input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-height: 650px) {
+  .vrm-stage {
+    min-height: 46dvh;
+  }
+
+  .conversation {
+    gap: 0.55rem;
+    padding-block: 0.65rem;
+  }
+}
