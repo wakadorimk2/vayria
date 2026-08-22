@@ -343,15 +343,29 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 
    `VITE_VOICE_INPUT_TRANSPORT`と`VAYRIA_STT_WS_URL`は、各worktreeの`.env.exhibition.local`へ残します。
 
-5. AivisSpeech とPython STTサービスを Windows PC で起動します。
+5. AivisSpeechをWindows PCで起動します。
+   AivisSpeechは今回の起動コマンドでは起動しません。
+   `AIVIS_BASE_URL`で設定した既存のサービスを使用します。
+
+6. 対象worktreeで、Python STTとexhibitionフロントを起動します。
+
+   ```powershell
+   npm run exhibition:start
+   ```
+
+   このコマンドは、Python STTを別のPowerShell窓で起動します。
+   exhibitionフロントは、現在のPowerShell窓で起動します。
+   Python STTが`127.0.0.1:8787`で待ち受けた後に、フロントを起動します。
+   フロントを`Ctrl+C`で停止すると、このコマンドが起動したPython STTも停止します。
+   既に`8787`番ポートが使用中の場合は、既存プロセスを停止せずにエラーを表示します。
+
+   手動で起動する場合は、次の2つのPowerShell窓を使用します。
 
    ```powershell
    Push-Location tools/stt
    uv run python -m vayria_stt.server
    Pop-Location
    ```
-
-6. exhibition モードで Vite を起動します。
 
    ```powershell
    npm run dev:exhibition
