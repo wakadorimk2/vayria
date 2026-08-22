@@ -1,4 +1,5 @@
 import type { Emotion } from '../character/emotion';
+import { runtimeConfig } from '../runtimeConfig';
 import type { ConversationSource } from './useConversation';
 
 export const CONVERSATION_EVENTS = [
@@ -7,6 +8,8 @@ export const CONVERSATION_EVENTS = [
   'llm_done',
   'tts_start',
   'tts_ready',
+  'motion_ready',
+  'motion_start',
   'animation_start',
   'turn_completed',
   'turn_aborted',
@@ -26,6 +29,7 @@ export interface ConversationEvent extends ConversationEventDetails {
   at: string;
   elapsedMs: number;
   event: ConversationEventName;
+  runId?: string;
   source: ConversationSource;
   turnId: string;
 }
@@ -57,6 +61,7 @@ function sendEventToLocalApi(event: ConversationEvent): void {
     headers: {
       'Content-Type': 'application/json',
       'X-Performer-Turn-Id': event.turnId,
+      ...(event.runId ? { 'X-Performer-Run-Id': event.runId } : {}),
     },
     body: JSON.stringify(event),
     keepalive: true,
@@ -70,6 +75,7 @@ export function createConversationEventEmitter(
 ) {
   const turnId = createTurnId();
   const startedAt = performance.now();
+  const runId = runtimeConfig.playcheckRunId;
 
   return {
     emit(event: ConversationEventName, details: ConversationEventDetails = {}) {
@@ -77,6 +83,7 @@ export function createConversationEventEmitter(
         at: new Date().toISOString(),
         elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
         event,
+        ...(runId ? { runId } : {}),
         source,
         turnId,
         ...readSafeDetails(details),
@@ -94,6 +101,7 @@ export function createConversationEventEmitter(
       console.info('[performer-event]', payload);
       sendEventToLocalApi(payload);
     },
+    runId,
     turnId,
   };
 }

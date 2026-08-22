@@ -6,99 +6,12 @@ import type {
   PerformerTrigger,
 } from '../performer/types';
 import { getEffectIntensity } from '../performer/runtime';
+import { CARD_MODIFIERS } from './cardReactions';
 import type { CardSwapResult } from './useCardGamePrototype';
 import type { CardZoneState } from './useCardGamePrototype';
 
 const FORCED_EFFECT_DURATION_MS = 30_000;
 const BACKGROUND_INTENSITY = 0.2;
-
-const CARD_MODIFIERS: Record<string, DirectionEffect['modifiers']> = {
-  suspicious: {
-    responseDelayMs: 260,
-    emotionalInertia: 0.28,
-    speechFragmentation: 0.12,
-    gazeDirectness: -0.35,
-    ttsIntonationScale: -0.08,
-    semanticBiases: ['断定を弱める', '相手の意図を一度確認する'],
-  },
-  sleepy: {
-    responseDelayMs: 180,
-    initiative: -0.25,
-    speechFragmentation: 0.1,
-    ttsRateScale: -0.12,
-    ttsIntonationScale: -0.16,
-    idleMotionWeight: -0.25,
-    headYawBias: -0.8,
-    semanticBiases: ['短くゆるく返す', '説明を少し省略する'],
-  },
-  curious: {
-    initiative: 0.2,
-    callbackTendency: 0.25,
-    gazeDirectness: 0.24,
-    attentionStrength: 0.18,
-    ttsIntonationScale: 0.08,
-    semanticBiases: ['気になる点を短く残す'],
-  },
-  chicken: {
-    semanticBiases: ['鶏に関係する具体物を一つ連想する'],
-  },
-  gigantic: {
-    semanticBiases: ['物事を一箇所だけ大きなスケールで見る'],
-  },
-  tiny: {
-    semanticBiases: ['小さな音や細部へ焦点を寄せる'],
-  },
-  rain: {
-    semanticBiases: ['雨音や湿り気を短く連想する'],
-  },
-  secret: {
-    speechFragmentation: 0.08,
-    semanticBiases: ['言いかけて余白を残す'],
-  },
-  sparkle: {
-    ttsIntonationScale: 0.08,
-    semanticBiases: ['光や華やかさを一箇所だけ強調する'],
-  },
-  panic: {
-    responseDelayMs: -90,
-    speechFragmentation: 0.18,
-    ttsRateScale: 0.08,
-    semanticBiases: ['短い焦りや未完了の思考を一箇所だけ入れる'],
-  },
-  hungry: {
-    semanticBiases: ['身体感覚や食べ物を一箇所だけ連想する'],
-  },
-  underwater: {
-    responseDelayMs: 140,
-    ttsRateScale: -0.08,
-    semanticBiases: ['音や思考を少し遠くぼんやりさせる'],
-  },
-  lonely: {
-    emotionalInertia: 0.12,
-    ttsIntonationScale: -0.08,
-    semanticBiases: ['文末に小さな空白感を残す'],
-  },
-  confident: {
-    gazeDirectness: 0.22,
-    ttsIntonationScale: 0.05,
-    semanticBiases: ['迷いのない断定を一箇所だけ入れる'],
-  },
-  strange: {
-    speechFragmentation: 0.08,
-    semanticBiases: ['普通の状況に小さな違和感を指摘する'],
-  },
-  'deja-vu': {
-    emotionalInertia: 0.08,
-    semanticBiases: ['以前にもあったような反復感を残す'],
-  },
-  'distant-thunder': {
-    responseDelayMs: 90,
-    semanticBiases: ['まだ起きていない変化の気配を示す'],
-  },
-  'upside-down': {
-    semanticBiases: ['常識や因果を一箇所だけ反転させる'],
-  },
-};
 
 interface BackgroundEntry {
   startedAt: number;

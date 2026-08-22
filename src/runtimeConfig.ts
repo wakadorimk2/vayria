@@ -1,3 +1,5 @@
+import { readPlaycheckRunId } from './playcheck';
+
 const APP_MODES = ['local', 'exhibition', 'public'] as const;
 const VOICE_INPUT_TRANSPORTS = ['web-speech', 'remote'] as const;
 
@@ -63,6 +65,10 @@ export const runtimeConfig = Object.freeze({
     import.meta.env.VITE_VOICE_INPUT_TRANSPORT,
     mode,
   ),
+  playcheckRunId:
+    typeof window === 'undefined'
+      ? null
+      : readPlaycheckRunId(window.location.search),
 });
 
 export function apiUrl(path: string): string {

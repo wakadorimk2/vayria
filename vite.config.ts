@@ -82,6 +82,8 @@ export default defineConfig(({ mode }) => {
         aivisIntonationScale: serverEnvironment.AIVIS_INTONATION_SCALE,
         aivisTempoDynamicsScale:
           serverEnvironment.AIVIS_TEMPO_DYNAMICS_SCALE,
+        playcheckRoot: serverEnvironment.VAYRIA_PLAYCHECK_ROOT,
+        exhibitionCaptureEnabled: mode === 'exhibition',
       }),
       voiceStreamProxyPlugin(
         serverEnvironment.VAYRIA_STT_WS_URL?.trim() ||

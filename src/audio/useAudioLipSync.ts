@@ -5,7 +5,9 @@ const RMS_CEILING = 0.12;
 const REACTION_GAIN_SCALE = 0.55;
 
 export interface PlayAudioOptions {
-  onStart?: () => void;
+  startDelayMs?: number;
+  onReadyToStart?: (scheduledStartAt: number) => boolean | void;
+  onStart?: (startedAt: number) => void;
 }
 
 export type PlayAudio = (
@@ -33,6 +35,7 @@ export function useAudioLipSync(volume = 1) {
   const reactionAnalyserRef = useRef<AnalyserNode | null>(null);
   const reactionGainRef = useRef<GainNode | null>(null);
   const reactionSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const startTimerRef = useRef<number | null>(null);
   const animationFrameRef = useRef(0);
   const reactionAnimationFrameRef = useRef(0);
   const smoothedRmsRef = useRef(0);
@@ -90,15 +93,19 @@ export function useAudioLipSync(volume = 1) {
   }, [ensureAudioContext]);
 
   const clearPlayback = useCallback(() => {
-    const source = sourceRef.current;
-    sourceRef.current = null;
-    if (source) {
+    if (startTimerRef.current !== null) {
+      window.clearTimeout(startTimerRef.current);
+      startTimerRef.current = null;
+    }
+
+    if (sourceRef.current) {
       try {
-        source.stop();
+        sourceRef.current.stop();
       } catch {
         // The source already stopped.
       }
-      source.disconnect();
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
     }
 
     if (animationFrameRef.current) {
@@ -116,15 +123,14 @@ export function useAudioLipSync(volume = 1) {
   }, []);
 
   const clearReactionPlayback = useCallback(() => {
-    const source = reactionSourceRef.current;
-    reactionSourceRef.current = null;
-    if (source) {
+    if (reactionSourceRef.current) {
       try {
-        source.stop();
+        reactionSourceRef.current.stop();
       } catch {
         // The source already stopped.
       }
-      source.disconnect();
+      reactionSourceRef.current.disconnect();
+      reactionSourceRef.current = null;
     }
 
     if (reactionAnimationFrameRef.current) {
@@ -179,6 +185,11 @@ export function useAudioLipSync(volume = 1) {
         analyserRef.current = analyser;
 
         const samples = new Float32Array(analyser.fftSize);
+        const requestedDelayMs = options?.startDelayMs ?? 0;
+        const startDelayMs = Number.isFinite(requestedDelayMs)
+          ? Math.max(0, Math.min(requestedDelayMs, 10_000))
+          : 0;
+        const scheduledStartAt = performance.now() + startDelayMs;
         const updateMouth = () => {
           if (
             generation !== generationRef.current ||
@@ -211,10 +222,33 @@ export function useAudioLipSync(volume = 1) {
             if (generation === generationRef.current) clearPlayback();
             resolve();
           };
-          setIsSpeaking(true);
-          animationFrameRef.current = requestAnimationFrame(updateMouth);
-          source.start();
-          options?.onStart?.();
+
+          const markStarted = () => {
+            if (
+              generation !== generationRef.current ||
+              sourceRef.current !== source
+            ) {
+              return;
+            }
+            setIsSpeaking(true);
+            animationFrameRef.current = requestAnimationFrame(updateMouth);
+            options?.onStart?.(performance.now());
+          };
+
+          const readyToStart = options?.onReadyToStart?.(scheduledStartAt);
+          const effectiveStartDelayMs =
+            readyToStart === false ? 0 : startDelayMs;
+          const scheduledAudioTime =
+            context.currentTime + effectiveStartDelayMs / 1_000;
+          source.start(scheduledAudioTime);
+          if (effectiveStartDelayMs > 0) {
+            startTimerRef.current = window.setTimeout(() => {
+              startTimerRef.current = null;
+              markStarted();
+            }, effectiveStartDelayMs);
+          } else {
+            markStarted();
+          }
         });
       } catch (error) {
         if (generation === generationRef.current) clearPlayback();

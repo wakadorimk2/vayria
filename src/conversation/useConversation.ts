@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PlayAudio } from '../audio/useAudioLipSync';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
 import { createConversationEventEmitter } from './conversationEvents';
 import { apiUrl } from '../runtimeConfig';
+import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
   PerformancePlan,
   PerformanceResult,
@@ -159,8 +159,7 @@ function waitMilliseconds(delayMs: number): Promise<void> {
 }
 
 export function useConversation(
-  playAudio: PlayAudio,
-  stopAudio: () => void,
+  playback: PerformancePlayback,
   options: ConversationOptions = {},
 ) {
   const historyLimit = normalizeHistoryLimit(options.historyLimit);
@@ -242,9 +241,9 @@ export function useConversation(
     (stopPlayback: boolean) => {
       generationRef.current += 1;
       abortFetch();
-      if (stopPlayback) stopAudio();
+      if (stopPlayback) playback.stop();
     },
-    [abortFetch, stopAudio],
+    [abortFetch, playback],
   );
 
   const interruptCurrentTurn = useCallback(
@@ -329,6 +328,7 @@ export function useConversation(
 
       activePlanRef.current = plan;
       onPerformancePlanRef.current?.(plan);
+      playback.prepare(plan);
       const generation = generationRef.current + 1;
       generationRef.current = generation;
       setError('');
@@ -342,6 +342,7 @@ export function useConversation(
       let requestController: AbortController | null = null;
       let currentPhase: 'llm' | 'tts' = 'llm';
       let responseEmotion: Emotion | undefined;
+      let motionStartedAt: number | undefined;
       let speechStartedAt: number | undefined;
 
       try {
@@ -362,6 +363,9 @@ export function useConversation(
           headers: {
             'Content-Type': 'application/json',
             'X-Performer-Turn-Id': eventEmitter.turnId,
+            ...(eventEmitter.runId
+              ? { 'X-Performer-Run-Id': eventEmitter.runId }
+              : {}),
           },
           body: JSON.stringify({
             mode: turnSource === 'autonomous' ? 'autonomous' : 'manual',
@@ -506,6 +510,9 @@ export function useConversation(
           headers: {
             'Content-Type': 'application/json',
             'X-Performer-Turn-Id': eventEmitter.turnId,
+            ...(eventEmitter.runId
+              ? { 'X-Performer-Run-Id': eventEmitter.runId }
+              : {}),
           },
           body: JSON.stringify({
             text: responseText,
@@ -556,9 +563,16 @@ export function useConversation(
           };
         }
 
-        await playAudio(audioData, {
-          onStart: () => {
-            speechStartedAt = Date.now();
+        const playbackResult = await playback.play(plan, audioData, {
+          onMotionReady: () => {
+            eventEmitter.emit('motion_ready');
+          },
+          onMotionStart: (startedAt) => {
+            motionStartedAt = startedAt;
+            eventEmitter.emit('motion_start');
+          },
+          onSpeechStart: (startedAt) => {
+            speechStartedAt = startedAt;
             if (generation === generationRef.current) {
               eventEmitter.emit('animation_start');
               setConversationState('speaking', turnSource);
@@ -566,6 +580,11 @@ export function useConversation(
           },
         });
         if (generation !== generationRef.current) {
+          emitResult(plan, 'interrupted');
+          emitTerminalEvent('turn_aborted', { reason: 'superseded' });
+          return { completed: false, decision: null };
+        }
+        if (!playbackResult) {
           emitResult(plan, 'interrupted');
           emitTerminalEvent('turn_aborted', { reason: 'superseded' });
           return { completed: false, decision: null };
@@ -582,8 +601,9 @@ export function useConversation(
             emotion: responseEmotion,
             intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
           },
-          speechStartedAt,
-          speechEndedAt: Date.now(),
+          motionStartedAt: playbackResult.motionStartedAt ?? motionStartedAt,
+          speechStartedAt: playbackResult.speechStartedAt ?? speechStartedAt,
+          speechEndedAt: playbackResult.speechEndedAt,
         });
         emitTerminalEvent('turn_completed');
         return { completed: true, decision: autonomousDecision };
@@ -634,7 +654,7 @@ export function useConversation(
       emitResult,
       finishActivePlanAsCancelled,
       invalidateCurrentTurn,
-      playAudio,
+      playback,
       setConversationState,
     ],
   );

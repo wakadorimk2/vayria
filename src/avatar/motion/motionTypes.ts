@@ -95,6 +95,18 @@ export interface MotionCorrectionProfile {
   };
 }
 
+export interface MotionPlaybackProfile {
+  profileId: string;
+  hipsTranslationScale: number;
+  hipsRotationScale: number;
+  spineRotationScale: number;
+  chestRotationScale: number;
+  upperChestRotationScale: number;
+  neckRotationScale: number;
+  headRotationScale: number;
+  lookAtRotationScale: number;
+}
+
 const ASSET_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const PROFILE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

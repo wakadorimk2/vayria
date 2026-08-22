@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.log
 stress-results/
+playcheck-results/local/
 
 .env*
 !.env.example

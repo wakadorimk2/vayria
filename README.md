@@ -255,7 +255,11 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
 manifest の `assetId`、SHA-256、duration、tag、補正 profile ID が、再生 asset の契約です。
 
-現在の manifest は空です。
+現在の manifest には、Card Pool用18本と通常発話用1本の保存済みVRMAが登録されています。
+
+通常発話の既定主動作は `speech-gentle` です。手元を中心とした穏やかな身体動作を使います。
+
+発話前は、視線・呼吸・微細な揺れを手続き型の前反応として使います。VRMAの開始は180msでIdleからクロスフェードします。音声終了後は250msの余韻を保持し、その後400msでVRMAからIdleへ戻ります。再生中はVRMA単独です。
 
 curated VRMA は、構造検証と実際の Vayria VRM での owner Playcheck 後に登録します。
 
@@ -342,6 +346,65 @@ iPad と Windows PC は同一 LAN に接続してください。Wi-Fi と Ethern
 LAN アドレスはソースへ記述しません。起動時に表示された URL を使用します。
 `main` worktreeは`5187`、worker worktreeは`5188`から`5210`の割り当てポートを使用します。
 
+### 展示中の受動ログとOwner観察
+
+`npm run dev:exhibition`は、起動から停止までを1つの展示キャプチャとして保存します。
+通常の`npm run dev`は展示キャプチャを保存しません。
+来場者へ入力、確認画面、匿名ID表示、QR操作は追加しません。
+
+端末1で展示を起動します。
+
+```powershell
+npm run dev:exhibition
+```
+
+Viteのターミナルに表示された`captureId`を使い、端末2でOwner観察CLIを起動します。
+
+```powershell
+npm run exhibition:observe -- --capture-id <captureId>
+```
+
+最新の展示キャプチャを選ぶ場合は、次を使います。
+
+```powershell
+npm run exhibition:observe -- --latest
+```
+
+展示中は、次の短い入力だけを保存できます。
+
+```text
+note <短文>
+score <axis> <0|1|2|3|N/A> [reason]
+```
+
+`axis`は`presence`、`timing`、`continuity`、`emotion`、`embodiment`です。
+`N/A`には理由が必要です。
+メモと理由は500文字以内です。
+`exit`で観察CLIを終了しても、既存データは削除しません。
+Viteを`Ctrl+C`で停止しても、キャプチャは保存先に残ります。
+
+展示停止後に、JSON集計とCSV行データを生成します。
+
+```powershell
+npm run exhibition:export -- --capture-id <captureId>
+```
+
+保存先は`VAYRIA_PLAYCHECK_ROOT`配下の次です。
+
+```text
+playcheck-results/local/exhibition/<captureId>/
+  metadata.json
+  events.jsonl
+  observations.jsonl
+  export/summary.json
+  export/rows.csv
+```
+
+展示イベントには発話本文、履歴、API key、個人情報を保存しません。
+Ownerも、メモと理由へ発話本文、履歴、API key、個人情報を貼り付けません。
+`playcheckRunId`がある既存のPlaycheckイベントは、従来のraw保存を優先します。
+`public`モードのユーザー入力は今回実装しません。
+
 Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187`から`5210`の受信を一度だけ許可してください。
 インターネットへポート転送は設定しないでください。
 
@@ -407,14 +470,86 @@ npm run stress -- `
   --max-p95-turn-ms 20000
 ```
 
+## 自然さPlaycheck
+
+固定6ケースと5軸rubricで、AITuberの自然さをOwnerが確認できます。
+評価専用UIは追加しません。PCの対話CLIが採点を受け付けます。
+
+PCだけで確認する場合は、Viteを起動します。
+
+端末1:
+
+```powershell
+npm run dev
+```
+
+端末2:
+
+```powershell
+npm run playcheck -- start --base-url http://127.0.0.1:5187/
+```
+
+展示モードでiPadを使う場合は、次のコマンドを実行します。
+
+```powershell
+npm run playcheck:ipad
+```
+
+このコマンドは、exhibitionモードのViteを起動します。
+Viteの`Network` URLから評価runとQRページを作成します。
+QRページをPCの既定ブラウザーで開きます。
+iPadのカメラでQRコードを読み取ります。
+iPadとWindows PCは同じLANに接続してください。
+複数の`Network` URLがある場合は、先頭URLをQRに使います。
+他のURLはCLIに表示します。
+QRページを自動で開かない場合は、次を使います。
+
+```powershell
+npm run playcheck:ipad -- --no-open-qr
+```
+
+その場合は、CLIに表示された`QR page`のパスをPCのブラウザーで開きます。
+CLIは`runId`、`playcheckRunId`付きURL、採点コマンドを表示します。
+同じrun IDを指定して、PCで対話式採点を開始します。
+
+```powershell
+npm run playcheck -- score --run-id <runId>
+```
+
+CLIは6ケースの前提、操作、観察点を表示します。
+iPadでケースを実行し、PCへ戻ってEnterを押します。
+CLIが自然さに関する5つの質問と短い所感を尋ねます。
+入力はケースごとに保存されます。
+途中で終了した場合は、同じ`score`コマンドで再開できます。
+特定ケースを再採点する場合は`--case <scenarioId>`を追加します。
+
+採点完了後に、匿名集計を生成します。
+
+```powershell
+npm run playcheck -- finalize --run-id <runId>
+```
+
+生イベントとCLIの作業状態は`playcheck-results/local/`へ保存します。
+作業状態のJSONはCLIが管理します。Ownerは直接編集しません。
+所感は匿名のrun結果へ保存します。
+発話本文、履歴、API key、個人情報は所感へ書きません。
+Gitには`docs/evaluation/results/`の匿名集計だけを保存します。
+
 ブラウザーは開発時に、次の会話イベントを構造化ログへ出力します。
 
 `input_received`、`llm_start`、`llm_done`、`tts_start`、`tts_ready`、
-`animation_start`、`turn_completed`、`turn_aborted`、`turn_failed`
+`motion_ready`、`motion_start`、`animation_start`、`turn_completed`、
+`turn_aborted`、`turn_failed`
 
 ログはブラウザーのコンソールとViteのターミナルへ出力します。
 入力本文、返答本文、履歴、API keyはイベントログへ含めません。
 `animation_start`は音声再生とリップシンク開始時点です。
+`motion_ready`はVRMAの準備完了時点です。
+`motion_start`は身体モーションの開始時点です。
+発話計画は、既定でモーションを180ms先行させます。
+モーションは既定で180msかけて開始し、音声終了後250msの余韻の後、400msかけてIdleへ戻ります。
+VRMAの準備が1200msを超えた場合は、音声のみを再生します。
+通常発話の既定assetは`speech-gentle`です。カードプレビューが別のassetを指定した場合は、そのassetを優先します。
 
 各provider requestは`X-Performer-Turn-Id`で会話イベントと関連付けます。
 serverは既存clientの`X-Wildcard-Turn-Id`も互換目的で受理します。
@@ -429,7 +564,7 @@ serverは既存clientの`X-Wildcard-Turn-Id`も互換目的で受理します。
 - コメント取得、fake audience、配信サービス連携
 - TTSキュー、発話分割、ストリーミング、割り込み再開
 - 話題の永続記憶
-- ARDY runtime generation、自由な motion selector、複雑な VRMA blending
+- ARDY runtime generation、自由な motion selector、複雑なVRMAタイムライン制御
 - 長期的な mood、感情履歴
 - production server と deployment
 

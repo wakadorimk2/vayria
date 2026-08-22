@@ -1,11 +1,12 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
 } from 'react';
-import { VrmStage } from './avatar/VrmStage';
+import { VrmStage, type VrmStageHandle } from './avatar/VrmStage';
 import { useAudioLipSync } from './audio/useAudioLipSync';
 import { CardGamePrototype } from './cards/CardGamePrototype';
 import { useCardGamePrototype } from './cards/useCardGamePrototype';
@@ -32,6 +33,7 @@ import {
   type ListeningReactionCue,
   type VoiceInputEvent,
 } from './voice/voiceInput';
+import { PerformancePlaybackCoordinator } from './performer/performancePlayback';
 
 const STATUS_LABELS = {
   idle: '話しかけてください。',
@@ -190,6 +192,9 @@ export default function App() {
     { emotion: NonNullable<PerformanceResult['emotionCue']>['emotion']; intensity: number } | null
   >(null);
   const activePlanRef = useRef<PerformancePlan | null>(null);
+  const stageRef = useRef<VrmStageHandle>(null);
+  const [stageMotionPort, setStageMotionPort] =
+    useState<VrmStageHandle | null>(null);
   const nonSpeechTimerRef = useRef<number | null>(null);
   const sessionGenerationRef = useRef(0);
   const {
@@ -223,11 +228,21 @@ export default function App() {
     start: startVoiceInput,
     stop: stopVoiceInput,
   } = voiceInput;
+  const playbackCoordinator = useMemo(
+    () =>
+      new PerformancePlaybackCoordinator({
+        getMotionPort: () => stageMotionPort,
+        playAudio: play,
+        stopAudio: stop,
+      }),
+    [play, stageMotionPort, stop],
+  );
 
   const handlePerformancePlan = useCallback((plan: PerformancePlan) => {
     activePlanRef.current = plan;
     setActivePlan(plan);
-  }, []);
+    playbackCoordinator.prepare(plan);
+  }, [playbackCoordinator]);
 
   const handlePerformanceCue = useCallback(
     (
@@ -246,12 +261,13 @@ export default function App() {
       if (result.outcome === 'failed') {
         setIsAutonomousLoopEnabled(false);
       }
+      playbackCoordinator.stop();
       completePlan(result);
       activePlanRef.current = null;
       setActivePlan(null);
       setActiveEmotionCue(null);
     },
-    [completePlan],
+    [completePlan, playbackCoordinator],
   );
 
   const executeNonSpeechPlan = useCallback(
@@ -310,7 +326,7 @@ export default function App() {
     sendVoice,
     source,
     status,
-  } = useConversation(play, stop, {
+  } = useConversation(playbackCoordinator, {
     historyLimit: 6,
     isMuted,
     onPerformanceCue: handlePerformanceCue,
@@ -732,6 +748,7 @@ export default function App() {
 
   const handleAvatarReady = useCallback(() => {
     void prepare();
+    setStageMotionPort(stageRef.current);
     setIsAvatarReady(true);
   }, [prepare]);
 
@@ -811,6 +828,7 @@ export default function App() {
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
           performancePlan={activePlan ?? undefined}
+          ref={stageRef}
           sessionGeneration={sessionGeneration}
         />
         {isExhibitionMode && (

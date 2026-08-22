@@ -60,9 +60,61 @@ export interface PerformerProfile {
   energyBaseline: number;
   responseDelayBaselineMs: number;
   leadBeforeSpeechMs: number;
+  motionLeadMs: number;
+  motionEnterBlendMs: number;
+  motionExitBlendMs: number;
+  motionPreparationTimeoutMs: number;
+  postSpeechHoldMs: number;
   autonomousInitialDelayMs: number;
   autonomousMinDelayMs: number;
   autonomousMaxDelayMs: number;
+}
+
+export type BehaviorStance =
+  | 'inquisitive'
+  | 'skeptical'
+  | 'drowsy'
+  | 'weathered'
+  | 'awed'
+  | 'timid'
+  | 'curious'
+  | 'seeking'
+  | 'secretive'
+  | 'alarmed'
+  | 'delighted'
+  | 'buoyant'
+  | 'withdrawn'
+  | 'assertive'
+  | 'uncanny'
+  | 'uncertain'
+  | 'vigilant'
+  | 'disoriented';
+
+export type CardGestureIntent =
+  | 'inspect'
+  | 'withdraw'
+  | 'expand'
+  | 'contract'
+  | 'release'
+  | 'lean_in'
+  | 'self_hold'
+  | 'look_up'
+  | 'conceal'
+  | 'brace'
+  | 'open'
+  | 'sway'
+  | 'lower'
+  | 'present'
+  | 'freeze'
+  | 'stare'
+  | 'scan'
+  | 'orient';
+
+export interface PerformanceBehavior {
+  stance: BehaviorStance;
+  energy: 'low' | 'medium' | 'high';
+  engagement: 'direct' | 'cautious' | 'inward' | 'distant';
+  gestureIntent: CardGestureIntent;
 }
 
 export interface DirectionModifiers {
@@ -121,10 +173,19 @@ export interface ActionIntent {
   };
 }
 
+export interface PerformanceTiming {
+  motionLeadMs: number;
+  motionEnterBlendMs: number;
+  motionExitBlendMs: number;
+  motionPreparationTimeoutMs: number;
+  postSpeechHoldMs: number;
+}
+
 export interface PerformancePlan {
   planId: string;
   trigger: PerformerTrigger['kind'];
   intent: 'speak' | 'wait' | 'ignore' | 'react_nonverbally';
+  behavior?: PerformanceBehavior;
   preReaction?: {
     leadBeforeSpeechMs: number;
     gaze?: {
@@ -143,6 +204,7 @@ export interface PerformancePlan {
   motion?: {
     assetId: string;
   };
+  timing: PerformanceTiming;
   speech?: {
     delayMs: number;
     llmContext: {
@@ -175,6 +237,7 @@ export interface PerformanceResult {
     emotion: Emotion;
     intensity: number;
   };
+  motionStartedAt?: number;
   speechStartedAt?: number;
   speechEndedAt?: number;
 }

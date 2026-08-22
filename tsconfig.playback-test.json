@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/playback-test",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/playback-test.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/audio/useAudioLipSync.ts",
+    "src/performer/performancePlayback.ts",
+    "src/performer/types.ts",
+    "scripts/performance-playback.test.ts"
+  ]
+}

@@ -5,6 +5,7 @@ import {
   applyPlanLocalModifiers,
   createActionIntent,
   createInitialPerformerState,
+  DEFAULT_SPEECH_MOTION_ASSET_ID,
   getEffectIntensity,
   getNextAutonomousDelay,
   reducePerformanceResult,
@@ -138,6 +139,7 @@ test('opaque external stimulus uses the neutral Core baseline', () => {
 });
 
 test('require_speech and attention target are Direction contributions', () => {
+  assert.equal(DEFAULT_SPEECH_MOTION_ASSET_ID, 'speech-gentle');
   const trigger: PerformerTrigger = {
     kind: 'external_stimulus',
     semanticCue: 'something_changed',
@@ -162,6 +164,81 @@ test('require_speech and attention target are Direction contributions', () => {
     plan.preReaction?.leadBeforeSpeechMs,
     DEFAULT_PERFORMER_PROFILE.leadBeforeSpeechMs,
   );
+  assert.equal(plan.motion?.assetId, DEFAULT_SPEECH_MOTION_ASSET_ID);
+  assert.deepEqual(plan.timing, {
+    motionLeadMs: DEFAULT_PERFORMER_PROFILE.motionLeadMs,
+    motionEnterBlendMs: DEFAULT_PERFORMER_PROFILE.motionEnterBlendMs,
+    motionExitBlendMs: DEFAULT_PERFORMER_PROFILE.motionExitBlendMs,
+    motionPreparationTimeoutMs:
+      DEFAULT_PERFORMER_PROFILE.motionPreparationTimeoutMs,
+    postSpeechHoldMs: DEFAULT_PERFORMER_PROFILE.postSpeechHoldMs,
+  });
+});
+
+test('default speech motion is not assigned to non-speech plans', () => {
+  const trigger: PerformerTrigger = {
+    kind: 'external_stimulus',
+    semanticCue: 'silent_reaction',
+  };
+  const intent = createActionIntent(trigger, createState());
+  const plan = resolvePerformancePlan(
+    intent,
+    [],
+    createState(),
+    DEFAULT_PERFORMER_PROFILE,
+    100,
+  );
+
+  assert.equal(plan.intent, 'react_nonverbally');
+  assert.equal(plan.motion, undefined);
+});
+
+test('performance timing is clamped without changing response lead timing', () => {
+  const trigger: PerformerTrigger = {
+    kind: 'viewer_message',
+    text: 'timing',
+  };
+  const profile = {
+    ...DEFAULT_PERFORMER_PROFILE,
+    leadBeforeSpeechMs: 240,
+    motionLeadMs: 999,
+    motionEnterBlendMs: 9_999,
+    motionExitBlendMs: -10,
+    motionPreparationTimeoutMs: 9_999,
+    postSpeechHoldMs: -10,
+  };
+  const plan = resolvePerformancePlan(
+    createActionIntent(trigger, createState(), profile),
+    [],
+    createState(),
+    profile,
+    100,
+  );
+
+  assert.equal(plan.preReaction?.leadBeforeSpeechMs, 240);
+  assert.deepEqual(plan.timing, {
+    motionLeadMs: 300,
+    motionEnterBlendMs: 1_000,
+    motionExitBlendMs: 0,
+    motionPreparationTimeoutMs: 1_500,
+    postSpeechHoldMs: 0,
+  });
+});
+
+test('normal runtime plans remain free of Card Preview behavior state', () => {
+  const trigger: PerformerTrigger = {
+    kind: 'viewer_message',
+    text: 'こんにちは',
+  };
+  const plan = resolvePerformancePlan(
+    createActionIntent(trigger, createState()),
+    [],
+    createState(),
+    DEFAULT_PERFORMER_PROFILE,
+    100,
+  );
+
+  assert.equal(plan.behavior, undefined);
 });
 
 test('emotion inertia blends the cue with the previous emotion', () => {

@@ -31,6 +31,7 @@ function readJsonChunk(bytes) {
 
   let json = null;
   let binByteLength = 0;
+  let binBytes = null;
   for (let offset = 12; offset < declaredLength; ) {
     assertCondition(offset + 8 <= declaredLength, 'The GLB chunk header is truncated.');
     const chunkLength = view.getUint32(offset, true);
@@ -43,12 +44,15 @@ function readJsonChunk(bytes) {
       const jsonText = new TextDecoder().decode(bytes.subarray(chunkStart, chunkEnd)).trim();
       json = JSON.parse(jsonText);
     }
-    if (chunkType === BIN_CHUNK_TYPE) binByteLength += chunkLength;
+    if (chunkType === BIN_CHUNK_TYPE) {
+      binByteLength += chunkLength;
+      binBytes = bytes.subarray(chunkStart, chunkEnd);
+    }
     offset = chunkEnd;
   }
 
   assertCondition(json !== null, 'The GLB does not contain a JSON chunk.');
-  return { json, binByteLength };
+  return { json, binByteLength, binBytes };
 }
 
 function readIndex(value, label) {
@@ -72,7 +76,66 @@ function validateAccessor(gltf, accessorIndex, binByteLength, label) {
   assertCondition(byteOffset >= 0 && byteOffset + byteLength <= binByteLength, `${label} bufferView is outside the BIN chunk.`);
 }
 
-function validateAnimations(gltf, binByteLength) {
+function readAnimationInputValues(
+  gltf,
+  accessorIndex,
+  binBytes,
+  binByteLength,
+  label,
+) {
+  assertCondition(binBytes instanceof Uint8Array, 'The GLB BIN chunk is missing.');
+  const accessors = Array.isArray(gltf.accessors) ? gltf.accessors : [];
+  const bufferViews = Array.isArray(gltf.bufferViews) ? gltf.bufferViews : [];
+  const accessor = accessors[readIndex(accessorIndex, `${label}.accessor`)];
+  assertCondition(accessor && typeof accessor === 'object', `${label} accessor is missing.`);
+  assertCondition(accessor.componentType === 5126, `${label} accessor must use FLOAT.`);
+  assertCondition(accessor.type === 'SCALAR', `${label} accessor must be SCALAR.`);
+  assertCondition(Number.isInteger(accessor.count) && accessor.count > 0, `${label} accessor count is invalid.`);
+  const viewIndex = readIndex(accessor.bufferView, `${label}.bufferView`);
+  const bufferView = bufferViews[viewIndex];
+  assertCondition(bufferView && typeof bufferView === 'object', `${label} bufferView is missing.`);
+  const bufferViewOffset = Number.isInteger(bufferView.byteOffset) ? bufferView.byteOffset : 0;
+  const accessorOffset = Number.isInteger(accessor.byteOffset) ? accessor.byteOffset : 0;
+  const stride = Number.isInteger(bufferView.byteStride) ? bufferView.byteStride : 4;
+  const start = bufferViewOffset + accessorOffset;
+  assertCondition(stride >= 4, `${label} byte stride is invalid.`);
+  assertCondition(
+    start >= 0 && start + (accessor.count - 1) * stride + 4 <= binByteLength,
+    `${label} accessor is outside the BIN chunk.`,
+  );
+
+  const view = new DataView(
+    binBytes.buffer,
+    binBytes.byteOffset,
+    binBytes.byteLength,
+  );
+  return Array.from(
+    { length: accessor.count },
+    (_, index) => view.getFloat32(start + index * stride, true),
+  );
+}
+
+function getAnimationDuration(animation, gltf, binBytes, binByteLength, label) {
+  if (Number.isFinite(animation.duration) && animation.duration > 0) {
+    return animation.duration;
+  }
+
+  const samplers = Array.isArray(animation.samplers) ? animation.samplers : [];
+  const inputValues = samplers.flatMap((sampler, samplerIndex) =>
+    readAnimationInputValues(
+      gltf,
+      sampler.input,
+      binBytes,
+      binByteLength,
+      `${label}.samplers[${samplerIndex}].input`,
+    ),
+  );
+  const duration = Math.max(...inputValues);
+  assertCondition(Number.isFinite(duration) && duration > 0, `${label}.duration is invalid.`);
+  return duration;
+}
+
+function validateAnimations(gltf, binBytes, binByteLength) {
   const extensionsUsed = Array.isArray(gltf.extensionsUsed) ? gltf.extensionsUsed : [];
   assertCondition(
     extensionsUsed.includes('VRMC_vrm_animation'),
@@ -97,9 +160,12 @@ function validateAnimations(gltf, binByteLength) {
 
   for (const [animationIndex, animation] of animations.entries()) {
     assertCondition(animation && typeof animation === 'object', `animations[${animationIndex}] is invalid.`);
-    assertCondition(
-      Number.isFinite(animation.duration) && animation.duration > 0,
-      `animations[${animationIndex}].duration is invalid.`,
+    getAnimationDuration(
+      animation,
+      gltf,
+      binBytes,
+      binByteLength,
+      `animations[${animationIndex}]`,
     );
     assertCondition(Array.isArray(animation.channels) && animation.channels.length > 0, `animations[${animationIndex}] has no channels.`);
     const samplers = Array.isArray(animation.samplers) ? animation.samplers : [];
@@ -124,8 +190,8 @@ function validateAnimations(gltf, binByteLength) {
 async function main() {
   const filePath = readArgument('--file');
   const bytes = new Uint8Array(await readFile(filePath));
-  const { json, binByteLength } = readJsonChunk(bytes);
-  const animationCount = validateAnimations(json, binByteLength);
+  const { json, binByteLength, binBytes } = readJsonChunk(bytes);
+  const animationCount = validateAnimations(json, binBytes, binByteLength);
   console.log(`Validated VRMA: ${filePath} (${animationCount} animation(s))`);
 }
 
