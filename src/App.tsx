@@ -600,6 +600,14 @@ export default function App() {
           onReady={handleAvatarReady}
           performancePlan={activePlan ?? undefined}
         />
+        {isExhibitionMode && (
+          <aside className="exhibition-copy" aria-label="展示案内">
+            <p className="exhibition-copy__title">Vayriaに一枚、どうぞ。</p>
+            <p className="exhibition-copy__hint">
+              気になるカードを一枚、Vayriaの脳内へ。
+            </p>
+          </aside>
+        )}
         <CardGamePrototype
           game={cardGame}
           isInteractionLocked={isPerformerBusy}

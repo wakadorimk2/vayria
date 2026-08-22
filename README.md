@@ -137,7 +137,9 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    Setup scriptはAPIを起動しません。
    ActionがworktreeごとのAPIを起動します。
    `main`は`5187`を使用します。
-   worker worktreeは`5188`から`5999`の空きポートを自動で使用します。
+   worker worktreeは`5188`から`5210`の空きポートを自動で使用します。
+   Setup scriptはworktreeごとの`.env.exhibition.local`も自動で生成します。
+   `.env.exhibition.example`を毎回コピーする必要はありません。
    既存の`.env.local`は上書きしません。
    `.env.local`には実キーを保存しません。
 
@@ -166,7 +168,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    既存の`.env.local`は、`-Force`を指定しない限り上書きしません。
 
    `main`は`5187`を使用します。
-   各worker worktreeは`5188`以降の未使用ポートを使用します。
+   各worker worktreeは`5188`から`5210`の未使用ポートを使用します。
 
 7. VRMの正本をGitリポジトリの外へ保存します。
 
@@ -225,15 +227,23 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 | `exhibition` | Windows PC と iPad の同一 LAN 接続 | `0.0.0.0:5187` 待受け |
 | `public` | 将来の HTTPS 公開 | 今回は公開サーバーを提供しません |
 
+### 展示コピー
+
+展示画面と会場パネルで使用する正本コピーです。
+
+メインコピー：
+
+> Vayriaに一枚、どうぞ。
+
+補助コピー：
+
+> 気になるカードを一枚、Vayriaの脳内へ。
+
 ### iPad 展示の確認
 
 1. `.env.example` を `.env.local` へコピーし、API key と AivisSpeech の設定を記述します。
-2. `.env.exhibition.example` を `.env.exhibition` へコピーします。
-
-   ```powershell
-   Copy-Item -LiteralPath '.env.exhibition.example' -Destination '.env.exhibition'
-   ```
-
+2. worktreeのSetup scriptが`.env.exhibition.local`を生成したことを確認します。
+   `.env.exhibition.example`の手動コピーは不要です。
 3. AivisSpeech を Windows PC で起動します。
 4. exhibition モードで Vite を起動します。
 
@@ -244,13 +254,14 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 5. Vite が表示する `Network` URL を iPad で開きます。
 
    ```text
-   http://<Windows PC の LAN アドレス>:5187/
+   http://<Windows PC の LAN アドレス>:<worktreeに割り当てられたポート>/
    ```
 
 iPad と Windows PC は同一 LAN に接続してください。Wi-Fi と Ethernet のどちらも使用できます。
 LAN アドレスはソースへ記述しません。起動時に表示された URL を使用します。
+`main` worktreeは`5187`、worker worktreeは`5188`から`5210`の割り当てポートを使用します。
 
-Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187` の受信を許可してください。
+Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187`から`5210`の受信を一度だけ許可してください。
 インターネットへポート転送は設定しないでください。
 
 `VITE_API_BASE_URL=/` は現在のページと同じ接続先を使用します。別の HTTPS API を使用する場合だけ、`VITE_API_BASE_URL` を変更します。
@@ -259,7 +270,7 @@ Windows ファイアウォールは、プライベートネットワーク上の
 `getUserMedia()` とカメラ背景も今回の対象外です。カメラを追加する場合は HTTPS または同等の Secure Context が必要です。
 
 `.env.local` と `public/avatar/*.vrm` は Git の追跡対象外です。
-`.env.exhibition` も Git の追跡対象外です。
+`.env.exhibition` と `.env.exhibition.local` も Git の追跡対象外です。
 VRMの正本もGitリポジトリの外に置きます。`.worktreeinclude`には追加しません。
 API key と AivisSpeech の設定は Vite の Node middleware だけが読みます。
 ブラウザー bundle には埋め込みません。
