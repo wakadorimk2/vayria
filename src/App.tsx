@@ -38,6 +38,7 @@ import {
   BARGE_IN_TIMEOUT_MS,
   clampVadThreshold,
   DEFAULT_VAD_THRESHOLD,
+  getExhibitionAudioPresetConfig,
   isAudioLabMode,
   resolveInitialAudioLabMode,
   type AudioLabMode,
@@ -241,17 +242,27 @@ export default function App() {
   const [bargeInState, setBargeInState] = useState<BargeInState>('idle');
   const [bargeInTimeoutToken, setBargeInTimeoutToken] = useState(0);
   const [audioLabMode, setAudioLabMode] = useState<AudioLabMode>(
-    () => resolveInitialAudioLabMode(runtimeConfig.audioLabEnabled),
+    () =>
+      resolveInitialAudioLabMode(
+        runtimeConfig.audioLabEnabled,
+        isExhibitionMode,
+      ),
   );
-  const [vadThreshold, setVadThreshold] = useState(DEFAULT_VAD_THRESHOLD);
+  const [vadThreshold, setVadThreshold] = useState(
+    () =>
+      getExhibitionAudioPresetConfig(runtimeConfig.audioPreset)
+        .defaultVadThreshold ?? DEFAULT_VAD_THRESHOLD,
+  );
   const ttsPlaying = isSpeaking || isReactionPlaying;
   const voiceLab = useVoiceLab({
     enabled: runtimeConfig.audioLabEnabled,
     mode: audioLabMode,
+    preset: runtimeConfig.audioPreset,
     ttsPlaying,
   });
   const voiceInput = useVoiceInput({
     audioMode: audioLabMode,
+    audioPreset: runtimeConfig.audioPreset,
     language: 'ja-JP',
     ttsPlaying,
     onDiagnostic: voiceLab.handleDiagnostic,
@@ -1146,6 +1157,7 @@ export default function App() {
           isVadSpeech={voiceInput.isVadSpeech}
           mediaSettings={voiceInput.mediaSettings}
           mode={audioLabMode}
+          preset={runtimeConfig.audioPreset}
           onExport={voiceLab.downloadJsonl}
           onModeChange={handleAudioLabModeChange}
           onVoiceToggle={handleVoiceToggle}

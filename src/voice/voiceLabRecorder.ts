@@ -8,10 +8,12 @@ import type {
 } from './audioLab.js';
 import {
   createEmptySummary,
+  DEFAULT_EXHIBITION_AUDIO_PRESET,
   findKnownHallucinationPhrase,
   millisecondsBetween,
   timestampFromMilliseconds,
   type AudioLabMediaSettings,
+  type ExhibitionAudioPreset,
 } from './audioLab.js';
 import type { VoiceInputEvent } from './voiceInput.js';
 
@@ -39,6 +41,7 @@ interface PendingSttObservation {
 export interface VoiceLabRecorderOptions {
   enabled: boolean;
   mode: AudioLabMode;
+  preset?: ExhibitionAudioPreset;
   sessionId?: string;
   onRecord?: (record: VoiceLabRecord) => void;
 }
@@ -78,6 +81,7 @@ export class VoiceLabRecorder {
   private readonly onRecord?: (record: VoiceLabRecord) => void;
   private readonly sessionId: string | null;
   private currentMode: AudioLabMode;
+  private readonly currentPreset: ExhibitionAudioPreset;
   private currentTtsPlaying = false;
   private currentMediaSettings: AudioLabMediaSettings | null = null;
   private started = false;
@@ -107,6 +111,7 @@ export class VoiceLabRecorder {
   constructor(options: VoiceLabRecorderOptions) {
     this.enabled = options.enabled;
     this.currentMode = options.mode;
+    this.currentPreset = options.preset ?? DEFAULT_EXHIBITION_AUDIO_PRESET;
     this.sessionId = options.enabled
       ? options.sessionId ?? createSessionId()
       : null;
@@ -121,6 +126,7 @@ export class VoiceLabRecorder {
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
       mode: this.currentMode,
+      preset: this.currentPreset,
     });
   }
 
@@ -137,6 +143,7 @@ export class VoiceLabRecorder {
       kind: 'session_summary',
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
+      preset: this.currentPreset,
       summary: cloneSummary(this.summary),
     });
     this.started = false;
@@ -153,6 +160,7 @@ export class VoiceLabRecorder {
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
       mode,
+      preset: this.currentPreset,
     });
   }
 
@@ -194,6 +202,7 @@ export class VoiceLabRecorder {
           timestamp: timestampFromMilliseconds(diagnostic.at),
           sessionId: this.sessionId!,
           mode: this.currentMode,
+          preset: this.currentPreset,
           action: diagnostic.action,
           state: diagnostic.state,
           ttsPlaying: diagnostic.ttsPlaying,
@@ -289,6 +298,7 @@ export class VoiceLabRecorder {
           timestamp: timestampFromMilliseconds(event.at),
           sessionId: this.sessionId!,
           mode: this.currentMode,
+          preset: this.currentPreset,
           error: event.code,
           segmentId: null,
         });
@@ -307,6 +317,7 @@ export class VoiceLabRecorder {
             timestamp: timestampFromMilliseconds(event.at),
             sessionId: this.sessionId!,
             mode: active.mode,
+            preset: this.currentPreset,
             error: 'recognition-stopped-before-result',
             segmentId: active.segmentId,
           });
@@ -373,6 +384,7 @@ export class VoiceLabRecorder {
       timestamp,
       sessionId: this.sessionId!,
       mode: active.mode,
+      preset: this.currentPreset,
       segmentId: event.segmentId,
       speechStartAt,
       speechEndAt,
@@ -412,6 +424,7 @@ export class VoiceLabRecorder {
       timestamp: timestampFromMilliseconds(diagnostic.at),
       sessionId: this.sessionId,
       mode: this.currentMode,
+      preset: this.currentPreset,
       speechStartAt: null,
       speechEndAt: timestampFromMilliseconds(diagnostic.at),
       audioDurationMs: Math.max(0, Math.round(diagnostic.candidateDurationMs)),

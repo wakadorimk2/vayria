@@ -4,9 +4,12 @@ import { createRemotePcmVoiceAdapter } from './remotePcmVoiceAdapter';
 import type { VoiceInputAdapter } from './voiceAdapter';
 import {
   DEFAULT_AUDIO_INPUT_MODE,
+  DEFAULT_EXHIBITION_AUDIO_PRESET,
   DEFAULT_VAD_THRESHOLD,
+  getExhibitionAudioPresetConfig,
   type AudioLabMediaSettings,
   type AudioLabMode,
+  type ExhibitionAudioPreset,
   type VoiceInputDiagnostic,
 } from './audioLab.js';
 import {
@@ -22,6 +25,7 @@ export interface UseVoiceInputOptions {
   language?: string;
   transport?: VoiceInputTransport;
   audioMode?: AudioLabMode;
+  audioPreset?: ExhibitionAudioPreset;
   vadThreshold?: number;
   ttsPlaying?: boolean;
   onEvent?: (event: VoiceInputEvent) => void;
@@ -54,7 +58,11 @@ function isFatalVoiceError(code: string | null): boolean {
 
 export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const audioMode = options.audioMode ?? DEFAULT_AUDIO_INPUT_MODE;
-  const vadThreshold = options.vadThreshold ?? DEFAULT_VAD_THRESHOLD;
+  const audioPreset = options.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET;
+  const vadThreshold =
+    options.vadThreshold ??
+    getExhibitionAudioPresetConfig(audioPreset).defaultVadThreshold ??
+    DEFAULT_VAD_THRESHOLD;
   const optionsRef = useRef(options);
   const controllerRef = useRef<VoiceInputController | null>(null);
   const adapterRef = useRef<VoiceInputAdapter | null>(null);
@@ -167,8 +175,13 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         ? createRemotePcmVoiceAdapter({
             ...adapterOptions,
             audioMode,
+            audioPreset:
+              optionsRef.current.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET,
             vadThreshold:
-              optionsRef.current.vadThreshold ?? DEFAULT_VAD_THRESHOLD,
+              optionsRef.current.vadThreshold ??
+              getExhibitionAudioPresetConfig(
+                optionsRef.current.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET,
+              ).defaultVadThreshold,
             diagnostics: runtimeConfig.audioLabEnabled,
           })
         : createBrowserSpeechRecognitionAdapter(adapterOptions);
@@ -190,7 +203,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       adapter.dispose();
       adapterRef.current = null;
     };
-  }, [audioMode]);
+  }, [audioMode, audioPreset]);
 
   useEffect(() => {
     adapterRef.current?.setVadThreshold?.(vadThreshold);

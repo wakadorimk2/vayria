@@ -15,13 +15,24 @@ export interface AdaptiveRmsVadChunkResult extends RmsVadChunkResult {
   vadThreshold: number;
 }
 
+export interface AdaptiveRmsVadOptions {
+  noiseFloorMultiplier?: number;
+}
+
 export class AdaptiveRmsVad {
   private readonly vad: RmsVad;
+  private readonly noiseFloorMultiplier: number;
   private vadThreshold: number;
   private noiseFloor = ADAPTIVE_NOISE_FLOOR_INITIAL;
   private ttsPlaying = false;
 
-  constructor(vadThreshold = DEFAULT_VAD_THRESHOLD) {
+  constructor(
+    vadThreshold = DEFAULT_VAD_THRESHOLD,
+    options: AdaptiveRmsVadOptions = {},
+  ) {
+    this.noiseFloorMultiplier = Number.isFinite(options.noiseFloorMultiplier)
+      ? Math.max(1, options.noiseFloorMultiplier!)
+      : ADAPTIVE_NOISE_FLOOR_MULTIPLIER;
     this.vadThreshold = clampVadThreshold(vadThreshold);
     this.vad = new RmsVad(this.getEffectiveThreshold());
   }
@@ -37,7 +48,7 @@ export class AdaptiveRmsVad {
   getEffectiveThreshold(): number {
     return Math.max(
       this.vadThreshold,
-      this.noiseFloor * ADAPTIVE_NOISE_FLOOR_MULTIPLIER,
+      this.noiseFloor * this.noiseFloorMultiplier,
     );
   }
 

@@ -12,10 +12,13 @@ import type { VoiceInputEvent } from './voiceInput.js';
 import {
   AUDIO_PROCESSING_CONSTRAINTS,
   DEFAULT_AUDIO_INPUT_MODE,
+  DEFAULT_EXHIBITION_AUDIO_PRESET,
   DEFAULT_VAD_THRESHOLD,
+  getExhibitionAudioPresetConfig,
   sanitizeMediaTrackSettings,
   type AudioLabMediaSettings,
   type AudioLabMode,
+  type ExhibitionAudioPreset,
   type VoiceInputDiagnostic,
 } from './audioLab.js';
 import { AdaptiveRmsVad } from './adaptiveRmsVad.js';
@@ -28,6 +31,7 @@ const MAX_SOCKET_BUFFERED_BYTES = 512 * 1024;
 interface RemotePcmVoiceAdapterOptions extends VoiceInputAdapterOptions {
   webSocketUrl?: string;
   audioMode?: AudioLabMode;
+  audioPreset?: ExhibitionAudioPreset;
   vadThreshold?: number;
   diagnostics?: boolean;
 }
@@ -68,7 +72,12 @@ function readWebSocketUrl(override?: string): string | null {
 
 function readAudioConstraints(
   audioMode: AudioLabMode,
+  audioPreset: ExhibitionAudioPreset,
 ): MediaTrackConstraints {
+  if (audioMode === 'exhibition-mix') {
+    return getExhibitionAudioPresetConfig(audioPreset).requestedConstraints;
+  }
+
   if (audioMode === DEFAULT_AUDIO_INPUT_MODE) {
     return { echoCancellation: true };
   }
@@ -241,14 +250,18 @@ export function createRemotePcmVoiceAdapter(
   const supportErrorCode = readSupportErrorCode();
   const AudioContextConstructor = readAudioContextConstructor();
   const audioMode = options.audioMode ?? DEFAULT_AUDIO_INPUT_MODE;
-  const requestedAudioConstraints = readAudioConstraints(audioMode);
+  const audioPreset = options.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET;
+  const presetConfig = getExhibitionAudioPresetConfig(audioPreset);
+  const requestedAudioConstraints = readAudioConstraints(audioMode, audioPreset);
   const rmsVad =
     audioMode === 'processed-vad'
       ? new RmsVad(options.vadThreshold ?? DEFAULT_VAD_THRESHOLD)
       : null;
   const adaptiveRmsVad =
-    audioMode === 'exhibition-mix'
-      ? new AdaptiveRmsVad(options.vadThreshold ?? DEFAULT_VAD_THRESHOLD)
+    audioMode === 'exhibition-mix' && presetConfig.browserGateEnabled
+      ? new AdaptiveRmsVad(options.vadThreshold ?? presetConfig.defaultVadThreshold, {
+          noiseFloorMultiplier: presetConfig.noiseFloorMultiplier,
+        })
       : null;
   const activeVad = rmsVad ?? adaptiveRmsVad;
   let disposed = false;

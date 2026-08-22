@@ -1,4 +1,8 @@
 import { readPlaycheckRunId } from './playcheck';
+import {
+  resolveExhibitionAudioPreset,
+  type ExhibitionAudioPreset,
+} from './voice/audioLab.js';
 
 const APP_MODES = ['local', 'exhibition', 'public'] as const;
 const VOICE_INPUT_TRANSPORTS = ['web-speech', 'remote'] as const;
@@ -63,10 +67,21 @@ function readAudioLabEnabled(search: string): boolean {
   return new URLSearchParams(search).get('audioLab') === '1';
 }
 
+function readAudioPreset(search: string): ExhibitionAudioPreset {
+  const queryValue = new URLSearchParams(search).get('audioPreset');
+  return resolveExhibitionAudioPreset(
+    queryValue,
+    import.meta.env.VITE_AUDIO_PRESET,
+  );
+}
+
+const browserSearch =
+  typeof window === 'undefined' ? '' : window.location.search;
+
 export const runtimeConfig = Object.freeze({
   apiBaseUrl: readApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
-  audioLabEnabled:
-    typeof window !== 'undefined' && readAudioLabEnabled(window.location.search),
+  audioLabEnabled: readAudioLabEnabled(browserSearch),
+  audioPreset: readAudioPreset(browserSearch),
   mode,
   voiceTransport: readVoiceInputTransport(
     import.meta.env.VITE_VOICE_INPUT_TRANSPORT,

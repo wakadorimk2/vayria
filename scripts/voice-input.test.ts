@@ -28,8 +28,11 @@ import {
   clampVadThreshold,
   DEFAULT_AUDIO_INPUT_MODE,
   DEFAULT_AUDIO_LAB_MODE,
+  DEFAULT_EXHIBITION_AUDIO_PRESET,
+  getExhibitionAudioPresetConfig,
   findKnownHallucinationPhrase,
   resolveInitialAudioLabMode,
+  resolveExhibitionAudioPreset,
   sanitizeMediaTrackSettings,
   type VoiceLabRecord,
 } from '../src/voice/audioLab.js';
@@ -453,6 +456,15 @@ test('adaptive RMS VAD updates noise floor only while idle and accepts short spe
   const shortSpeech = adaptive.process(makePcmChunk(0.08), 500);
   assert.deepEqual(shortSpeech.events, [{ type: 'speech_started', at: 500 }]);
   assert.equal(shortSpeech.forwardedChunks.length, 2);
+
+  const aggressive = new AdaptiveRmsVad(0.02, {
+    noiseFloorMultiplier: 3.0,
+  });
+  aggressive.process(makePcmChunk(0.01), 600);
+  assert.equal(
+    aggressive.getEffectiveThreshold(),
+    Math.max(0.02, aggressive.getNoiseFloor() * 3.0),
+  );
 });
 
 test('adaptive RMS VAD rejects a low-level candidate after two noise-floor chunks', () => {
@@ -572,8 +584,43 @@ test('Audio Lab normalizes known hallucinations and anonymizes track settings', 
 test('Audio Lab defaults to Mode D only when the debug flag is enabled', () => {
   assert.equal(DEFAULT_AUDIO_INPUT_MODE, 'baseline');
   assert.equal(DEFAULT_AUDIO_LAB_MODE, 'exhibition-mix');
+  assert.equal(DEFAULT_EXHIBITION_AUDIO_PRESET, 'mild');
   assert.equal(resolveInitialAudioLabMode(true), 'exhibition-mix');
   assert.equal(resolveInitialAudioLabMode(false), 'baseline');
+  assert.equal(resolveInitialAudioLabMode(false, true), 'exhibition-mix');
+  assert.equal(resolveInitialAudioLabMode(false, false), 'baseline');
+});
+
+test('exhibition audio presets resolve query over environment and expose gate settings', () => {
+  assert.equal(resolveExhibitionAudioPreset(null, null), 'mild');
+  assert.equal(resolveExhibitionAudioPreset(null, 'aggressive'), 'aggressive');
+  assert.equal(resolveExhibitionAudioPreset('off', 'aggressive'), 'off');
+  assert.equal(resolveExhibitionAudioPreset('invalid', 'aggressive'), 'aggressive');
+  assert.equal(resolveExhibitionAudioPreset('invalid', 'invalid'), 'mild');
+
+  assert.deepEqual(
+    getExhibitionAudioPresetConfig('off'),
+    {
+      requestedConstraints: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+      browserGateEnabled: false,
+      defaultVadThreshold: 0.02,
+      noiseFloorMultiplier: 2.5,
+    },
+  );
+  assert.equal(getExhibitionAudioPresetConfig('mild').defaultVadThreshold, 0.02);
+  assert.equal(getExhibitionAudioPresetConfig('mild').noiseFloorMultiplier, 2.5);
+  assert.equal(
+    getExhibitionAudioPresetConfig('aggressive').defaultVadThreshold,
+    0.04,
+  );
+  assert.equal(
+    getExhibitionAudioPresetConfig('aggressive').noiseFloorMultiplier,
+    3.0,
+  );
 });
 
 test('Voice Lab recorder measures latency, known errors, TTS overlap, and summary', () => {
@@ -581,6 +628,7 @@ test('Voice Lab recorder measures latency, known errors, TTS overlap, and summar
   const recorder = new VoiceLabRecorder({
     enabled: true,
     mode: 'processed',
+    preset: 'mild',
     sessionId: 'vl-test-session',
     onRecord: (record) => records.push(record),
   });
@@ -639,12 +687,14 @@ test('Voice Lab recorder measures latency, known errors, TTS overlap, and summar
   assert.equal(snapshot.summary.ttsOverlapCount, 1);
   assert.equal(snapshot.summary.averageSttLatencyMs, 200);
   assert.equal(records.at(-1)?.kind, 'session_summary');
+  assert.equal(records[0]?.preset, 'mild');
 });
 
 test('Voice Lab recorder stores Mode D thresholds and barge-in summary metrics', () => {
   const recorder = new VoiceLabRecorder({
     enabled: true,
     mode: 'exhibition-mix',
+    preset: 'aggressive',
     sessionId: 'vl-mode-d-session',
   });
   recorder.start();
@@ -748,6 +798,10 @@ test('Voice Lab recorder stores Mode D thresholds and barge-in summary metrics',
   assert.equal(snapshot.summary.bargeInConfirmedCount, 1);
   assert.equal(snapshot.summary.bargeInRestoredCount, 1);
   assert.equal(snapshot.summary.bargeInTimeoutCount, 1);
+  assert.equal(
+    snapshot.records.find((record) => record.kind === 'utterance')?.preset,
+    'aggressive',
+  );
 });
 
 test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifiers', async () => {
@@ -758,6 +812,7 @@ test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifie
       timestamp: '2026-08-22T00:00:00.000Z',
       sessionId: 'vl-store-session',
       mode: 'baseline' as const,
+      preset: 'mild' as const,
     };
     assert.deepEqual(readVoiceLabRecord({ record }), record);
     await appendVoiceLabRecord(root, record);
@@ -771,11 +826,16 @@ test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifie
       /record is invalid/,
     );
     assert.throws(
+      () => readVoiceLabRecord({ ...record, preset: 'invalid' }),
+      /record is invalid/,
+    );
+    assert.throws(
       () =>
         readVoiceLabRecord({
           kind: 'session_summary',
           timestamp: '2026-08-22T00:00:00.000Z',
           sessionId: 'vl-store-session',
+          preset: 'mild',
           summary: {
             utteranceCount: 0,
             sttSuccessCount: 0,

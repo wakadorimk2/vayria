@@ -68,7 +68,16 @@ Audio Labを有効にした開発調査では、raw transcriptを調査ログへ
 Audio LabのMode A/B/C/D、固定ケース、JSONLログは
 [`docs/evaluation/voice-audio-lab.md`](docs/evaluation/voice-audio-lab.md)を参照してください。
 `?audioLab=1`を付けたAudio Labは、初期ModeにExhibition Mixを選びます。
-通常のlocal/exhibition起動は、既存のBaseline経路を使います。
+通常の`exhibition`起動は、Mode DのExhibition Mixを使います。
+通常の`local`と`public`起動は、Baselineを使います。
+
+展示用Presetの既定値は`mild`です。
+起動時は`VITE_AUDIO_PRESET=off|mild|aggressive`で変更できます。
+URLの`?audioPreset=off`、`?audioPreset=mild`、`?audioPreset=aggressive`は、起動時設定より優先します。
+PresetをURLで変更した場合は、ページを再読み込みしてください。
+通常展示にはPreset操作UIを表示しません。
+Audio LabのDebug panelでは、現在のPresetを読み取り専用で表示します。
+Presetの比較手順は[`docs/evaluation/voice-audio-lab.md`](docs/evaluation/voice-audio-lab.md)を参照してください。
 
 Sessionはページ内だけの一時状態です。
 履歴、話題、直前の自律返答、演者状態、カードのターン状態を含みます。
@@ -325,6 +334,7 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 4. `.env.exhibition.local`へ証明書とSTTサービスの設定を追加します。
 
    ```dotenv
+   VITE_AUDIO_PRESET=mild
    VITE_VOICE_INPUT_TRANSPORT=remote
    VAYRIA_HTTPS=true
    VAYRIA_HTTPS_CERT_FILE=C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-cert.pem

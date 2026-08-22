@@ -322,6 +322,7 @@ function Ensure-ExhibitionEnvironment {
     '# Do not add secrets here. Shared server settings remain in .env.local.'
     'VITE_APP_MODE=exhibition'
     'VITE_API_BASE_URL=/'
+    'VITE_AUDIO_PRESET=mild'
     'VITE_VOICE_INPUT_TRANSPORT=remote'
     'VAYRIA_BIND_HOST=0.0.0.0'
     "VAYRIA_PORT=$SelectedPort"

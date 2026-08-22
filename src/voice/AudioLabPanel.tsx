@@ -1,6 +1,7 @@
 import type {
   AudioLabMediaSettings,
   AudioLabMode,
+  ExhibitionAudioPreset,
   VoiceLabSnapshot,
 } from './audioLab.js';
 import {
@@ -17,8 +18,15 @@ const MODE_LABELS: Record<AudioLabMode, string> = {
   'exhibition-mix': 'Exhibition Mix',
 };
 
+const PRESET_LABELS: Record<ExhibitionAudioPreset, string> = {
+  off: 'Off',
+  mild: 'Mild',
+  aggressive: 'Aggressive',
+};
+
 interface AudioLabPanelProps {
   mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
   onModeChange: (mode: AudioLabMode) => void;
   onVoiceToggle: () => void;
   vadThreshold: number;
@@ -56,6 +64,7 @@ function latestUtterance(snapshot: VoiceLabSnapshot) {
 
 export function AudioLabPanel({
   mode,
+  preset,
   onModeChange,
   onVoiceToggle,
   vadThreshold,
@@ -105,6 +114,9 @@ export function AudioLabPanel({
               ))}
             </select>
           </label>
+          <p className="audio-lab-panel__hint">
+            Preset: <strong>{PRESET_LABELS[preset]}</strong> (URL/env設定)
+          </p>
           <p className="audio-lab-panel__hint">
             {isMicActive
               ? '音声入力を停止するとModeを変更できます。'

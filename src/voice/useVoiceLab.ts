@@ -3,6 +3,7 @@ import { apiUrl } from '../runtimeConfig';
 import {
   createEmptySummary,
   type AudioLabMode,
+  type ExhibitionAudioPreset,
   type VoiceInputDiagnostic,
   type VoiceLabRecord,
   type VoiceLabSnapshot,
@@ -13,6 +14,7 @@ import type { VoiceInputEvent } from './voiceInput.js';
 export interface UseVoiceLabOptions {
   enabled: boolean;
   mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
   ttsPlaying: boolean;
 }
 
@@ -62,6 +64,7 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
       const nextRecorder = new VoiceLabRecorder({
         enabled: true,
         mode: optionsRef.current.mode,
+        preset: optionsRef.current.preset,
         onRecord: (record) => {
           setSnapshot(nextRecorder.getSnapshot());
           postVoiceLabRecord(record);
@@ -118,6 +121,7 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
         kind: 'session_summary',
         timestamp: new Date().toISOString(),
         sessionId: current.sessionId,
+        preset: optionsRef.current.preset,
         summary: current.summary,
       });
     }

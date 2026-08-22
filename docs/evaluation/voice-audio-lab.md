@@ -36,7 +36,45 @@ Audio Labは、同じ端末、同じマイク、同じ発話条件で音声入�
 HTTPS証明書とexhibitionの起動方法は、ルートのREADMEを参照してください。
 Audio Labは開発ビルドでだけ有効です。
 `?audioLab=1`で開くAudio Labの初期Modeは`Exhibition Mix`です。
-query parameterなしの通常起動は`Baseline`です。
+通常の`exhibition`起動も`Exhibition Mix`です。
+通常の`local`と`public`起動は`Baseline`です。
+
+## Exhibition Audio Preset
+
+展示用Presetの既定値は`mild`です。
+Viteの起動時設定で変更できます。
+
+```dotenv
+VITE_AUDIO_PRESET=mild
+```
+
+URLのquery parameterは、起動時設定より優先します。
+URLを変更した後は、ページを再読み込みしてください。
+
+```text
+?audioPreset=off
+?audioPreset=mild
+?audioPreset=aggressive
+```
+
+優先順位は次です。
+
+`URL query > VITE_AUDIO_PRESET > mild`
+
+不正なURL値は`VITE_AUDIO_PRESET`へ戻ります。
+不正な起動時設定は`mild`へ戻ります。
+通常展示にはPreset操作UIを表示しません。
+Audio Labでは現在のPresetを読み取り専用で確認できます。
+
+Presetの役割は次です。
+
+- `off`: AEC、NS、AGCとブラウザー側適応RMSゲートを無効にします。PCMはPython WebRTC VADへ送ります。Python VADとbarge-inは有効です。
+- `mild`: AECとNSを要求します。AGCは要求しません。threshold初期値は`0.02`です。noise floor倍率は`2.5`です。
+- `aggressive`: AEC、NS、AGCを要求します。threshold初期値は`0.04`です。noise floor倍率は`3.0`です。
+
+ブラウザーはAEC、NS、AGCの処理強度を指定できません。
+要求値と実際の適用値は、MediaTrack settingsへ記録します。
+`noiseSuppression`または`autoGainControl`が未適用でも、起動失敗とは解釈しません。
 
 ## Mode A/B/C/Dの比較
 
@@ -62,21 +100,24 @@ UIの範囲は`0.005`から`0.2`です。
 - `Baseline`: 既存の経路を使用します。localの既定値は`SpeechRecognition`または`webkitSpeechRecognition`です。exhibitionで既存のRemote PCM設定を使う場合は、既存のPython STT経路を使用します。
 - `Processed`: Remote PCMへ接続し、`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。
 - `Processed + VAD`: ProcessedにRMSベースのブラウザー側VADを追加します。200msチャンクを使います。既存のPython WebRTC VADと600ms無音終了処理も残します。
-- `Exhibition Mix`: Processedに適応型RMSゲート、既存のPython WebRTC VAD、barge-in、TTS duckingを追加します。Mode DはRemote PCM経路を使います。
+- `Exhibition Mix`: Presetに応じた標準AEC・NS・AGC、適応型RMSゲート、既存のPython WebRTC VAD、barge-in、TTS duckingを組み合わせます。Mode DはRemote PCM経路を使います。
 
 ## Mode Dの確認ポイント
 
 Mode Dは展示環境向けの組み合わせです。
 
-1. `echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。
+1. Presetに応じて`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。
 2. SafariまたはOSが返した実値をMediaTrack settingsへ記録します。
-3. AudioWorkletの200ms PCMチャンクで適応型RMSゲートを実行します。
+3. `mild`と`aggressive`では、AudioWorkletの200ms PCMチャンクで適応型RMSゲートを実行します。`off`ではゲートを実行しません。
 4. ゲートを通過した元のPCMだけをPython WebRTC VADへ送ります。
 5. Python側のfaster-whisperへ音声を送ります。
 
 初期のnoise floorは`0.005`です。
 noise floorの更新係数は`0.05`です。
-effective thresholdは`max(user threshold, noise floor * 2.5)`です。
+effective thresholdは`max(user threshold, noise floor * preset倍率)`です。
+`mild`の倍率は`2.5`です。
+`aggressive`の倍率は`3.0`です。
+`off`はブラウザー側ゲートを使わないため、noise floorとeffective thresholdはUnavailableです。
 speech開始は1チャンクです。
 speech終了はthreshold未満3チャンクです。
 candidate rejectはnoise floor未満2チャンクです。

@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import {
   AUDIO_LAB_MODES,
   isAudioLabMode,
+  isExhibitionAudioPreset,
   isVoiceLabRecord,
   type VoiceLabRecord,
 } from '../src/voice/audioLab.js';
@@ -25,9 +26,12 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
   new Map([
     [
       'session_started',
-      new Set(['kind', 'timestamp', 'sessionId', 'mode']),
+      new Set(['kind', 'timestamp', 'sessionId', 'mode', 'preset']),
     ],
-    ['mode_changed', new Set(['kind', 'timestamp', 'sessionId', 'mode'])],
+    [
+      'mode_changed',
+      new Set(['kind', 'timestamp', 'sessionId', 'mode', 'preset']),
+    ],
     [
       'utterance',
       new Set([
@@ -35,6 +39,7 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
         'timestamp',
         'sessionId',
         'mode',
+        'preset',
         'segmentId',
         'speechStartAt',
         'speechEndAt',
@@ -63,6 +68,7 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
         'timestamp',
         'sessionId',
         'mode',
+        'preset',
         'speechStartAt',
         'speechEndAt',
         'audioDurationMs',
@@ -83,6 +89,7 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
         'timestamp',
         'sessionId',
         'mode',
+        'preset',
         'action',
         'state',
         'ttsPlaying',
@@ -91,9 +98,20 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
     ],
     [
       'error',
-      new Set(['kind', 'timestamp', 'sessionId', 'mode', 'error', 'segmentId']),
+      new Set([
+        'kind',
+        'timestamp',
+        'sessionId',
+        'mode',
+        'preset',
+        'error',
+        'segmentId',
+      ]),
     ],
-    ['session_summary', new Set(['kind', 'timestamp', 'sessionId', 'summary'])],
+    [
+      'session_summary',
+      new Set(['kind', 'timestamp', 'sessionId', 'preset', 'summary']),
+    ],
   ]);
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -135,6 +153,7 @@ function validateVoiceLabRecordShape(record: VoiceLabRecord): boolean {
   if (record.kind !== 'session_summary' && !isAudioLabMode(record.mode)) {
     return false;
   }
+  if (!isExhibitionAudioPreset(record.preset)) return false;
   if (record.kind === 'utterance' || record.kind === 'vad_rejected') {
     if (!validateMediaSettings(record.mediaTrackSettings)) return false;
   }

@@ -12,6 +12,15 @@ export type AudioLabMode = (typeof AUDIO_LAB_MODES)[number];
 export const DEFAULT_AUDIO_INPUT_MODE: AudioLabMode = 'baseline';
 export const DEFAULT_AUDIO_LAB_MODE: AudioLabMode = 'exhibition-mix';
 export const DEFAULT_VAD_THRESHOLD = 0.02;
+export const EXHIBITION_AUDIO_PRESETS = [
+  'off',
+  'mild',
+  'aggressive',
+] as const;
+
+export type ExhibitionAudioPreset = (typeof EXHIBITION_AUDIO_PRESETS)[number];
+
+export const DEFAULT_EXHIBITION_AUDIO_PRESET: ExhibitionAudioPreset = 'mild';
 export const VAD_THRESHOLD_MIN = 0.005;
 export const VAD_THRESHOLD_MAX = 0.2;
 export const VAD_THRESHOLD_STEP = 0.005;
@@ -43,6 +52,51 @@ export const KNOWN_HALLUCINATION_PHRASES = [
 export type AudioLabRequestedConstraints = Partial<
   Record<AudioProcessingConstraint, boolean>
 >;
+
+export interface ExhibitionAudioPresetConfig {
+  requestedConstraints: Required<
+    Pick<AudioLabRequestedConstraints, AudioProcessingConstraint>
+  >;
+  browserGateEnabled: boolean;
+  defaultVadThreshold: number;
+  noiseFloorMultiplier: number;
+}
+
+export const EXHIBITION_AUDIO_PRESET_CONFIGS: Record<
+  ExhibitionAudioPreset,
+  ExhibitionAudioPresetConfig
+> = {
+  off: {
+    requestedConstraints: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
+    browserGateEnabled: false,
+    defaultVadThreshold: DEFAULT_VAD_THRESHOLD,
+    noiseFloorMultiplier: ADAPTIVE_NOISE_FLOOR_MULTIPLIER,
+  },
+  mild: {
+    requestedConstraints: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: false,
+    },
+    browserGateEnabled: true,
+    defaultVadThreshold: DEFAULT_VAD_THRESHOLD,
+    noiseFloorMultiplier: ADAPTIVE_NOISE_FLOOR_MULTIPLIER,
+  },
+  aggressive: {
+    requestedConstraints: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+    browserGateEnabled: true,
+    defaultVadThreshold: 0.04,
+    noiseFloorMultiplier: 3.0,
+  },
+};
 
 export interface AudioLabAppliedMediaSettings {
   echoCancellation?: boolean | string;
@@ -116,10 +170,37 @@ export function isAudioLabMode(value: unknown): value is AudioLabMode {
   );
 }
 
+export function isExhibitionAudioPreset(
+  value: unknown,
+): value is ExhibitionAudioPreset {
+  return (
+    typeof value === 'string' &&
+    (EXHIBITION_AUDIO_PRESETS as readonly string[]).includes(value)
+  );
+}
+
+export function resolveExhibitionAudioPreset(
+  queryValue: unknown,
+  environmentValue: unknown,
+): ExhibitionAudioPreset {
+  if (isExhibitionAudioPreset(queryValue)) return queryValue;
+  if (isExhibitionAudioPreset(environmentValue)) return environmentValue;
+  return DEFAULT_EXHIBITION_AUDIO_PRESET;
+}
+
+export function getExhibitionAudioPresetConfig(
+  preset: ExhibitionAudioPreset,
+): ExhibitionAudioPresetConfig {
+  return EXHIBITION_AUDIO_PRESET_CONFIGS[preset];
+}
+
 export function resolveInitialAudioLabMode(
   audioLabEnabled: boolean,
+  isExhibition = false,
 ): AudioLabMode {
-  return audioLabEnabled ? DEFAULT_AUDIO_LAB_MODE : DEFAULT_AUDIO_INPUT_MODE;
+  return audioLabEnabled || isExhibition
+    ? DEFAULT_AUDIO_LAB_MODE
+    : DEFAULT_AUDIO_INPUT_MODE;
 }
 
 export function clampVadThreshold(value: number): number {
@@ -205,6 +286,7 @@ export interface VoiceLabSessionStartedRecord {
   timestamp: string;
   sessionId: string;
   mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
 }
 
 export interface VoiceLabModeChangedRecord {
@@ -212,6 +294,7 @@ export interface VoiceLabModeChangedRecord {
   timestamp: string;
   sessionId: string;
   mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
 }
 
 export interface VoiceLabUtteranceRecord {
@@ -219,6 +302,7 @@ export interface VoiceLabUtteranceRecord {
   timestamp: string;
   sessionId: string;
   mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
   segmentId: string | null;
   speechStartAt: string | null;
   speechEndAt: string | null;
@@ -245,6 +329,7 @@ export interface VoiceLabVadRejectedRecord {
   timestamp: string;
   sessionId: string;
   mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
   speechStartAt: string | null;
   speechEndAt: string;
   audioDurationMs: number;
@@ -263,6 +348,7 @@ export interface VoiceLabBargeInRecord {
   timestamp: string;
   sessionId: string;
   mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
   action: BargeInAction;
   state: BargeInState;
   ttsPlaying: boolean;
@@ -274,6 +360,7 @@ export interface VoiceLabErrorRecord {
   timestamp: string;
   sessionId: string;
   mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
   error: string;
   segmentId: string | null;
 }
@@ -282,6 +369,7 @@ export interface VoiceLabSessionSummaryRecord {
   kind: 'session_summary';
   timestamp: string;
   sessionId: string;
+  preset: ExhibitionAudioPreset;
   summary: VoiceLabSessionSummary;
 }
 
@@ -437,6 +525,7 @@ export function isVoiceLabRecord(value: unknown): value is VoiceLabRecord {
     return false;
   }
   if (!Number.isFinite(Date.parse(record.timestamp))) return false;
+  if (!isExhibitionAudioPreset(record.preset)) return false;
   return [
     'session_started',
     'mode_changed',

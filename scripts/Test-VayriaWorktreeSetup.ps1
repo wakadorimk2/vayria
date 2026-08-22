@@ -256,6 +256,9 @@ try {
     if ((Get-EnvironmentValue -Path $case.EnvPath -Name 'VITE_APP_MODE') -ne 'exhibition') {
       throw "The generated exhibition environment has an unexpected mode: $($case.EnvPath)"
     }
+    if ((Get-EnvironmentValue -Path $case.EnvPath -Name 'VITE_AUDIO_PRESET') -ne 'mild') {
+      throw "The generated exhibition environment has an unexpected audio preset: $($case.EnvPath)"
+    }
     if ((Get-EnvironmentValue -Path $case.EnvPath -Name 'VAYRIA_BIND_HOST') -ne '0.0.0.0') {
       throw "The generated exhibition environment has an unexpected bind host: $($case.EnvPath)"
     }
