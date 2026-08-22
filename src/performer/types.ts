@@ -219,6 +219,12 @@ export interface DirectionContribution {
   semanticCues: string[];
   triggers: PerformerTrigger[];
   attentionTarget?: AttentionTarget;
+  planOverrides?: {
+    behavior?: PerformanceBehavior;
+    motion?: {
+      assetId: string;
+    };
+  };
 }
 
 export interface ActionIntent {

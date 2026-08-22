@@ -15,6 +15,7 @@ import {
   schedulePerformancePlan,
 } from '../src/performer/runtime.js';
 import { DEFAULT_PERFORMER_PROFILE } from '../src/performer/profile.js';
+import { CARD_BEHAVIORS, CARD_MODIFIERS } from '../src/cards/cardReactions.js';
 import type {
   DirectionContribution,
   DirectionEffect,
@@ -228,6 +229,80 @@ test('require_speech and attention target are Direction contributions', () => {
       DEFAULT_PERFORMER_PROFILE.motionPreparationTimeoutMs,
     postSpeechHoldMs: DEFAULT_PERFORMER_PROFILE.postSpeechHoldMs,
   });
+});
+
+test('card plan overrides reach the plan before speech motion fallback', () => {
+  const trigger: PerformerTrigger = {
+    kind: 'external_stimulus',
+    semanticCue: 'something_changed:sleepy',
+    metadata: { origin: 'wildcard' },
+  };
+  const intent = createActionIntent(trigger, createState());
+  const contribution = createContribution(
+    'wildcard',
+    [createEffect('forced:sleepy', CARD_MODIFIERS.sleepy)],
+    {
+      attentionTarget: 'viewer',
+      constraints: [{ kind: 'require_speech', scope: 'current_plan' }],
+      planOverrides: {
+        behavior: CARD_BEHAVIORS.sleepy,
+        motion: { assetId: 'card-sleepy' },
+      },
+    },
+  );
+  const plan = resolvePerformancePlan(
+    intent,
+    [contribution],
+    createState(),
+    DEFAULT_PERFORMER_PROFILE,
+    0,
+  );
+
+  assert.equal(plan.intent, 'speak');
+  assert.deepEqual(plan.behavior, CARD_BEHAVIORS.sleepy);
+  assert.equal(plan.motion?.assetId, 'card-sleepy');
+  assert.notEqual(plan.motion?.assetId, DEFAULT_SPEECH_MOTION_ASSET_ID);
+  assert.equal(plan.preReaction?.gaze?.target, 'viewer');
+  assert.ok((plan.preReaction?.leadBeforeSpeechMs ?? Infinity) <= 500);
+  const sleepyResponseDelayMs = CARD_MODIFIERS.sleepy.responseDelayMs ?? 0;
+  assert.equal(
+    plan.speech?.delayMs,
+    DEFAULT_PERFORMER_PROFILE.responseDelayBaselineMs +
+      sleepyResponseDelayMs,
+  );
+  assert.equal(plan.ttsProfile?.rateScale, 0.88);
+
+  const reducedPlan = resolvePerformancePlan(
+    intent,
+    [
+      createContribution('wildcard', [], {
+        constraints: [{ kind: 'require_speech', scope: 'current_plan' }],
+        planOverrides: { behavior: CARD_BEHAVIORS.sleepy },
+      }),
+    ],
+    createState(),
+    DEFAULT_PERFORMER_PROFILE,
+    0,
+  );
+  assert.deepEqual(reducedPlan.behavior, CARD_BEHAVIORS.sleepy);
+  assert.equal(reducedPlan.motion, undefined);
+});
+
+test('the first plan override follows sorted direction order', () => {
+  const first = createContribution('direction-b', [], {
+    planOverrides: { motion: { assetId: 'wrong-order' } },
+  });
+  const second = createContribution('direction-a', [], {
+    planOverrides: { motion: { assetId: 'sorted-first' } },
+  });
+
+  const forward = aggregateDirectionContributions([first, second], 0);
+  const reverse = aggregateDirectionContributions([second, first], 0);
+
+  assert.deepEqual(forward.planOverrides, {
+    motion: { assetId: 'sorted-first' },
+  });
+  assert.deepEqual(forward.planOverrides, reverse.planOverrides);
 });
 
 test('default speech motion is not assigned to non-speech plans', () => {

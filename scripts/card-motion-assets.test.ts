@@ -7,6 +7,7 @@ import {
   attachCardPreviewMotion,
   CARD_MOTION_ASSET_BY_GESTURE_INTENT,
   CARD_MOTION_ASSET_IDS,
+  getCardPerformancePlanOverrides,
 } from '../src/cards/cardMotionAssets.js';
 import { cardPool } from '../src/cards/cardPool.js';
 import { CARD_REACTION_PROFILES } from '../src/cards/cardReactions.js';
@@ -143,9 +144,20 @@ test('Card Pool preview adds a saved motion asset unless motion is reduced', () 
   const plan = createPlan();
   for (const card of cardPool) {
     const profile = CARD_REACTION_PROFILES[card.id];
+    const overrides = getCardPerformancePlanOverrides(card.id, false);
+    const reducedOverrides = getCardPerformancePlanOverrides(card.id, true);
     const withMotion = attachCardPreviewMotion(plan, card.id, false);
     const reduced = attachCardPreviewMotion(plan, card.id, true);
 
+    assert.deepEqual(overrides.behavior, profile.behavior, card.id);
+    assert.equal(
+      overrides.motion?.assetId,
+      CARD_MOTION_ASSET_IDS[card.id],
+      card.id,
+    );
+    assert.notEqual(overrides.motion?.assetId, 'speech-gentle', card.id);
+    assert.deepEqual(reducedOverrides.behavior, profile.behavior, card.id);
+    assert.equal(reducedOverrides.motion, undefined, card.id);
     assert.deepEqual(withMotion.behavior, profile.behavior, card.id);
     assert.equal(
       withMotion.motion?.assetId,

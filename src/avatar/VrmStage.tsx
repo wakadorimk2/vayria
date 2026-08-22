@@ -81,14 +81,25 @@ function waitForMotionDelay(
 }
 
 function createListeningReactionPlan(
-  assetId: string,
+  assetId: string | null,
   requestId: number,
 ): PerformancePlan {
   return {
     planId: `voice-reaction-${requestId}`,
     trigger: 'external_stimulus',
     intent: 'react_nonverbally',
-    motion: { assetId },
+    preReaction: {
+      leadBeforeSpeechMs: 0,
+      gaze: {
+        target: 'viewer',
+        directness: 1,
+      },
+      motion: {
+        weight: 1,
+        headYawBias: 0,
+      },
+    },
+    ...(assetId === null ? {} : { motion: { assetId } }),
     timing: {
       motionLeadMs: 0,
       motionEnterBlendMs: 180,
@@ -98,6 +109,19 @@ function createListeningReactionPlan(
     },
     activeDirectionIds: [],
   };
+}
+
+type AvatarPerformancePhase =
+  | 'pre_reaction'
+  | 'motion'
+  | 'speech'
+  | 'tail'
+  | 'recovery';
+
+interface AvatarPerformanceState {
+  plan: PerformancePlan;
+  phase: AvatarPerformancePhase;
+  recoveryStartedAt: number | null;
 }
 
 interface VrmStageProps {
@@ -119,6 +143,8 @@ export interface VrmStageHandle {
     signal?: AbortSignal,
   ): Promise<boolean>;
   startPreparedMotion(planId: string): number | null;
+  markSpeechStart(planId: string, startedAt: number): void;
+  markSpeechEnd(planId: string, endedAt: number): void;
   finishMotion(planId?: string): void;
   stopMotion(planId?: string): void;
   playReactionMotion(assetId: string, requestId: number): Promise<boolean>;
@@ -153,6 +179,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       listeningReaction?.id ?? null,
     );
     const listeningReactionStartedAtRef = useRef(0);
+    const performanceStateRef = useRef<AvatarPerformanceState | null>(null);
     const motionScaleRef = useRef(motionScale);
     const performancePlanRef = useRef(performancePlan);
     const onReadyRef = useRef(onReady);
@@ -189,12 +216,33 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     useEffect(() => {
       const nextId = listeningReaction?.id ?? null;
       if (nextId !== listeningReactionIdRef.current) {
+        const previousId = listeningReactionIdRef.current;
         listeningReactionIdRef.current = nextId;
         listeningReactionStartedAtRef.current =
           nextId === null ? 0 : performance.now();
+
+        if (
+          listeningReaction &&
+          nextId !== null &&
+          !performancePlan
+        ) {
+          performanceStateRef.current = {
+            plan: createListeningReactionPlan(null, nextId),
+            phase: 'pre_reaction',
+            recoveryStartedAt: null,
+          };
+        } else if (
+          nextId === null &&
+          previousId !== null &&
+          performanceStateRef.current?.plan.planId ===
+            `voice-reaction-${previousId}`
+        ) {
+          performanceStateRef.current.phase = 'recovery';
+          performanceStateRef.current.recoveryStartedAt = performance.now();
+        }
       }
       listeningReactionRef.current = listeningReaction;
-    }, [listeningReaction]);
+    }, [listeningReaction, performancePlan]);
 
     useEffect(() => {
       onReadyRef.current = onReady;
@@ -319,9 +367,23 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       preparedMotionPlanIdRef.current = null;
       activeMotionPlanIdRef.current = null;
       motionPlayerRef.current?.stop();
+      if (
+        !planId ||
+        performanceStateRef.current?.plan.planId === planId
+      ) {
+        performanceStateRef.current = null;
+      }
     }, []);
 
     const finishMotion = useCallback((planId?: string) => {
+      const performanceState = performanceStateRef.current;
+      if (
+        performanceState &&
+        (!planId || performanceState.plan.planId === planId)
+      ) {
+        performanceState.phase = 'recovery';
+        performanceState.recoveryStartedAt = performance.now();
+      }
       if (
         planId &&
         preparedMotionPlanIdRef.current !== planId &&
@@ -341,8 +403,32 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       if (!player?.startPrepared()) return null;
       preparedMotionPlanIdRef.current = null;
       activeMotionPlanIdRef.current = planId;
-      return performance.now();
+      const startedAt = performance.now();
+      if (performanceStateRef.current?.plan.planId === planId) {
+        performanceStateRef.current.phase = 'motion';
+        performanceStateRef.current.recoveryStartedAt = null;
+      }
+      return startedAt;
     }, []);
+
+    const markSpeechStart = useCallback(
+      (planId: string): void => {
+        const state = performanceStateRef.current;
+        if (!state || state.plan.planId !== planId) return;
+        state.phase = 'speech';
+        state.recoveryStartedAt = null;
+      },
+      [],
+    );
+
+    const markSpeechEnd = useCallback(
+      (planId: string): void => {
+        const state = performanceStateRef.current;
+        if (!state || state.plan.planId !== planId) return;
+        state.phase = 'tail';
+      },
+      [],
+    );
 
     const stopReactionMotion = useCallback(() => {
       reactionMotionRequestRef.current += 1;
@@ -371,6 +457,11 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         const controller = new AbortController();
         reactionMotionControllerRef.current = controller;
         const plan = createListeningReactionPlan(assetId, requestId);
+        performanceStateRef.current = {
+          plan,
+          phase: 'pre_reaction',
+          recoveryStartedAt: null,
+        };
         reactionMotionPlanIdRef.current = plan.planId;
 
         try {
@@ -435,6 +526,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       () => ({
         prepareMotion,
         startPreparedMotion,
+        markSpeechStart,
+        markSpeechEnd,
         finishMotion,
         stopMotion,
         playReactionMotion,
@@ -442,6 +535,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       }),
       [
         finishMotion,
+        markSpeechEnd,
+        markSpeechStart,
         playReactionMotion,
         prepareMotion,
         startPreparedMotion,
@@ -465,15 +560,38 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     useEffect(() => {
       const previousPlanId = performancePlanRef.current?.planId;
       performancePlanRef.current = performancePlan;
+      if (performancePlan) {
+        performanceStateRef.current = {
+          plan: performancePlan,
+          phase: 'pre_reaction',
+          recoveryStartedAt: null,
+        };
+      }
+      const playbackState = motionPlayerRef.current?.playbackState ?? 'idle';
+      const performanceState = performanceStateRef.current;
       const isGracefulExit =
         !performancePlan &&
-        activeMotionPlanIdRef.current === previousPlanId &&
-        (motionPlayerRef.current?.playbackState === 'exiting' ||
-          motionPlayerRef.current?.playbackState === 'settled');
+        previousPlanId !== undefined &&
+        ((activeMotionPlanIdRef.current === previousPlanId &&
+          playbackState !== 'idle') ||
+          (performanceState?.plan.planId === previousPlanId &&
+            performanceState.phase === 'recovery'));
       if (performancePlan?.motion && motionScaleRef.current > 0) {
         void prepareMotion(performancePlan);
       } else if (!isGracefulExit) {
-        stopMotion();
+        const reaction = listeningReactionRef.current;
+        if (reaction && !reactionMotionPlanIdRef.current) {
+          const reactionPlanId = `voice-reaction-${reaction.id}`;
+          if (performanceStateRef.current?.plan.planId !== reactionPlanId) {
+            performanceStateRef.current = {
+              plan: createListeningReactionPlan(null, reaction.id),
+              phase: 'pre_reaction',
+              recoveryStartedAt: null,
+            };
+          }
+        } else {
+          stopMotion();
+        }
       }
     }, [performancePlan, prepareMotion, stopMotion]);
 
@@ -607,7 +725,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   .join(' '),
               );
             }
-            emotionController.setEmotion(emotionRef.current);
+            emotionController.setEmotion(
+              emotionRef.current,
+              performancePlanRef.current?.avatarProfile?.expressionHoldMs ?? 0,
+            );
             appliedEmotion = emotionRef.current;
 
             const expression = vrm.expressionManager?.getExpression(
@@ -653,9 +774,13 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         const delta = clock.getDelta();
         if (loadedVrm) {
           const plan = performancePlanRef.current;
-          const avatarProfile = plan?.avatarProfile;
-          const preReaction = plan?.preReaction;
+          const performanceState = performanceStateRef.current;
+          const activePerformancePlan = performanceState?.plan ?? plan;
+          const avatarProfile = activePerformancePlan?.avatarProfile;
+          const preReaction = activePerformancePlan?.preReaction;
           const listeningReactionState = listeningReactionRef.current;
+          const hasPerformanceState =
+            performanceState !== null || plan !== null;
           const safeMotionScale = Math.max(
             0,
             Math.min(motionScaleRef.current, 1),
@@ -685,22 +810,40 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 preReaction?.gaze?.directness ??
                 0.72);
           const headYawBias = requestedHeadYawBias * safeMotionScale;
-          const isBodyMotionPlaying =
-            motionPlayerRef.current?.isPlaying() ?? false;
           const listeningNodDegrees =
             listeningReactionState?.kind === 'nod'
-            ? getListeningNodDegrees(
-                (performance.now() - listeningReactionStartedAtRef.current) /
-                  1_000,
-              )
-            : 0;
+              ? getListeningNodDegrees(
+                  (performance.now() - listeningReactionStartedAtRef.current) /
+                    1_000,
+                )
+              : 0;
+          const motionPlayer = motionPlayerRef.current;
+          idleController?.removeOverlay();
+          motionPlayer?.update(delta);
+          const playbackState = motionPlayer?.playbackState ?? 'idle';
+          const hasActiveBodyMotion =
+            playbackState === 'entering' ||
+            playbackState === 'playing' ||
+            playbackState === 'exiting';
+          const performanceGazeTarget =
+            hasPerformanceState && gazeTarget !== 'none'
+              ? camera.position
+              : null;
           const idleGazeFrame = idleGazeController?.update(
             delta,
             camera.position,
-            !isBodyMotionPlaying && !performancePlanRef.current,
+            !hasActiveBodyMotion && !hasPerformanceState,
+            performanceGazeTarget,
           );
-          idleController?.setEnabled(!isBodyMotionPlaying);
-          if (!isBodyMotionPlaying) {
+          idleController?.setEnabled(true);
+          if (hasActiveBodyMotion) {
+            idleController?.updateOverlay(
+              delta,
+              idleMotionWeight,
+              headYawBias + (idleGazeFrame?.fallbackHeadYawBias ?? 0),
+              listeningNodDegrees,
+            );
+          } else {
             idleController?.update(
               delta,
               idleMotionWeight,
@@ -708,9 +851,11 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               listeningNodDegrees,
             );
           }
-          motionPlayerRef.current?.update(delta);
           if (emotionController && appliedEmotion !== emotionRef.current) {
-            emotionController.setEmotion(emotionRef.current);
+            emotionController.setEmotion(
+              emotionRef.current,
+              avatarProfile?.expressionHoldMs ?? 0,
+            );
             appliedEmotion = emotionRef.current;
           }
           emotionController?.update(delta);
@@ -723,6 +868,24 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           }
           loadedVrm.expressionManager?.update();
           loadedVrm.update(delta);
+
+          const currentPerformanceState = performanceStateRef.current;
+          const recoveryStartedAt =
+            currentPerformanceState?.recoveryStartedAt;
+          const motionRecovered =
+            playbackState === 'idle' || playbackState === 'settled';
+          if (
+            currentPerformanceState?.phase === 'recovery' &&
+            recoveryStartedAt !== null &&
+            recoveryStartedAt !== undefined &&
+            !performancePlanRef.current &&
+            !listeningReactionRef.current &&
+            motionRecovered &&
+            performance.now() - recoveryStartedAt >=
+              currentPerformanceState.plan.timing.motionExitBlendMs
+          ) {
+            performanceStateRef.current = null;
+          }
         }
         renderer.render(scene, camera);
         animationFrame = requestAnimationFrame(render);

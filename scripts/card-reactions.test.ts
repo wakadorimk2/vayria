@@ -114,6 +114,9 @@ test('card preview contribution forces speech and viewer attention', () => {
     { kind: 'require_speech', scope: 'current_plan' },
   ]);
   assert.equal(contribution.attentionTarget, 'viewer');
+  assert.deepEqual(contribution.planOverrides, {
+    behavior: CARD_BEHAVIORS.rain,
+  });
   assert.deepEqual(contribution.triggers[0], {
     kind: 'external_stimulus',
     semanticCue: 'card_preview:rain',
@@ -124,6 +127,19 @@ test('card preview contribution forces speech and viewer attention', () => {
   assert.equal(contribution.effects[0].durationMs, 30_000);
   assert.equal(contribution.effects[0].decay, 'exponential');
   assert.deepEqual(contribution.effects[0].modifiers, CARD_MODIFIERS.rain);
+});
+
+test('every card preview contribution carries its behavior override', () => {
+  for (const card of cardPool) {
+    const contribution = createCardPreviewContribution(card.id, 0);
+
+    assert.deepEqual(
+      contribution.planOverrides?.behavior,
+      CARD_BEHAVIORS[card.id],
+      card.id,
+    );
+    assert.equal(contribution.planOverrides?.motion, undefined, card.id);
+  }
 });
 
 test('card interaction attention uses a strict 35 percent boundary', () => {
