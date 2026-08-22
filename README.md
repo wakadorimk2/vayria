@@ -64,16 +64,31 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
    ID を取得します。API の詳細は
    `http://127.0.0.1:10101/docs` でも確認できます。
 
-4. `.env.local` に API key と AivisSpeech の設定を記述します。
+4. API keyをリポジトリ外の秘密ファイルへ保存します。
+
+   既定のパスは`C:\Users\wakad\.vayria\secrets.env`です。
+   別のWindowsユーザーでは、自分のユーザープロファイル配下に作成します。
 
    ```dotenv
    OPENAI_API_KEY=your_key_here
+   ```
+
+   このファイルはGitリポジトリの外へ置きます。
+
+5. `.env.local`には秘密ファイルのパスとAivisSpeechの設定を記述します。
+
+   ```dotenv
+   OPENAI_API_KEY=
+   VAYRIA_SECRET_FILE=C:\Users\<Windowsユーザー名>\.vayria\secrets.env
    AIVIS_BASE_URL=http://127.0.0.1:10101
    AIVIS_SPEED_SCALE=1.15
    AIVIS_PITCH_SCALE=0
    AIVIS_INTONATION_SCALE=1.0
    AIVIS_TEMPO_DYNAMICS_SCALE=1.0
    ```
+
+   `VAYRIA_SECRET_FILE`を設定した場合、外部ファイルの`OPENAI_API_KEY`を優先します。
+   `VAYRIA_SECRET_FILE`を設定しない場合は、既存の`.env.local`直書き方式を使用します。
 
    アプリは emotion に対応する zonoko style ID を `/speakers` から取得します。
    音声パラメーターは省略できます。省略時は上記の値を使います。
@@ -87,19 +102,73 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 
    zonoko の一部スタイルでは、AivisSpeech が
    `AIVIS_INTONATION_SCALE` を無視する場合があります。
-5. 自作または利用許可を持つ VRM を次の場所へ置きます。
 
-   ```text
-   public/avatar/model.vrm
+6. worktreeごとに`.env.local`を作成して、APIを起動します。
+
+   Codexデスクトップアプリでは、新規チャットで`Worktree`と`Local environment`を選択すると、
+   セットアップスクリプトがworktree作成時に実行されます。
+   これはCodexアプリ自体の起動時処理ではありません。
+
+   Local environmentのSetup scriptには、次の2行を登録します。
+
+   ```powershell
+   npm ci
+   pwsh -NoProfile -File .\scripts\Setup-VayriaWorktree.ps1
    ```
 
-6. 開発サーバーを起動します。
+   Local environmentのActionには、次を登録します。
 
    ```powershell
    npm run dev
    ```
 
-7. `http://127.0.0.1:5187/` をブラウザーで開きます。
+   Setup scriptはAPIを起動しません。
+   ActionがworktreeごとのAPIを起動します。
+   `main`は`5187`を使用します。
+   worker worktreeは`5188`から`5999`の空きポートを自動で使用します。
+   既存の`.env.local`は上書きしません。
+   `.env.local`には実キーを保存しません。
+
+   CodexアプリのSettingsでLocal environmentを作成し、アプリが生成したプロジェクト`.codex`設定を確認します。
+   設定スキーマは手書きしません。
+   `.codex`設定には認証情報やAPIキーを含めません。
+   `.worktreeinclude`には`.env.local`を追加しません。
+
+   Codexを使わない場合は、次のラッパーでAPI keyをコピーせずにworktreeの設定を作成できます。
+   その後、対象worktreeで`npm run dev`を起動します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Start-VayriaWorktree.ps1 `
+     -WorktreePath 'C:\path\to\worktree' `
+     -Port 5188
+   ```
+
+   設定だけを作成する場合は、次のスクリプトを使用します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Initialize-WorktreeEnv.ps1 `
+     -WorktreePath 'C:\path\to\worktree' `
+     -Port 5188
+   ```
+
+   既存の`.env.local`は、`-Force`を指定しない限り上書きしません。
+
+   `main`は`5187`を使用します。
+   各worker worktreeは`5188`以降の未使用ポートを使用します。
+
+7. 自作または利用許可を持つ VRM を次の場所へ置きます。
+
+   ```text
+   public/avatar/model.vrm
+   ```
+
+8. 開発サーバーを起動します。
+
+   ```powershell
+   npm run dev
+   ```
+
+9. `http://127.0.0.1:5187/` をブラウザーで開きます。
 
 ## 運用モード
 
