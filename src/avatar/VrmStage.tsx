@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Box3,
   Clock,
   PerspectiveCamera,
   Scene,
-  sRGBEncoding,
+  SRGBColorSpace,
   Vector3,
   WebGLRenderer,
 } from 'three';
@@ -20,6 +20,8 @@ import { EmotionExpressionController } from './EmotionExpressionController';
 import { applyBasePose, IdleController } from './idleMotion';
 import { frameAvatar } from './cameraPreset';
 import { setupStageLighting } from './stageLighting';
+import { SavedMotionCatalog } from './motion/motionCatalog';
+import { MotionPlayer } from './motion/motionPlayer';
 import {
   EXHIBITION_PORTRAIT_CAMERA,
   STAGE_PRESET,
@@ -37,6 +39,7 @@ interface VrmStageProps {
   mouthOpen: number;
   onReady?: () => void;
   performancePlan?: PerformancePlan;
+  sessionGeneration?: number;
 }
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
@@ -49,6 +52,7 @@ export function VrmStage({
   mouthOpen,
   onReady,
   performancePlan,
+  sessionGeneration = 0,
 }: VrmStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -60,6 +64,15 @@ export function VrmStage({
   const onReadyRef = useRef(onReady);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [expressionWarning, setExpressionWarning] = useState('');
+  const loadedVrmRef = useRef<VRM | null>(null);
+  const motionPlayerRef = useRef<MotionPlayer | null>(null);
+  const motionCatalogRef = useRef(new SavedMotionCatalog());
+  const motionAbortControllerRef = useRef<AbortController | null>(null);
+  const motionRequestGenerationRef = useRef(0);
+  const requestedMotionAssetId = performancePlan?.motion?.assetId ?? null;
+  const requestedMotionAssetIdRef = useRef<string | null>(
+    requestedMotionAssetId,
+  );
 
   useEffect(() => {
     mouthOpenRef.current = mouthOpen;
@@ -74,16 +87,87 @@ export function VrmStage({
   }, [attentionTarget]);
 
   useEffect(() => {
-    motionScaleRef.current = motionScale;
-  }, [motionScale]);
-
-  useEffect(() => {
     performancePlanRef.current = performancePlan;
   }, [performancePlan]);
 
   useEffect(() => {
     onReadyRef.current = onReady;
   }, [onReady]);
+
+  const syncMotionAsset = useCallback(async () => {
+    const requestGeneration = ++motionRequestGenerationRef.current;
+    motionAbortControllerRef.current?.abort();
+
+    const assetId = requestedMotionAssetIdRef.current;
+    const vrm = loadedVrmRef.current;
+    const player = motionPlayerRef.current;
+    if (!vrm || !player) return;
+
+    if (!assetId || motionScaleRef.current <= 0) {
+      player.stop();
+      return;
+    }
+
+    player.stop();
+    const controller = new AbortController();
+    motionAbortControllerRef.current = controller;
+
+    try {
+      const asset = await motionCatalogRef.current.get(
+        assetId,
+        controller.signal,
+      );
+      if (
+        requestGeneration !== motionRequestGenerationRef.current ||
+        controller.signal.aborted ||
+        requestedMotionAssetIdRef.current !== assetId ||
+        loadedVrmRef.current !== vrm
+      ) {
+        return;
+      }
+
+      await player.play(asset, vrm, controller.signal);
+    } catch (error) {
+      if (
+        controller.signal.aborted ||
+        requestGeneration !== motionRequestGenerationRef.current
+      ) {
+        return;
+      }
+      player.stop();
+      console.warn('Performer motion fallback: saved asset was not played.', {
+        assetId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    motionScaleRef.current = motionScale;
+    if (motionScale <= 0) {
+      motionRequestGenerationRef.current += 1;
+      motionAbortControllerRef.current?.abort();
+      motionPlayerRef.current?.stop();
+      return;
+    }
+
+    if (requestedMotionAssetIdRef.current) {
+      void syncMotionAsset();
+    }
+  }, [motionScale, syncMotionAsset]);
+
+  useEffect(() => {
+    requestedMotionAssetIdRef.current = requestedMotionAssetId;
+    void syncMotionAsset();
+  }, [requestedMotionAssetId, syncMotionAsset]);
+
+  useEffect(() => {
+    if (sessionGeneration === 0) return;
+    requestedMotionAssetIdRef.current = null;
+    motionRequestGenerationRef.current += 1;
+    motionAbortControllerRef.current?.abort();
+    motionPlayerRef.current?.stop();
+  }, [sessionGeneration]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -108,7 +192,7 @@ export function VrmStage({
     }
     renderer.setClearAlpha(0);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.outputEncoding = sRGBEncoding;
+    renderer.outputColorSpace = SRGBColorSpace;
 
     let disposed = false;
     let loadedVrm: VRM | null = null;
@@ -175,8 +259,10 @@ export function VrmStage({
           vrm.scene.position.set(-center.x, -initialBounds.min.y, -center.z);
           scene.add(vrm.scene);
           loadedVrm = vrm;
+          loadedVrmRef.current = vrm;
           applyBasePose(vrm);
           idleController = new IdleController(vrm);
+          motionPlayerRef.current = new MotionPlayer(vrm.scene);
           blinkController = new BlinkController(vrm);
           emotionController = new EmotionExpressionController(vrm);
 
@@ -227,6 +313,7 @@ export function VrmStage({
           );
           setLoadState('ready');
           onReadyRef.current?.();
+          void syncMotionAsset();
         },
         undefined,
         () => {
@@ -265,7 +352,13 @@ export function VrmStage({
           (avatarProfile?.headYawBias ?? preReaction?.motion?.headYawBias ?? 0) +
           gazeYawBias * (avatarProfile?.gazeDirectness ?? preReaction?.gaze?.directness ?? 0.72);
         const headYawBias = requestedHeadYawBias * safeMotionScale;
-        idleController?.update(delta, idleMotionWeight, headYawBias);
+        const isBodyMotionPlaying =
+          motionPlayerRef.current?.isPlaying() ?? false;
+        idleController?.setEnabled(!isBodyMotionPlaying);
+        if (!isBodyMotionPlaying) {
+          idleController?.update(delta, idleMotionWeight, headYawBias);
+        }
+        motionPlayerRef.current?.update(delta);
         if (
           emotionController &&
           appliedEmotion !== emotionRef.current
@@ -299,13 +392,18 @@ export function VrmStage({
       blinkController = null;
       emotionController = null;
       idleController = null;
+      motionAbortControllerRef.current?.abort();
+      motionRequestGenerationRef.current += 1;
+      motionPlayerRef.current?.dispose();
+      motionPlayerRef.current = null;
+      loadedVrmRef.current = null;
       if (loadedVrm) {
         scene.remove(loadedVrm.scene);
         VRMUtils.deepDispose(loadedVrm.scene);
       }
       renderer.dispose();
     };
-  }, [isExhibitionMode]);
+  }, [isExhibitionMode, syncMotionAsset]);
 
   return (
     <div className="vrm-stage" ref={containerRef}>

@@ -35,6 +35,18 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 脳内カードは弱い内部状態として扱い、`activatedCards`が空のまま発話する場合があります。
 直前の自律発話と同じ目立つ表現、比喩、文型、テンションは自然に避けます。
 
+発話、沈黙、非発話反応が完了すると、次の自律発話を予約します。
+通信失敗が発生すると、自律発話ループを停止します。
+手動入力またはSession Resetでループを再開できます。
+ミュートとタブ非表示はループだけを一時停止し、会話の履歴、話題、演者状態、カード状態を保持します。
+
+Sessionはページ内だけの一時状態です。
+履歴、話題、直前の自律返答、演者状態、カードのターン状態を含みます。
+localモードの開発画面には`Session Reset`を表示します。
+Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻します。
+既存の`Reset Turn`はカードのターン状態だけを戻します。
+音量設定と読み込み済みアバターはSession Resetでも保持します。
+
 ## 必要なもの
 
 - Node.js 24（現在の検証環境）
@@ -125,7 +137,9 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
    Setup scriptはAPIを起動しません。
    ActionがworktreeごとのAPIを起動します。
    `main`は`5187`を使用します。
-   worker worktreeは`5188`から`5999`の空きポートを自動で使用します。
+   worker worktreeは`5188`から`5210`の空きポートを自動で使用します。
+   Setup scriptはworktreeごとの`.env.exhibition.local`も自動で生成します。
+   `.env.exhibition.example`を毎回コピーする必要はありません。
    既存の`.env.local`は上書きしません。
    `.env.local`には実キーを保存しません。
 
@@ -154,9 +168,42 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
    既存の`.env.local`は、`-Force`を指定しない限り上書きしません。
 
    `main`は`5187`を使用します。
-   各worker worktreeは`5188`以降の未使用ポートを使用します。
+   各worker worktreeは`5188`から`5210`の未使用ポートを使用します。
 
-7. 自作または利用許可を持つ VRM を次の場所へ置きます。
+7. VRMの正本をGitリポジトリの外へ保存します。
+
+   既定の正本パスは次です。
+
+   ```text
+   %USERPROFILE%\.vayria\avatar\model.vrm
+   ```
+
+   現在のmain worktreeにあるVRMを初回の正本へ移行する場合は、次を実行します。
+   この操作はmain worktreeの元ファイルを削除しません。
+
+   ```powershell
+   New-Item -ItemType Directory -Path "$env:USERPROFILE\.vayria\avatar" -Force
+   Copy-Item -LiteralPath 'C:\Users\wakad\projects\vayria\public\avatar\model.vrm' `
+     -Destination "$env:USERPROFILE\.vayria\avatar\model.vrm"
+   ```
+
+   Codexのworktreeセットアップは、正本がある場合に、VRMがないworktreeへコピーします。
+   既存のVRMは自動で上書きしません。
+
+   現在のworktreeだけを明示的に同期する場合は、次を実行します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Sync-VayriaAvatar.ps1
+   ```
+
+   全worktreeを明示的に同期する場合は、対象を確認してから`-Force`を指定します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Sync-VayriaAvatar.ps1 `
+     -AllWorktrees -Force
+   ```
+
+   各worktreeの実行用コピーは次のパスです。
 
    ```text
    public/avatar/model.vrm
@@ -170,6 +217,24 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 
 9. `http://127.0.0.1:5187/` をブラウザーで開きます。
 
+## モーションライブラリ
+
+保存済み VRMA は `public/avatar/motions/manifest.json` で管理します。
+
+manifest の `assetId`、SHA-256、duration、tag、補正 profile ID が、再生 asset の契約です。
+
+現在の manifest は空です。
+
+curated VRMA は、構造検証と実際の Vayria VRM での owner Playcheck 後に登録します。
+
+ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイルは、`%USERPROFILE%\.vayria\ardy\` の外部環境へ置きます。
+
+生成手順は [`tools/motion/README.md`](tools/motion/README.md) を参照してください。
+
+ブラウザーは ARDY process へ接続しません。
+
+展示は保存済み motion のみで成立します。
+
 ## 運用モード
 
 アプリは同じフロントエンドと API パスを、次のモードで使用します。
@@ -180,15 +245,23 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 | `exhibition` | Windows PC と iPad の同一 LAN 接続 | `0.0.0.0:5187` 待受け |
 | `public` | 将来の HTTPS 公開 | 今回は公開サーバーを提供しません |
 
+### 展示コピー
+
+展示画面と会場パネルで使用する正本コピーです。
+
+メインコピー：
+
+> Vayriaに一枚、どうぞ。
+
+補助コピー：
+
+> 気になるカードを一枚、Vayriaの脳内へ。
+
 ### iPad 展示の確認
 
 1. `.env.example` を `.env.local` へコピーし、API key と AivisSpeech の設定を記述します。
-2. `.env.exhibition.example` を `.env.exhibition` へコピーします。
-
-   ```powershell
-   Copy-Item -LiteralPath '.env.exhibition.example' -Destination '.env.exhibition'
-   ```
-
+2. worktreeのSetup scriptが`.env.exhibition.local`を生成したことを確認します。
+   `.env.exhibition.example`の手動コピーは不要です。
 3. AivisSpeech を Windows PC で起動します。
 4. exhibition モードで Vite を起動します。
 
@@ -199,22 +272,24 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 5. Vite が表示する `Network` URL を iPad で開きます。
 
    ```text
-   http://<Windows PC の LAN アドレス>:5187/
+   http://<Windows PC の LAN アドレス>:<worktreeに割り当てられたポート>/
    ```
 
 iPad と Windows PC は同一 LAN に接続してください。Wi-Fi と Ethernet のどちらも使用できます。
 LAN アドレスはソースへ記述しません。起動時に表示された URL を使用します。
+`main` worktreeは`5187`、worker worktreeは`5188`から`5210`の割り当てポートを使用します。
 
-Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187` の受信を許可してください。
+Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187`から`5210`の受信を一度だけ許可してください。
 インターネットへポート転送は設定しないでください。
 
 `VITE_API_BASE_URL=/` は現在のページと同じ接続先を使用します。別の HTTPS API を使用する場合だけ、`VITE_API_BASE_URL` を変更します。
 
-`public` モードは将来の公開用設定名です。公開 URL、公開中継、認証、セッション管理は今回の対象外です。
+`public` モードは将来の公開用設定名です。公開 URL、公開中継、認証、永続セッション管理は今回の対象外です。
 `getUserMedia()` とカメラ背景も今回の対象外です。カメラを追加する場合は HTTPS または同等の Secure Context が必要です。
 
-`.env.local` と `public/avatar/*.vrm` は Git の追跡対象外です。
-`.env.exhibition` も Git の追跡対象外です。
+`.env.local`、`public/avatar/*.vrm`、生成途中の motion asset は Git の追跡対象外です。
+`.env.exhibition` と `.env.exhibition.local` も Git の追跡対象外です。
+VRMの正本もGitリポジトリの外に置きます。`.worktreeinclude`には追加しません。
 API key と AivisSpeech の設定は Vite の Node middleware だけが読みます。
 ブラウザー bundle には埋め込みません。
 
@@ -290,7 +365,8 @@ serverは既存clientの`X-Wildcard-Turn-Id`も互換目的で受理します。
 - コメント取得、fake audience、配信サービス連携
 - TTSキュー、発話分割、ストリーミング、割り込み再開
 - 話題の永続記憶
-- VRMA、長期的な mood、感情履歴、モーション選択
+- ARDY runtime generation、自由な motion selector、複雑な VRMA blending
+- 長期的な mood、感情履歴
 - production server と deployment
 
 `npm run dev` のローカル利用と、`npm run dev:exhibition` の同一 LAN 展示確認を対象にしています。

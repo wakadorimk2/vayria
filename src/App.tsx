@@ -121,16 +121,20 @@ export default function App() {
   const [audioControl, setAudioControl] = useState(readAudioControlState);
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>({ topic: null, topicTurns: 0 });
+  const [isAutonomousLoopEnabled, setIsAutonomousLoopEnabled] =
+    useState(true);
+  const [sessionGeneration, setSessionGeneration] = useState(0);
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const cardGame = useCardGamePrototype();
-  const { acceptReply, beginReply, zones } = cardGame;
+  const { acceptReply, beginReply, resetTurn, zones } = cardGame;
   const performer = usePerformerRuntime();
   const wildcardDirection = useWildcardDirection(zones);
   const {
     completePlan,
     createPlan,
     getNextAutonomousDelay: getRuntimeAutonomousDelay,
+    resetRuntime,
     setPhase,
   } = performer;
   const {
@@ -143,6 +147,7 @@ export default function App() {
   >(null);
   const activePlanRef = useRef<PerformancePlan | null>(null);
   const nonSpeechTimerRef = useRef<number | null>(null);
+  const sessionGenerationRef = useRef(0);
   const {
     isAudioUnlocked,
     mouthOpen,
@@ -169,8 +174,11 @@ export default function App() {
 
   const handlePerformanceResult = useCallback(
     (result: PerformanceResult) => {
-      completePlan(result);
       if (activePlanRef.current?.planId !== result.planId) return;
+      if (result.outcome === 'failed') {
+        setIsAutonomousLoopEnabled(false);
+      }
+      completePlan(result);
       activePlanRef.current = null;
       setActivePlan(null);
       setActiveEmotionCue(null);
@@ -180,12 +188,16 @@ export default function App() {
 
   const executeNonSpeechPlan = useCallback(
     (plan: PerformancePlan) => {
+      const expectedSessionGeneration = sessionGeneration;
       handlePerformancePlan(plan);
       if (nonSpeechTimerRef.current !== null) {
         window.clearTimeout(nonSpeechTimerRef.current);
       }
-      nonSpeechTimerRef.current = window.setTimeout(() => {
-        nonSpeechTimerRef.current = null;
+      const timer = window.setTimeout(() => {
+        if (nonSpeechTimerRef.current === timer) {
+          nonSpeechTimerRef.current = null;
+        }
+        if (expectedSessionGeneration !== sessionGenerationRef.current) return;
         handlePerformanceResult({
           planId: plan.planId,
           completedAt: Date.now(),
@@ -194,8 +206,28 @@ export default function App() {
           intent: plan.intent,
         });
       }, plan.preReaction?.leadBeforeSpeechMs ?? 0);
-      return false;
-    }, [handlePerformancePlan, handlePerformanceResult]);
+      nonSpeechTimerRef.current = timer;
+      return true;
+    },
+    [handlePerformancePlan, handlePerformanceResult, sessionGeneration],
+  );
+
+  const cancelNonSpeechPlan = useCallback(() => {
+    if (nonSpeechTimerRef.current === null) return;
+
+    window.clearTimeout(nonSpeechTimerRef.current);
+    nonSpeechTimerRef.current = null;
+    const plan = activePlanRef.current;
+    if (!plan) return;
+
+    handlePerformanceResult({
+      planId: plan.planId,
+      completedAt: Date.now(),
+      outcome: 'cancelled',
+      trigger: plan.trigger,
+      intent: plan.intent,
+    });
+  }, [handlePerformanceResult]);
 
   const {
     cancelAutonomous,
@@ -203,6 +235,7 @@ export default function App() {
     isBusy,
     isManualBusy,
     reply,
+    resetConversation,
     sendAutonomous,
     sendManual,
     source,
@@ -223,6 +256,27 @@ export default function App() {
       : 'idle';
   const trimmedInput = input.trim();
   const volumePercent = Math.round(volume * 100);
+
+  const resetSession = useCallback(() => {
+    const nextGeneration = sessionGenerationRef.current + 1;
+    sessionGenerationRef.current = nextGeneration;
+
+    if (nonSpeechTimerRef.current !== null) {
+      window.clearTimeout(nonSpeechTimerRef.current);
+      nonSpeechTimerRef.current = null;
+    }
+
+    resetConversation();
+    resetRuntime();
+    resetTurn();
+    activePlanRef.current = null;
+    setActivePlan(null);
+    setActiveEmotionCue(null);
+    setAutonomousContext({ topic: null, topicTurns: 0 });
+    setInput('');
+    setIsAutonomousLoopEnabled(true);
+    setSessionGeneration(nextGeneration);
+  }, [resetConversation, resetRuntime, resetTurn]);
 
   useEffect(() => {
     const serialized = JSON.stringify({ volume, lastAudibleVolume });
@@ -289,14 +343,33 @@ export default function App() {
       contribution?: ReturnType<typeof getDirectionContribution>;
       trigger?: PerformerTrigger;
     } = {}) => {
-      if (isMuted || isBusy || activePlanRef.current !== null) return false;
+      const expectedSessionGeneration = sessionGeneration;
+      const isCurrentSession = () =>
+        expectedSessionGeneration === sessionGenerationRef.current;
+
+      if (
+        !isCurrentSession() ||
+        !isAutonomousLoopEnabled ||
+        isMuted ||
+        isBusy ||
+        activePlanRef.current !== null
+      ) {
+        return false;
+      }
       if (isExhibitionMode) {
         const audioReady = await prepare();
-        if (!audioReady) return false;
+        if (!audioReady || !isCurrentSession()) return false;
       } else {
         void prepare();
       }
-      if (isMuted || isBusy || activePlanRef.current !== null) return false;
+      if (
+        !isCurrentSession() ||
+        isMuted ||
+        isBusy ||
+        activePlanRef.current !== null
+      ) {
+        return false;
+      }
       const trigger =
         options.trigger ?? ({ kind: 'idle_tick', elapsedMs: 0 } as const);
       const plan = createPlanForTrigger(
@@ -313,7 +386,7 @@ export default function App() {
         acceptReply,
         plan,
       );
-      if (!decision) return false;
+      if (!decision || !isCurrentSession()) return false;
       setAutonomousContext((current) =>
         advanceAutonomousContext(current, decision),
       );
@@ -326,12 +399,14 @@ export default function App() {
       createPlanForTrigger,
       executeNonSpeechPlan,
       getDirectionContribution,
+      isAutonomousLoopEnabled,
       isExhibitionMode,
       isBusy,
       isMuted,
       prepare,
       readCardContext,
       sendAutonomous,
+      sessionGeneration,
     ],
   );
 
@@ -343,7 +418,7 @@ export default function App() {
         metadata: { origin: 'wildcard' },
       };
       const contribution = activateCardSwap(result);
-      if (isMuted || isBusy) return;
+      if (!isAutonomousLoopEnabled || isMuted || isBusy) return;
       void startAutonomous({
         cardContextOverride: {
           brainCardIds: result.brainCardIds,
@@ -353,7 +428,13 @@ export default function App() {
         trigger,
       });
     },
-    [activateCardSwap, isBusy, isMuted, startAutonomous],
+    [
+      activateCardSwap,
+      isAutonomousLoopEnabled,
+      isBusy,
+      isMuted,
+      startAutonomous,
+    ],
   );
 
   const getNextAutonomousDelay = useCallback(
@@ -368,16 +449,20 @@ export default function App() {
     cancelAutonomous,
     getNextAutonomousDelay,
     isBusy: isPerformerBusy,
+    isLoopEnabled: isAutonomousLoopEnabled,
     isMuted,
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
     onIdleTick: startAutonomous,
+    sessionGeneration,
   });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!trimmedInput || isManualBusy) return;
+    setIsAutonomousLoopEnabled(true);
     if (source === 'autonomous') cancelAutonomous();
+    cancelNonSpeechPlan();
     const trigger: PerformerTrigger = {
       kind: 'viewer_message',
       text: trimmedInput,
@@ -514,11 +599,21 @@ export default function App() {
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
           performancePlan={activePlan ?? undefined}
+          sessionGeneration={sessionGeneration}
         />
+        {isExhibitionMode && (
+          <aside className="exhibition-copy" aria-label="展示案内">
+            <p className="exhibition-copy__title">Vayriaに一枚、どうぞ。</p>
+            <p className="exhibition-copy__hint">
+              気になるカードを一枚、Vayriaの脳内へ。
+            </p>
+          </aside>
+        )}
         <CardGamePrototype
           game={cardGame}
           isInteractionLocked={isPerformerBusy}
           onCardInserted={handleCardInserted}
+          onSessionReset={resetSession}
           onSelectionActiveChange={setIsCardSelectionActive}
         />
       </section>

@@ -155,6 +155,37 @@ input {
   pointer-events: none;
 }
 
+.app-shell[data-app-mode="exhibition"] .exhibition-copy {
+  position: absolute;
+  z-index: 2;
+  top: clamp(1rem, 5vh, 2.5rem);
+  left: clamp(1rem, 4vw, 3rem);
+  max-width: min(70vw, 24rem);
+  color: #f4f2ed;
+  pointer-events: none;
+  text-shadow: 0 2px 12px rgb(0 0 0 / 62%);
+  user-select: none;
+}
+
+.exhibition-copy__title,
+.exhibition-copy__hint {
+  margin: 0;
+}
+
+.exhibition-copy__title {
+  font-size: clamp(1.2rem, 2.8vw, 1.75rem);
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+}
+
+.exhibition-copy__hint {
+  margin-top: 0.4rem;
+  color: rgb(244 242 237 / 76%);
+  font-size: clamp(0.82rem, 1.8vw, 1.05rem);
+  line-height: 1.45;
+}
+
 .card-drag-preview {
   position: fixed;
   z-index: 20;
@@ -352,6 +383,7 @@ input {
 }
 
 .reset-turn-button,
+.reset-session-button,
 .swap-button {
   border: 1px solid #5a6068;
   border-radius: 999px;
@@ -365,6 +397,12 @@ input {
   font-size: 0.62rem;
 }
 
+.reset-session-button {
+  padding: 0.22rem 0.55rem;
+  border-color: #8b5d55;
+  font-size: 0.62rem;
+}
+
 .swap-button {
   padding: 0.3rem 0.85rem;
   border-color: #d78256;
@@ -375,7 +413,9 @@ input {
 }
 
 .reset-turn-button:hover,
-.reset-turn-button:focus-visible {
+.reset-turn-button:focus-visible,
+.reset-session-button:hover,
+.reset-session-button:focus-visible {
   border-color: #8b929b;
 }
 
@@ -385,6 +425,7 @@ input {
 }
 
 .reset-turn-button:focus-visible,
+.reset-session-button:focus-visible,
 .swap-button:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;

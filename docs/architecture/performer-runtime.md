@@ -66,8 +66,10 @@ The current source mapping is:
 | WildCard direction | `src/cards/wildcardDirection.ts` |
 | Request and playback execution | `src/conversation/useConversation.ts` |
 | Autonomous timer and environment checks | `src/conversation/useAutonomousTalk.ts` |
+| In-memory session orchestration | `src/App.tsx`, conversation and card hooks |
 | LLM and TTS provider boundary | `server/localApi.ts` |
 | Expression, gaze approximation, and idle motion | `src/avatar/VrmStage.tsx`, `src/avatar/idleMotion.ts` |
+| Saved VRMA catalog and body clip playback | `src/avatar/motion/`, `src/avatar/VrmStage.tsx` |
 
 ### Exhibition observability
 
@@ -124,6 +126,28 @@ The hook does not decide whether the performer wants to speak.
 It emits `PerformanceResult`.
 
 It does not own emotion state.
+
+### Session loop and reset
+
+The application keeps one in-memory session while the page remains open.
+The session contains conversation history, autonomous topic context, the last
+autonomous reply, Performer State, and per-turn card state.
+
+The loop starts after the avatar and audio are ready.
+It schedules the initial four-second delay, then schedules the next delay after
+speech, silence, or a local non-speech plan completes.
+
+A communication failure pauses the autonomous loop and preserves the session.
+Manual input can resume the loop.
+Mute and page invisibility pause the loop without resetting session data.
+
+`Session Reset` is a local development control.
+It stops active requests, playback, and non-speech timers.
+It resets the in-memory session and starts a new initial-delay cycle.
+`Reset Turn` remains a card-only reset.
+
+The session is not persisted.
+The Performer Runtime does not receive a generic `SessionState` type.
 
 ## 3. State and profile
 
@@ -344,6 +368,10 @@ The conversation generation guard rejects stale fetch and playback completions.
 
 The active plan ID guard rejects stale `PerformanceResult` updates.
 
+Session Reset increments the session generation before it clears active state.
+Old autonomous callbacks and non-speech timers cannot create or complete a plan
+in the new session.
+
 ## 8. Prior art and Build / Buy / Borrow decision
 
 These findings are based on the inspected repository paths and source files.
@@ -433,7 +461,7 @@ The current MVP uses the existing VRM stage and a small head-yaw gaze approximat
 - trust, affinity, and durable personality growth;
 - generic timeline engine;
 - speech queue, sentence-level TTS, barge-in, and resume;
-- VRMA selection and complex motion graphs;
+- complex VRMA selection graphs and runtime blending;
 - arbitrary card DSL;
 - direct dependency on an external OSS runtime.
 

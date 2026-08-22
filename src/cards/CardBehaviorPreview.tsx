@@ -17,6 +17,11 @@ import {
 } from './cardReactions';
 import { useCardPreviewConversation } from './useCardPreviewConversation';
 import { WildcardCard } from './WildcardCard';
+import {
+  attachCardPreviewMotion,
+  CARD_MOTION_ASSET_IDS,
+  type CardMotionCardId,
+} from './cardMotionAssets';
 import type { DirectionModifiers } from '../performer/types';
 import type { WildcardCardData } from './cardTypes';
 
@@ -93,9 +98,13 @@ function ModifierList({
 function ReactionDetails({
   card,
   profile,
+  motionAssetId,
+  motionSuppressed,
 }: {
   card: WildcardCardData;
   profile: CardReactionProfile;
+  motionAssetId: string;
+  motionSuppressed: boolean;
 }) {
   return (
     <section
@@ -131,6 +140,30 @@ function ReactionDetails({
       <p className="card-behavior-preview__lifecycle">
         通常の脳内効果は背景強度0.2です。交換直後は強制強度1.0で30秒かけて減衰し、発話を要求します。
       </p>
+
+      <section className="card-behavior-preview__other-values">
+        <h3>保存済みVRMA</h3>
+        <dl className="card-behavior-preview__modifier-list">
+          <div>
+            <dt>asset ID</dt>
+            <dd>
+              <code>{motionAssetId}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>再生対象</dt>
+            <dd>カード反応の保存済みVRMA</dd>
+          </div>
+          <div>
+            <dt>縮小モーション</dt>
+            <dd>
+              {motionSuppressed
+                ? 'カード固有VRMAを抑制'
+                : 'カード選択時に再生'}
+            </dd>
+          </div>
+        </dl>
+      </section>
     </section>
   );
 }
@@ -152,12 +185,14 @@ function usePrefersReducedMotion(): boolean {
 }
 
 export function CardBehaviorPreview() {
-  const [selectedCardId, setSelectedCardId] = useState<string>(
+  const [selectedCardId, setSelectedCardId] = useState<CardMotionCardId>(
     M1_INITIAL_BRAIN_CARD_IDS[0],
   );
   const [audioUnlockRequired, setAudioUnlockRequired] = useState(false);
-  const [pendingCardId, setPendingCardId] = useState<string | null>(null);
+  const [pendingCardId, setPendingCardId] =
+    useState<CardMotionCardId | null>(null);
   const [activePlan, setActivePlan] = useState<PerformancePlan | null>(null);
+  const [motionSessionGeneration, setMotionSessionGeneration] = useState(0);
   const [activeEmotionCue, setActiveEmotionCue] = useState<{
     emotion: Emotion;
     intensity: number;
@@ -221,20 +256,26 @@ export function CardBehaviorPreview() {
   const isBusy = isPreviewBusy || activePlan !== null;
 
   const runPreview = useCallback(
-    (cardId: string) => {
+    (cardId: CardMotionCardId) => {
       const contribution = createCardPreviewContribution(cardId);
       const trigger = contribution.triggers[0];
       if (!trigger) return;
-      const plan = createPlan(trigger, [contribution]);
+      const basePlan = createPlan(trigger, [contribution]);
+      const plan = attachCardPreviewMotion(
+        basePlan,
+        cardId,
+        prefersReducedMotion,
+      );
       void startPreview(cardId, plan);
     },
-    [createPlan, startPreview],
+    [createPlan, prefersReducedMotion, startPreview],
   );
 
   const selectCard = useCallback(
-    async (cardId: string) => {
+    async (cardId: CardMotionCardId) => {
       selectionGenerationRef.current += 1;
       const selectionGeneration = selectionGenerationRef.current;
+      setMotionSessionGeneration(selectionGeneration);
       setSelectedCardId(cardId);
       setPendingCardId(cardId);
       setAudioUnlockRequired(false);
@@ -300,6 +341,7 @@ export function CardBehaviorPreview() {
               motionScale={prefersReducedMotion ? 0 : 1}
               mouthOpen={mouthOpen}
               performancePlan={activePlan ?? undefined}
+              sessionGeneration={motionSessionGeneration}
             />
             <div className="card-behavior-preview__stage-overlay">
               <span className="card-behavior-preview__selected-label">
@@ -328,7 +370,12 @@ export function CardBehaviorPreview() {
         </section>
 
         {selectedProfile && (
-          <ReactionDetails card={selectedCard} profile={selectedProfile} />
+          <ReactionDetails
+            card={selectedCard}
+            motionAssetId={CARD_MOTION_ASSET_IDS[selectedCard.id]}
+            motionSuppressed={prefersReducedMotion}
+            profile={selectedProfile}
+          />
         )}
       </div>
 

@@ -132,6 +132,7 @@ export class IdleController {
   private readonly bones = new Map<string, IdleBone>();
   private readonly offsetEuler = new Euler(0, 0, 0, 'XYZ');
   private readonly offsetRotation = new Quaternion();
+  private enabled = true;
   private elapsedSeconds = 0;
 
   constructor(vrm: VRM) {
@@ -142,6 +143,8 @@ export class IdleController {
   }
 
   update(deltaSeconds: number, weight = 1, headYawBias = 0): void {
+    if (!this.enabled) return;
+
     const safeDelta = Math.min(
       Math.max(deltaSeconds, 0),
       IDLE_MOTION.maxDeltaSeconds,
@@ -192,11 +195,21 @@ export class IdleController {
     );
   }
 
+  setEnabled(enabled: boolean): void {
+    if (this.enabled === enabled) return;
+    this.enabled = enabled;
+    if (!enabled) this.restoreCapturedRotations();
+  }
+
   dispose(): void {
+    this.restoreCapturedRotations();
+    this.bones.clear();
+  }
+
+  private restoreCapturedRotations(): void {
     for (const bone of this.bones.values()) {
       bone.node.quaternion.copy(bone.baseRotation);
     }
-    this.bones.clear();
   }
 
   private captureBone(

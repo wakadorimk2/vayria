@@ -1,10 +1,44 @@
 # Avatar placement
 
-Place a user-owned VRM file here with this exact path:
+The canonical user-owned VRM is stored outside the repository:
+
+```text
+%USERPROFILE%\.vayria\avatar\model.vrm
+```
+
+Each worktree receives a runtime copy at this exact path:
 
 ```text
 public/avatar/model.vrm
 ```
 
-The VRM file is intentionally ignored by Git. Reload the browser after adding
-or replacing it.
+`Setup-VayriaWorktree.ps1` copies the canonical VRM when the worktree does not
+have a copy. It does not overwrite an existing copy. A missing canonical VRM
+only produces a warning, so environment setup can continue without an avatar.
+
+To synchronize the current worktree explicitly:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Sync-VayriaAvatar.ps1
+```
+
+To synchronize every registered worktree, use `-AllWorktrees`. Existing files
+that differ from the canonical VRM remain protected unless `-Force` is used:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Sync-VayriaAvatar.ps1 `
+  -AllWorktrees -Force
+```
+
+The VRM files are intentionally ignored by Git. Do not add them to
+`.worktreeinclude`. Reload the browser after adding or replacing a copy.
+
+## Motion assets
+
+Curated `.vrma` files use the `motions` directory.
+
+Register each file in `motions/manifest.json`.
+
+The manifest must contain a SHA-256 hash, duration, tags, and correction profile ID.
+
+Generated or unreviewed files must stay outside this directory until structural validation and owner Playcheck are complete.
