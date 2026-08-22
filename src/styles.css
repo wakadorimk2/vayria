@@ -288,6 +288,12 @@ input {
   width: var(--wildcard-card-width);
 }
 
+.card-zone--hand .wildcard-card--dragging {
+  flex-basis: calc(var(--wildcard-card-width) * 0.8);
+  width: calc(var(--wildcard-card-width) * 0.8);
+  opacity: 0;
+}
+
 .app-shell[data-app-mode="exhibition"] .card-zone--hand {
   --wildcard-card-width: var(--exhibition-hand-card-width);
   opacity: 1;
