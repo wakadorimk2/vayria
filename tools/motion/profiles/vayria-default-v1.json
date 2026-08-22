@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "profileId": "vayria-default-v1",
+  "targetAvatarSha256": null,
+  "calibrationStatus": "pending-owner-playcheck",
+  "units": {
+    "rotation": "degrees",
+    "translation": "meters",
+    "scale": "ratio"
+  },
+  "upperBody": {
+    "upperArmSpreadDegrees": {
+      "left": 0,
+      "right": 0
+    },
+    "armSwingScale": 1,
+    "elbowFlexionDegrees": {
+      "left": 0,
+      "right": 0
+    },
+    "shoulderElevationDegrees": {
+      "left": 0,
+      "right": 0
+    }
+  },
+  "lowerBody": {
+    "stanceWidthScale": 1,
+    "stepWidthScale": 1,
+    "rootMotionScale": 1,
+    "pelvisMotionScale": 1
+  },
+  "secondary": {
+    "headYawDegrees": 0,
+    "headPitchDegrees": 0,
+    "wristRotationDegrees": 0
+  }
+}

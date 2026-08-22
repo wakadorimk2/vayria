@@ -599,6 +599,7 @@ export default function App() {
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
           performancePlan={activePlan ?? undefined}
+          sessionGeneration={sessionGeneration}
         />
         {isExhibitionMode && (
           <aside className="exhibition-copy" aria-label="展示案内">

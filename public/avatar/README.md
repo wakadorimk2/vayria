@@ -32,3 +32,13 @@ pwsh -NoProfile -File .\scripts\Sync-VayriaAvatar.ps1 `
 
 The VRM files are intentionally ignored by Git. Do not add them to
 `.worktreeinclude`. Reload the browser after adding or replacing a copy.
+
+## Motion assets
+
+Curated `.vrma` files use the `motions` directory.
+
+Register each file in `motions/manifest.json`.
+
+The manifest must contain a SHA-256 hash, duration, tags, and correction profile ID.
+
+Generated or unreviewed files must stay outside this directory until structural validation and owner Playcheck are complete.
