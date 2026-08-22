@@ -29,6 +29,7 @@ export class IdleGazeController {
   private readonly neutralTarget = new Vector3();
   private readonly currentTarget = new Vector3();
   private readonly desiredTarget = new Vector3();
+  private readonly performanceStartTarget = new Vector3();
   private readonly random: RandomSource;
   private readonly modelHeight: number;
   private enabled = false;
@@ -38,6 +39,7 @@ export class IdleGazeController {
   private phase: IdleGazePhase = 'waiting';
   private phaseElapsedSeconds = 0;
   private hasNeutralTarget = false;
+  private performanceActive = false;
 
   constructor(
     private readonly vrm: VRM,
@@ -66,20 +68,41 @@ export class IdleGazeController {
     deltaSeconds: number,
     viewerTarget: Vector3,
     enabled: boolean,
+    performanceTarget: Vector3 | null = null,
   ): IdleGazeFrame {
     if (this.disposed) return this.createFrame();
 
-    if (!enabled) {
-      if (this.enabled) this.reset();
-      this.enabled = false;
-      return this.createFrame();
-    }
-
-    this.enabled = true;
     const safeDelta = Math.min(
       Math.max(deltaSeconds, 0),
       IDLE_GAZE_TIMING.maxDeltaSeconds,
     );
+
+    if (performanceTarget) {
+      this.updatePerformanceGaze(safeDelta, performanceTarget);
+      return this.createFrame();
+    }
+
+    if (this.performanceActive) {
+      this.performanceActive = false;
+      this.beginReturnToNeutral();
+    }
+
+    if (!enabled) {
+      this.enabled = false;
+      if (this.phase === 'glancing') {
+        this.beginReturnToNeutral();
+      }
+      if (this.phase === 'returning') {
+        this.updateReturnTarget();
+        this.phaseElapsedSeconds += safeDelta;
+        if (this.phaseElapsedSeconds >= IDLE_GAZE_TIMING.returnSeconds) {
+          this.finishGaze();
+        }
+      }
+      return this.createFrame();
+    }
+
+    this.enabled = true;
 
     if (this.phase === 'waiting') {
       this.phaseElapsedSeconds += safeDelta;
@@ -114,6 +137,7 @@ export class IdleGazeController {
     this.phase = 'waiting';
     this.phaseElapsedSeconds = 0;
     this.gazeHoldSeconds = 0;
+    this.performanceActive = false;
     this.nextGazeSeconds = this.randomBetween(
       IDLE_GAZE_TIMING.minWaitSeconds,
       IDLE_GAZE_TIMING.maxWaitSeconds,
@@ -154,6 +178,38 @@ export class IdleGazeController {
     }
   }
 
+  private updatePerformanceGaze(
+    deltaSeconds: number,
+    performanceTarget: Vector3,
+  ): void {
+    if (!this.performanceActive) {
+      this.performanceActive = true;
+      this.performanceStartTarget.copy(this.currentTarget);
+      this.phase = 'glancing';
+      this.phaseElapsedSeconds = 0;
+      this.gazeHoldSeconds = 0;
+
+      if (this.vrm.lookAt && this.hasNeutralTarget) {
+        this.gazeTarget.position.copy(this.currentTarget);
+        this.vrm.lookAt.target = this.gazeTarget;
+      }
+    }
+
+    this.desiredTarget.copy(performanceTarget);
+    this.phaseElapsedSeconds += deltaSeconds;
+    const progress = MathUtils.smoothstep(
+      this.phaseElapsedSeconds,
+      0,
+      IDLE_GAZE_TIMING.approachSeconds,
+    );
+    this.currentTarget.lerpVectors(
+      this.performanceStartTarget,
+      this.desiredTarget,
+      progress,
+    );
+    this.gazeTarget.position.copy(this.currentTarget);
+  }
+
   private updateGlanceTarget(): void {
     if (!this.vrm.lookAt || !this.hasNeutralTarget) return;
 
@@ -186,7 +242,17 @@ export class IdleGazeController {
     this.gazeTarget.position.copy(this.currentTarget);
   }
 
+  private beginReturnToNeutral(): void {
+    if (this.phase === 'waiting' || this.phase === 'returning') return;
+
+    this.desiredTarget.copy(this.currentTarget);
+    this.phase = 'returning';
+    this.phaseElapsedSeconds = 0;
+    this.gazeHoldSeconds = 0;
+  }
+
   private finishGaze(): void {
+    this.performanceActive = false;
     this.clearLookAtTarget();
     this.phase = 'waiting';
     this.phaseElapsedSeconds = 0;

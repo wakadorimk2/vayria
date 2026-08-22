@@ -7,14 +7,28 @@ export interface PerformanceMotionPort {
     signal?: AbortSignal,
   ): Promise<boolean>;
   startPreparedMotion(planId: string): number | null;
+  markSpeechStart(planId: string, startedAt: number): void;
+  markSpeechEnd(planId: string, endedAt: number): void;
   finishMotion(planId: string): void;
   stopMotion(planId: string): void;
+}
+
+export type PerformancePlaybackTimerHandle = ReturnType<typeof setTimeout>;
+
+export interface PerformancePlaybackClock {
+  now(): number;
+  setTimeout(
+    callback: () => void,
+    delayMs: number,
+  ): PerformancePlaybackTimerHandle;
+  clearTimeout(handle: PerformancePlaybackTimerHandle): void;
 }
 
 export interface PerformancePlaybackCallbacks {
   onMotionReady?: (readyAt: number) => void;
   onMotionStart?: (startedAt: number) => void;
   onSpeechStart?: (startedAt: number) => void;
+  onSpeechEnd?: (endedAt: number) => void;
 }
 
 export interface PerformancePlaybackResult {
@@ -37,6 +51,7 @@ interface PerformancePlaybackOptions {
   getMotionPort: () => PerformanceMotionPort | null;
   playAudio: PlayAudio;
   stopAudio: () => void;
+  clock?: PerformancePlaybackClock;
   now?: () => number;
 }
 
@@ -58,7 +73,7 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
   private readonly getMotionPort: PerformancePlaybackOptions['getMotionPort'];
   private readonly playAudio: PlayAudio;
   private readonly stopAudio: () => void;
-  private readonly now: () => number;
+  private readonly clock: PerformancePlaybackClock;
   private generation = 0;
   private activePlanId: string | null = null;
   private preparation: PreparationState | null = null;
@@ -68,7 +83,9 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
     this.getMotionPort = options.getMotionPort;
     this.playAudio = options.playAudio;
     this.stopAudio = options.stopAudio;
-    this.now = options.now ?? (() => performance.now());
+    this.clock =
+      options.clock ??
+      createPerformancePlaybackClock(options.now ?? (() => performance.now()));
   }
 
   prepare(plan: PerformancePlan): void {
@@ -122,12 +139,13 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
             preparation.promise,
             plan.timing.motionPreparationTimeoutMs,
             controller.signal,
+            this.clock,
           )
         : false;
       if (!this.isCurrent(plan.planId, generation, controller)) return null;
 
       const motionPort = this.getMotionPort();
-      if (motionReady) callbacks.onMotionReady?.(this.now());
+      if (motionReady) callbacks.onMotionReady?.(this.clock.now());
 
       let motionStartedAt: number | undefined;
       let speechStartedAt: number | undefined;
@@ -144,14 +162,25 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
           return motionStartedAt !== undefined;
         },
         onStart: (startedAt) => {
+          if (!this.isCurrent(plan.planId, generation, controller)) return;
           speechStartedAt = startedAt;
+          motionPort?.markSpeechStart(plan.planId, startedAt);
           callbacks.onSpeechStart?.(startedAt);
         },
       });
       if (!this.isCurrent(plan.planId, generation, controller)) return null;
 
-      const speechEndedAt = this.now();
-      await waitForDelay(plan.timing.postSpeechHoldMs, controller.signal);
+      const speechEndedAt = this.clock.now();
+      motionPort?.markSpeechEnd(plan.planId, speechEndedAt);
+      callbacks.onSpeechEnd?.(speechEndedAt);
+      await waitForDelay(
+        Math.max(
+          plan.timing.postSpeechHoldMs,
+          plan.avatarProfile?.expressionHoldMs ?? 0,
+        ),
+        controller.signal,
+        this.clock,
+      );
       if (!this.isCurrent(plan.planId, generation, controller)) return null;
 
       motionPort?.finishMotion(plan.planId);
@@ -210,7 +239,8 @@ function waitForPreparation(
   preparation: Promise<boolean>,
   timeoutMs: number,
   signal: AbortSignal,
-  ): Promise<boolean> {
+  clock: PerformancePlaybackClock,
+): Promise<boolean> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(new PlaybackCancelledError());
@@ -219,10 +249,10 @@ function waitForPreparation(
 
     let settled = false;
     const timeout = Math.max(0, Math.round(timeoutMs));
-    const timer = setTimeout(() => finish(false), timeout);
+    const timer = clock.setTimeout(() => finish(false), timeout);
 
     const cleanup = () => {
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
       signal.removeEventListener('abort', handleAbort);
     };
     const finish = (value: boolean) => {
@@ -243,7 +273,11 @@ function waitForPreparation(
   });
 }
 
-function waitForDelay(delayMs: number, signal: AbortSignal): Promise<void> {
+function waitForDelay(
+  delayMs: number,
+  signal: AbortSignal,
+  clock: PerformancePlaybackClock,
+): Promise<void> {
   if (delayMs <= 0) return Promise.resolve();
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -251,15 +285,25 @@ function waitForDelay(delayMs: number, signal: AbortSignal): Promise<void> {
       return;
     }
 
-    const timer = setTimeout(() => {
+    const timer = clock.setTimeout(() => {
       signal.removeEventListener('abort', handleAbort);
       resolve();
     }, delayMs);
     const handleAbort = () => {
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
       signal.removeEventListener('abort', handleAbort);
       reject(new PlaybackCancelledError());
     };
     signal.addEventListener('abort', handleAbort, { once: true });
   });
+}
+
+function createPerformancePlaybackClock(
+  now: () => number,
+): PerformancePlaybackClock {
+  return {
+    now,
+    setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+    clearTimeout: (handle) => clearTimeout(handle),
+  };
 }
