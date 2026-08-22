@@ -1,5 +1,4 @@
 export const STAGE_PRESET = {
-  backgroundColor: '#242633',
   camera: {
     fov: 30,
     visibleHeightRatio: 0.48,
@@ -10,23 +9,46 @@ export const STAGE_PRESET = {
     hemisphere: {
       skyColor: '#fff4ea',
       groundColor: '#3a4056',
-      intensity: 0.25,
+      intensity: 0.55,
     },
     key: {
       color: '#fff0e6',
-      intensity: 0.55,
+      intensity: 1,
       position: [1.5, 2.2, 2.5],
     },
     fill: {
       color: '#dce7ff',
-      intensity: 0.1,
+      intensity: 0.35,
       position: [-1.5, 1.4, 1.8],
     },
     back: {
       color: '#d9c8ff',
-      intensity: 0.12,
+      intensity: 0.2,
       position: [0.5, 2, -2],
     },
+  },
+} as const;
+
+export const CARD_PREVIEW_LIGHTING = {
+  hemisphere: {
+    skyColor: '#fff4ea',
+    groundColor: '#3a4056',
+    intensity: 0.45,
+  },
+  key: {
+    color: '#fff0e6',
+    intensity: 1.05,
+    position: [1.5, 2.2, 2.5],
+  },
+  fill: {
+    color: '#dce7ff',
+    intensity: 0.25,
+    position: [-1.5, 1.4, 1.8],
+  },
+  back: {
+    color: '#d9c8ff',
+    intensity: 0.2,
+    position: [0.5, 2, -2],
   },
 } as const;
 

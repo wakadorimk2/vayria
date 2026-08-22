@@ -10,3 +10,12 @@ playcheck-results/local/
 
 public/avatar/*.vrm
 public/avatar/*.vrma
+public/avatar/motions/generated/
+.motion-cache/
+tools/motion/.venv/
+tools/motion/checkpoints/
+tools/motion/hf-cache/
+tools/motion/runtime-cache/
+tools/motion/raw-output/
+*.npz
+*.npy

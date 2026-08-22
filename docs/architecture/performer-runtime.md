@@ -69,6 +69,7 @@ The current source mapping is:
 | In-memory session orchestration | `src/App.tsx`, conversation and card hooks |
 | LLM and TTS provider boundary | `server/localApi.ts` |
 | Expression, gaze approximation, and idle motion | `src/avatar/VrmStage.tsx`, `src/avatar/idleMotion.ts` |
+| Saved VRMA catalog and body clip playback | `src/avatar/motion/`, `src/avatar/VrmStage.tsx` |
 
 ### Exhibition observability
 
@@ -460,7 +461,7 @@ The current MVP uses the existing VRM stage and a small head-yaw gaze approximat
 - trust, affinity, and durable personality growth;
 - generic timeline engine;
 - speech queue, sentence-level TTS, barge-in, and resume;
-- VRMA selection and complex motion graphs;
+- complex VRMA selection graphs and runtime blending;
 - arbitrary card DSL;
 - direct dependency on an external OSS runtime.
 

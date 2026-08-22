@@ -17,3 +17,17 @@ The Miko VRM and VRMA files are not distributed with Vayria.
 
 - three.js: https://github.com/mrdoob/three.js — MIT License
 - @pixiv/three-vrm: https://github.com/pixiv/three-vrm — MIT License
+- @pixiv/three-vrm-animation: https://github.com/pixiv/three-vrm — MIT License
+
+## NVIDIA ARDY integration boundary
+
+Vayria does not vendor NVIDIA ARDY source or model weights.
+
+- ARDY source: https://github.com/nv-tlabs/ardy — Apache-2.0
+- ARDY model checkpoints: NVIDIA Open Model License / Agreement terms apply
+- NVIDIA Open Model License: https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/
+- Text-To-VRMA reference: https://github.com/Kirakun0328/text-to-vrma — MIT License
+
+The ARDY commit, model ID, download source, and applicable model notice must be
+recorded when a checkpoint is used to generate a curated VRMA. Model weights
+remain outside the repository.

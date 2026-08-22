@@ -1,16 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 import { cardPool } from './cardPool';
+import { M1_INITIAL_BRAIN_CARD_IDS } from './cardReactions';
 import type { WildcardCardData } from './cardTypes';
 
 const MAX_INTERFERENCE_COUNT = 1;
-
-const INITIAL_BRAIN_IDS = [
-  'chicken',
-  'suspicious',
-  'sleepy',
-  'rain',
-  'gigantic',
-] as const;
 
 const INITIAL_HAND_IDS = [
   'tiny',
@@ -48,7 +41,7 @@ function selectCards(ids: readonly string[]): WildcardCardData[] {
 
 function createInitialState(): CardZoneState {
   return {
-    brain: selectCards(INITIAL_BRAIN_IDS),
+    brain: selectCards(M1_INITIAL_BRAIN_CARD_IDS),
     hand: selectCards(INITIAL_HAND_IDS),
     remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
     activatedCardIds: [],
