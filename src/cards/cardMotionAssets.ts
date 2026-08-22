@@ -2,6 +2,7 @@ import { cardPool } from './cardPool.js';
 import { CARD_REACTION_PROFILES } from './cardReactions.js';
 import type {
   CardGestureIntent,
+  DirectionContribution,
   PerformancePlan,
 } from '../performer/types.js';
 
@@ -39,26 +40,34 @@ export const CARD_MOTION_ASSET_BY_GESTURE_INTENT: Readonly<
   ]),
 ) as Record<CardGestureIntent, string>;
 
-export function attachCardPreviewMotion(
-  plan: PerformancePlan,
-  cardId: CardMotionCardId,
-  reducedMotion: boolean,
-): PerformancePlan {
+export function getCardPerformancePlanOverrides(
+  cardId: string,
+  reducedMotion = false,
+): NonNullable<DirectionContribution['planOverrides']> {
   const behavior = CARD_REACTION_PROFILES[cardId]?.behavior;
   if (!behavior) {
     throw new Error(`Card behavior is missing "${cardId}".`);
   }
 
-  const nextPlan = {
-    ...plan,
-    behavior,
-  } satisfies PerformancePlan;
-  if (reducedMotion) return nextPlan;
+  return reducedMotion
+    ? { behavior }
+    : {
+        behavior,
+        motion: {
+          assetId: CARD_MOTION_ASSET_BY_GESTURE_INTENT[behavior.gestureIntent],
+        },
+      };
+}
 
+export function attachCardPreviewMotion(
+  plan: PerformancePlan,
+  cardId: CardMotionCardId,
+  reducedMotion: boolean,
+): PerformancePlan {
+  const overrides = getCardPerformancePlanOverrides(cardId, reducedMotion);
   return {
-    ...nextPlan,
-    motion: {
-      assetId: CARD_MOTION_ASSET_BY_GESTURE_INTENT[behavior.gestureIntent],
-    },
-  };
+    ...plan,
+    behavior: overrides.behavior,
+    motion: overrides.motion,
+  } satisfies PerformancePlan;
 }

@@ -489,6 +489,10 @@ export function createCardPreviewContribution(
   if (!modifiers) {
     throw new Error(`Card modifier is missing "${cardId}".`);
   }
+  const behavior = CARD_REACTION_PROFILES[cardId]?.behavior;
+  if (!behavior) {
+    throw new Error(`Card behavior is missing "${cardId}".`);
+  }
 
   const trigger: PerformerTrigger = {
     kind: 'external_stimulus',
@@ -514,5 +518,6 @@ export function createCardPreviewContribution(
     semanticCues: [...(modifiers.semanticBiases ?? [])],
     triggers: [trigger],
     attentionTarget: 'viewer',
+    planOverrides: { behavior },
   };
 }
