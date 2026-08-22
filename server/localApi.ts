@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { performance } from 'node:perf_hooks';
 import type { Plugin } from 'vite';
 import type { Message } from '@aituber-onair/chat';
+import { isPlaycheckRunId } from '../src/playcheck.js';
 import {
   AIVIS_VOICE_PARAMETERS,
   EMOTIONS,
@@ -17,6 +18,10 @@ import {
 import { cardPool } from '../src/cards/cardPool.js';
 import type { WildcardCardData } from '../src/cards/cardTypes.js';
 import { CARD_REACTION_PROFILES } from '../src/cards/cardReactions.js';
+import {
+  appendPlaycheckRecord,
+  type PlaycheckRecord,
+} from './playcheckStore.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -65,6 +70,7 @@ interface LocalApiConfig {
   aivisPitchScale?: string;
   aivisIntonationScale?: string;
   aivisTempoDynamicsScale?: string;
+  playcheckRoot?: string;
 }
 
 interface AivisTtsSettings {
@@ -132,6 +138,7 @@ interface ClientConversationEvent {
   emotion?: Emotion;
   phase?: 'llm' | 'tts';
   reason?: string;
+  runId?: string;
 }
 
 class RequestError extends Error {
@@ -194,6 +201,15 @@ function readTurnIdHeader(request: IncomingMessage): string | null {
   return null;
 }
 
+function readPlaycheckRunIdHeader(
+  request: IncomingMessage,
+): string | null | undefined {
+  const value = request.headers['x-performer-run-id'];
+  if (value === undefined) return undefined;
+  const candidate = Array.isArray(value) ? value[0] : value;
+  return isPlaycheckRunId(candidate) ? candidate : null;
+}
+
 function logStructuredEvent(
   event: string,
   fields: Record<string, unknown>,
@@ -206,6 +222,70 @@ function logStructuredEvent(
       ...fields,
     }),
   );
+}
+
+const PLAYCHECK_RECORD_FIELDS = [
+  'requestId',
+  'turnId',
+  'source',
+  'clientAt',
+  'elapsedMs',
+  'durationMs',
+  'emotion',
+  'phase',
+  'reason',
+  'activeRequests',
+  'audioBytes',
+] as const;
+const SAFE_PLAYCHECK_REASONS = new Set([
+  'busy',
+  'muted',
+  'superseded',
+  'request_invalid',
+  'provider_error',
+  'silence',
+]);
+
+async function recordStructuredEvent(
+  config: LocalApiConfig,
+  event: string,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  logStructuredEvent(event, fields);
+
+  const runId = fields.runId;
+  if (!isPlaycheckRunId(runId)) return;
+
+  const record: PlaycheckRecord = {
+    at: new Date().toISOString(),
+    event,
+    runId,
+  };
+  for (const field of PLAYCHECK_RECORD_FIELDS) {
+    const value = fields[field];
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number'
+    ) {
+      if (
+        field === 'reason' &&
+        (typeof value !== 'string' || !SAFE_PLAYCHECK_REASONS.has(value))
+      ) {
+        continue;
+      }
+      record[field] = value;
+    }
+  }
+
+  try {
+    await appendPlaycheckRecord(
+      config.playcheckRoot ?? 'playcheck-results/local',
+      runId,
+      record,
+    );
+  } catch (error) {
+    console.warn('Playcheck event recording failed.', error);
+  }
 }
 
 export function readConversationEvent(payload: unknown): ClientConversationEvent {
@@ -224,6 +304,7 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     'emotion',
     'phase',
     'reason',
+    'runId',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError('Event body contains an unsupported field.', 400);
@@ -275,6 +356,13 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     source,
     turnId,
   };
+
+  if (record.runId !== undefined) {
+    if (!isPlaycheckRunId(record.runId)) {
+      throw new RequestError('runId is invalid.', 400);
+    }
+    eventPayload.runId = record.runId;
+  }
 
   if (record.durationMs !== undefined) {
     if (
@@ -1490,6 +1578,7 @@ async function handleRequest(
   const isLlmRequest =
     pathname === CHAT_PATH || pathname === CARD_PREVIEW_PATH;
   let requestPhase: 'llm' | 'tts' | null = null;
+  let playcheckRunId: string | undefined;
 
   if (request.method !== 'POST') {
     sendJson(response, 405, { error: 'Method not allowed.' });
@@ -1499,13 +1588,26 @@ async function handleRequest(
   if (isProviderRequest) activeProviderRequests += 1;
 
   try {
+    const headerPlaycheckRunId = readPlaycheckRunIdHeader(request);
+    if (headerPlaycheckRunId === null) {
+      throw new RequestError('runId header is invalid.', 400);
+    }
+    playcheckRunId = headerPlaycheckRunId;
     const payload = await readJsonBody(request);
 
     if (pathname === EVENTS_PATH) {
       const event = readConversationEvent(payload);
-      logStructuredEvent(event.event, {
+      if (
+        event.runId !== undefined &&
+        playcheckRunId !== undefined &&
+        event.runId !== playcheckRunId
+      ) {
+        throw new RequestError('runId header does not match the event.', 400);
+      }
+      await recordStructuredEvent(config, event.event, {
         origin: 'client',
         requestId,
+        runId: event.runId ?? playcheckRunId,
         turnId: event.turnId,
         source: event.source,
         clientAt: event.at,
@@ -1577,9 +1679,10 @@ async function handleRequest(
         performanceContext,
       } = readChatRequest(payload);
       const startedAt = performance.now();
-      logStructuredEvent('llm_start', {
+      await recordStructuredEvent(config, 'llm_start', {
         origin: 'server',
         requestId,
+        runId: playcheckRunId,
         turnId: headerTurnId,
         source: mode,
         activeRequests: activeProviderRequests,
@@ -1596,9 +1699,10 @@ async function handleRequest(
         previousAutonomousReply,
         performanceContext,
       );
-      logStructuredEvent('llm_done', {
+      await recordStructuredEvent(config, 'llm_done', {
         origin: 'server',
         requestId,
+        runId: playcheckRunId,
         turnId: headerTurnId,
         source: mode,
         durationMs: Math.round(performance.now() - startedAt),
@@ -1626,9 +1730,10 @@ async function handleRequest(
         }
       : settings;
     const startedAt = performance.now();
-    logStructuredEvent('tts_start', {
+    await recordStructuredEvent(config, 'tts_start', {
       origin: 'server',
       requestId,
+      runId: playcheckRunId,
       turnId: headerTurnId,
       activeRequests: activeProviderRequests,
     });
@@ -1643,9 +1748,10 @@ async function handleRequest(
     const audio = Buffer.from(
       await synthesizeSpeech(baseUrl, style.id, effectiveSettings, text),
     );
-    logStructuredEvent('tts_ready', {
+    await recordStructuredEvent(config, 'tts_ready', {
       origin: 'server',
       requestId,
+      runId: playcheckRunId,
       turnId: headerTurnId,
       durationMs: Math.round(performance.now() - startedAt),
       audioBytes: audio.byteLength,
@@ -1661,9 +1767,10 @@ async function handleRequest(
   } catch (error) {
     if (error instanceof RequestError) {
       if (requestPhase) {
-        logStructuredEvent('turn_failed', {
+        await recordStructuredEvent(config, 'turn_failed', {
           origin: 'server',
           requestId,
+          runId: playcheckRunId,
           turnId: headerTurnId,
           phase: requestPhase,
           reason: 'request_invalid',
@@ -1676,9 +1783,10 @@ async function handleRequest(
 
     if (error instanceof AivisSpeechError) {
       if (requestPhase) {
-        logStructuredEvent('turn_failed', {
+        await recordStructuredEvent(config, 'turn_failed', {
           origin: 'server',
           requestId,
+          runId: playcheckRunId,
           turnId: headerTurnId,
           phase: requestPhase,
           reason: 'provider_error',
@@ -1690,9 +1798,10 @@ async function handleRequest(
     }
 
     if (requestPhase) {
-      logStructuredEvent('turn_failed', {
+      await recordStructuredEvent(config, 'turn_failed', {
         origin: 'server',
         requestId,
+        runId: playcheckRunId,
         turnId: headerTurnId,
         phase: requestPhase,
         reason: 'provider_error',

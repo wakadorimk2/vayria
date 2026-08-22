@@ -339,6 +339,9 @@ export function useConversation(
           headers: {
             'Content-Type': 'application/json',
             'X-Performer-Turn-Id': eventEmitter.turnId,
+            ...(eventEmitter.runId
+              ? { 'X-Performer-Run-Id': eventEmitter.runId }
+              : {}),
           },
           body: JSON.stringify({
             mode: turnSource,
@@ -480,6 +483,9 @@ export function useConversation(
           headers: {
             'Content-Type': 'application/json',
             'X-Performer-Turn-Id': eventEmitter.turnId,
+            ...(eventEmitter.runId
+              ? { 'X-Performer-Run-Id': eventEmitter.runId }
+              : {}),
           },
           body: JSON.stringify({
             text: responseText,
