@@ -217,6 +217,24 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
 9. `http://127.0.0.1:5187/` をブラウザーで開きます。
 
+## モーションライブラリ
+
+保存済み VRMA は `public/avatar/motions/manifest.json` で管理します。
+
+manifest の `assetId`、SHA-256、duration、tag、補正 profile ID が、再生 asset の契約です。
+
+現在の manifest は空です。
+
+curated VRMA は、構造検証と実際の Vayria VRM での owner Playcheck 後に登録します。
+
+ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイルは、`%USERPROFILE%\.vayria\ardy\` の外部環境へ置きます。
+
+生成手順は [`tools/motion/README.md`](tools/motion/README.md) を参照してください。
+
+ブラウザーは ARDY process へ接続しません。
+
+展示は保存済み motion のみで成立します。
+
 ## 運用モード
 
 アプリは同じフロントエンドと API パスを、次のモードで使用します。
@@ -269,7 +287,7 @@ Windows ファイアウォールは、プライベートネットワーク上の
 `public` モードは将来の公開用設定名です。公開 URL、公開中継、認証、永続セッション管理は今回の対象外です。
 `getUserMedia()` とカメラ背景も今回の対象外です。カメラを追加する場合は HTTPS または同等の Secure Context が必要です。
 
-`.env.local` と `public/avatar/*.vrm` は Git の追跡対象外です。
+`.env.local`、`public/avatar/*.vrm`、生成途中の motion asset は Git の追跡対象外です。
 `.env.exhibition` と `.env.exhibition.local` も Git の追跡対象外です。
 VRMの正本もGitリポジトリの外に置きます。`.worktreeinclude`には追加しません。
 API key と AivisSpeech の設定は Vite の Node middleware だけが読みます。
@@ -347,7 +365,8 @@ serverは既存clientの`X-Wildcard-Turn-Id`も互換目的で受理します。
 - コメント取得、fake audience、配信サービス連携
 - TTSキュー、発話分割、ストリーミング、割り込み再開
 - 話題の永続記憶
-- VRMA、長期的な mood、感情履歴、モーション選択
+- ARDY runtime generation、自由な motion selector、複雑な VRMA blending
+- 長期的な mood、感情履歴
 - production server と deployment
 
 `npm run dev` のローカル利用と、`npm run dev:exhibition` の同一 LAN 展示確認を対象にしています。

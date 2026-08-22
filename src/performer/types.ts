@@ -138,7 +138,10 @@ export interface PerformancePlan {
     motion?: {
       weight: number;
       headYawBias: number;
-    };
+      };
+  };
+  motion?: {
+    assetId: string;
   };
   speech?: {
     delayMs: number;

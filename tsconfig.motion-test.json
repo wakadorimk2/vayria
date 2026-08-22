@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/motion-test",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/motion-test.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/avatar/motion/motionTypes.ts",
+    "scripts/motion-manifest.test.ts"
+  ]
+}
