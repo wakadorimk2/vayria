@@ -106,6 +106,7 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
     const recorder = recorderRef.current;
     if (!recorder || !options.enabled) return;
     recorder.setTtsPlaying(options.ttsPlaying);
+    setSnapshot(recorder.getSnapshot());
   }, [options.enabled, options.ttsPlaying]);
 
   const handleDiagnostic = useCallback((diagnostic: VoiceInputDiagnostic) => {

@@ -9,6 +9,7 @@ import type {
 } from './audioLab.js';
 import {
   createEmptySummary,
+  calculatePerMinuteRate,
   DEFAULT_AUDIO_ENDPOINT_MS,
   DEFAULT_EXHIBITION_AUDIO_PRESET,
   findKnownHallucinationPhrase,
@@ -17,6 +18,7 @@ import {
   type AudioLabMediaSettings,
   type AudioEndpointMs,
   type ExhibitionAudioPreset,
+  type VoiceLabModeSummary,
 } from './audioLab.js';
 import type { VoiceInputEvent } from './voiceInput.js';
 
@@ -35,6 +37,7 @@ interface ActiveUtterance {
   effectiveThreshold: number | null;
   noiseFloor: number | null;
   ttsPlayingDuringUtterance: boolean;
+  ttsCandidateStartedDuringTts: boolean;
   mediaTrackSettings: AudioLabMediaSettings | null;
 }
 
@@ -93,6 +96,8 @@ export class VoiceLabRecorder {
   private currentAudioEndpointMs: AudioEndpointMs;
   private currentSttRuntime: SttRuntimeInfo | null = null;
   private currentTtsPlaying = false;
+  private currentTtsStartedAtMs: number | null = null;
+  private currentTtsMode: AudioLabMode | null = null;
   private currentMediaSettings: AudioLabMediaSettings | null = null;
   private started = false;
   private records: VoiceLabRecord[] = [];
@@ -145,7 +150,9 @@ export class VoiceLabRecorder {
 
   finish(): void {
     if (!this.enabled || !this.started || !this.sessionId) return;
-    const finishedAt = timestampFromMilliseconds(Date.now());
+    const finishedAtMs = Date.now();
+    const finishedAt = timestampFromMilliseconds(finishedAtMs);
+    this.closeTtsWindow(finishedAtMs);
     for (const [segmentId, finalizedEvent] of this.pendingFinalizedEvents) {
       const active = this.activeUtterances.get(segmentId);
       if (active) active.speechEndAt = finishedAt;
@@ -183,12 +190,28 @@ export class VoiceLabRecorder {
     this.currentAudioEndpointMs = audioEndpointMs;
   }
 
-  setTtsPlaying(isPlaying: boolean): void {
-    this.currentTtsPlaying = isPlaying;
-    if (!isPlaying) return;
-    for (const active of this.activeUtterances.values()) {
-      active.ttsPlayingDuringUtterance = true;
+  setTtsPlaying(isPlaying: boolean, at = Date.now()): void {
+    if (this.currentTtsPlaying === isPlaying) {
+      if (isPlaying) {
+        for (const active of this.activeUtterances.values()) {
+          active.ttsPlayingDuringUtterance = true;
+        }
+      }
+      return;
     }
+
+    if (isPlaying) {
+      this.currentTtsPlaying = true;
+      this.currentTtsStartedAtMs = Math.round(at);
+      this.currentTtsMode = this.currentMode;
+      for (const active of this.activeUtterances.values()) {
+        active.ttsPlayingDuringUtterance = true;
+      }
+      return;
+    }
+
+    this.closeTtsWindow(at);
+    this.currentTtsPlaying = false;
   }
 
   handleDiagnostic(diagnostic: VoiceInputDiagnostic): void {
@@ -305,6 +328,7 @@ export class VoiceLabRecorder {
           effectiveThreshold: this.pendingEffectiveThreshold,
           noiseFloor: this.pendingNoiseFloor,
           ttsPlayingDuringUtterance: this.currentTtsPlaying,
+          ttsCandidateStartedDuringTts: this.currentTtsPlaying,
           mediaTrackSettings: this.currentMediaSettings,
         });
         this.resetPendingVadMetrics();
@@ -379,10 +403,12 @@ export class VoiceLabRecorder {
 
   getSnapshot(): VoiceLabSnapshot {
     if (!this.enabled || !this.sessionId) return emptySnapshot();
+    const summary = cloneSummary(this.summary);
+    this.applyOpenTtsWindow(summary, Date.now());
     return {
       sessionId: this.sessionId,
       records: [...this.records],
-      summary: cloneSummary(this.summary),
+      summary,
       latestRecord: this.latestRecord,
       latestTranscript: this.latestTranscript,
       latestError: this.latestError,
@@ -408,6 +434,7 @@ export class VoiceLabRecorder {
       effectiveThreshold: null,
       noiseFloor: null,
       ttsPlayingDuringUtterance: this.currentTtsPlaying,
+      ttsCandidateStartedDuringTts: this.currentTtsPlaying,
       mediaTrackSettings: this.currentMediaSettings,
     };
     const timestamp = timestampFromMilliseconds(event.at);
@@ -485,7 +512,7 @@ export class VoiceLabRecorder {
     };
 
     this.appendRecord(record);
-    this.updateSummary(record);
+    this.updateSummary(record, active.ttsCandidateStartedDuringTts);
     this.activeUtterances.delete(event.segmentId);
     this.pendingSttObservations.delete(event.segmentId);
     this.latestTranscript = recognizedText;
@@ -517,10 +544,24 @@ export class VoiceLabRecorder {
     this.summary.candidateCount += 1;
     this.summary.byMode[this.currentMode].vadRejectCount += 1;
     this.summary.byMode[this.currentMode].candidateCount += 1;
+    if (record.ttsPlayingDuringUtterance) {
+      const targets = [
+        this.summary,
+        this.summary.byMode[this.currentMode],
+      ];
+      for (const target of targets) {
+        target.ttsCandidateCount += 1;
+        target.ttsVadRejectCount += 1;
+      }
+    }
+    this.updateTtsRates(this.summary);
     this.resetPendingVadMetrics();
   }
 
-  private updateSummary(record: VoiceLabUtteranceRecord): void {
+  private updateSummary(
+    record: VoiceLabUtteranceRecord,
+    ttsCandidateStartedDuringTts = record.ttsPlayingDuringUtterance,
+  ): void {
     const known = record.knownHallucinationPhrase !== null;
     const successful = record.recognizedText.length > 0;
     const noiseLike = !successful && !known;
@@ -532,6 +573,11 @@ export class VoiceLabRecorder {
       if (noiseLike) target.noiseLikeSttCount += 1;
       if (known) target.knownHallucinationCount += 1;
       if (record.ttsPlayingDuringUtterance) target.ttsOverlapCount += 1;
+      if (ttsCandidateStartedDuringTts) {
+        target.ttsCandidateCount += 1;
+        target.ttsAcceptedCount += 1;
+        if (noiseLike) target.ttsNoiseLikeSttCount += 1;
+      }
     }
 
     if (record.sttLatencyMs !== null) {
@@ -554,7 +600,66 @@ export class VoiceLabRecorder {
       this.summary.averageSttLatencyMs =
         overall.count > 0 ? overall.totalMs / overall.count : null;
     }
+    this.updateTtsRates(this.summary);
     this.updatePhaseLatencySummaries();
+  }
+
+  private closeTtsWindow(at: number): void {
+    if (
+      this.currentTtsStartedAtMs === null ||
+      this.currentTtsMode === null
+    ) {
+      this.currentTtsStartedAtMs = null;
+      this.currentTtsMode = null;
+      return;
+    }
+
+    const durationMs = Math.max(
+      0,
+      Math.round(at - this.currentTtsStartedAtMs),
+    );
+    this.summary.ttsActiveDurationMs += durationMs;
+    this.summary.byMode[this.currentTtsMode].ttsActiveDurationMs += durationMs;
+    this.currentTtsStartedAtMs = null;
+    this.currentTtsMode = null;
+    this.updateTtsRates(this.summary);
+  }
+
+  private applyOpenTtsWindow(
+    summary: VoiceLabSessionSummary,
+    at: number,
+  ): void {
+    if (
+      this.currentTtsStartedAtMs === null ||
+      this.currentTtsMode === null
+    ) {
+      this.updateTtsRates(summary);
+      return;
+    }
+
+    const durationMs = Math.max(
+      0,
+      Math.round(at - this.currentTtsStartedAtMs),
+    );
+    summary.ttsActiveDurationMs += durationMs;
+    summary.byMode[this.currentTtsMode].ttsActiveDurationMs += durationMs;
+    this.updateTtsRates(summary);
+  }
+
+  private updateTtsRates(summary: VoiceLabSessionSummary): void {
+    const targets: VoiceLabModeSummary[] = [
+      summary,
+      summary.byMode.baseline,
+      summary.byMode.processed,
+      summary.byMode['processed-vad'],
+      summary.byMode['exhibition-mix'],
+    ];
+    for (const target of targets) {
+      target.ttsCandidatesPerMinute = calculatePerMinuteRate(
+        target.ttsCandidateCount,
+        target.ttsActiveDurationMs,
+      );
+    }
   }
 
   private updatePhaseLatencySummaries(): void {

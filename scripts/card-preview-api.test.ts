@@ -3,11 +3,10 @@ import test from 'node:test';
 import {
   buildCardPreviewSystemPrompt,
   buildVoiceInteractionPolicySystemPrompt,
-  createVoiceReactionResponse,
   isContentBearingVoiceMessage,
   normalizeVoiceInteractionDecision,
   parseCardPreviewResponse,
-  parseVoiceInteractionPolicy,
+  parseVoiceAssistantResponse,
   readCardPreviewRequest,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
@@ -95,38 +94,101 @@ test('card preview prompt uses behavior state without motion asset details', () 
   assert.equal(prompt.includes('.vrma'), false);
 });
 
-test('voice interaction policy accepts only compatible action and cue pairs', () => {
+test('voice assistant response accepts only compatible action and cue pairs', () => {
   assert.deepEqual(
-    parseVoiceInteractionPolicy(
-      '{"action":"listen","backchannelCue":"none"}',
+    parseVoiceAssistantResponse(
+      JSON.stringify({
+        voiceAction: 'listen',
+        backchannelCue: 'none',
+        text: '',
+        emotion: 'neutral',
+        activatedCards: [],
+      }),
+      [],
+      null,
+      'えっと…',
     ),
-    { action: 'listen', backchannelCue: 'none' },
+    {
+      text: '',
+      emotion: 'neutral',
+      activatedCards: [],
+      voiceAction: 'listen',
+      backchannelCue: 'none',
+    },
   );
   assert.deepEqual(
-    parseVoiceInteractionPolicy(
-      '{"action":"backchannel","backchannelCue":"uun"}',
+    parseVoiceAssistantResponse(
+      JSON.stringify({
+        voiceAction: 'backchannel',
+        backchannelCue: 'uun',
+        text: '',
+        emotion: 'neutral',
+        activatedCards: [],
+      }),
+      [],
+      null,
+      'うーん',
     ),
-    { action: 'backchannel', backchannelCue: 'uun' },
+    {
+      text: '',
+      emotion: 'neutral',
+      activatedCards: [],
+      voiceAction: 'backchannel',
+      backchannelCue: 'uun',
+    },
   );
   assert.deepEqual(
-    parseVoiceInteractionPolicy(
-      '{"action":"take_floor","backchannelCue":"none"}',
+    parseVoiceAssistantResponse(
+      JSON.stringify({
+        voiceAction: 'take_floor',
+        backchannelCue: 'none',
+        text: '雨ですね',
+        emotion: 'neutral',
+        activatedCards: [],
+      }),
+      [],
+      null,
+      '今日は雨だった',
     ),
-    { action: 'take_floor', backchannelCue: 'none' },
+    {
+      text: '雨ですね',
+      emotion: 'neutral',
+      activatedCards: [],
+      voiceAction: 'take_floor',
+      backchannelCue: 'none',
+    },
   );
   assert.throws(
     () =>
-      parseVoiceInteractionPolicy(
-        '{"action":"backchannel","backchannelCue":"none"}',
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'backchannel',
+          backchannelCue: 'none',
+          text: '',
+          emotion: 'neutral',
+          activatedCards: [],
+        }),
+        [],
+        null,
+        'うん',
       ),
-    /invalid action or cue/,
+    /action and backchannel cue are incompatible/,
   );
   assert.throws(
     () =>
-      parseVoiceInteractionPolicy(
-        '{"action":"take_floor","backchannelCue":"un","extra":true}',
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'take_floor',
+          backchannelCue: 'un',
+          text: '雨ですね',
+          emotion: 'neutral',
+          activatedCards: [],
+        }),
+        [],
+        null,
+        '今日は雨だった',
       ),
-    /invalid action or cue/,
+    /action and backchannel cue are incompatible/,
   );
 });
 
@@ -180,12 +242,20 @@ test('voice reply prompt asks for short concrete grounding', () => {
   assert.match(VOICE_REPLY_INSTRUCTION, /generic acknowledgment/);
 });
 
-test('non-floor voice reactions return no spoken text or activated cards', () => {
+test('non-floor voice responses return no spoken text or activated cards', () => {
   assert.deepEqual(
-    createVoiceReactionResponse({
-      action: 'listen',
-      backchannelCue: 'none',
-    }),
+    parseVoiceAssistantResponse(
+      JSON.stringify({
+        voiceAction: 'listen',
+        backchannelCue: 'none',
+        text: '',
+        emotion: 'joy',
+        activatedCards: [],
+      }),
+      [],
+      null,
+      'えっと…',
+    ),
     {
       text: '',
       emotion: 'neutral',
@@ -195,10 +265,18 @@ test('non-floor voice reactions return no spoken text or activated cards', () =>
     },
   );
   assert.deepEqual(
-    createVoiceReactionResponse({
-      action: 'backchannel',
-      backchannelCue: 'un',
-    }),
+    parseVoiceAssistantResponse(
+      JSON.stringify({
+        voiceAction: 'backchannel',
+        backchannelCue: 'un',
+        text: '',
+        emotion: 'joy',
+        activatedCards: [],
+      }),
+      [],
+      null,
+      'うん',
+    ),
     {
       text: '',
       emotion: 'neutral',

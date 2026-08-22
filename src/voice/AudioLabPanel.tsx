@@ -60,6 +60,18 @@ function formatLatency(value: number | null): string {
   return value === null ? '—' : `${Math.round(value)} ms`;
 }
 
+function formatDuration(value: number | null): string {
+  return value === null ? '—' : `${(value / 1_000).toFixed(1)} s`;
+}
+
+function formatRate(value: number | null): string {
+  return value === null ? 'Unavailable' : value.toFixed(2);
+}
+
+function formatPercent(value: number | null): string {
+  return value === null ? 'Unavailable' : `${value.toFixed(1)}%`;
+}
+
 function latestUtterance(snapshot: VoiceLabSnapshot) {
   for (let index = snapshot.records.length - 1; index >= 0; index -= 1) {
     const record = snapshot.records[index];
@@ -94,6 +106,15 @@ export function AudioLabPanel({
 }: AudioLabPanelProps) {
   const utterance = latestUtterance(snapshot);
   const summary = snapshot.summary;
+  const processedTtsRate = summary.byMode.processed.ttsCandidatesPerMinute;
+  const processedVadTtsRate =
+    summary.byMode['processed-vad'].ttsCandidatesPerMinute;
+  const ttsCandidateReduction =
+    processedTtsRate === null ||
+    processedVadTtsRate === null ||
+    processedTtsRate === 0
+      ? null
+      : (1 - processedVadTtsRate / processedTtsRate) * 100;
 
   return (
     <aside className="audio-lab-panel" aria-label="Audio Lab">
@@ -331,6 +352,43 @@ export function AudioLabPanel({
                         {modeSummary.bargeInConfirmedCount}/
                         {modeSummary.bargeInTriggeredCount}
                       </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="audio-lab-panel__section">
+            <h2>TTS candidate comparison</h2>
+            <p className="audio-lab-panel__hint">
+              Processed → Processed + VAD candidate reduction:{' '}
+              <strong>{formatPercent(ttsCandidateReduction)}</strong>
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Mode</th>
+                  <th>TTS time</th>
+                  <th>Candidates</th>
+                  <th>Accepted</th>
+                  <th>VAD reject</th>
+                  <th>Noise-like</th>
+                  <th>Candidates/min</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(Object.keys(MODE_LABELS) as AudioLabMode[]).map((value) => {
+                  const modeSummary = summary.byMode[value];
+                  return (
+                    <tr key={value}>
+                      <th scope="row">{MODE_LABELS[value]}</th>
+                      <td>{formatDuration(modeSummary.ttsActiveDurationMs)}</td>
+                      <td>{modeSummary.ttsCandidateCount}</td>
+                      <td>{modeSummary.ttsAcceptedCount}</td>
+                      <td>{modeSummary.ttsVadRejectCount}</td>
+                      <td>{modeSummary.ttsNoiseLikeSttCount}</td>
+                      <td>{formatRate(modeSummary.ttsCandidatesPerMinute)}</td>
                     </tr>
                   );
                 })}

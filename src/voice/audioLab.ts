@@ -353,6 +353,12 @@ export interface VoiceLabModeSummary {
   bargeInConfirmedCount: number;
   bargeInRestoredCount: number;
   bargeInTimeoutCount: number;
+  ttsActiveDurationMs: number;
+  ttsCandidateCount: number;
+  ttsAcceptedCount: number;
+  ttsVadRejectCount: number;
+  ttsNoiseLikeSttCount: number;
+  ttsCandidatesPerMinute: number | null;
   averageSttQueueWaitMs?: number | null;
   averageSttProcessingMs?: number | null;
   averageEndpointToResultLatencyMs?: number | null;
@@ -512,11 +518,27 @@ export function createEmptyModeSummary(): VoiceLabModeSummary {
     bargeInConfirmedCount: 0,
     bargeInRestoredCount: 0,
     bargeInTimeoutCount: 0,
+    ttsActiveDurationMs: 0,
+    ttsCandidateCount: 0,
+    ttsAcceptedCount: 0,
+    ttsVadRejectCount: 0,
+    ttsNoiseLikeSttCount: 0,
+    ttsCandidatesPerMinute: null,
     averageSttQueueWaitMs: null,
     averageSttProcessingMs: null,
     averageEndpointToResultLatencyMs: null,
     averageSpeechToResultLatencyMs: null,
   };
+}
+
+export function calculatePerMinuteRate(
+  count: number,
+  durationMs: number,
+): number | null {
+  if (!Number.isFinite(count) || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return null;
+  }
+  return (Math.max(0, count) * 60_000) / durationMs;
 }
 
 export function createEmptySummary(): VoiceLabSessionSummary {

@@ -185,6 +185,61 @@ JSONLの発話レコードには次の時刻と時間を保存します。
 展示用のstretch targetは`700ms以下`です。
 quality profileまたはCPU fallbackが超えても、失敗とは判定しません。
 
+## 音声LLMの呼び出し回数
+
+通常の音声応答は、行動判定と本文生成を1回のLLM呼び出しで処理します。
+応答JSONには`voiceAction`、`backchannelCue`、`text`、`emotion`、`activatedCards`を含めます。
+wire上の行動名は`listen`、`backchannel`、`take_floor`を維持します。
+
+`listen`と`backchannel`では、本文とカード発動は空です。
+`take_floor`では、本文と必要なカード発動を返します。
+内容のある発話を非発話反応へ分類した場合だけ、契約修正を指定して1回再試行します。
+
+`llm_done.providerCallCount`を確認します。
+通常は`1`です。
+契約修正の再試行がある場合は`2`です。
+`llm_done.durationMs`は、再試行を含むリクエスト全体のLLM時間です。
+`providerCallCount`と`durationMs`を別々に見ると、待ち時間の増加理由を確認できます。
+
+## TTS再生中の候補比較
+
+Mode BとMode CのTTS回り込みを比較する場合は、次の条件を固定します。
+
+1. 同じMode、endpoint `600ms`、同じ端末で開始します。
+2. 同じTTS文、音量、再生速度、再生時間を使います。
+3. TTS再生中は話しません。
+4. Mode Bで10回以上繰り返します。
+5. Mode Cで同じ回数を繰り返します。
+6. 各セッションのJSONLをExportします。
+
+次の値を比較します。
+
+- `ttsActiveDurationMs`
+- `ttsCandidateCount`
+- `ttsAcceptedCount`
+- `ttsVadRejectCount`
+- `ttsNoiseLikeSttCount`
+- `ttsCandidatesPerMinute`
+
+`ttsCandidatesPerMinute`は、TTS再生時間で正規化した候補数です。
+TTS再生時間が0の場合は`null`です。
+Audio Labの削減率は、Processedを基準に計算します。
+
+```text
+1 - processed-vad.ttsCandidatesPerMinute
+    / processed.ttsCandidatesPerMinute
+```
+
+比較元の時間が不足する場合は`Unavailable`です。
+削減率が負の場合も、その値を記録します。
+異なるTTS文、音量、再生時間、会場ノイズのセッションを混ぜて削減率を比較しません。
+
+「うん」「はい」などの割り込みは、無言ケースと分けて測定します。
+同じTTS文と同じ割り込み回数をMode B/Cで再現します。
+`ttsAcceptedCount`は、TTS中に始まった発話のうち、VADを通過してSTTへ送った候補です。
+`ttsNoiseLikeSttCount`は、その候補のうち空または既知誤認識以外のnoise-like結果です。
+`ttsVadRejectCount`は、TTS中に発生したVAD rejectです。
+
 ## 固定して試す10ケース
 
 次のケースを、同じ順番でMode B/Cのendpoint `600ms`、Mode B/Cのendpoint `400ms`へ適用します。

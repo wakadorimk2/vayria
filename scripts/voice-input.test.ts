@@ -28,6 +28,7 @@ import {
 import {
   DEFAULT_AUDIO_ENDPOINT_MS,
   AUDIO_ENDPOINT_VALUES,
+  calculatePerMinuteRate,
   clampVadThreshold,
   DEFAULT_AUDIO_INPUT_MODE,
   DEFAULT_AUDIO_LAB_MODE,
@@ -667,7 +668,7 @@ test('Voice Lab recorder measures latency, known errors, TTS overlap, and summar
     onRecord: (record) => records.push(record),
   });
   recorder.start();
-  recorder.setTtsPlaying(true);
+  recorder.setTtsPlaying(true, 1_000);
   recorder.handleDiagnostic({
     type: 'media_settings',
     at: 1_000,
@@ -711,6 +712,7 @@ test('Voice Lab recorder measures latency, known errors, TTS overlap, and summar
     text: '',
     at: 1_400,
   });
+  recorder.setTtsPlaying(false, 1_500);
   recorder.finish();
 
   const snapshot = recorder.getSnapshot();
@@ -731,6 +733,12 @@ test('Voice Lab recorder measures latency, known errors, TTS overlap, and summar
   assert.equal(utterance.ttsPlayingDuringUtterance, true);
   assert.equal(snapshot.summary.knownHallucinationCount, 1);
   assert.equal(snapshot.summary.ttsOverlapCount, 1);
+  assert.equal(snapshot.summary.ttsActiveDurationMs, 500);
+  assert.equal(snapshot.summary.ttsCandidateCount, 1);
+  assert.equal(snapshot.summary.ttsAcceptedCount, 1);
+  assert.equal(snapshot.summary.ttsVadRejectCount, 0);
+  assert.equal(snapshot.summary.ttsNoiseLikeSttCount, 0);
+  assert.equal(snapshot.summary.ttsCandidatesPerMinute, 120);
   assert.equal(snapshot.summary.averageSttLatencyMs, 200);
   assert.equal(snapshot.summary.averageSttQueueWaitMs, 100);
   assert.equal(snapshot.summary.averageSttProcessingMs, 200);
@@ -748,7 +756,7 @@ test('Voice Lab recorder stores Mode D thresholds and barge-in summary metrics',
     sessionId: 'vl-mode-d-session',
   });
   recorder.start();
-  recorder.setTtsPlaying(true);
+  recorder.setTtsPlaying(true, 1_000);
   recorder.handleDiagnostic({
     type: 'audio_level',
     at: 1_000,
@@ -832,6 +840,7 @@ test('Voice Lab recorder stores Mode D thresholds and barge-in summary metrics',
     ttsPlaying: true,
     reason: 'timeout',
   });
+  recorder.setTtsPlaying(false, 2_500);
   recorder.finish();
 
   const snapshot = recorder.getSnapshot();
@@ -844,6 +853,11 @@ test('Voice Lab recorder stores Mode D thresholds and barge-in summary metrics',
   assert.equal(utterance.noiseFloor, 0.006);
   assert.equal(snapshot.summary.candidateCount, 2);
   assert.equal(snapshot.summary.byMode['exhibition-mix'].candidateCount, 2);
+  assert.equal(snapshot.summary.ttsActiveDurationMs, 1_500);
+  assert.equal(snapshot.summary.ttsCandidateCount, 2);
+  assert.equal(snapshot.summary.ttsAcceptedCount, 1);
+  assert.equal(snapshot.summary.ttsVadRejectCount, 1);
+  assert.equal(snapshot.summary.ttsCandidatesPerMinute, 80);
   assert.equal(snapshot.summary.bargeInTriggeredCount, 1);
   assert.equal(snapshot.summary.bargeInConfirmedCount, 1);
   assert.equal(snapshot.summary.bargeInRestoredCount, 1);
@@ -852,6 +866,80 @@ test('Voice Lab recorder stores Mode D thresholds and barge-in summary metrics',
     snapshot.records.find((record) => record.kind === 'utterance')?.preset,
     'aggressive',
   );
+});
+
+test('Voice Lab recorder measures TTS candidates separately from normal overlap', () => {
+  const recorder = new VoiceLabRecorder({
+    enabled: true,
+    mode: 'processed-vad',
+    preset: 'mild',
+    sessionId: 'vl-tts-candidate-session',
+  });
+  recorder.start();
+  recorder.handleVoiceEvent({
+    type: 'speech_started',
+    segmentId: 'normal-overlap-segment',
+    at: 500,
+  });
+  recorder.setTtsPlaying(true, 1_000);
+  recorder.handleVoiceEvent({
+    type: 'speech_ended',
+    segmentId: 'normal-overlap-segment',
+    at: 1_300,
+  });
+  recorder.handleVoiceEvent({
+    type: 'utterance_finalized',
+    segmentId: 'normal-overlap-segment',
+    text: '環境音',
+    at: 1_400,
+  });
+  recorder.handleVoiceEvent({
+    type: 'speech_started',
+    segmentId: 'tts-segment',
+    at: 1_500,
+  });
+  recorder.handleVoiceEvent({
+    type: 'speech_ended',
+    segmentId: 'tts-segment',
+    at: 1_700,
+  });
+  recorder.handleVoiceEvent({
+    type: 'utterance_finalized',
+    segmentId: 'tts-segment',
+    text: '',
+    at: 1_800,
+  });
+  recorder.handleDiagnostic({
+    type: 'vad_rejected',
+    at: 1_900,
+    candidateDurationMs: 400,
+    maxScore: 0.01,
+    reason: 'below-threshold',
+    noiseFloor: 0.005,
+    effectiveThreshold: 0.02,
+    vadThreshold: 0.02,
+  });
+  recorder.setTtsPlaying(false, 2_000);
+  recorder.finish();
+
+  const { summary } = recorder.getSnapshot();
+  assert.equal(summary.ttsActiveDurationMs, 1_000);
+  assert.equal(summary.ttsCandidateCount, 2);
+  assert.equal(summary.ttsAcceptedCount, 1);
+  assert.equal(summary.ttsVadRejectCount, 1);
+  assert.equal(summary.ttsNoiseLikeSttCount, 1);
+  assert.equal(summary.ttsCandidatesPerMinute, 120);
+  assert.equal(summary.ttsOverlapCount, 2);
+  assert.equal(summary.utteranceCount, 2);
+  assert.equal(
+    summary.byMode['processed-vad'].ttsCandidatesPerMinute,
+    120,
+  );
+});
+
+test('per-minute rate is unavailable without an active TTS duration', () => {
+  assert.equal(calculatePerMinuteRate(3, 0), null);
+  assert.equal(calculatePerMinuteRate(3, 1_000), 180);
 });
 
 test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifiers', async () => {
