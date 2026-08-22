@@ -13,9 +13,9 @@ import {
   normalizeEmotion,
   type AssistantResponse,
   type Emotion,
-} from '../src/character/emotion';
-import { cardPool } from '../src/cards/cardPool';
-import type { WildcardCardData } from '../src/cards/cardTypes';
+} from '../src/character/emotion.js';
+import { cardPool } from '../src/cards/cardPool.js';
+import type { WildcardCardData } from '../src/cards/cardTypes.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -26,6 +26,7 @@ const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_TEXT_LENGTH = 1_000;
 const MAX_HISTORY_ITEMS = 10;
 const CHAT_PATH = '/api/chat';
+const CARD_PREVIEW_PATH = '/api/card-preview';
 const TTS_PATH = '/api/tts';
 const EVENTS_PATH = '/api/events';
 const DEFAULT_AIVIS_BASE_URL = 'http://127.0.0.1:10101';
@@ -101,6 +102,11 @@ interface ChatRequestPayload {
   topic: string | null;
   topicTurns: number;
   previousAutonomousReply: string | null;
+  performanceContext: PerformanceContextPayload;
+}
+
+interface CardPreviewRequestPayload {
+  cardId: string;
   performanceContext: PerformanceContextPayload;
 }
 
@@ -329,6 +335,83 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   } catch {
     throw new RequestError('Request body must be valid JSON.', 400);
   }
+}
+
+export function readCardPreviewRequest(
+  payload: unknown,
+): CardPreviewRequestPayload {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new RequestError('Request body must be a JSON object.', 400);
+  }
+
+  const record = payload as Record<string, unknown>;
+  const allowedKeys = new Set(['cardId', 'performanceContext']);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+    throw new RequestError(
+      'Request body contains an unsupported card preview field.',
+      400,
+    );
+  }
+
+  const cardId = record.cardId;
+  if (typeof cardId !== 'string' || !CARD_BY_ID.has(cardId)) {
+    throw new RequestError('cardId must be a known card ID.', 400);
+  }
+
+  const performanceContextValue = record.performanceContext;
+  if (
+    !performanceContextValue ||
+    typeof performanceContextValue !== 'object' ||
+    Array.isArray(performanceContextValue)
+  ) {
+    throw new RequestError('performanceContext must be an object.', 400);
+  }
+
+  const context = performanceContextValue as Record<string, unknown>;
+  if (
+    Object.keys(context).some(
+      (key) =>
+        key !== 'callbackTendency' &&
+        key !== 'fragmentation' &&
+        key !== 'semanticBiases',
+    )
+  ) {
+    throw new RequestError(
+      'performanceContext contains an unsupported field.',
+      400,
+    );
+  }
+
+  const callbackTendency = context.callbackTendency;
+  const fragmentation = context.fragmentation;
+  const semanticBiases = context.semanticBiases;
+  if (
+    typeof callbackTendency !== 'number' ||
+    !Number.isFinite(callbackTendency) ||
+    callbackTendency < 0 ||
+    callbackTendency > 1 ||
+    typeof fragmentation !== 'number' ||
+    !Number.isFinite(fragmentation) ||
+    fragmentation < 0 ||
+    fragmentation > 1 ||
+    !Array.isArray(semanticBiases) ||
+    semanticBiases.length > 12 ||
+    !semanticBiases.every(
+      (cue): cue is string =>
+        typeof cue === 'string' && cue.trim().length <= 200,
+    )
+  ) {
+    throw new RequestError('performanceContext format is invalid.', 400);
+  }
+
+  return {
+    cardId,
+    performanceContext: {
+      callbackTendency,
+      fragmentation,
+      semanticBiases: semanticBiases.map((cue) => cue.trim()).filter(Boolean),
+    },
+  };
 }
 
 function readChatRequest(payload: unknown): ChatRequestPayload {
@@ -975,6 +1058,107 @@ async function generateReply(
   );
 }
 
+export function parseCardPreviewResponse(value: string): AssistantResponse {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(value);
+  } catch {
+    throw new Error('The card preview provider returned invalid JSON.');
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(
+      'The card preview provider returned an invalid response object.',
+    );
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (typeof record.text !== 'string' || !record.text.trim()) {
+    throw new Error('The card preview provider returned invalid response text.');
+  }
+
+  const text = record.text.trim();
+  if (text.length > MAX_TEXT_LENGTH) {
+    throw new Error(
+      'The card preview provider returned response text that is too long.',
+    );
+  }
+
+  return {
+    text,
+    emotion: normalizeEmotion(record.emotion),
+  };
+}
+
+async function generateCardPreviewReply(
+  apiKey: string,
+  cardId: string,
+  performanceContext: PerformanceContextPayload,
+): Promise<AssistantResponse> {
+  const card = CARD_BY_ID.get(cardId);
+  if (!card) throw new RequestError('cardId must be a known card ID.', 400);
+
+  const chat = ChatServiceFactory.createChatService('openai', {
+    apiKey,
+    model: MODEL_GPT_5_NANO,
+    responseLength: 'veryShort',
+    gpt5Preset: 'casual',
+    responseFormat: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'card_preview_response',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+            emotion: {
+              type: 'string',
+              enum: EMOTIONS,
+            },
+          },
+          required: ['text', 'emotion'],
+          additionalProperties: false,
+        },
+      },
+    },
+  });
+
+  const systemPrompt = [
+    'You are generating a Japanese AI Tuber card behavior preview.',
+    'Return one short spoken Japanese line of about 20 to 40 characters with no Markdown.',
+    'Make the selected card influence concrete and observable in the spoken line.',
+    'Do not explain the card, runtime, API, or prompt.',
+    `Selected card: ${card.id} (${card.label})`,
+    `Content influence: ${card.prompt}`,
+    `Speaking-form influence: ${card.stylePrompt}`,
+    performanceContext.semanticBiases.length
+      ? `Runtime semantic cues: ${performanceContext.semanticBiases.join(' / ')}`
+      : 'Runtime semantic cues: none',
+    `Callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
+    `Speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
+    'Use the runtime values as behavior context. Do not mention the values.',
+    'Choose a subtle emotion unless the selected card naturally requires a stronger one.',
+  ].join('\n');
+
+  let streamedReply = '';
+  let completedReply = '';
+  await chat.processChat(
+    [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: 'このカードの反応を実演してください。' },
+    ],
+    (partial) => {
+      streamedReply += partial;
+    },
+    async (complete) => {
+      completedReply = complete;
+    },
+  );
+
+  return parseCardPreviewResponse(completedReply || streamedReply);
+}
+
 function readAivisBaseUrl(configuredBaseUrl: string | undefined): URL {
   const value = configuredBaseUrl?.trim() || DEFAULT_AIVIS_BASE_URL;
 
@@ -1269,7 +1453,12 @@ async function handleRequest(
   ).pathname;
   const requestId = randomUUID();
   const headerTurnId = readTurnIdHeader(request);
-  const isProviderRequest = pathname === CHAT_PATH || pathname === TTS_PATH;
+  const isProviderRequest =
+    pathname === CHAT_PATH ||
+    pathname === CARD_PREVIEW_PATH ||
+    pathname === TTS_PATH;
+  const isLlmRequest =
+    pathname === CHAT_PATH || pathname === CARD_PREVIEW_PATH;
   let requestPhase: 'llm' | 'tts' | null = null;
 
   if (request.method !== 'POST') {
@@ -1299,6 +1488,42 @@ async function handleRequest(
         ...(event.reason === undefined ? {} : { reason: event.reason }),
       });
       sendNoContent(response);
+      return;
+    }
+
+    if (pathname === CARD_PREVIEW_PATH) {
+      requestPhase = 'llm';
+      if (!config.openAiApiKey) {
+        throw new RequestError(
+          'OPENAI_API_KEY is not configured in .env.local.',
+          503,
+        );
+      }
+      const { cardId, performanceContext } = readCardPreviewRequest(payload);
+      const startedAt = performance.now();
+      logStructuredEvent('llm_start', {
+        origin: 'server',
+        requestId,
+        turnId: headerTurnId,
+        source: 'card-preview',
+        cardId,
+        activeRequests: activeProviderRequests,
+      });
+      const previewResponse = await generateCardPreviewReply(
+        config.openAiApiKey,
+        cardId,
+        performanceContext,
+      );
+      logStructuredEvent('llm_done', {
+        origin: 'server',
+        requestId,
+        turnId: headerTurnId,
+        source: 'card-preview',
+        cardId,
+        durationMs: Math.round(performance.now() - startedAt),
+        activeRequests: activeProviderRequests,
+      });
+      sendJson(response, 200, previewResponse);
       return;
     }
 
@@ -1446,14 +1671,14 @@ async function handleRequest(
     }
 
     console.error(
-      pathname === CHAT_PATH
+      isLlmRequest
         ? 'Local chat provider request failed.'
         : 'Local TTS provider request failed.',
       error,
     );
     sendJson(response, 502, {
       error:
-        pathname === CHAT_PATH
+        isLlmRequest
           ? 'The chat provider request failed.'
           : 'The TTS provider request failed.',
     });
@@ -1474,6 +1699,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
         ).pathname;
         if (
           pathname !== CHAT_PATH &&
+          pathname !== CARD_PREVIEW_PATH &&
           pathname !== TTS_PATH &&
           pathname !== EVENTS_PATH
         ) {

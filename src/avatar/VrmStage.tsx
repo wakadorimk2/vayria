@@ -33,6 +33,7 @@ interface VrmStageProps {
   attentionTarget?: 'viewer' | 'chat' | 'game' | 'none';
   emotion: Emotion;
   isExhibitionMode?: boolean;
+  motionScale?: number;
   mouthOpen: number;
   onReady?: () => void;
   performancePlan?: PerformancePlan;
@@ -44,6 +45,7 @@ export function VrmStage({
   attentionTarget = 'none',
   emotion,
   isExhibitionMode = false,
+  motionScale = 1,
   mouthOpen,
   onReady,
   performancePlan,
@@ -53,6 +55,7 @@ export function VrmStage({
   const mouthOpenRef = useRef(mouthOpen);
   const emotionRef = useRef(emotion);
   const attentionTargetRef = useRef(attentionTarget);
+  const motionScaleRef = useRef(motionScale);
   const performancePlanRef = useRef(performancePlan);
   const onReadyRef = useRef(onReady);
   const [loadState, setLoadState] = useState<LoadState>('loading');
@@ -69,6 +72,10 @@ export function VrmStage({
   useEffect(() => {
     attentionTargetRef.current = attentionTarget;
   }, [attentionTarget]);
+
+  useEffect(() => {
+    motionScaleRef.current = motionScale;
+  }, [motionScale]);
 
   useEffect(() => {
     performancePlanRef.current = performancePlan;
@@ -237,6 +244,10 @@ export function VrmStage({
         const plan = performancePlanRef.current;
         const avatarProfile = plan?.avatarProfile;
         const preReaction = plan?.preReaction;
+        const safeMotionScale = Math.max(
+          0,
+          Math.min(motionScaleRef.current, 1),
+        );
         const gazeTarget = preReaction?.gaze?.target ?? attentionTargetRef.current;
         const gazeYawBias =
           gazeTarget === 'viewer'
@@ -246,11 +257,14 @@ export function VrmStage({
               : gazeTarget === 'game'
                 ? 0.35
                 : 0;
-        const idleMotionWeight =
+        const requestedIdleMotionWeight =
           avatarProfile?.idleMotionWeight ?? preReaction?.motion?.weight ?? 1;
-        const headYawBias =
+        const idleMotionWeight =
+          1 + (requestedIdleMotionWeight - 1) * safeMotionScale;
+        const requestedHeadYawBias =
           (avatarProfile?.headYawBias ?? preReaction?.motion?.headYawBias ?? 0) +
           gazeYawBias * (avatarProfile?.gazeDirectness ?? preReaction?.gaze?.directness ?? 0.72);
+        const headYawBias = requestedHeadYawBias * safeMotionScale;
         idleController?.update(delta, idleMotionWeight, headYawBias);
         if (
           emotionController &&
