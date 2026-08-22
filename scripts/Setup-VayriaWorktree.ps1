@@ -7,6 +7,8 @@ param(
 
   [string]$SecretFile = (Join-Path $env:USERPROFILE '.vayria\secrets.env'),
 
+  [string]$HttpsConfigFile = (Join-Path $env:USERPROFILE '.vayria\https.env'),
+
   [string]$AvatarSourcePath = (Join-Path $env:USERPROFILE '.vayria\avatar\model.vrm')
 )
 
@@ -60,6 +62,24 @@ function Resolve-SecretFile {
   $resolvedPath = [IO.Path]::GetFullPath($Path)
   if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
     throw "The external secret file does not exist: $resolvedPath"
+  }
+
+  return $resolvedPath
+}
+
+function Resolve-HttpsConfigFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not [IO.Path]::IsPathRooted($Path)) {
+    throw 'HttpsConfigFile must be an absolute path.'
+  }
+
+  $resolvedPath = [IO.Path]::GetFullPath($Path)
+  if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+    return $null
   }
 
   return $resolvedPath
@@ -148,6 +168,15 @@ function Get-ExistingWorktreePort {
   }
 
   [void](Resolve-SecretFile -Path $secretReference)
+
+  $httpsConfigReference = Get-EnvironmentValue -Path $EnvPath -Name 'VAYRIA_HTTPS_CONFIG_FILE'
+  if (-not [string]::IsNullOrWhiteSpace($httpsConfigReference)) {
+    if (-not [IO.Path]::IsPathRooted($httpsConfigReference)) {
+      throw "Existing .env.local has a relative VAYRIA_HTTPS_CONFIG_FILE. Setup stopped without overwriting it: $EnvPath"
+    }
+
+    [void](Resolve-HttpsConfigFile -Path $httpsConfigReference)
+  }
 
   $legacyKey = Select-String -LiteralPath $EnvPath -Pattern '^\s*OPENAI_API_KEY\s*=\s*\S.*$' -Encoding utf8 |
     Select-Object -First 1
@@ -279,14 +308,17 @@ function Invoke-WorktreeInitialization {
     [int]$SelectedPort,
 
     [Parameter(Mandatory = $true)]
-    [string]$ResolvedSecretFile
+    [string]$ResolvedSecretFile,
+
+    [string]$ResolvedHttpsConfigFile
   )
 
   $initializer = Join-Path $PSScriptRoot 'Initialize-WorktreeEnv.ps1'
   $initializerParameters = @{
-    WorktreePath = $RepositoryRoot
-    Port         = $SelectedPort
-    SecretFile   = $ResolvedSecretFile
+    WorktreePath     = $RepositoryRoot
+    Port             = $SelectedPort
+    SecretFile       = $ResolvedSecretFile
+    HttpsConfigFile = $ResolvedHttpsConfigFile
   }
 
   if ($WhatIfPreference) {
@@ -328,6 +360,7 @@ function Ensure-ExhibitionEnvironment {
     'VAYRIA_HTTPS=false'
     'VAYRIA_HTTPS_CERT_FILE='
     'VAYRIA_HTTPS_KEY_FILE='
+    '# VAYRIA_HTTPS_CONFIG_FILE is shared from .env.local when configured.'
     'VAYRIA_STT_WS_URL=ws://127.0.0.1:8787/stream'
   )
 
@@ -340,6 +373,7 @@ function Ensure-ExhibitionEnvironment {
 $repositoryRoot = Resolve-WorktreeRoot -Path $WorktreePath
 $envPath = Join-Path $repositoryRoot '.env.local'
 $resolvedSecretFile = Resolve-SecretFile -Path $SecretFile
+$resolvedHttpsConfigFile = Resolve-HttpsConfigFile -Path $HttpsConfigFile
 Invoke-AvatarSynchronization -RepositoryRoot $repositoryRoot -SourcePath $AvatarSourcePath
 $mutex = [Threading.Mutex]::new($false, $portMutexName)
 $lockAcquired = $false
@@ -383,7 +417,8 @@ try {
   Invoke-WorktreeInitialization `
     -RepositoryRoot $repositoryRoot `
     -SelectedPort $selectedPort `
-    -ResolvedSecretFile $resolvedSecretFile
+    -ResolvedSecretFile $resolvedSecretFile `
+    -ResolvedHttpsConfigFile $resolvedHttpsConfigFile
 
   Ensure-ExhibitionEnvironment `
     -RepositoryRoot $repositoryRoot `

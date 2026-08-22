@@ -1,8 +1,8 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-import { readFileSync } from 'node:fs';
 import { localApiPlugin } from './server/localApi';
 import { resolveOpenAiApiKey } from './server/secretConfig';
+import { resolveHttpsOptions } from './server/httpsConfig';
 import { voiceStreamProxyPlugin } from './server/voiceStreamProxy';
 
 const DEFAULT_DEV_HOST = '127.0.0.1';
@@ -26,33 +26,6 @@ function readDevPort(value: string | undefined, variableName: string): number {
   }
 
   return port;
-}
-
-function isEnabled(value: string | undefined): boolean {
-  return ['1', 'true', 'yes', 'on'].includes(value?.trim().toLowerCase() ?? '');
-}
-
-function readHttpsOptions(environment: Record<string, string>) {
-  if (!isEnabled(environment.VAYRIA_HTTPS)) return undefined;
-
-  const certificateFile = environment.VAYRIA_HTTPS_CERT_FILE?.trim();
-  const privateKeyFile = environment.VAYRIA_HTTPS_KEY_FILE?.trim();
-  if (!certificateFile || !privateKeyFile) {
-    throw new Error(
-      'VAYRIA_HTTPS_CERT_FILE and VAYRIA_HTTPS_KEY_FILE are required when VAYRIA_HTTPS is enabled.',
-    );
-  }
-
-  try {
-    return {
-      cert: readFileSync(certificateFile),
-      key: readFileSync(privateKeyFile),
-    };
-  } catch (error) {
-    throw new Error(
-      `Vayria HTTPS certificate files could not be read: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
 }
 
 export default defineConfig(({ mode }) => {
@@ -94,7 +67,7 @@ export default defineConfig(({ mode }) => {
       host: devHost,
       port: devPort,
       strictPort: true,
-      https: readHttpsOptions(serverEnvironment),
+      https: resolveHttpsOptions(serverEnvironment),
     },
     build: {
       // AudioWorklet modules must be served as JavaScript assets, not data URLs.

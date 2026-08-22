@@ -9,6 +9,8 @@ param(
 
   [string]$SecretFile = (Join-Path $env:USERPROFILE '.vayria\secrets.env'),
 
+  [string]$HttpsConfigFile = (Join-Path $env:USERPROFILE '.vayria\https.env'),
+
   [string]$AivisBaseUrl = 'http://127.0.0.1:10101',
 
   [ValidateSet('local', 'exhibition', 'public')]
@@ -24,11 +26,12 @@ $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $initializeScript = Join-Path $scriptDirectory 'Initialize-WorktreeEnv.ps1'
 
 $initializeParameters = @{
-  WorktreePath = $resolvedWorktree
-  Port         = $Port
-  SecretFile   = $SecretFile
-  AivisBaseUrl = $AivisBaseUrl
-  AppMode      = $AppMode
+  WorktreePath     = $resolvedWorktree
+  Port             = $Port
+  SecretFile       = $SecretFile
+  HttpsConfigFile = $HttpsConfigFile
+  AivisBaseUrl     = $AivisBaseUrl
+  AppMode          = $AppMode
 }
 
 if ($Force) {

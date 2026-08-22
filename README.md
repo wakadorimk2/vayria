@@ -116,6 +116,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    ```dotenv
    OPENAI_API_KEY=
    VAYRIA_SECRET_FILE=C:\Users\<Windowsユーザー名>\.vayria\secrets.env
+   VAYRIA_HTTPS_CONFIG_FILE=
    AIVIS_BASE_URL=http://127.0.0.1:10101
    AIVIS_SPEED_SCALE=1.15
    AIVIS_PITCH_SCALE=0
@@ -125,6 +126,8 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
    `VAYRIA_SECRET_FILE`を設定した場合、外部ファイルの`OPENAI_API_KEY`を優先します。
    `VAYRIA_SECRET_FILE`を設定しない場合は、既存の`.env.local`直書き方式を使用します。
+   `VAYRIA_HTTPS_CONFIG_FILE`を設定した場合、共有ファイルのHTTPS設定を優先します。
+   `VAYRIA_HTTPS_CONFIG_FILE`を設定しない場合は、既存の`VAYRIA_HTTPS_*`直接設定を使用します。
 
    アプリは emotion に対応する zonoko style ID を `/speakers` から取得します。
    音声パラメーターは省略できます。省略時は上記の値を使います。
@@ -176,6 +179,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    `.env.exhibition.example`を毎回コピーする必要はありません。
    既存の`.env.local`は上書きしません。
    `.env.local`には実キーを保存しません。
+   `%USERPROFILE%\.vayria\https.env`が存在する場合、Setup scriptは同じHTTPS設定ファイルの絶対パスを各worktreeへ記録します。
 
    CodexアプリのSettingsでLocal environmentを作成し、アプリが生成したプロジェクト`.codex`設定を確認します。
    設定スキーマは手書きしません。
@@ -314,15 +318,30 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    `mkcert -CAROOT`が返すルートCAをiPadへインストールします。
    iPadの「設定 > 一般 > 情報 > 証明書信頼設定」でルートCAを信頼します。
 
-4. `.env.exhibition.local`へ証明書とSTTサービスの設定を追加します。
+4. 共有HTTPS設定ファイルを一度だけ作成します。
+
+   既定のパスは`C:\Users\<Windowsユーザー名>\.vayria\https.env`です。
+   証明書と秘密鍵はworktreeへコピーしません。
 
    ```dotenv
-   VITE_VOICE_INPUT_TRANSPORT=remote
    VAYRIA_HTTPS=true
    VAYRIA_HTTPS_CERT_FILE=C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-cert.pem
    VAYRIA_HTTPS_KEY_FILE=C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-key.pem
-   VAYRIA_STT_WS_URL=ws://127.0.0.1:8787/stream
    ```
+
+   `Setup-VayriaWorktree.ps1`は、このファイルが存在する場合に各worktreeの`.env.local`へ参照先を記録します。
+   既存の`.env.local`は上書きしません。
+   既存worktreeへ反映する場合は、内容を確認してから次を実行します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Initialize-WorktreeEnv.ps1 `
+     -WorktreePath 'C:\path\to\worktree' `
+     -Port 5188 `
+     -HttpsConfigFile 'C:\Users\<Windowsユーザー名>\.vayria\https.env' `
+     -Force
+   ```
+
+   `VITE_VOICE_INPUT_TRANSPORT`と`VAYRIA_STT_WS_URL`は、各worktreeの`.env.exhibition.local`へ残します。
 
 5. AivisSpeech とPython STTサービスを Windows PC で起動します。
 

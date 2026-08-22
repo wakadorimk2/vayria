@@ -18,8 +18,9 @@ import type {
 
 interface CardGamePrototypeProps {
   game: CardGamePrototypeController;
-  isInteractionLocked?: boolean;
+  isResetLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
+  onCardInteraction?: () => void;
   onSessionReset?: () => void;
   onSelectionActiveChange?: (isActive: boolean) => void;
 }
@@ -112,8 +113,9 @@ function getBrainDropWaveX(distanceFromTarget: number): string {
 
 export function CardGamePrototype({
   game,
-  isInteractionLocked = false,
+  isResetLocked = false,
   onCardInserted,
+  onCardInteraction,
   onSessionReset,
   onSelectionActiveChange,
 }: CardGamePrototypeProps) {
@@ -131,7 +133,7 @@ export function CardGamePrototype({
   const dragSessionRef = useRef<DragSession | null>(null);
   const suppressNextClickRef = useRef(false);
   const isSpent = zones.remainingInterferenceCount === 0;
-  const interactionLocked = isSpent || isInteractionLocked;
+  const interactionLocked = isSpent;
   const dragActive = dragState?.isDragging === true;
   const visualInteractionLocked = interactionLocked && !dragActive;
   const selectionActive =
@@ -150,23 +152,14 @@ export function CardGamePrototype({
   }, [onSelectionActiveChange, selectionActive]);
 
   const commitSwap = useCallback(
-    (
-      brainCardId: string,
-      handCardId: string,
-      allowDuringInteractionLock = false,
-    ) => {
-      if (
-        isSpent ||
-        (isInteractionLocked && !allowDuringInteractionLock)
-      ) {
-        return;
-      }
+    (brainCardId: string, handCardId: string) => {
+      if (isSpent) return;
       const result = swapCards(brainCardId, handCardId);
       if (!result) return;
       setLastSwap(result);
       onCardInserted?.(result);
     },
-    [isInteractionLocked, isSpent, onCardInserted, swapCards],
+    [isSpent, onCardInserted, swapCards],
   );
 
   useEffect(() => {
@@ -196,11 +189,13 @@ export function CardGamePrototype({
         return;
       }
 
+      onCardInteraction?.();
       selectCard(zone, cardId);
     },
     [
       commitSwap,
       interactionLocked,
+      onCardInteraction,
       selectCard,
       selectedBrainCardId,
       selectedHandCardId,
@@ -253,7 +248,7 @@ export function CardGamePrototype({
 
       const targetBrainCardId = readBrainCardIdAtPoint(clientX, clientY);
       if (targetBrainCardId) {
-        commitSwap(targetBrainCardId, session.cardId, true);
+        commitSwap(targetBrainCardId, session.cardId);
       }
     },
     [commitSwap],
@@ -271,6 +266,7 @@ export function CardGamePrototype({
       if (!session.isDragging && distance < DRAG_THRESHOLD_PX) return;
 
       event.preventDefault();
+      const startedDragging = !session.isDragging;
       const nextSession: DragSession = {
         ...session,
         isDragging: true,
@@ -283,6 +279,7 @@ export function CardGamePrototype({
       };
       dragSessionRef.current = nextSession;
       setDragState(nextSession);
+      if (startedDragging) onCardInteraction?.();
     };
     const handlePointerUp = (event: PointerEvent) => {
       const session = dragSessionRef.current;
@@ -306,30 +303,22 @@ export function CardGamePrototype({
       document.removeEventListener('pointercancel', handlePointerCancel);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [cancelDrag, completeDrag]);
+  }, [cancelDrag, completeDrag, onCardInteraction]);
 
   const selectionHint =
     runtimeConfig.mode === 'exhibition'
-      ? isInteractionLocked
-        ? dragActive
-          ? '脳内へドロップ'
-          : '反応中…'
-        : isSpent
-          ? 'このターンは操作済み'
-          : selectionActive
-            ? '脳内へカードを選択'
-            : 'カードを触ってみて'
-      : isInteractionLocked
-        ? dragActive
-          ? '推論中ですが、掴んだカードを脳内へ放して挿入できます'
-          : '返答を待っています'
-        : isSpent
-          ? zones.forcedCardId
-            ? `脳へ干渉しました。「${zones.brain.find((card) => card.id === zones.forcedCardId)?.label ?? zones.forcedCardId}」の返答を待っています`
-            : 'このターンは操作済み'
-          : selectedBrainCardId || selectedHandCardId
-            ? '反対側のカードを選択すると交換します'
-            : '手札から脳内へカードをドラッグ';
+      ? isSpent
+        ? 'このターンは操作済み'
+        : selectionActive
+          ? '脳内へカードを選択'
+          : 'カードを触ってみて'
+      : isSpent
+        ? zones.forcedCardId
+          ? `脳へ干渉しました。「${zones.brain.find((card) => card.id === zones.forcedCardId)?.label ?? zones.forcedCardId}」の返答を待っています`
+          : 'このターンは操作済み'
+        : selectedBrainCardId || selectedHandCardId
+          ? '反対側のカードを選択すると交換します'
+          : '手札から脳内へカードをドラッグ';
 
   const renderCards = (zone: CardZone) => {
     const selectedId =
@@ -447,7 +436,7 @@ export function CardGamePrototype({
               <>
                 <button
                   className="reset-turn-button"
-                  disabled={isInteractionLocked}
+                  disabled={isResetLocked}
                   onClick={resetTurn}
                   type="button"
                 >
@@ -456,6 +445,7 @@ export function CardGamePrototype({
                 {onSessionReset && (
                   <button
                     className="reset-session-button"
+                    disabled={isResetLocked}
                     onClick={onSessionReset}
                     type="button"
                   >
