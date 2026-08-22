@@ -17,6 +17,8 @@ export class EmotionExpressionController {
   private readonly currentWeights = new Map<string, number>();
   private startWeights = new Map<string, number>();
   private targetExpression: string | null = null;
+  private targetEmotion: Emotion | null = null;
+  private holdRemainingSeconds = 0;
   private elapsedSeconds = TRANSITION_SECONDS;
 
   constructor(vrm: VRM) {
@@ -51,9 +53,18 @@ export class EmotionExpressionController {
     return this.expressionByEmotion.get(emotion) ?? null;
   }
 
-  setEmotion(emotion: Emotion): void {
+  setEmotion(emotion: Emotion, holdMs = 0): void {
+    if (emotion === this.targetEmotion && this.holdRemainingSeconds > 0) {
+      return;
+    }
+    this.applyEmotion(emotion, holdMs);
+  }
+
+  private applyEmotion(emotion: Emotion, holdMs: number): void {
     this.startWeights = new Map(this.currentWeights);
     this.targetExpression = this.getExpressionName(emotion);
+    this.targetEmotion = emotion;
+    this.holdRemainingSeconds = normalizeHoldSeconds(holdMs);
     this.elapsedSeconds = 0;
 
     console.info(
@@ -63,6 +74,10 @@ export class EmotionExpressionController {
 
   update(deltaSeconds: number): void {
     const safeDelta = Math.min(Math.max(deltaSeconds, 0), 0.1);
+    this.holdRemainingSeconds = Math.max(
+      0,
+      this.holdRemainingSeconds - safeDelta,
+    );
     this.elapsedSeconds = Math.min(
       this.elapsedSeconds + safeDelta,
       TRANSITION_SECONDS,
@@ -84,5 +99,12 @@ export class EmotionExpressionController {
     }
     this.currentWeights.clear();
     this.startWeights.clear();
+    this.targetEmotion = null;
+    this.holdRemainingSeconds = 0;
   }
+}
+
+function normalizeHoldSeconds(holdMs: number): number {
+  if (!Number.isFinite(holdMs)) return 0;
+  return Math.max(0, holdMs) / 1_000;
 }

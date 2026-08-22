@@ -47,12 +47,13 @@ function advance(
   seconds: number,
   target = new Vector3(0, 1, 5),
   enabled = true,
+  performanceTarget: Vector3 | null = null,
 ): ReturnType<IdleGazeController['update']> {
-  let frame = controller.update(0, target, enabled);
+  let frame = controller.update(0, target, enabled, performanceTarget);
   let remaining = seconds;
   while (remaining > 0) {
     const delta = Math.min(0.1, remaining);
-    frame = controller.update(delta, target, enabled);
+    frame = controller.update(delta, target, enabled, performanceTarget);
     remaining -= delta;
   }
   return frame;
@@ -213,7 +214,7 @@ test('idle gaze keeps positive and negative offsets within model-relative bounds
   );
 });
 
-test('disabled idle gaze resets and re-arms without a stuck target', () => {
+test('disabled idle gaze returns smoothly and re-arms without a stuck target', () => {
   const { lookAt, vrm } = createFakeVrm();
   const controller = new IdleGazeController(vrm, 2, () => 0);
 
@@ -225,7 +226,16 @@ test('disabled idle gaze resets and re-arms without a stuck target', () => {
     new Vector3(0, 1, 5),
     false,
   );
-  assert.equal(disabledFrame.phase, 'waiting');
+  assert.equal(disabledFrame.phase, 'returning');
+  assert.notEqual(lookAt?.target, null);
+
+  const returnedFrame = advance(
+    controller,
+    IDLE_GAZE_TIMING.returnSeconds + 0.1,
+    new Vector3(0, 1, 5),
+    false,
+  );
+  assert.equal(returnedFrame.phase, 'waiting');
   assert.equal(lookAt?.target, null);
 
   const reEnabledFrame = controller.update(
@@ -234,6 +244,41 @@ test('disabled idle gaze resets and re-arms without a stuck target', () => {
     true,
   );
   assert.equal(reEnabledFrame.phase, 'waiting');
+});
+
+test('performance gaze holds the viewer target and returns after release', () => {
+  const { lookAt, vrm } = createFakeVrm();
+  const controller = new IdleGazeController(vrm, 2, () => 0);
+  const viewerTarget = new Vector3(0, 1, 5);
+
+  const activeFrame = advance(
+    controller,
+    IDLE_GAZE_TIMING.approachSeconds + 0.1,
+    viewerTarget,
+    false,
+    viewerTarget,
+  );
+  assert.equal(activeFrame.phase, 'glancing');
+  assert.equal(activeFrame.isLookingAtViewer, true);
+  assert.notEqual(lookAt?.target, null);
+
+  const returningFrame = controller.update(
+    0.1,
+    viewerTarget,
+    false,
+    null,
+  );
+  assert.equal(returningFrame.phase, 'returning');
+  assert.notEqual(lookAt?.target, null);
+
+  const waitingFrame = advance(
+    controller,
+    IDLE_GAZE_TIMING.returnSeconds + 0.1,
+    viewerTarget,
+    false,
+  );
+  assert.equal(waitingFrame.phase, 'waiting');
+  assert.equal(lookAt?.target, null);
 });
 
 test('idle gaze stays inactive while a performance plan is active', () => {
