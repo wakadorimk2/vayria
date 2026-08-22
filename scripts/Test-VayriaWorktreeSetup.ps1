@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $setupScript = Join-Path $scriptDirectory 'Setup-VayriaWorktree.ps1'
+$syncScript = Join-Path $scriptDirectory 'Sync-VayriaAvatar.ps1'
 $pwshCommand = (Get-Command pwsh.exe -CommandType Application -ErrorAction Stop |
   Select-Object -First 1).Source
 $gitCommand = (Get-Command git.exe -CommandType Application -ErrorAction Stop |
@@ -60,6 +61,9 @@ function Invoke-SetupScript {
     [Parameter(Mandatory = $true)]
     [string]$ExternalSecretFile,
 
+    [Parameter(Mandatory = $true)]
+    [string]$AvatarSourcePath,
+
     [switch]$ExpectFailure,
 
     [switch]$UseCurrentDirectory
@@ -73,6 +77,8 @@ function Invoke-SetupScript {
     $Worktree
     '-SecretFile'
     $ExternalSecretFile
+    '-AvatarSourcePath'
+    $AvatarSourcePath
   )
 
   if ($ExpectFailure) {
@@ -103,6 +109,81 @@ function Invoke-SetupScript {
   }
 }
 
+function Invoke-AvatarSyncScript {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Worktree,
+
+    [Parameter(Mandatory = $true)]
+    [string]$AvatarSourcePath,
+
+    [switch]$AllWorktrees,
+
+    [switch]$Force,
+
+    [switch]$ExpectFailure
+  )
+
+  $arguments = @(
+    '-NoProfile'
+    '-File'
+    $syncScript
+    '-WorktreePath'
+    $Worktree
+    '-AvatarSourcePath'
+    $AvatarSourcePath
+  )
+
+  if ($AllWorktrees) {
+    $arguments += '-AllWorktrees'
+  }
+  if ($Force) {
+    $arguments += '-Force'
+  }
+
+  if ($ExpectFailure) {
+    & $pwshCommand @arguments *> $null
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -eq 0) {
+      throw "Avatar sync unexpectedly succeeded for $Worktree"
+    }
+    return
+  }
+
+  & $pwshCommand @arguments
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) {
+    throw "Avatar sync failed with exit code $exitCode for $Worktree"
+  }
+}
+
+function New-TestPortReservation {
+  param(
+    [int]$StartPort = 5190,
+
+    [int]$EndPort = 5999
+  )
+
+  for ($candidatePort = $StartPort; $candidatePort -le $EndPort; $candidatePort++) {
+    $candidateListener = [Net.Sockets.TcpListener]::new(
+      [Net.IPAddress]::Loopback,
+      $candidatePort
+    )
+    try {
+      $candidateListener.Start()
+      return [PSCustomObject]@{
+        Listener = $candidateListener
+        Port     = $candidatePort
+      }
+    }
+    catch {
+      $candidateListener.Dispose()
+    }
+  }
+
+  throw "No free test port exists in the range $StartPort-$EndPort."
+}
+
 $repositoryRoot = Join-Path $testRoot 'repo'
 $worktreeOne = Join-Path $testRoot 'worktree-one'
 $worktreeTwo = Join-Path $testRoot 'worktree-two'
@@ -112,6 +193,15 @@ $worktreeFive = Join-Path $testRoot 'worktree-five'
 $worktreeSix = Join-Path $testRoot 'worktree-six'
 $secretDirectory = Join-Path $testRoot 'secret folder'
 $secretFile = Join-Path $secretDirectory 'secrets.env'
+$avatarSourceDirectory = Join-Path $testRoot 'avatar source folder'
+$avatarSourceFile = Join-Path $avatarSourceDirectory 'model.vrm'
+$repositoryAvatar = Join-Path $repositoryRoot 'public\avatar\model.vrm'
+$worktreeOneAvatar = Join-Path $worktreeOne 'public\avatar\model.vrm'
+$worktreeTwoAvatar = Join-Path $worktreeTwo 'public\avatar\model.vrm'
+$worktreeThreeAvatar = Join-Path $worktreeThree 'public\avatar\model.vrm'
+$worktreeFourAvatar = Join-Path $worktreeFour 'public\avatar\model.vrm'
+$worktreeFiveAvatar = Join-Path $worktreeFive 'public\avatar\model.vrm'
+$worktreeSixAvatar = Join-Path $worktreeSix 'public\avatar\model.vrm'
 $worktreeOneEnv = Join-Path $worktreeOne '.env.local'
 $worktreeTwoEnv = Join-Path $worktreeTwo '.env.local'
 $worktreeThreeEnv = Join-Path $worktreeThree '.env.local'
@@ -120,8 +210,9 @@ $worktreeFiveEnv = Join-Path $worktreeFive '.env.local'
 $worktreeSixEnv = Join-Path $worktreeSix '.env.local'
 
 try {
-  New-Item -ItemType Directory -Path $repositoryRoot, $secretDirectory -Force | Out-Null
+  New-Item -ItemType Directory -Path $repositoryRoot, $secretDirectory, $avatarSourceDirectory -Force | Out-Null
   Set-Content -LiteralPath $secretFile -Value 'OPENAI_API_KEY=test-worktree-key' -Encoding utf8
+  Set-Content -LiteralPath $avatarSourceFile -Value 'test-vrm-payload' -Encoding utf8
 
   Invoke-NativeChecked -Command $gitCommand -Arguments @('init', '--quiet', $repositoryRoot)
   Invoke-NativeChecked -Command $gitCommand -Arguments @('-C', $repositoryRoot, 'config', 'user.email', 'test@example.invalid')
@@ -136,8 +227,8 @@ try {
   Invoke-NativeChecked -Command $gitCommand -Arguments @('-C', $repositoryRoot, 'worktree', 'add', '--quiet', '--detach', $worktreeFive, 'HEAD')
   Invoke-NativeChecked -Command $gitCommand -Arguments @('-C', $repositoryRoot, 'worktree', 'add', '--quiet', '--detach', $worktreeSix, 'HEAD')
 
-  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -UseCurrentDirectory
-  Invoke-SetupScript -Worktree $worktreeTwo -ExternalSecretFile $secretFile
+  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile -UseCurrentDirectory
+  Invoke-SetupScript -Worktree $worktreeTwo -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile
 
   $portOne = [int](Get-EnvironmentValue -Path $worktreeOneEnv -Name 'VAYRIA_PORT')
   $portTwo = [int](Get-EnvironmentValue -Path $worktreeTwoEnv -Name 'VAYRIA_PORT')
@@ -146,6 +237,16 @@ try {
   }
   if ($portTwo -lt 5188 -or $portTwo -gt 5999 -or $portTwo -eq $portOne) {
     throw "The second allocated port is invalid or duplicated: $portTwo"
+  }
+
+  $avatarHash = (Get-FileHash -LiteralPath $avatarSourceFile -Algorithm SHA256).Hash
+  foreach ($avatarPath in @($worktreeOneAvatar, $worktreeTwoAvatar)) {
+    if (-not (Test-Path -LiteralPath $avatarPath -PathType Leaf)) {
+      throw "Setup did not copy the VRM: $avatarPath"
+    }
+    if ((Get-FileHash -LiteralPath $avatarPath -Algorithm SHA256).Hash -ne $avatarHash) {
+      throw "The copied VRM has an unexpected hash: $avatarPath"
+    }
   }
 
   foreach ($envPath in @($worktreeOneEnv, $worktreeTwoEnv)) {
@@ -160,24 +261,54 @@ try {
   }
 
   $hashBeforeRerun = (Get-FileHash -LiteralPath $worktreeOneEnv -Algorithm SHA256).Hash
-  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile
+  $avatarHashBeforeRerun = (Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash
+  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile
   $hashAfterRerun = (Get-FileHash -LiteralPath $worktreeOneEnv -Algorithm SHA256).Hash
   if ($hashBeforeRerun -ne $hashAfterRerun) {
     throw 'Setup changed an existing .env.local.'
   }
+  if ((Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash -ne $avatarHashBeforeRerun) {
+    throw 'Setup changed an already synchronized VRM.'
+  }
+
+  $missingAvatarSource = Join-Path $avatarSourceDirectory 'missing.vrm'
+  $worktreeTwoEnvironmentHash = (Get-FileHash -LiteralPath $worktreeTwoEnv -Algorithm SHA256).Hash
+  Remove-Item -LiteralPath $worktreeTwoAvatar -Force
+  Invoke-SetupScript -Worktree $worktreeTwo -ExternalSecretFile $secretFile -AvatarSourcePath $missingAvatarSource
+  if ((Get-FileHash -LiteralPath $worktreeTwoEnv -Algorithm SHA256).Hash -ne $worktreeTwoEnvironmentHash) {
+    throw 'Setup changed an existing .env.local when the VRM source was missing.'
+  }
+  if (Test-Path -LiteralPath $worktreeTwoAvatar) {
+    throw 'Setup created a VRM when the source was missing.'
+  }
+  Invoke-AvatarSyncScript -Worktree $worktreeTwo -AvatarSourcePath $avatarSourceFile
+
+  Set-Content -LiteralPath $worktreeOneAvatar -Value 'local-worktree-vrm' -Encoding utf8
+  $protectedAvatarHash = (Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash
+  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile
+  if ((Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash -ne $protectedAvatarHash) {
+    throw 'Setup overwrote a differing VRM without explicit synchronization.'
+  }
+  Invoke-AvatarSyncScript -Worktree $worktreeOne -AvatarSourcePath $avatarSourceFile -ExpectFailure
+  if ((Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash -ne $protectedAvatarHash) {
+    throw 'A failed explicit synchronization changed the differing VRM.'
+  }
+  Invoke-AvatarSyncScript -Worktree $worktreeOne -AvatarSourcePath $avatarSourceFile -Force
+  if ((Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash -ne $avatarHash) {
+    throw 'Force synchronization did not update the differing VRM.'
+  }
 
   $listener = $null
+  $listenerPort = $null
   try {
-    $listener = [Net.Sockets.TcpListener]::new(
-      [Net.IPAddress]::Loopback,
-      5190
-    )
-    $listener.Start()
+    $reservation = New-TestPortReservation
+    $listener = $reservation.Listener
+    $listenerPort = $reservation.Port
 
-    Invoke-SetupScript -Worktree $worktreeThree -ExternalSecretFile $secretFile
+    Invoke-SetupScript -Worktree $worktreeThree -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile
     $portThree = [int](Get-EnvironmentValue -Path $worktreeThreeEnv -Name 'VAYRIA_PORT')
-    if ($portThree -ne 5191) {
-      throw "The setup did not skip the TCP-used port 5190: $portThree"
+    if ($portThree -le $listenerPort) {
+      throw "The setup did not skip the TCP-used port ${listenerPort}: $portThree"
     }
   }
   finally {
@@ -210,6 +341,8 @@ try {
       ('"{0}"' -f $case.Worktree)
       '-SecretFile'
       ('"{0}"' -f $secretFile)
+      '-AvatarSourcePath'
+      ('"{0}"' -f $avatarSourceFile)
     )
 
     Start-Process `
@@ -245,8 +378,26 @@ try {
     }
   }
 
+  Invoke-AvatarSyncScript -Worktree $repositoryRoot -AvatarSourcePath $avatarSourceFile -AllWorktrees -Force
+  foreach ($avatarPath in @(
+      $repositoryAvatar,
+      $worktreeOneAvatar,
+      $worktreeTwoAvatar,
+      $worktreeThreeAvatar,
+      $worktreeFourAvatar,
+      $worktreeFiveAvatar,
+      $worktreeSixAvatar
+    )) {
+    if (-not (Test-Path -LiteralPath $avatarPath -PathType Leaf)) {
+      throw "All-worktree synchronization did not create the VRM: $avatarPath"
+    }
+    if ((Get-FileHash -LiteralPath $avatarPath -Algorithm SHA256).Hash -ne $avatarHash) {
+      throw "All-worktree synchronization produced an unexpected hash: $avatarPath"
+    }
+  }
+
   $missingSecretFile = Join-Path $secretDirectory 'missing.env'
-  Invoke-SetupScript -Worktree $worktreeFour -ExternalSecretFile $missingSecretFile -ExpectFailure
+  Invoke-SetupScript -Worktree $worktreeFour -ExternalSecretFile $missingSecretFile -AvatarSourcePath $avatarSourceFile -ExpectFailure
   if (Test-Path -LiteralPath $worktreeFourEnv) {
     throw 'Setup created .env.local after the secret file check failed.'
   }
@@ -254,6 +405,9 @@ try {
   Invoke-NativeChecked -Command $gitCommand -Arguments @('-C', $repositoryRoot, 'worktree', 'remove', '--force', $worktreeOne)
   if (-not (Test-Path -LiteralPath $secretFile -PathType Leaf)) {
     throw 'The external secret file did not survive worktree deletion.'
+  }
+  if (-not (Test-Path -LiteralPath $avatarSourceFile -PathType Leaf)) {
+    throw 'The avatar source did not survive worktree deletion.'
   }
 
   Write-Output "Vayria worktree setup tests passed: ports $portOne, $portTwo, $portThree, $parallelPortOne, and $parallelPortTwo."
