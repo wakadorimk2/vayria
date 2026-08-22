@@ -41,6 +41,14 @@ export const RUBRIC_AXIS_LABELS = Object.freeze({
   embodiment: '声・視線・動きの統一',
 });
 
+export const RUBRIC_AXIS_QUESTIONS = Object.freeze({
+  presence: '待っている間、Vayriaはそこに居る感じがした？',
+  timing: '話しかけたあと、返事までの間とターンの交替は自然だった？',
+  continuity: '話題のつながりと変化は自然だった？ 表現の繰り返しは気にならなかった？',
+  emotion: '声の感情と、発話内容や表情の印象は合っていた？',
+  embodiment: '声、視線、表情、動きは同じ気持ちを表していた？',
+});
+
 export const PLAYCHECK_CASES = Object.freeze([
   {
     id: 'idle_presence',
@@ -755,15 +763,15 @@ function currentScoreHint(scenario, axis) {
   if (!hasValidStoredScore(score)) return '';
   const reason = scenario.naReasons?.[axis];
   if (score === 'N/A' && (typeof reason !== 'string' || !reason.trim())) return '';
-  return ` [現在: ${score}。Enterで維持]`;
+  return ` [現在は${score}。Enterでそのまま]`;
 }
 
 async function promptInteractiveScore({ ask, output, scenario, axis }) {
-  const label = RUBRIC_AXIS_LABELS[axis];
+  const question = RUBRIC_AXIS_QUESTIONS[axis];
   const currentHint = currentScoreHint(scenario, axis);
   while (true) {
     const answer = await ask(
-      `  ${label} (${axis}) 0/1/2/3/N/A${currentHint}: `,
+      `  ${question}\n  0=破綻 / 1=不自然 / 2=許容 / 3=自然 / N/A=観測不能${currentHint}: `,
     );
     if (!answer.trim() && currentHint) return scenario.scores[axis];
 
@@ -783,7 +791,7 @@ async function promptInteractiveScore({ ask, output, scenario, axis }) {
       return score;
     }
 
-    const reason = (await ask('  N/Aの理由: ')).trim();
+    const reason = (await ask('  今回は観測できなかった理由: ')).trim();
     if (!reason) {
       writeOutput(output, 'N/Aの理由は必須です。');
       continue;
@@ -798,7 +806,7 @@ async function promptOwnerNote({ ask, output, scenario }) {
   const suffix = currentNote ? '。Enterで現在の所感を維持' : '';
   while (true) {
     const answer = await ask(
-      `所感（任意、${MAX_OWNER_NOTE_LENGTH}文字以内。発話本文・秘密情報・個人情報は禁止）${suffix}: `,
+      `このケースで感じたことを一言（任意、${MAX_OWNER_NOTE_LENGTH}文字以内。本文や個人情報は書かない）${suffix}: `,
     );
     if (!answer.trim() && currentNote) return currentNote;
     try {

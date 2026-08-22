@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   MAX_OWNER_NOTE_LENGTH,
   RUBRIC_AXES,
+  RUBRIC_AXIS_QUESTIONS,
   SCENARIO_IDS,
   createRunTemplate,
   finalizeRun,
@@ -74,9 +75,15 @@ function createAsk(answers) {
 }
 
 function createOutput() {
+  const chunks = [];
   return {
     isTTY: false,
-    write() {},
+    write(value) {
+      chunks.push(value);
+    },
+    text() {
+      return chunks.join('');
+    },
   };
 }
 
@@ -101,6 +108,33 @@ test('score arguments and interactive score values are validated', () => {
   assert.equal(parseInteractiveScore(' N/A '), 'N/A');
   assert.equal(parseInteractiveScore('na'), 'N/A');
   assert.throws(() => parseInteractiveScore('4'), /must be 0, 1, 2, 3, or N\/A/);
+});
+
+test('interactive scoring asks natural-language owner questions without axis IDs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vayria-playcheck-prompts-'));
+  const localRoot = join(root, 'local');
+  try {
+    await startRun({ localRoot, runId: RUN_ID });
+    const output = createOutput();
+    const prompts = [];
+    const answers = ['', '2', '2', '2', '2', '2', ''];
+    await scoreRun({
+      localRoot,
+      runId: RUN_ID,
+      caseId: 'idle_presence',
+      ask: async (prompt) => {
+        prompts.push(prompt);
+        return answers.shift();
+      },
+      output,
+    });
+    const transcript = prompts.join('\n') + output.text();
+    assert.match(transcript, new RegExp(RUBRIC_AXIS_QUESTIONS.presence));
+    assert.match(transcript, /0=破綻 \/ 1=不自然 \/ 2=許容 \/ 3=自然 \/ N\/A=観測不能/);
+    assert.doesNotMatch(transcript, /\(presence\)/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('start accepts --no-open-qr and the browser launcher is injectable', () => {
