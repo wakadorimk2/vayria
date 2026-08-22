@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { VrmStage } from '../avatar/VrmStage';
 import { useAudioLipSync } from '../audio/useAudioLipSync';
 import type { Emotion } from '../character/emotion';
-import type { PerformancePlan, PerformanceResult } from '../performer/types';
+import type {
+  PerformanceBehavior,
+  PerformancePlan,
+  PerformanceResult,
+} from '../performer/types';
 import { usePerformerRuntime } from '../performer/usePerformerRuntime';
 import { cardPool } from './cardPool';
 import {
@@ -48,6 +52,70 @@ const MODIFIER_LABELS: Readonly<Record<CardReactionModifierKey, string>> = {
   headYawBias: '首振り補正',
   semanticBiases: '意味の手がかり',
 };
+
+const BEHAVIOR_LABELS: Readonly<
+  Record<keyof PerformanceBehavior, Readonly<Record<string, string>>>
+> = {
+  stance: {
+    inquisitive: '探る姿勢',
+    skeptical: '疑う姿勢',
+    drowsy: '眠気のある姿勢',
+    weathered: '天候に弱った姿勢',
+    awed: '圧倒された姿勢',
+    timid: '小さく構える姿勢',
+    curious: '好奇心のある姿勢',
+    seeking: '何かを求める姿勢',
+    secretive: '隠す姿勢',
+    alarmed: '警戒した姿勢',
+    delighted: '喜びのある姿勢',
+    buoyant: '漂う姿勢',
+    withdrawn: '引いた姿勢',
+    assertive: '胸を張る姿勢',
+    uncanny: '不穏な姿勢',
+    uncertain: '確信できない姿勢',
+    vigilant: '遠くを警戒する姿勢',
+    disoriented: '方向を失った姿勢',
+  },
+  energy: {
+    low: '低い',
+    medium: '中程度',
+    high: '高い',
+  },
+  engagement: {
+    direct: '直接向き合う',
+    cautious: '慎重に向き合う',
+    inward: '自分の内側へ向く',
+    distant: '距離を置く',
+  },
+  gestureIntent: {
+    inspect: '様子を探る',
+    withdraw: '身を引く',
+    expand: '大きく開く',
+    contract: '小さく縮む',
+    release: '力を抜く',
+    lean_in: '前へ乗り出す',
+    self_hold: '身体へ意識を向ける',
+    look_up: '上方を気にする',
+    conceal: '隠す仕草を意図する',
+    brace: '身構える',
+    open: '外へ開く',
+    sway: 'ゆっくり揺れる',
+    lower: '肩を落とす',
+    present: '存在を示す',
+    freeze: '動きを止める',
+    stare: '遠くを見つめる',
+    scan: '周囲を警戒する',
+    orient: '向きを確かめる',
+  },
+};
+
+function formatBehaviorValue(
+  field: keyof PerformanceBehavior,
+  value: PerformanceBehavior[keyof PerformanceBehavior],
+): string {
+  const code = String(value);
+  return `${BEHAVIOR_LABELS[field][code] ?? code} (${code})`;
+}
 
 function formatSignedNumber(value: number): string {
   if (value === 0) return '0';
@@ -135,6 +203,20 @@ function ReactionDetails({
           fields={CARD_REACTION_UNMAPPED_FIELDS}
           modifiers={profile.modifiers}
         />
+      </section>
+
+      <section className="card-behavior-preview__other-values">
+        <h3>Behavior State</h3>
+        <dl className="card-behavior-preview__modifier-list">
+          {(
+            ['stance', 'energy', 'engagement', 'gestureIntent'] as const
+          ).map((field) => (
+            <div key={field}>
+              <dt>{field}</dt>
+              <dd>{formatBehaviorValue(field, profile.behavior[field])}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       <p className="card-behavior-preview__lifecycle">
@@ -342,6 +424,7 @@ export function CardBehaviorPreview() {
               mouthOpen={mouthOpen}
               performancePlan={activePlan ?? undefined}
               sessionGeneration={motionSessionGeneration}
+              stageVariant="card-preview"
             />
             <div className="card-behavior-preview__stage-overlay">
               <span className="card-behavior-preview__selected-label">

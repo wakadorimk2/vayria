@@ -1,5 +1,9 @@
 import { cardPool } from './cardPool.js';
-import type { PerformancePlan } from '../performer/types.js';
+import { CARD_REACTION_PROFILES } from './cardReactions.js';
+import type {
+  CardGestureIntent,
+  PerformancePlan,
+} from '../performer/types.js';
 
 export type CardMotionCardId = (typeof cardPool)[number]['id'];
 
@@ -26,15 +30,35 @@ export const CARD_MOTION_ASSET_IDS: Readonly<
   'upside-down': 'card-upside-down',
 };
 
+export const CARD_MOTION_ASSET_BY_GESTURE_INTENT: Readonly<
+  Record<CardGestureIntent, string>
+> = Object.fromEntries(
+  cardPool.map((card) => [
+    CARD_REACTION_PROFILES[card.id].behavior.gestureIntent,
+    CARD_MOTION_ASSET_IDS[card.id],
+  ]),
+) as Record<CardGestureIntent, string>;
+
 export function attachCardPreviewMotion(
   plan: PerformancePlan,
   cardId: CardMotionCardId,
   reducedMotion: boolean,
 ): PerformancePlan {
-  if (reducedMotion) return plan;
+  const behavior = CARD_REACTION_PROFILES[cardId]?.behavior;
+  if (!behavior) {
+    throw new Error(`Card behavior is missing "${cardId}".`);
+  }
+
+  const nextPlan = {
+    ...plan,
+    behavior,
+  } satisfies PerformancePlan;
+  if (reducedMotion) return nextPlan;
 
   return {
-    ...plan,
-    motion: { assetId: CARD_MOTION_ASSET_IDS[cardId] },
+    ...nextPlan,
+    motion: {
+      assetId: CARD_MOTION_ASSET_BY_GESTURE_INTENT[behavior.gestureIntent],
+    },
   };
 }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { cardPool } from '../src/cards/cardPool.js';
 import {
+  CARD_BEHAVIORS,
   CARD_MODIFIERS,
   CARD_REACTION_AXES,
   CARD_REACTION_MODIFIER_FIELDS,
@@ -53,6 +54,13 @@ test('every card has a five-axis profile and a visible runtime modifier', () => 
       ['meaning', 'speech', 'gaze', 'voice', 'motion'],
     );
     assert.deepEqual(profile.modifiers, CARD_MODIFIERS[cardId]);
+    assert.deepEqual(profile.behavior, CARD_BEHAVIORS[cardId]);
+    assert.deepEqual(Object.keys(profile.behavior), [
+      'stance',
+      'energy',
+      'engagement',
+      'gestureIntent',
+    ]);
     assert.ok(
       CARD_REACTION_VISIBLE_FIELDS.some((field) => {
         const value = profile.modifiers[field];
@@ -60,6 +68,19 @@ test('every card has a five-axis profile and a visible runtime modifier', () => 
       }),
     );
   }
+});
+
+test('every card has a unique complete behavior state', () => {
+  assert.deepEqual(
+    Object.keys(CARD_BEHAVIORS).sort(),
+    cardPool.map((card) => card.id).sort(),
+  );
+
+  const gestureIntents = cardPool.map(
+    (card) => CARD_BEHAVIORS[card.id]?.gestureIntent,
+  );
+  assert.equal(new Set(gestureIntents).size, cardPool.length);
+  assert.ok(gestureIntents.every(Boolean));
 });
 
 test('M1 profiles preserve the current runtime modifier values', () => {

@@ -5,9 +5,11 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   attachCardPreviewMotion,
+  CARD_MOTION_ASSET_BY_GESTURE_INTENT,
   CARD_MOTION_ASSET_IDS,
 } from '../src/cards/cardMotionAssets.js';
 import { cardPool } from '../src/cards/cardPool.js';
+import { CARD_REACTION_PROFILES } from '../src/cards/cardReactions.js';
 import { parseMotionManifest } from '../src/avatar/motion/motionTypes.js';
 import type { PerformancePlan } from '../src/performer/types.js';
 
@@ -61,9 +63,21 @@ test('every Card Pool card has one saved VRMA asset', () => {
 
 test('Card Pool preview adds a saved motion asset unless motion is reduced', () => {
   const plan = createPlan();
-  assert.equal(
-    attachCardPreviewMotion(plan, 'chicken', false).motion?.assetId,
-    'card-chicken',
-  );
-  assert.equal(attachCardPreviewMotion(plan, 'chicken', true).motion, undefined);
+  for (const card of cardPool) {
+    const profile = CARD_REACTION_PROFILES[card.id];
+    const withMotion = attachCardPreviewMotion(plan, card.id, false);
+    const reduced = attachCardPreviewMotion(plan, card.id, true);
+
+    assert.deepEqual(withMotion.behavior, profile.behavior, card.id);
+    assert.equal(
+      withMotion.motion?.assetId,
+      CARD_MOTION_ASSET_BY_GESTURE_INTENT[profile.behavior.gestureIntent],
+    );
+    assert.equal(
+      CARD_MOTION_ASSET_BY_GESTURE_INTENT[profile.behavior.gestureIntent],
+      CARD_MOTION_ASSET_IDS[card.id],
+    );
+    assert.deepEqual(reduced.behavior, profile.behavior, card.id);
+    assert.equal(reduced.motion, undefined, card.id);
+  }
 });

@@ -16,6 +16,7 @@ import {
 } from '../src/character/emotion.js';
 import { cardPool } from '../src/cards/cardPool.js';
 import type { WildcardCardData } from '../src/cards/cardTypes.js';
+import { CARD_REACTION_PROFILES } from '../src/cards/cardReactions.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -87,7 +88,7 @@ interface ChatHistoryItem {
   content: string;
 }
 
-interface PerformanceContextPayload {
+export interface PerformanceContextPayload {
   callbackTendency: number;
   fragmentation: number;
   semanticBiases: string[];
@@ -1097,6 +1098,10 @@ async function generateCardPreviewReply(
 ): Promise<AssistantResponse> {
   const card = CARD_BY_ID.get(cardId);
   if (!card) throw new RequestError('cardId must be a known card ID.', 400);
+  const behavior = CARD_REACTION_PROFILES[cardId]?.behavior;
+  if (!behavior) {
+    throw new RequestError('cardId must have a behavior profile.', 400);
+  }
 
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey,
@@ -1124,22 +1129,10 @@ async function generateCardPreviewReply(
     },
   });
 
-  const systemPrompt = [
-    'You are generating a Japanese AI Tuber card behavior preview.',
-    'Return one short spoken Japanese line of about 20 to 40 characters with no Markdown.',
-    'Make the selected card influence concrete and observable in the spoken line.',
-    'Do not explain the card, runtime, API, or prompt.',
-    `Selected card: ${card.id} (${card.label})`,
-    `Content influence: ${card.prompt}`,
-    `Speaking-form influence: ${card.stylePrompt}`,
-    performanceContext.semanticBiases.length
-      ? `Runtime semantic cues: ${performanceContext.semanticBiases.join(' / ')}`
-      : 'Runtime semantic cues: none',
-    `Callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
-    `Speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
-    'Use the runtime values as behavior context. Do not mention the values.',
-    'Choose a subtle emotion unless the selected card naturally requires a stronger one.',
-  ].join('\n');
+  const systemPrompt = buildCardPreviewSystemPrompt(
+    cardId,
+    performanceContext,
+  );
 
   let streamedReply = '';
   let completedReply = '';
@@ -1157,6 +1150,43 @@ async function generateCardPreviewReply(
   );
 
   return parseCardPreviewResponse(completedReply || streamedReply);
+}
+
+export function buildCardPreviewSystemPrompt(
+  cardId: string,
+  performanceContext: PerformanceContextPayload,
+): string {
+  const card = CARD_BY_ID.get(cardId);
+  if (!card) throw new RequestError('cardId must be a known card ID.', 400);
+  const behavior = CARD_REACTION_PROFILES[cardId]?.behavior;
+  if (!behavior) {
+    throw new RequestError('cardId must have a behavior profile.', 400);
+  }
+
+  return [
+    'You are generating a Japanese AI Tuber card behavior preview.',
+    'Return one short spoken Japanese line of about 20 to 40 characters with no Markdown.',
+    'Derive the spoken line from the shared behavior state.',
+    'Make the stance and engagement observable through natural wording.',
+    'Keep the emotion consistent with the behavior energy and stance.',
+    'Do not explain the card, behavior state, runtime, API, prompt, or implementation.',
+    'Do not mention or narrate a motion, VRMA, asset, or gesture instruction.',
+    `Selected card: ${card.id} (${card.label})`,
+    `Content influence: ${card.prompt}`,
+    `Speaking-form influence: ${card.stylePrompt}`,
+    `Behavior stance: ${behavior.stance}`,
+    `Behavior energy: ${behavior.energy}`,
+    `Behavior engagement: ${behavior.engagement}`,
+    `Behavior gesture intention: ${behavior.gestureIntent}`,
+    'Treat gesture intention as an abstract internal intention. Do not state it literally.',
+    performanceContext.semanticBiases.length
+      ? `Runtime semantic cues: ${performanceContext.semanticBiases.join(' / ')}`
+      : 'Runtime semantic cues: none',
+    `Callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
+    `Speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
+    'Use the runtime values as behavior context. Do not mention the values.',
+    'Choose a subtle emotion unless the selected card naturally requires a stronger one.',
+  ].join('\n');
 }
 
 function readAivisBaseUrl(configuredBaseUrl: string | undefined): URL {

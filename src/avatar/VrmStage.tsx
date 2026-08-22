@@ -23,6 +23,7 @@ import { setupStageLighting } from './stageLighting';
 import { SavedMotionCatalog } from './motion/motionCatalog';
 import { MotionPlayer } from './motion/motionPlayer';
 import {
+  CARD_PREVIEW_LIGHTING,
   EXHIBITION_PORTRAIT_CAMERA,
   STAGE_PRESET,
 } from './stagePreset';
@@ -40,6 +41,7 @@ interface VrmStageProps {
   onReady?: () => void;
   performancePlan?: PerformancePlan;
   sessionGeneration?: number;
+  stageVariant?: 'default' | 'card-preview';
 }
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
@@ -53,6 +55,7 @@ export function VrmStage({
   onReady,
   performancePlan,
   sessionGeneration = 0,
+  stageVariant = 'default',
 }: VrmStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -181,7 +184,12 @@ export function VrmStage({
       0.01,
       50,
     );
-    setupStageLighting(scene);
+    setupStageLighting(
+      scene,
+      stageVariant === 'card-preview'
+        ? CARD_PREVIEW_LIGHTING
+        : STAGE_PRESET.lighting,
+    );
 
     let renderer: WebGLRenderer;
     try {
@@ -403,7 +411,7 @@ export function VrmStage({
       }
       renderer.dispose();
     };
-  }, [isExhibitionMode, syncMotionAsset]);
+  }, [isExhibitionMode, stageVariant, syncMotionAsset]);
 
   return (
     <div className="vrm-stage" ref={containerRef}>

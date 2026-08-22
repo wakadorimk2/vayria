@@ -1,6 +1,7 @@
 import type {
   DirectionContribution,
   DirectionModifiers,
+  PerformanceBehavior,
   PerformerTrigger,
 } from '../performer/types.js';
 
@@ -27,6 +28,7 @@ export interface CardReactionProfile {
   cardId: string;
   modifiers: Partial<DirectionModifiers>;
   axisSummaries: Readonly<Record<CardReactionAxis, string>>;
+  behavior: PerformanceBehavior;
 }
 
 export const CARD_REACTION_MODIFIER_FIELDS: Readonly<
@@ -52,6 +54,119 @@ export const CARD_REACTION_VISIBLE_FIELDS = [
 ] as const satisfies readonly CardReactionModifierKey[];
 
 const CARD_PREVIEW_EFFECT_DURATION_MS = 30_000;
+
+export const CARD_BEHAVIORS: Readonly<
+  Record<string, PerformanceBehavior>
+> = {
+  chicken: {
+    stance: 'inquisitive',
+    energy: 'medium',
+    engagement: 'cautious',
+    gestureIntent: 'inspect',
+  },
+  suspicious: {
+    stance: 'skeptical',
+    energy: 'medium',
+    engagement: 'cautious',
+    gestureIntent: 'withdraw',
+  },
+  gigantic: {
+    stance: 'awed',
+    energy: 'high',
+    engagement: 'direct',
+    gestureIntent: 'expand',
+  },
+  tiny: {
+    stance: 'timid',
+    energy: 'low',
+    engagement: 'inward',
+    gestureIntent: 'contract',
+  },
+  sleepy: {
+    stance: 'drowsy',
+    energy: 'low',
+    engagement: 'inward',
+    gestureIntent: 'release',
+  },
+  curious: {
+    stance: 'curious',
+    energy: 'medium',
+    engagement: 'direct',
+    gestureIntent: 'lean_in',
+  },
+  hungry: {
+    stance: 'seeking',
+    energy: 'medium',
+    engagement: 'inward',
+    gestureIntent: 'self_hold',
+  },
+  rain: {
+    stance: 'weathered',
+    energy: 'low',
+    engagement: 'cautious',
+    gestureIntent: 'look_up',
+  },
+  secret: {
+    stance: 'secretive',
+    energy: 'low',
+    engagement: 'cautious',
+    gestureIntent: 'conceal',
+  },
+  panic: {
+    stance: 'alarmed',
+    energy: 'high',
+    engagement: 'direct',
+    gestureIntent: 'brace',
+  },
+  sparkle: {
+    stance: 'delighted',
+    energy: 'high',
+    engagement: 'direct',
+    gestureIntent: 'open',
+  },
+  underwater: {
+    stance: 'buoyant',
+    energy: 'low',
+    engagement: 'distant',
+    gestureIntent: 'sway',
+  },
+  lonely: {
+    stance: 'withdrawn',
+    energy: 'low',
+    engagement: 'distant',
+    gestureIntent: 'lower',
+  },
+  confident: {
+    stance: 'assertive',
+    energy: 'high',
+    engagement: 'direct',
+    gestureIntent: 'present',
+  },
+  strange: {
+    stance: 'uncanny',
+    energy: 'low',
+    engagement: 'distant',
+    gestureIntent: 'freeze',
+  },
+  'deja-vu': {
+    stance: 'uncertain',
+    energy: 'low',
+    engagement: 'distant',
+    gestureIntent: 'stare',
+  },
+  'distant-thunder': {
+    stance: 'vigilant',
+    energy: 'medium',
+    engagement: 'cautious',
+    gestureIntent: 'scan',
+  },
+  'upside-down': {
+    stance: 'disoriented',
+    energy: 'medium',
+    engagement: 'cautious',
+    gestureIntent: 'orient',
+  },
+};
 
 export const CARD_MODIFIERS: Readonly<
   Record<string, Partial<DirectionModifiers>>
@@ -349,6 +464,7 @@ export const CARD_REACTION_PROFILES: Readonly<
       cardId,
       modifiers,
       axisSummaries: CARD_AXIS_SUMMARIES[cardId],
+      behavior: CARD_BEHAVIORS[cardId],
     },
   ]),
 ) as Record<string, CardReactionProfile>;

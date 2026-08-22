@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildCardPreviewSystemPrompt,
   parseCardPreviewResponse,
   readCardPreviewRequest,
 } from '../server/localApi.js';
@@ -75,4 +76,15 @@ test('card preview response keeps only text and normalized emotion', () => {
     () => parseCardPreviewResponse('{"text":""}'),
     /invalid response text/,
   );
+});
+
+test('card preview prompt uses behavior state without motion asset details', () => {
+  const prompt = buildCardPreviewSystemPrompt('chicken', VALID_CONTEXT);
+
+  assert.match(prompt, /Behavior stance: inquisitive/);
+  assert.match(prompt, /Behavior energy: medium/);
+  assert.match(prompt, /Behavior engagement: cautious/);
+  assert.match(prompt, /Behavior gesture intention: inspect/);
+  assert.equal(prompt.includes('card-chicken'), false);
+  assert.equal(prompt.includes('.vrma'), false);
 });
