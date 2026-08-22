@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/voice-input-test",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/voice-input-test.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/voice/browserSpeechRecognition.ts",
+    "src/voice/backchannelPolicy.ts",
+    "src/voice/pcm16.ts",
+    "src/voice/voiceInput.ts",
+    "scripts/voice-input.test.ts"
+  ]
+}

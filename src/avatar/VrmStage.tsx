@@ -37,13 +37,26 @@ import {
 } from './stagePreset';
 import type { Emotion } from '../character/emotion';
 import type { PerformancePlan } from '../performer/types';
+import type { ListeningReactionCue } from '../voice/voiceInput';
 
 const MODEL_URL = `${import.meta.env.BASE_URL}avatar/model.vrm`;
+
+const LISTENING_NOD_DURATION_SECONDS = 0.48;
+const LISTENING_NOD_DEGREES = -4;
+
+function getListeningNodDegrees(elapsedSeconds: number): number {
+  if (elapsedSeconds < 0 || elapsedSeconds >= LISTENING_NOD_DURATION_SECONDS) {
+    return 0;
+  }
+  const progress = elapsedSeconds / LISTENING_NOD_DURATION_SECONDS;
+  return LISTENING_NOD_DEGREES * Math.sin(progress * Math.PI);
+}
 
 interface VrmStageProps {
   attentionTarget?: 'viewer' | 'chat' | 'game' | 'none';
   emotion: Emotion;
   isExhibitionMode?: boolean;
+  listeningReaction?: ListeningReactionCue;
   motionScale?: number;
   mouthOpen: number;
   onReady?: () => void;
@@ -70,6 +83,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       attentionTarget = 'none',
       emotion,
       isExhibitionMode = false,
+      listeningReaction,
       motionScale = 1,
       mouthOpen,
       onReady,
@@ -84,6 +98,11 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const mouthOpenRef = useRef(mouthOpen);
     const emotionRef = useRef(emotion);
     const attentionTargetRef = useRef(attentionTarget);
+    const listeningReactionRef = useRef(listeningReaction);
+    const listeningReactionIdRef = useRef<number | null>(
+      listeningReaction?.id ?? null,
+    );
+    const listeningReactionStartedAtRef = useRef(0);
     const motionScaleRef = useRef(motionScale);
     const performancePlanRef = useRef(performancePlan);
     const onReadyRef = useRef(onReady);
@@ -112,6 +131,16 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     useEffect(() => {
       attentionTargetRef.current = attentionTarget;
     }, [attentionTarget]);
+
+    useEffect(() => {
+      const nextId = listeningReaction?.id ?? null;
+      if (nextId !== listeningReactionIdRef.current) {
+        listeningReactionIdRef.current = nextId;
+        listeningReactionStartedAtRef.current =
+          nextId === null ? 0 : performance.now();
+      }
+      listeningReactionRef.current = listeningReaction;
+    }, [listeningReaction]);
 
     useEffect(() => {
       onReadyRef.current = onReady;
@@ -474,12 +503,15 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           const plan = performancePlanRef.current;
           const avatarProfile = plan?.avatarProfile;
           const preReaction = plan?.preReaction;
+          const listeningReactionState = listeningReactionRef.current;
           const safeMotionScale = Math.max(
             0,
             Math.min(motionScaleRef.current, 1),
           );
           const gazeTarget =
-            preReaction?.gaze?.target ?? attentionTargetRef.current;
+            listeningReactionState?.target ??
+            preReaction?.gaze?.target ??
+            attentionTargetRef.current;
           const gazeYawBias =
             gazeTarget === 'viewer'
               ? 0.6
@@ -503,6 +535,12 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           const headYawBias = requestedHeadYawBias * safeMotionScale;
           const isBodyMotionPlaying =
             motionPlayerRef.current?.isPlaying() ?? false;
+          const listeningNodDegrees = listeningReactionState
+            ? getListeningNodDegrees(
+                (performance.now() - listeningReactionStartedAtRef.current) /
+                  1_000,
+              )
+            : 0;
           const idleGazeFrame = idleGazeController?.update(
             delta,
             camera.position,
@@ -514,6 +552,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               delta,
               idleMotionWeight,
               headYawBias + (idleGazeFrame?.fallbackHeadYawBias ?? 0),
+              listeningNodDegrees,
             );
           }
           motionPlayerRef.current?.update(delta);

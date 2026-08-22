@@ -1,8 +1,10 @@
 import { readPlaycheckRunId } from './playcheck';
 
 const APP_MODES = ['local', 'exhibition', 'public'] as const;
+const VOICE_INPUT_TRANSPORTS = ['web-speech', 'remote'] as const;
 
 export type AppMode = (typeof APP_MODES)[number];
+export type VoiceInputTransport = (typeof VOICE_INPUT_TRANSPORTS)[number];
 
 const DEFAULT_APP_MODE: AppMode = 'local';
 
@@ -41,9 +43,28 @@ function readApiBaseUrl(value: unknown): string {
   return rawValue.replace(/\/+$/, '');
 }
 
+function readVoiceInputTransport(
+  value: unknown,
+  mode: AppMode,
+): VoiceInputTransport {
+  if (
+    typeof value === 'string' &&
+    (VOICE_INPUT_TRANSPORTS as readonly string[]).includes(value)
+  ) {
+    return value as VoiceInputTransport;
+  }
+
+  return mode === 'exhibition' ? 'remote' : 'web-speech';
+}
+
+const mode = readAppMode(import.meta.env.VITE_APP_MODE);
 export const runtimeConfig = Object.freeze({
   apiBaseUrl: readApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
-  mode: readAppMode(import.meta.env.VITE_APP_MODE),
+  mode,
+  voiceTransport: readVoiceInputTransport(
+    import.meta.env.VITE_VOICE_INPUT_TRANSPORT,
+    mode,
+  ),
   playcheckRunId:
     typeof window === 'undefined'
       ? null

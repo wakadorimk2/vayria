@@ -15,7 +15,7 @@ export type ConversationStatus =
   | 'speaking'
   | 'error';
 
-export type ConversationSource = 'manual' | 'autonomous';
+export type ConversationSource = 'manual' | 'voice' | 'autonomous';
 
 export const AUTONOMOUS_ACTIONS = [
   'continue',
@@ -86,6 +86,8 @@ const ACTIVE_STATUSES: ConversationStatus[] = [
   'synthesizing',
   'speaking',
 ];
+
+const INTERACTIVE_SOURCES: ConversationSource[] = ['manual', 'voice'];
 
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
@@ -174,6 +176,9 @@ export function useConversation(
   const sourceRef = useRef<ConversationSource | null>(null);
   const statusRef = useRef<ConversationStatus>('idle');
   const activePlanRef = useRef<PerformancePlan | null>(null);
+  const activeTurnControlRef = useRef<{
+    interrupt: (reason: string) => void;
+  } | null>(null);
   const onPerformanceCueRef = useRef(options.onPerformanceCue);
   const onPerformancePlanRef = useRef(options.onPerformancePlan);
   const onPerformanceResultRef = useRef(options.onPerformanceResult);
@@ -239,6 +244,18 @@ export function useConversation(
       if (stopPlayback) playback.stop();
     },
     [abortFetch, playback],
+  );
+
+  const interruptCurrentTurn = useCallback(
+    (reason = 'interrupted') => {
+      activeTurnControlRef.current?.interrupt(reason);
+      const plan = activePlanRef.current;
+      if (plan) emitResult(plan, 'interrupted');
+      invalidateCurrentTurn(true);
+      setError('');
+      setConversationState('idle', null);
+    },
+    [emitResult, invalidateCurrentTurn, setConversationState],
   );
 
   const cancelAutonomous = useCallback(() => {
@@ -316,6 +333,12 @@ export function useConversation(
       generationRef.current = generation;
       setError('');
       setConversationState('thinking', turnSource);
+      const turnControl = {
+        interrupt: (reason: string) => {
+          emitTerminalEvent('turn_aborted', { reason });
+        },
+      };
+      activeTurnControlRef.current = turnControl;
       let requestController: AbortController | null = null;
       let currentPhase: 'llm' | 'tts' = 'llm';
       let responseEmotion: Emotion | undefined;
@@ -345,7 +368,7 @@ export function useConversation(
               : {}),
           },
           body: JSON.stringify({
-            mode: turnSource,
+            mode: turnSource === 'autonomous' ? 'autonomous' : 'manual',
             ...(message === null ? {} : { message }),
             history: historyRef.current,
             ...cardContext,
@@ -396,7 +419,7 @@ export function useConversation(
               )
             : null;
         if (
-          (turnSource === 'manual' && !responseText) ||
+          (INTERACTIVE_SOURCES.includes(turnSource) && !responseText) ||
           (autonomousDecision?.action !== 'silence' &&
             autonomousDecision !== null &&
             !responseText) ||
@@ -440,7 +463,7 @@ export function useConversation(
         });
         onReplyAccepted(activatedCards);
 
-        if (turnSource === 'manual') {
+        if (INTERACTIVE_SOURCES.includes(turnSource)) {
           appendHistory([
             { role: 'user', content: message ?? '' },
             { role: 'assistant', content: responseText },
@@ -459,7 +482,10 @@ export function useConversation(
             reason: 'muted',
             phase: currentPhase,
           });
-          return { completed: turnSource === 'manual', decision: null };
+          return {
+            completed: INTERACTIVE_SOURCES.includes(turnSource),
+            decision: null,
+          };
         }
 
         setConversationState('synthesizing', turnSource);
@@ -532,7 +558,7 @@ export function useConversation(
             emitTerminalEvent('turn_aborted', { reason: 'superseded', phase: 'tts' });
           }
           return {
-            completed: turnSource === 'manual',
+            completed: INTERACTIVE_SOURCES.includes(turnSource),
             decision: null,
           };
         }
@@ -598,7 +624,9 @@ export function useConversation(
           emitResult(plan, 'cancelled');
           emitTerminalEvent('turn_aborted', { reason: 'aborted' });
           return {
-            completed: turnSource === 'manual' && isMutedRef.current,
+            completed:
+              INTERACTIVE_SOURCES.includes(turnSource) &&
+              isMutedRef.current,
             decision: null,
           };
         }
@@ -615,6 +643,10 @@ export function useConversation(
           phase: currentPhase,
         });
         return { completed: false, decision: null };
+      } finally {
+        if (activeTurnControlRef.current === turnControl) {
+          activeTurnControlRef.current = null;
+        }
       }
     },
     [
@@ -637,6 +669,26 @@ export function useConversation(
       (
         await processTurn(
           'manual',
+          message,
+          cardContext,
+          onReplyAccepted,
+          null,
+          plan,
+        )
+      ).completed,
+    [processTurn],
+  );
+
+  const sendVoice = useCallback(
+    async (
+      message: string,
+      cardContext: ChatCardContext,
+      onReplyAccepted: (activatedCardIds: string[]) => void,
+      plan: PerformancePlan,
+    ) =>
+      (
+        await processTurn(
+          'voice',
           message,
           cardContext,
           onReplyAccepted,
@@ -677,7 +729,7 @@ export function useConversation(
     }
 
     if (
-      sourceRef.current === 'manual' &&
+      INTERACTIVE_SOURCES.includes(sourceRef.current ?? 'manual') &&
       ['synthesizing', 'speaking'].includes(statusRef.current)
     ) {
       finishActivePlanAsCancelled();
@@ -706,11 +758,13 @@ export function useConversation(
     cancelAutonomous,
     error,
     isBusy,
-    isManualBusy: isBusy && source === 'manual',
+    interruptCurrentTurn,
+    isManualBusy: isBusy && INTERACTIVE_SOURCES.includes(source ?? 'manual'),
     reply,
     resetConversation,
     sendAutonomous,
     sendManual,
+    sendVoice,
     source,
     status,
   };

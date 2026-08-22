@@ -17,5 +17,8 @@ tools/motion/checkpoints/
 tools/motion/hf-cache/
 tools/motion/runtime-cache/
 tools/motion/raw-output/
+tools/stt/.venv/
+tools/stt/.pytest_cache/
+tools/stt/**/__pycache__/
 *.npz
 *.npy
