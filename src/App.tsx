@@ -26,7 +26,11 @@ import type {
   PerformerTrigger,
 } from './performer/types';
 import { runtimeConfig } from './runtimeConfig';
-import { fetchListeningBackchannel } from './voice/backchannel';
+import { fetchListeningBackchannels } from './voice/backchannel';
+import {
+  scheduleListeningBackchannel,
+  selectListeningBackchannelIndex,
+} from './voice/backchannelPolicy';
 import { useVoiceInput } from './voice/useVoiceInput';
 import {
   MAX_VOICE_TEXT_LENGTH,
@@ -213,7 +217,8 @@ export default function App() {
   );
   const voiceReactionIdRef = useRef(0);
   const activeVoiceSegmentRef = useRef<string | null>(null);
-  const backchannelAudioRef = useRef<ArrayBuffer | null>(null);
+  const backchannelAudioRef = useRef<ArrayBuffer[]>([]);
+  const backchannelVariantIndexRef = useRef<number | null>(null);
   const backchannelLoadingRef = useRef<Promise<void> | null>(null);
   const backchannelTimerRef = useRef<number | null>(null);
   const voiceInput = useVoiceInput({
@@ -348,6 +353,14 @@ export default function App() {
       : STATUS_LABELS[status];
   const voiceError = getVoiceErrorMessage(voiceInputErrorCode);
   const conversationError = error || voiceValidationError || voiceError;
+  const exhibitionAudioActionLabel = voiceError
+    ? '音声とマイクを再試行'
+    : '音声とマイクを有効化';
+  const shouldShowAudioUnlockControl =
+    !isExhibitionMode ||
+    !isAudioUnlocked ||
+    !isVoiceInputEnabled ||
+    Boolean(voiceError);
 
   const resetSession = useCallback(() => {
     const nextGeneration = sessionGenerationRef.current + 1;
@@ -356,6 +369,7 @@ export default function App() {
     stopVoiceInput();
     activeVoiceSegmentRef.current = null;
     setListeningReaction(undefined);
+    backchannelVariantIndexRef.current = null;
     if (backchannelTimerRef.current !== null) {
       window.clearTimeout(backchannelTimerRef.current);
       backchannelTimerRef.current = null;
@@ -444,9 +458,11 @@ export default function App() {
   }, []);
 
   const preloadBackchannel = useCallback(() => {
-    if (backchannelAudioRef.current || backchannelLoadingRef.current) return;
+    if (backchannelAudioRef.current.length > 0 || backchannelLoadingRef.current) {
+      return;
+    }
 
-    const loading = fetchListeningBackchannel()
+    const loading = fetchListeningBackchannels()
       .then((audioData) => {
         backchannelAudioRef.current = audioData;
       })
@@ -473,12 +489,23 @@ export default function App() {
           });
           clearBackchannelTimer();
           const segmentId = event.segmentId;
+          const delayMs = scheduleListeningBackchannel();
+          if (delayMs === null) return;
           backchannelTimerRef.current = window.setTimeout(() => {
             backchannelTimerRef.current = null;
             if (activeVoiceSegmentRef.current !== segmentId) return;
             const audioData = backchannelAudioRef.current;
-            if (audioData) void playReaction(audioData);
-          }, 420);
+            const variantIndex = selectListeningBackchannelIndex(
+              audioData.length,
+              backchannelVariantIndexRef.current,
+            );
+            if (variantIndex === null) return;
+            const selectedAudio = audioData[variantIndex];
+            if (!selectedAudio) return;
+            void playReaction(selectedAudio).then((played) => {
+              if (played) backchannelVariantIndexRef.current = variantIndex;
+            });
+          }, delayMs);
           return;
         }
         case 'speech_ended':
@@ -490,7 +517,7 @@ export default function App() {
           setListeningReaction(undefined);
           const message = event.text.trim();
           if (!message) {
-            setVoiceValidationError('音声を聞き取れませんでした。');
+            setVoiceValidationError('');
             return;
           }
           if (message.length > MAX_VOICE_TEXT_LENGTH) {
@@ -716,13 +743,31 @@ export default function App() {
     }
   };
 
-  const handleExhibitionAudioUnlock = () => {
+  const handleExhibitionAudioUnlock = useCallback(async () => {
     if (isMuted) {
-      handleMuteToggle();
-      return;
+      const restoredVolume = volume > 0 ? volume : lastAudibleVolume;
+      setAudioControl({
+        isMuted: false,
+        lastAudibleVolume: restoredVolume,
+        volume: restoredVolume,
+      });
     }
-    void prepare();
-  };
+
+    const audioReadyPromise = prepare();
+    const voiceStartedPromise = startVoiceInput();
+    const [, voiceStarted] = await Promise.all([
+      audioReadyPromise,
+      voiceStartedPromise,
+    ]);
+    if (voiceStarted) preloadBackchannel();
+  }, [
+    isMuted,
+    lastAudibleVolume,
+    preloadBackchannel,
+    prepare,
+    startVoiceInput,
+    volume,
+  ]);
 
   const handleVolumeInput = (event: FormEvent<HTMLInputElement>) => {
     const inputVolume = Number(event.currentTarget.value) / 100;
@@ -758,7 +803,7 @@ export default function App() {
       data-app-mode={runtimeConfig.mode}
       data-exhibition-state={exhibitionPresentationState}
     >
-      {(!isExhibitionMode || !isAudioUnlocked) && (
+      {shouldShowAudioUnlockControl && (
         <header className="app-title">
           {!isExhibitionMode && <span>Vayria</span>}
           <div
@@ -768,15 +813,13 @@ export default function App() {
           >
             {isExhibitionMode ? (
               <button
-                aria-label={
-                  isMuted ? '音声をオンにする' : '音声を有効化する'
-                }
+                aria-label={`${exhibitionAudioActionLabel}する`}
                 className="audio-unlock-button"
                 onClick={handleExhibitionAudioUnlock}
-                title="最初の音声再生を有効にします"
+                title={`${exhibitionAudioActionLabel}します`}
                 type="button"
               >
-                {isMuted ? '音声をオンにする' : '音声を有効化'}
+                {exhibitionAudioActionLabel}
               </button>
             ) : (
               <>

@@ -42,9 +42,11 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 
 ## 音声入力
 
-会話欄の`🎙 聞く`を押すと、マイク入力を開始します。
-`local`モードは、利用可能な場合にブラウザーの`SpeechRecognition`を使用します。
-`exhibition`モードは、`AudioWorklet`で16 kHz、モノラル、PCM16へ変換し、
+`local`モードでは、会話欄の`🎙 聞く`を押すとマイク入力を開始します。
+利用可能な場合は、ブラウザーの`SpeechRecognition`を使用します。
+`exhibition`モードでは、画面上部の`音声とマイクを有効化`を最初に押してください。
+音声再生とマイク入力を同時に開始し、成功後は操作ボタンを隠します。
+展示では、`AudioWorklet`で16 kHz、モノラル、PCM16へ変換し、
 同一originの`/api/voice-stream`へWebSocket送信します。
 
 ViteはPCMを解釈しません。ViteはPCMを`127.0.0.1`のPython STTサービスへ中継します。

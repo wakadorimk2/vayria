@@ -11,6 +11,7 @@
   },
   "include": [
     "src/voice/browserSpeechRecognition.ts",
+    "src/voice/backchannelPolicy.ts",
     "src/voice/pcm16.ts",
     "src/voice/voiceInput.ts",
     "scripts/voice-input.test.ts"

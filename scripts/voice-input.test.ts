@@ -12,6 +12,15 @@ import {
   downmixToMono,
   encodePcm16,
 } from '../src/voice/pcm16.js';
+import {
+  LISTENING_BACKCHANNEL_MAX_DELAY_MS,
+  LISTENING_BACKCHANNEL_MIN_DELAY_MS,
+  LISTENING_BACKCHANNEL_PROBABILITY,
+  LISTENING_BACKCHANNEL_PROFILES,
+  collectSuccessfulBackchannelAudio,
+  scheduleListeningBackchannel,
+  selectListeningBackchannelIndex,
+} from '../src/voice/backchannelPolicy.js';
 
 const initial: VoiceInputSnapshot = {
   phase: 'idle',
@@ -285,5 +294,62 @@ test('PCM16 encoding clamps samples and uses little-endian signed integers', () 
   assert.deepEqual(
     [0, 1, 2, 3, 4, 5].map((index) => view.getInt16(index * 2, true)),
     [-32768, -16384, 0, 16384, 32767, 32767],
+  );
+});
+
+test('listening backchannel provides six TTS profiles', () => {
+  assert.deepEqual(LISTENING_BACKCHANNEL_PROFILES, [
+    { rateScale: 0.92, intonationScale: 0.82 },
+    { rateScale: 0.96, intonationScale: 0.96 },
+    { rateScale: 1, intonationScale: 1 },
+    { rateScale: 1.04, intonationScale: 1.08 },
+    { rateScale: 1.08, intonationScale: 0.9 },
+    { rateScale: 0.94, intonationScale: 1.16 },
+  ]);
+});
+
+test('listening backchannel schedules only within the configured probability and delay', () => {
+  assert.equal(
+    scheduleListeningBackchannel(() => LISTENING_BACKCHANNEL_PROBABILITY),
+    null,
+  );
+  assert.equal(
+    scheduleListeningBackchannel(
+      (() => {
+        const values = [LISTENING_BACKCHANNEL_PROBABILITY - 0.01, 0];
+        let index = 0;
+        return () => values[index++] ?? 0;
+      })(),
+    ),
+    LISTENING_BACKCHANNEL_MIN_DELAY_MS,
+  );
+  assert.equal(
+    scheduleListeningBackchannel(
+      (() => {
+        const values = [LISTENING_BACKCHANNEL_PROBABILITY - 0.01, 0.999999];
+        let index = 0;
+        return () => values[index++] ?? 0;
+      })(),
+    ),
+    LISTENING_BACKCHANNEL_MAX_DELAY_MS,
+  );
+});
+
+test('listening backchannel selection avoids immediate repetition', () => {
+  assert.equal(selectListeningBackchannelIndex(6, null, () => 0), 0);
+  assert.equal(selectListeningBackchannelIndex(6, 0, () => 0), 1);
+  assert.equal(selectListeningBackchannelIndex(0, null, () => 0), null);
+});
+
+test('listening backchannel pool keeps successful TTS results only', () => {
+  const firstAudio = new ArrayBuffer(1);
+  const secondAudio = new ArrayBuffer(2);
+  assert.deepEqual(
+    collectSuccessfulBackchannelAudio([
+      { status: 'fulfilled', value: firstAudio },
+      { status: 'rejected', reason: new Error('TTS failed') },
+      { status: 'fulfilled', value: secondAudio },
+    ]),
+    [firstAudio, secondAudio],
   );
 });
