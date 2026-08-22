@@ -224,6 +224,8 @@ export default function App() {
     { emotion: NonNullable<PerformanceResult['emotionCue']>['emotion']; intensity: number } | null
   >(null);
   const activePlanRef = useRef<PerformancePlan | null>(null);
+  const cardReactionPlanIdsRef = useRef(new Set<string>());
+  const pendingActivatedCardIdsRef = useRef(new Map<string, string[]>());
   const stageRef = useRef<VrmStageHandle>(null);
   const [stageMotionPort, setStageMotionPort] =
     useState<VrmStageHandle | null>(null);
@@ -431,17 +433,58 @@ export default function App() {
   const handlePerformanceResult = useCallback(
     (result: PerformanceResult) => {
       if (activePlanRef.current?.planId !== result.planId) return;
+      const isCardReactionPlan = cardReactionPlanIdsRef.current.delete(
+        result.planId,
+      );
+      const pendingActivatedCardIds = pendingActivatedCardIdsRef.current.get(
+        result.planId,
+      );
+      pendingActivatedCardIdsRef.current.delete(result.planId);
       if (result.outcome === 'failed') {
         setIsAutonomousLoopEnabled(false);
       }
       playbackCoordinator.stop();
       completePlan(result);
+      if (isCardReactionPlan) {
+        if (result.outcome === 'completed' && pendingActivatedCardIds) {
+          acceptReply(pendingActivatedCardIds);
+        } else {
+          resetTurn();
+        }
+      }
       activePlanRef.current = null;
       setActivePlan(null);
       setActiveEmotionCue(null);
     },
-    [completePlan, playbackCoordinator],
+    [acceptReply, completePlan, playbackCoordinator, resetTurn],
   );
+
+  const handleReplyAccepted = useCallback(
+    (activatedCardIds: string[]) => {
+      const planId = activePlanRef.current?.planId;
+      if (planId && cardReactionPlanIdsRef.current.has(planId)) {
+        pendingActivatedCardIdsRef.current.set(planId, activatedCardIds);
+        return;
+      }
+      acceptReply(activatedCardIds);
+    },
+    [acceptReply],
+  );
+
+  const cancelActiveCardReactionPlan = useCallback(() => {
+    const plan = activePlanRef.current;
+    if (!plan || !cardReactionPlanIdsRef.current.has(plan.planId)) {
+      return false;
+    }
+    handlePerformanceResult({
+      planId: plan.planId,
+      completedAt: Date.now(),
+      outcome: 'cancelled',
+      trigger: plan.trigger,
+      intent: plan.intent,
+    });
+    return true;
+  }, [handlePerformanceResult]);
 
   const executeNonSpeechPlan = useCallback(
     (plan: PerformancePlan) => {
@@ -650,6 +693,8 @@ export default function App() {
     resetConversation();
     resetRuntime();
     resetTurn();
+    cardReactionPlanIdsRef.current.clear();
+    pendingActivatedCardIdsRef.current.clear();
     activePlanRef.current = null;
     setActivePlan(null);
     setActiveEmotionCue(null);
@@ -857,6 +902,7 @@ export default function App() {
 
           setVoiceValidationError('');
           cancelNonSpeechPlan();
+          cancelActiveCardReactionPlan();
           interruptCurrentTurn(
             bargeInTransition?.effects.includes('interrupt')
               ? 'voice_barge_in'
@@ -872,7 +918,7 @@ export default function App() {
           const plan = createPlanForTrigger(trigger);
           beginReply();
           if (!isMuted) void prepare();
-          void sendVoice(message, readCardContext(), acceptReply, plan);
+          void sendVoice(message, readCardContext(), handleReplyAccepted, plan);
           return;
         }
         case 'recognition_stopped':
@@ -897,12 +943,13 @@ export default function App() {
       }
     },
     [
-      acceptReply,
       beginReply,
+      cancelActiveCardReactionPlan,
       cancelNonSpeechPlan,
       clearBackchannelTimer,
       createPlanForTrigger,
       dispatchBargeIn,
+      handleReplyAccepted,
       interruptCurrentTurn,
       isMuted,
       audioLabMode,
@@ -937,30 +984,79 @@ export default function App() {
         !isAutonomousLoopEnabled ||
         isMuted ||
         isBusy ||
-        activePlanRef.current !== null
+        Boolean(activePlanRef.current)
       ) {
         return false;
       }
+
+      const trigger =
+        options.trigger ?? ({ kind: 'idle_tick', elapsedMs: 0 } as const);
+      const isForcedCardTurn =
+        options.contribution?.directionId === 'wildcard' &&
+        options.cardContextOverride?.forcedCardId !== null &&
+        options.cardContextOverride?.forcedCardId !== undefined;
+      const preactivatedPlan: PerformancePlan | null = isForcedCardTurn
+        ? createPlanForTrigger(
+            trigger,
+            options.contribution ?? getDirectionContribution(trigger),
+          )
+        : null;
+
+      if (preactivatedPlan) {
+        cardReactionPlanIdsRef.current.add(preactivatedPlan.planId);
+        handlePerformancePlan(preactivatedPlan);
+      }
+
+      const cancelPreactivatedPlan = () => {
+        if (!preactivatedPlan) return;
+        const currentActivePlan: PerformancePlan | null =
+          activePlanRef.current;
+        if (currentActivePlan?.planId !== preactivatedPlan.planId) {
+          cardReactionPlanIdsRef.current.delete(preactivatedPlan.planId);
+          pendingActivatedCardIdsRef.current.delete(preactivatedPlan.planId);
+          return;
+        }
+        handlePerformanceResult({
+          planId: preactivatedPlan.planId,
+          completedAt: Date.now(),
+          outcome: 'cancelled',
+          trigger: preactivatedPlan.trigger,
+          intent: preactivatedPlan.intent,
+        });
+      };
+
       if (isExhibitionMode) {
         const audioReady = await prepare();
-        if (!audioReady || !isCurrentSession()) return false;
+        if (!audioReady || !isCurrentSession()) {
+          cancelPreactivatedPlan();
+          return false;
+        }
       } else {
         void prepare();
       }
+      const currentActivePlan: PerformancePlan | null =
+        activePlanRef.current;
+      const keepsPreactivatedPlan =
+        preactivatedPlan !== null &&
+        currentActivePlan !== null &&
+        currentActivePlan.planId === preactivatedPlan.planId;
       if (
         !isCurrentSession() ||
         isMuted ||
         isBusy ||
-        activePlanRef.current !== null
+        (preactivatedPlan === null
+          ? activePlanRef.current !== null
+          : !keepsPreactivatedPlan)
       ) {
+        cancelPreactivatedPlan();
         return false;
       }
-      const trigger =
-        options.trigger ?? ({ kind: 'idle_tick', elapsedMs: 0 } as const);
-      const plan = createPlanForTrigger(
-        trigger,
-        options.contribution ?? getDirectionContribution(trigger),
-      );
+      const plan =
+        preactivatedPlan ??
+        createPlanForTrigger(
+          trigger,
+          options.contribution ?? getDirectionContribution(trigger),
+        );
       if (plan.intent !== 'speak') {
         return executeNonSpeechPlan(plan);
       }
@@ -968,7 +1064,7 @@ export default function App() {
       const decision = await sendAutonomous(
         options.cardContextOverride ?? readCardContext(),
         autonomousContext,
-        acceptReply,
+        handleReplyAccepted,
         plan,
       );
       if (!decision || !isCurrentSession()) return false;
@@ -978,12 +1074,14 @@ export default function App() {
       return true;
     },
     [
-      acceptReply,
       autonomousContext,
       beginReply,
       createPlanForTrigger,
       executeNonSpeechPlan,
       getDirectionContribution,
+      handlePerformancePlan,
+      handlePerformanceResult,
+      handleReplyAccepted,
       isAutonomousLoopEnabled,
       isExhibitionMode,
       isBusy,
@@ -1068,6 +1166,7 @@ export default function App() {
     stageRef.current?.stopReactionMotion();
     if (source === 'autonomous') cancelAutonomous();
     cancelNonSpeechPlan();
+    cancelActiveCardReactionPlan();
     const trigger: PerformerTrigger = {
       kind: 'viewer_message',
       text: trimmedInput,
@@ -1076,7 +1175,7 @@ export default function App() {
     beginReply();
     if (!isMuted) void prepare();
     setInput('');
-    void sendManual(trimmedInput, readCardContext(), acceptReply, plan);
+    void sendManual(trimmedInput, readCardContext(), handleReplyAccepted, plan);
   };
 
   const handleMuteToggle = () => {
