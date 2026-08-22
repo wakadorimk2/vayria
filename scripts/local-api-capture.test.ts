@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
 import test from 'node:test';
-import { localApiPlugin } from '../server/localApi.js';
+import {
+  localApiPlugin,
+  parseVoiceAssistantResponse,
+} from '../server/localApi.js';
 import {
   readExhibitionCaptureMetadata,
   readExhibitionEvents,
@@ -43,6 +46,73 @@ function createFakeServer(): {
   };
   return { server, handlers };
 }
+
+test('voice assistant response keeps action, text, and card contracts together', () => {
+  const brainCardIds = ['card-a'];
+  const listen = parseVoiceAssistantResponse(
+    JSON.stringify({
+      voiceAction: 'listen',
+      backchannelCue: 'none',
+      text: '',
+      emotion: 'neutral',
+      activatedCards: [],
+    }),
+    brainCardIds,
+    'card-a',
+    'えっと',
+  );
+  assert.equal(listen.voiceAction, 'listen');
+  assert.equal(listen.text, '');
+  assert.deepEqual(listen.activatedCards, []);
+
+  const backchannel = parseVoiceAssistantResponse(
+    JSON.stringify({
+      voiceAction: 'backchannel',
+      backchannelCue: 'un',
+      text: '',
+      emotion: 'neutral',
+      activatedCards: [],
+    }),
+    brainCardIds,
+    'card-a',
+    'うん',
+  );
+  assert.equal(backchannel.voiceAction, 'backchannel');
+  assert.equal(backchannel.backchannelCue, 'un');
+
+  const takeFloor = parseVoiceAssistantResponse(
+    JSON.stringify({
+      voiceAction: 'take_floor',
+      backchannelCue: 'none',
+      text: 'それは面白いですわ',
+      emotion: 'joy',
+      activatedCards: ['card-a'],
+    }),
+    brainCardIds,
+    'card-a',
+    '展示について聞きたいです',
+  );
+  assert.equal(takeFloor.voiceAction, 'take_floor');
+  assert.equal(takeFloor.text, 'それは面白いですわ');
+  assert.deepEqual(takeFloor.activatedCards, ['card-a']);
+
+  assert.throws(
+    () =>
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'listen',
+          backchannelCue: 'none',
+          text: '',
+          emotion: 'neutral',
+          activatedCards: [],
+        }),
+        brainCardIds,
+        null,
+        '展示について聞きたいです',
+      ),
+    /take_floor/,
+  );
+});
 
 async function waitForCaptureId(root: string): Promise<string> {
   for (let attempt = 0; attempt < 50; attempt += 1) {

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
 import {
   createVoiceInputController,
@@ -22,6 +25,35 @@ import {
   scheduleListeningBackchannel,
   selectListeningBackchannelIndex,
 } from '../src/voice/backchannelPolicy.js';
+import {
+  DEFAULT_AUDIO_ENDPOINT_MS,
+  AUDIO_ENDPOINT_VALUES,
+  calculatePerMinuteRate,
+  clampVadThreshold,
+  DEFAULT_AUDIO_INPUT_MODE,
+  DEFAULT_AUDIO_LAB_MODE,
+  DEFAULT_EXHIBITION_AUDIO_PRESET,
+  getExhibitionAudioPresetConfig,
+  findKnownHallucinationPhrase,
+  resolveInitialAudioLabMode,
+  resolveAudioEndpointMs,
+  resolveExhibitionAudioPreset,
+  sanitizeMediaTrackSettings,
+  type VoiceLabRecord,
+} from '../src/voice/audioLab.js';
+import {
+  getVadHangoverChunkCount,
+  RmsVad,
+  calculatePcm16Rms,
+} from '../src/voice/rmsVad.js';
+import { AdaptiveRmsVad } from '../src/voice/adaptiveRmsVad.js';
+import { reduceBargeIn } from '../src/voice/bargeIn.js';
+import { VoiceLabRecorder } from '../src/voice/voiceLabRecorder.js';
+import {
+  appendVoiceLabRecord,
+  readVoiceLabRecord,
+  readVoiceLabRecords,
+} from '../server/voiceLabStore.js';
 import { isVoiceInteractionDecision } from '../src/voice/voiceInteraction.js';
 
 const initial: VoiceInputSnapshot = {
@@ -148,6 +180,16 @@ function makeResultEvent(
       length: 1,
     },
   };
+}
+
+function makePcmChunk(amplitude: number): ArrayBuffer {
+  const pcm = new ArrayBuffer(6_400);
+  const view = new DataView(pcm);
+  const sample = Math.round(Math.max(-1, Math.min(amplitude, 1)) * 32_767);
+  for (let offset = 0; offset < view.byteLength; offset += 2) {
+    view.setInt16(offset, sample, true);
+  }
+  return pcm;
 }
 
 test('voice input transitions through listening and finalized states', () => {
@@ -390,4 +432,621 @@ test('listening backchannel pool keeps successful TTS results only', () => {
     ]),
     [firstAudio, secondAudio],
   );
+});
+
+test('RMS VAD applies threshold, preroll, and three-chunk hangover', () => {
+  const quiet = makePcmChunk(0.01);
+  const speech = makePcmChunk(0.08);
+  const vad = new RmsVad(0.02);
+
+  assert.equal(calculatePcm16Rms(makePcmChunk(0)), 0);
+  assert.equal(vad.process(makePcmChunk(0)).forwardedChunks.length, 0);
+  assert.equal(vad.process(quiet, 100).events.length, 0);
+
+  const started = vad.process(speech, 200);
+  assert.deepEqual(started.events, [{ type: 'speech_started', at: 200 }]);
+  assert.equal(started.forwardedChunks.length, 3);
+  assert.equal(started.speechActive, true);
+
+  assert.equal(vad.process(quiet, 300).events.length, 0);
+  assert.equal(vad.process(quiet, 400).events.length, 0);
+  assert.deepEqual(vad.process(quiet, 500).events, [
+    { type: 'speech_ended', at: 500 },
+  ]);
+});
+
+test('RMS VAD rejects low-level noise and preserves a short utterance', () => {
+  const quiet = makePcmChunk(0.01);
+  const speech = makePcmChunk(0.08);
+  const noiseVad = new RmsVad(0.02);
+  noiseVad.process(quiet, 100);
+  noiseVad.process(makePcmChunk(0), 200);
+  const rejected = noiseVad.process(makePcmChunk(0), 300);
+  assert.equal(rejected.forwardedChunks.length, 0);
+  assert.equal(rejected.events[0]?.type, 'rejected');
+
+  const shortVad = new RmsVad(0.02);
+  const short = shortVad.process(speech, 400);
+  assert.equal(short.forwardedChunks.length, 1);
+  assert.equal(short.events[0]?.type, 'speech_started');
+  assert.deepEqual(shortVad.flush(500), [{ type: 'speech_ended', at: 500 }]);
+  assert.equal(clampVadThreshold(0), 0.005);
+  assert.equal(clampVadThreshold(1), 0.2);
+});
+
+test('RMS VAD maps the selectable endpoint to a shorter hangover', () => {
+  assert.deepEqual(AUDIO_ENDPOINT_VALUES, [400, 600]);
+  assert.equal(DEFAULT_AUDIO_ENDPOINT_MS, 600);
+  assert.equal(getVadHangoverChunkCount(400), 2);
+  assert.equal(getVadHangoverChunkCount(600), 3);
+
+  const vad = new RmsVad(0.02, {
+    hangoverChunkCount: getVadHangoverChunkCount(400),
+  });
+  vad.process(makePcmChunk(0.08), 100);
+  vad.process(makePcmChunk(0.01), 300);
+  assert.deepEqual(vad.process(makePcmChunk(0.01), 500).events, [
+    { type: 'speech_ended', at: 500 },
+  ]);
+});
+
+test('adaptive RMS VAD updates noise floor only while idle and accepts short speech', () => {
+  const adaptive = new AdaptiveRmsVad(0.005);
+  assert.equal(adaptive.getNoiseFloor(), 0.005);
+  assert.equal(adaptive.getEffectiveThreshold(), 0.0125);
+
+  const quiet = adaptive.process(makePcmChunk(0.01), 100);
+  assert.ok(quiet.noiseFloor > 0.005);
+  assert.equal(quiet.vadThreshold, 0.005);
+  assert.equal(
+    quiet.effectiveThreshold,
+    Math.max(0.005, quiet.noiseFloor * 2.5),
+  );
+
+  adaptive.reset();
+  adaptive.setTtsPlaying(true);
+  const frozenFloor = adaptive.getNoiseFloor();
+  adaptive.process(makePcmChunk(0.01), 200);
+  assert.equal(adaptive.getNoiseFloor(), frozenFloor);
+
+  adaptive.reset();
+  adaptive.setTtsPlaying(false);
+  adaptive.process(makePcmChunk(0.01), 300);
+  const shortSpeech = adaptive.process(makePcmChunk(0.08), 500);
+  assert.deepEqual(shortSpeech.events, [{ type: 'speech_started', at: 500 }]);
+  assert.equal(shortSpeech.forwardedChunks.length, 2);
+
+  const aggressive = new AdaptiveRmsVad(0.02, {
+    noiseFloorMultiplier: 3.0,
+  });
+  aggressive.process(makePcmChunk(0.01), 600);
+  assert.equal(
+    aggressive.getEffectiveThreshold(),
+    Math.max(0.02, aggressive.getNoiseFloor() * 3.0),
+  );
+});
+
+test('adaptive RMS VAD rejects a low-level candidate after two noise-floor chunks', () => {
+  const adaptive = new AdaptiveRmsVad(0.02);
+  adaptive.process(makePcmChunk(0.008), 100);
+  adaptive.process(makePcmChunk(0), 300);
+  const rejected = adaptive.process(makePcmChunk(0), 500);
+
+  assert.deepEqual(rejected.events, [
+    {
+      type: 'rejected',
+      at: 500,
+      candidateDurationMs: 600,
+      maxScore: calculatePcm16Rms(makePcmChunk(0.008)),
+      reason: 'below-threshold',
+    },
+  ]);
+  assert.equal(rejected.forwardedChunks.length, 0);
+});
+
+test('barge-in reducer ducks only with TTS and restores or interrupts correctly', () => {
+  assert.deepEqual(
+    reduceBargeIn('idle', { type: 'speech_started', ttsPlaying: false }),
+    { state: 'idle', effects: [] },
+  );
+
+  const ducked = reduceBargeIn('idle', {
+    type: 'speech_started',
+    ttsPlaying: true,
+  });
+  assert.deepEqual(ducked, {
+    state: 'ducked',
+    effects: ['duck'],
+    reason: 'speech-started',
+  });
+
+  assert.deepEqual(
+    reduceBargeIn('ducked', {
+      type: 'transcript_finalized',
+      accepted: true,
+    }),
+    {
+      state: 'confirmed',
+      effects: ['interrupt', 'restore'],
+      reason: 'accepted-transcript',
+    },
+  );
+  assert.deepEqual(
+    reduceBargeIn('ducked', {
+      type: 'transcript_finalized',
+      accepted: false,
+    }),
+    {
+      state: 'restored',
+      effects: ['restore'],
+      reason: 'empty-or-filtered-transcript',
+    },
+  );
+  assert.deepEqual(
+    reduceBargeIn('ducked', { type: 'timeout' }),
+    { state: 'restored', effects: ['restore'], reason: 'timeout' },
+  );
+  assert.deepEqual(
+    reduceBargeIn('ducked', { type: 'recognition_failed' }),
+    {
+      state: 'restored',
+      effects: ['restore'],
+      reason: 'recognition-failed',
+    },
+  );
+  assert.deepEqual(
+    reduceBargeIn('ducked', { type: 'recognition_stopped' }),
+    {
+      state: 'restored',
+      effects: ['restore'],
+      reason: 'recognition-stopped',
+    },
+  );
+  assert.deepEqual(
+    reduceBargeIn('restored', {
+      type: 'speech_started',
+      ttsPlaying: true,
+    }),
+    {
+      state: 'ducked',
+      effects: ['duck'],
+      reason: 'speech-started',
+    },
+  );
+});
+
+test('Audio Lab normalizes known hallucinations and anonymizes track settings', () => {
+  assert.equal(
+    findKnownHallucinationPhrase(' ご視聴ありがとうございました。 '),
+    'ご視聴ありがとうございました',
+  );
+  assert.equal(
+    findKnownHallucinationPhrase('ご覧いただきありがとうございました！'),
+    'ご覧いただきありがとうございました',
+  );
+  assert.deepEqual(
+    sanitizeMediaTrackSettings({
+      echoCancellation: true,
+      noiseSuppression: false,
+      deviceId: 'do-not-save',
+      groupId: 'do-not-save',
+      sampleRate: 16_000,
+    }),
+    {
+      echoCancellation: true,
+      noiseSuppression: false,
+      sampleRate: 16_000,
+    },
+  );
+});
+
+test('Audio Lab defaults to Processed while retaining Mode D for debug selection', () => {
+  assert.equal(DEFAULT_AUDIO_INPUT_MODE, 'baseline');
+  assert.equal(DEFAULT_AUDIO_LAB_MODE, 'processed');
+  assert.equal(DEFAULT_EXHIBITION_AUDIO_PRESET, 'mild');
+  assert.equal(resolveInitialAudioLabMode(true), 'processed');
+  assert.equal(resolveInitialAudioLabMode(false), 'baseline');
+  assert.equal(resolveInitialAudioLabMode(false, true), 'processed');
+  assert.equal(resolveInitialAudioLabMode(false, false), 'baseline');
+});
+
+test('Audio endpoint resolves query over environment and defaults to 600ms', () => {
+  assert.equal(resolveAudioEndpointMs(null, null), 600);
+  assert.equal(resolveAudioEndpointMs(null, '400'), 400);
+  assert.equal(resolveAudioEndpointMs('600', '400'), 600);
+  assert.equal(resolveAudioEndpointMs('invalid', '400'), 400);
+  assert.equal(resolveAudioEndpointMs('invalid', 'invalid'), 600);
+});
+
+test('exhibition audio presets resolve query over environment and expose gate settings', () => {
+  assert.equal(resolveExhibitionAudioPreset(null, null), 'mild');
+  assert.equal(resolveExhibitionAudioPreset(null, 'aggressive'), 'aggressive');
+  assert.equal(resolveExhibitionAudioPreset('off', 'aggressive'), 'off');
+  assert.equal(resolveExhibitionAudioPreset('invalid', 'aggressive'), 'aggressive');
+  assert.equal(resolveExhibitionAudioPreset('invalid', 'invalid'), 'mild');
+
+  assert.deepEqual(
+    getExhibitionAudioPresetConfig('off'),
+    {
+      requestedConstraints: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+      browserGateEnabled: false,
+      defaultVadThreshold: 0.02,
+      noiseFloorMultiplier: 2.5,
+    },
+  );
+  assert.equal(getExhibitionAudioPresetConfig('mild').defaultVadThreshold, 0.02);
+  assert.equal(getExhibitionAudioPresetConfig('mild').noiseFloorMultiplier, 2.5);
+  assert.equal(
+    getExhibitionAudioPresetConfig('aggressive').defaultVadThreshold,
+    0.04,
+  );
+  assert.equal(
+    getExhibitionAudioPresetConfig('aggressive').noiseFloorMultiplier,
+    3.0,
+  );
+});
+
+test('Voice Lab recorder measures latency, known errors, TTS overlap, and summary', () => {
+  const records: VoiceLabRecord[] = [];
+  const recorder = new VoiceLabRecorder({
+    enabled: true,
+    mode: 'processed',
+    preset: 'mild',
+    sessionId: 'vl-test-session',
+    onRecord: (record) => records.push(record),
+  });
+  recorder.start();
+  recorder.setTtsPlaying(true, 1_000);
+  recorder.handleDiagnostic({
+    type: 'media_settings',
+    at: 1_000,
+    settings: {
+      requested: { echoCancellation: true },
+      supported: { echoCancellation: true },
+      applied: { echoCancellation: true },
+    },
+  });
+  recorder.handleVoiceEvent({
+    type: 'speech_started',
+    segmentId: 'segment-1',
+    at: 1_000,
+  });
+  recorder.handleDiagnostic({
+    type: 'stt_queued',
+    segmentId: 'segment-1',
+    at: 1_100,
+  });
+  recorder.handleDiagnostic({
+    type: 'stt_started',
+    segmentId: 'segment-1',
+    at: 1_200,
+  });
+  recorder.handleVoiceEvent({
+    type: 'speech_ended',
+    segmentId: 'segment-1',
+    at: 1_300,
+  });
+  recorder.handleDiagnostic({
+    type: 'stt_observed',
+    segmentId: 'segment-1',
+    at: 1_400,
+    rawText: 'ご視聴ありがとうございました。',
+    acceptedText: '',
+    filterReason: 'known-hallucination',
+  });
+  recorder.handleVoiceEvent({
+    type: 'utterance_finalized',
+    segmentId: 'segment-1',
+    text: '',
+    at: 1_400,
+  });
+  recorder.setTtsPlaying(false, 1_500);
+  recorder.finish();
+
+  const snapshot = recorder.getSnapshot();
+  const utterance = snapshot.records.find((record) => record.kind === 'utterance');
+  assert.equal(utterance?.kind, 'utterance');
+  if (utterance?.kind !== 'utterance') return;
+  assert.equal(utterance.rawRecognizedText, 'ご視聴ありがとうございました。');
+  assert.equal(utterance.knownHallucinationPhrase, 'ご視聴ありがとうございました');
+  assert.equal(utterance.sttLatencyMs, 200);
+  assert.equal(utterance.sttQueuedAt, '1970-01-01T00:00:01.100Z');
+  assert.equal(utterance.sttObservedAt, '1970-01-01T00:00:01.400Z');
+  assert.equal(utterance.sttQueueWaitMs, 100);
+  assert.equal(utterance.sttProcessingMs, 200);
+  assert.equal(utterance.endpointToResultLatencyMs, 100);
+  assert.equal(utterance.speechToResultLatencyMs, 400);
+  assert.equal(utterance.audioEndpointMs, 600);
+  assert.equal(utterance.audioDurationMs, 300);
+  assert.equal(utterance.ttsPlayingDuringUtterance, true);
+  assert.equal(snapshot.summary.knownHallucinationCount, 1);
+  assert.equal(snapshot.summary.ttsOverlapCount, 1);
+  assert.equal(snapshot.summary.ttsActiveDurationMs, 500);
+  assert.equal(snapshot.summary.ttsCandidateCount, 1);
+  assert.equal(snapshot.summary.ttsAcceptedCount, 1);
+  assert.equal(snapshot.summary.ttsVadRejectCount, 0);
+  assert.equal(snapshot.summary.ttsNoiseLikeSttCount, 0);
+  assert.equal(snapshot.summary.ttsCandidatesPerMinute, 120);
+  assert.equal(snapshot.summary.averageSttLatencyMs, 200);
+  assert.equal(snapshot.summary.averageSttQueueWaitMs, 100);
+  assert.equal(snapshot.summary.averageSttProcessingMs, 200);
+  assert.equal(snapshot.summary.averageEndpointToResultLatencyMs, 100);
+  assert.equal(snapshot.summary.averageSpeechToResultLatencyMs, 400);
+  assert.equal(records.at(-1)?.kind, 'session_summary');
+  assert.equal(records[0]?.preset, 'mild');
+});
+
+test('Voice Lab recorder stores Mode D thresholds and barge-in summary metrics', () => {
+  const recorder = new VoiceLabRecorder({
+    enabled: true,
+    mode: 'exhibition-mix',
+    preset: 'aggressive',
+    sessionId: 'vl-mode-d-session',
+  });
+  recorder.start();
+  recorder.setTtsPlaying(true, 1_000);
+  recorder.handleDiagnostic({
+    type: 'audio_level',
+    at: 1_000,
+    audioLevel: 0.01,
+    vadScore: 0.01,
+    vadSpeech: false,
+    sentToStt: false,
+    noiseFloor: 0.006,
+    effectiveThreshold: 0.02,
+    vadThreshold: 0.02,
+  });
+  recorder.handleVoiceEvent({
+    type: 'speech_started',
+    segmentId: 'mode-d-segment',
+    at: 1_200,
+  });
+  recorder.handleDiagnostic({
+    type: 'audio_level',
+    at: 1_300,
+    audioLevel: 0.08,
+    vadScore: 0.08,
+    vadSpeech: true,
+    sentToStt: true,
+    noiseFloor: 0.006,
+    effectiveThreshold: 0.02,
+    vadThreshold: 0.02,
+  });
+  recorder.handleDiagnostic({
+    type: 'stt_started',
+    segmentId: 'mode-d-segment',
+    at: 1_400,
+  });
+  recorder.handleVoiceEvent({
+    type: 'speech_ended',
+    segmentId: 'mode-d-segment',
+    at: 1_500,
+  });
+  recorder.handleDiagnostic({
+    type: 'stt_observed',
+    segmentId: 'mode-d-segment',
+    at: 1_600,
+    rawText: 'こんにちは',
+    acceptedText: 'こんにちは',
+  });
+  recorder.handleVoiceEvent({
+    type: 'utterance_finalized',
+    segmentId: 'mode-d-segment',
+    text: 'こんにちは',
+    at: 1_600,
+  });
+  recorder.handleDiagnostic({
+    type: 'vad_rejected',
+    at: 1_800,
+    candidateDurationMs: 400,
+    maxScore: 0.012,
+    reason: 'below-threshold',
+    noiseFloor: 0.006,
+    effectiveThreshold: 0.02,
+    vadThreshold: 0.02,
+  });
+  recorder.handleDiagnostic({
+    type: 'barge_in',
+    at: 1_900,
+    action: 'duck',
+    state: 'ducked',
+    ttsPlaying: true,
+  });
+  recorder.handleDiagnostic({
+    type: 'barge_in',
+    at: 2_000,
+    action: 'interrupt',
+    state: 'confirmed',
+    ttsPlaying: true,
+    reason: 'accepted-transcript',
+  });
+  recorder.handleDiagnostic({
+    type: 'barge_in',
+    at: 2_100,
+    action: 'restore',
+    state: 'restored',
+    ttsPlaying: true,
+    reason: 'timeout',
+  });
+  recorder.setTtsPlaying(false, 2_500);
+  recorder.finish();
+
+  const snapshot = recorder.getSnapshot();
+  const utterance = snapshot.records.find((record) => record.kind === 'utterance');
+  assert.equal(utterance?.kind, 'utterance');
+  if (utterance?.kind !== 'utterance') return;
+  assert.equal(utterance.maxVadScore, 0.08);
+  assert.equal(utterance.vadThreshold, 0.02);
+  assert.equal(utterance.effectiveThreshold, 0.02);
+  assert.equal(utterance.noiseFloor, 0.006);
+  assert.equal(snapshot.summary.candidateCount, 2);
+  assert.equal(snapshot.summary.byMode['exhibition-mix'].candidateCount, 2);
+  assert.equal(snapshot.summary.ttsActiveDurationMs, 1_500);
+  assert.equal(snapshot.summary.ttsCandidateCount, 2);
+  assert.equal(snapshot.summary.ttsAcceptedCount, 1);
+  assert.equal(snapshot.summary.ttsVadRejectCount, 1);
+  assert.equal(snapshot.summary.ttsCandidatesPerMinute, 80);
+  assert.equal(snapshot.summary.bargeInTriggeredCount, 1);
+  assert.equal(snapshot.summary.bargeInConfirmedCount, 1);
+  assert.equal(snapshot.summary.bargeInRestoredCount, 1);
+  assert.equal(snapshot.summary.bargeInTimeoutCount, 1);
+  assert.equal(
+    snapshot.records.find((record) => record.kind === 'utterance')?.preset,
+    'aggressive',
+  );
+});
+
+test('Voice Lab recorder measures TTS candidates separately from normal overlap', () => {
+  const recorder = new VoiceLabRecorder({
+    enabled: true,
+    mode: 'processed-vad',
+    preset: 'mild',
+    sessionId: 'vl-tts-candidate-session',
+  });
+  recorder.start();
+  recorder.handleVoiceEvent({
+    type: 'speech_started',
+    segmentId: 'normal-overlap-segment',
+    at: 500,
+  });
+  recorder.setTtsPlaying(true, 1_000);
+  recorder.handleVoiceEvent({
+    type: 'speech_ended',
+    segmentId: 'normal-overlap-segment',
+    at: 1_300,
+  });
+  recorder.handleVoiceEvent({
+    type: 'utterance_finalized',
+    segmentId: 'normal-overlap-segment',
+    text: '環境音',
+    at: 1_400,
+  });
+  recorder.handleVoiceEvent({
+    type: 'speech_started',
+    segmentId: 'tts-segment',
+    at: 1_500,
+  });
+  recorder.handleVoiceEvent({
+    type: 'speech_ended',
+    segmentId: 'tts-segment',
+    at: 1_700,
+  });
+  recorder.handleVoiceEvent({
+    type: 'utterance_finalized',
+    segmentId: 'tts-segment',
+    text: '',
+    at: 1_800,
+  });
+  recorder.handleDiagnostic({
+    type: 'vad_rejected',
+    at: 1_900,
+    candidateDurationMs: 400,
+    maxScore: 0.01,
+    reason: 'below-threshold',
+    noiseFloor: 0.005,
+    effectiveThreshold: 0.02,
+    vadThreshold: 0.02,
+  });
+  recorder.setTtsPlaying(false, 2_000);
+  recorder.finish();
+
+  const { summary } = recorder.getSnapshot();
+  assert.equal(summary.ttsActiveDurationMs, 1_000);
+  assert.equal(summary.ttsCandidateCount, 2);
+  assert.equal(summary.ttsAcceptedCount, 1);
+  assert.equal(summary.ttsVadRejectCount, 1);
+  assert.equal(summary.ttsNoiseLikeSttCount, 1);
+  assert.equal(summary.ttsCandidatesPerMinute, 120);
+  assert.equal(summary.ttsOverlapCount, 2);
+  assert.equal(summary.utteranceCount, 2);
+  assert.equal(
+    summary.byMode['processed-vad'].ttsCandidatesPerMinute,
+    120,
+  );
+});
+
+test('per-minute rate is unavailable without an active TTS duration', () => {
+  assert.equal(calculatePerMinuteRate(3, 0), null);
+  assert.equal(calculatePerMinuteRate(3, 1_000), 180);
+});
+
+test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifiers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vayria-voice-lab-'));
+  try {
+    const record = {
+      kind: 'session_started' as const,
+      timestamp: '2026-08-22T00:00:00.000Z',
+      sessionId: 'vl-store-session',
+      mode: 'baseline' as const,
+      preset: 'mild' as const,
+      audioEndpointMs: 600 as const,
+    };
+    assert.deepEqual(readVoiceLabRecord({ record }), record);
+    await appendVoiceLabRecord(root, record);
+    assert.deepEqual(await readVoiceLabRecords(root, record.sessionId), [record]);
+    const runtimeRecord = {
+      kind: 'stt_runtime' as const,
+      timestamp: '2026-08-22T00:00:00.000Z',
+      sessionId: 'vl-store-session',
+      mode: 'processed' as const,
+      preset: 'mild' as const,
+      audioEndpointMs: 600 as const,
+      runtime: {
+        requestedModel: 'small' as const,
+        requestedDevice: 'auto' as const,
+        requestedComputeType: 'auto' as const,
+        effectiveModel: 'small',
+        effectiveDevice: 'cuda',
+        effectiveComputeType: 'float16',
+        fallbackUsed: false,
+        fallbackReason: null,
+        modelLoadMs: 842,
+      },
+    };
+    assert.deepEqual(readVoiceLabRecord(runtimeRecord), runtimeRecord);
+    assert.throws(
+      () => readVoiceLabRecord({ ...record, sessionId: '../escape' }),
+      /session ID is invalid/,
+    );
+    assert.throws(
+      () => readVoiceLabRecord({ ...record, deviceId: 'must-not-save' }),
+      /record is invalid/,
+    );
+    assert.throws(
+      () => readVoiceLabRecord({ ...record, preset: 'invalid' }),
+      /record is invalid/,
+    );
+    assert.throws(
+      () =>
+        readVoiceLabRecord({
+          kind: 'session_summary',
+          timestamp: '2026-08-22T00:00:00.000Z',
+          sessionId: 'vl-store-session',
+          preset: 'mild',
+          summary: {
+            utteranceCount: 0,
+            sttSuccessCount: 0,
+            vadRejectCount: 0,
+            noiseLikeSttCount: 0,
+            knownHallucinationCount: 0,
+            ttsOverlapCount: 0,
+            averageSttLatencyMs: null,
+            byMode: {
+              baseline: {},
+              processed: {},
+              'processed-vad': {},
+              'exhibition-mix': {},
+            },
+            padding: 'x'.repeat(20_000),
+          },
+        }),
+      /too large/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

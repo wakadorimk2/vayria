@@ -11,9 +11,14 @@ from typing import Any
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from .transcriber import FasterWhisperTranscriber, Transcriber
+from .transcriber import (
+    FasterWhisperTranscriber,
+    Transcriber,
+    TranscriptionResult,
+)
 from .vad import (
     CHANNELS,
+    FRAME_DURATION_MS,
     PcmUtteranceDetector,
     SAMPLE_RATE,
     WebRtcSpeechClassifier,
@@ -22,6 +27,8 @@ from .vad import (
 MAX_MESSAGE_BYTES = 64 * 1024
 SUPPORTED_FORMAT = "pcm_s16le"
 SUPPORTED_CHUNK_MS = 200
+END_SILENCE_MS_VALUES = (400, 600)
+DEFAULT_END_SILENCE_MS = 600
 
 
 class WireProtocolError(Exception):
@@ -35,6 +42,8 @@ class StreamConfig:
     channels: int
     audio_format: str
     chunk_ms: int
+    diagnostics: bool = False
+    end_silence_ms: int = DEFAULT_END_SILENCE_MS
 
 
 def _timestamp() -> int:
@@ -44,14 +53,19 @@ def _timestamp() -> int:
 def _parse_start(payload: Any) -> StreamConfig:
     if not isinstance(payload, dict) or payload.get("type") != "start":
         raise WireProtocolError("invalid-start-message")
-    expected = {"type", "language", "sampleRate", "channels", "format", "chunkMs"}
-    if set(payload) != expected:
+    required = {"type", "language", "sampleRate", "channels", "format", "chunkMs"}
+    if (
+        set(payload) - required - {"diagnostics", "endSilenceMs"}
+        or not required.issubset(payload)
+    ):
         raise WireProtocolError("invalid-start-message")
     language = payload["language"]
     sample_rate = payload["sampleRate"]
     channels = payload["channels"]
     audio_format = payload["format"]
     chunk_ms = payload["chunkMs"]
+    end_silence_ms = payload.get("endSilenceMs", DEFAULT_END_SILENCE_MS)
+    diagnostics = payload.get("diagnostics", False)
     if (
         not isinstance(language, str)
         or not language
@@ -62,10 +76,22 @@ def _parse_start(payload: Any) -> StreamConfig:
         or audio_format != SUPPORTED_FORMAT
         or not isinstance(chunk_ms, int)
         or chunk_ms != SUPPORTED_CHUNK_MS
+        or isinstance(end_silence_ms, bool)
+        or not isinstance(end_silence_ms, int)
+        or end_silence_ms not in END_SILENCE_MS_VALUES
+        or not isinstance(diagnostics, bool)
     ):
         raise WireProtocolError("unsupported-audio-format")
     normalized_language = language.split("-", 1)[0].lower()
-    return StreamConfig(normalized_language, sample_rate, channels, audio_format, chunk_ms)
+    return StreamConfig(
+        language=normalized_language,
+        sample_rate=sample_rate,
+        channels=channels,
+        audio_format=audio_format,
+        chunk_ms=chunk_ms,
+        diagnostics=diagnostics,
+        end_silence_ms=end_silence_ms,
+    )
 
 
 async def _send_event(connection: ServerConnection, payload: dict[str, Any]) -> None:
@@ -77,22 +103,57 @@ async def _transcription_worker(
     queue: asyncio.Queue[tuple[str, bytes]],
     transcriber: Transcriber,
     language: str,
+    diagnostics: bool,
 ) -> None:
     while True:
         segment_id, pcm = await queue.get()
         try:
-            text = await asyncio.to_thread(
-                transcriber.transcribe_pcm16,
-                pcm,
-                sample_rate=SAMPLE_RATE,
-                language=language,
+            if diagnostics:
+                await _send_event(
+                    connection,
+                    {
+                        "type": "stt_started",
+                        "segmentId": segment_id,
+                        "at": _timestamp(),
+                    },
+                )
+            diagnostic_transcriber = getattr(
+                transcriber,
+                "transcribe_pcm16_with_diagnostics",
+                None,
             )
+            if callable(diagnostic_transcriber):
+                result = await asyncio.to_thread(
+                    diagnostic_transcriber,
+                    pcm,
+                    sample_rate=SAMPLE_RATE,
+                    language=language,
+                )
+            else:
+                text = await asyncio.to_thread(
+                    transcriber.transcribe_pcm16,
+                    pcm,
+                    sample_rate=SAMPLE_RATE,
+                    language=language,
+                )
+                result = TranscriptionResult(text, text, None)
+            if diagnostics:
+                observed = {
+                    "type": "stt_observed",
+                    "segmentId": segment_id,
+                    "rawText": result.raw_text,
+                    "acceptedText": result.text,
+                    "at": _timestamp(),
+                }
+                if result.filter_reason is not None:
+                    observed["filterReason"] = result.filter_reason
+                await _send_event(connection, observed)
             await _send_event(
                 connection,
                 {
                     "type": "utterance_finalized",
                     "segmentId": segment_id,
-                    "text": text,
+                    "text": result.text,
                     "at": _timestamp(),
                 },
             )
@@ -130,11 +191,31 @@ async def handle_connection(
         except json.JSONDecodeError as error:
             raise WireProtocolError("invalid-start-message") from error
         config = _parse_start(start_payload)
-        detector = PcmUtteranceDetector(classifier=WebRtcSpeechClassifier())
+        detector = PcmUtteranceDetector(
+            classifier=WebRtcSpeechClassifier(),
+            end_silence_frame_count=config.end_silence_ms // FRAME_DURATION_MS,
+        )
         queue = asyncio.Queue()
         worker = asyncio.create_task(
-            _transcription_worker(connection, queue, transcriber, config.language)
+            _transcription_worker(
+                connection,
+                queue,
+                transcriber,
+                config.language,
+                config.diagnostics,
+            )
         )
+        if config.diagnostics:
+            runtime_info = getattr(transcriber, "runtime_info", None)
+            if callable(runtime_info):
+                await _send_event(
+                    connection,
+                    {
+                        "type": "stt_runtime",
+                        "at": _timestamp(),
+                        "runtime": runtime_info(),
+                    },
+                )
         await _send_event(connection, {"type": "listening_started", "at": _timestamp()})
 
         async for message in connection:
@@ -148,13 +229,23 @@ async def handle_connection(
                 if control != {"type": "stop"}:
                     raise WireProtocolError("invalid-control-message")
                 for event in detector.flush():
-                    await _handle_detector_event(connection, queue, event)
+                    await _handle_detector_event(
+                        connection,
+                        queue,
+                        event,
+                        diagnostics=config.diagnostics,
+                    )
                 break
 
             if not isinstance(message, bytes) or len(message) > MAX_MESSAGE_BYTES:
                 raise WireProtocolError("invalid-pcm-frame")
             for event in detector.feed(message):
-                await _handle_detector_event(connection, queue, event)
+                await _handle_detector_event(
+                    connection,
+                    queue,
+                    event,
+                    diagnostics=config.diagnostics,
+                )
 
         if queue is not None:
             await queue.join()
@@ -194,6 +285,8 @@ async def _handle_detector_event(
     connection: ServerConnection,
     queue: asyncio.Queue[tuple[str, bytes]],
     event,
+    *,
+    diagnostics: bool = False,
 ) -> None:
     if event.type == "speech_started":
         await _send_event(
@@ -208,6 +301,15 @@ async def _handle_detector_event(
         )
         return
     if event.type == "utterance_finalized" and event.audio is not None:
+        if diagnostics:
+            await _send_event(
+                connection,
+                {
+                    "type": "stt_queued",
+                    "segmentId": event.segment_id,
+                    "at": _timestamp(),
+                },
+            )
         await queue.put((event.segment_id, event.audio))
 
 
@@ -215,17 +317,53 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the local Vayria PCM STT service.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
-    parser.add_argument("--model", default="small")
+    parser.add_argument("--model", choices=("tiny", "base", "small"), default="small")
     parser.add_argument("--language", default="ja")
-    parser.add_argument("--compute-type", default="int8")
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cuda", "cpu"),
+        default="auto",
+    )
+    parser.add_argument(
+        "--compute-type",
+        choices=("auto", "float16", "int8"),
+        default="auto",
+    )
+    parser.add_argument(
+        "--fallback-model",
+        choices=("tiny", "base", "small"),
+        default="tiny",
+    )
+    parser.add_argument(
+        "--fallback-device",
+        choices=("cuda", "cpu"),
+        default="cpu",
+    )
+    parser.add_argument(
+        "--fallback-compute-type",
+        choices=("auto", "float16", "int8"),
+        default="int8",
+    )
     return parser.parse_args()
 
 
 async def run(args: argparse.Namespace) -> None:
     transcriber = FasterWhisperTranscriber(
         model_name=args.model,
-        device="cpu",
+        device=args.device,
         compute_type=args.compute_type,
+        fallback_model=args.fallback_model,
+        fallback_device=args.fallback_device,
+        fallback_compute_type=args.fallback_compute_type,
+    )
+    runtime = await asyncio.to_thread(transcriber.prepare)
+    await asyncio.to_thread(transcriber.warm_up, args.language)
+    print(
+        json.dumps(
+            {"type": "stt_runtime", "runtime": runtime},
+            ensure_ascii=False,
+        ),
+        flush=True,
     )
     async with serve(
         lambda connection: handle_connection(connection, transcriber=transcriber),

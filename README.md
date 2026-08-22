@@ -59,8 +59,36 @@ PythonサービスはWebRTC VADとfaster-whisperを実行します。
 展示モードではHTTPSとPython STTサービスが必要です。
 音声入力を利用できない場合は、テキスト入力を使用してください。
 スピーカー使用時はVayriaの音声を認識する可能性があります。初回確認ではヘッドセットを推奨します。
-音声データは録音ファイルへ保存しません。音声内容をログへ出力しません。
-認識された最終文字列だけをchat APIへ渡します。
+音声データは録音ファイルへ保存しません。
+通常経路では音声内容をログへ出力しません。
+Audio Labを有効にした開発調査では、raw transcriptを調査ログへ保存します。
+会話には認識された最終文字列だけを渡します。
+
+音声入力の比較調査は、開発サーバーを起動してURLへ`?audioLab=1`を追加します。
+Audio LabのMode A/B/C/D、固定ケース、JSONLログは
+[`docs/evaluation/voice-audio-lab.md`](docs/evaluation/voice-audio-lab.md)を参照してください。
+`?audioLab=1`を付けたAudio Labは、初期ModeにProcessedを選びます。
+通常の`exhibition`起動も、Mode BのProcessedを使います。
+通常の`local`と`public`起動は、Baselineを使います。
+
+展示用Presetの既定値は`mild`です。
+起動時は`VITE_AUDIO_PRESET=off|mild|aggressive`で変更できます。
+URLの`?audioPreset=off`、`?audioPreset=mild`、`?audioPreset=aggressive`は、起動時設定より優先します。
+PresetをURLで変更した場合は、ページを再読み込みしてください。
+通常展示にはPreset操作UIを表示しません。
+Audio LabのDebug panelでは、現在のPresetを読み取り専用で表示します。
+Presetの比較手順は[`docs/evaluation/voice-audio-lab.md`](docs/evaluation/voice-audio-lab.md)を参照してください。
+
+Mode B/Cの無音終了は`600ms`が既定値です。
+Audio Labでは`?audioEndpoint=400`または`?audioEndpoint=600`で比較できます。
+URLの変更後はページを再読み込みしてください。
+`VITE_AUDIO_ENDPOINT_MS=400|600`でも起動時の既定値を変更できます。
+優先順位は`URL query > VITE_AUDIO_ENDPOINT_MS > 600ms`です。
+Mode DはAudio Labでだけ選べる実験Modeです。
+
+展示用STTは`small / CUDA / float16`を優先します。
+ロードに失敗した場合は`tiny / CPU / int8`へfallbackします。
+実際のmodel、device、compute type、fallback理由、model load時間はAudio LabとJSONLへ記録します。
 
 Sessionはページ内だけの一時状態です。
 履歴、話題、直前の自律返答、演者状態、カードのターン状態を含みます。
@@ -324,6 +352,9 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    証明書と秘密鍵はworktreeへコピーしません。
 
    ```dotenv
+   VITE_AUDIO_PRESET=mild
+   VITE_AUDIO_ENDPOINT_MS=600
+   VITE_VOICE_INPUT_TRANSPORT=remote
    VAYRIA_HTTPS=true
    VAYRIA_HTTPS_CERT_FILE=C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-cert.pem
    VAYRIA_HTTPS_KEY_FILE=C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-key.pem

@@ -1,4 +1,10 @@
 import { readPlaycheckRunId } from './playcheck';
+import {
+  resolveAudioEndpointMs,
+  resolveExhibitionAudioPreset,
+  type AudioEndpointMs,
+  type ExhibitionAudioPreset,
+} from './voice/audioLab.js';
 
 const APP_MODES = ['local', 'exhibition', 'public'] as const;
 const VOICE_INPUT_TRANSPORTS = ['web-speech', 'remote'] as const;
@@ -58,8 +64,35 @@ function readVoiceInputTransport(
 }
 
 const mode = readAppMode(import.meta.env.VITE_APP_MODE);
+function readAudioLabEnabled(search: string): boolean {
+  if (!import.meta.env.DEV) return false;
+  return new URLSearchParams(search).get('audioLab') === '1';
+}
+
+function readAudioPreset(search: string): ExhibitionAudioPreset {
+  const queryValue = new URLSearchParams(search).get('audioPreset');
+  return resolveExhibitionAudioPreset(
+    queryValue,
+    import.meta.env.VITE_AUDIO_PRESET,
+  );
+}
+
+function readAudioEndpoint(search: string): AudioEndpointMs {
+  const queryValue = new URLSearchParams(search).get('audioEndpoint');
+  return resolveAudioEndpointMs(
+    queryValue,
+    import.meta.env.VITE_AUDIO_ENDPOINT_MS,
+  );
+}
+
+const browserSearch =
+  typeof window === 'undefined' ? '' : window.location.search;
+
 export const runtimeConfig = Object.freeze({
   apiBaseUrl: readApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
+  audioLabEnabled: readAudioLabEnabled(browserSearch),
+  audioPreset: readAudioPreset(browserSearch),
+  audioEndpointMs: readAudioEndpoint(browserSearch),
   mode,
   voiceTransport: readVoiceInputTransport(
     import.meta.env.VITE_VOICE_INPUT_TRANSPORT,

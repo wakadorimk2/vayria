@@ -38,6 +38,21 @@ import {
   selectListeningBackchannelIndex,
 } from './voice/backchannelPolicy';
 import { useVoiceInput } from './voice/useVoiceInput';
+import { AudioLabPanel } from './voice/AudioLabPanel';
+import { reduceBargeIn, type BargeInEvent } from './voice/bargeIn';
+import {
+  BARGE_IN_TIMEOUT_MS,
+  clampVadThreshold,
+  DEFAULT_VAD_THRESHOLD,
+  getExhibitionAudioPresetConfig,
+  isAudioEndpointMs,
+  isAudioLabMode,
+  resolveInitialAudioLabMode,
+  type AudioEndpointMs,
+  type AudioLabMode,
+  type BargeInState,
+} from './voice/audioLab.js';
+import { useVoiceLab } from './voice/useVoiceLab';
 import {
   LISTENING_THINKING_MOTION_ASSET_ID,
   type VoiceBackchannelCue,
@@ -219,10 +234,13 @@ export default function App() {
   const sessionGenerationRef = useRef(0);
   const {
     isAudioUnlocked,
+    isReactionPlaying,
+    isSpeaking,
     mouthOpen,
     play,
     playReaction,
     prepare,
+    setDucked,
     stop,
     stopReaction,
   } = useAudioLipSync(volume);
@@ -240,9 +258,45 @@ export default function App() {
   >({ un: null, uun: null });
   const backchannelLoadingRef = useRef<Promise<void> | null>(null);
   const backchannelTimerRef = useRef<number | null>(null);
+  const bargeInTimerRef = useRef<number | null>(null);
+  const bargeInStateRef = useRef<BargeInState>('idle');
+  const [bargeInState, setBargeInState] = useState<BargeInState>('idle');
+  const [bargeInTimeoutToken, setBargeInTimeoutToken] = useState(0);
+  const [audioLabMode, setAudioLabMode] = useState<AudioLabMode>(
+    () =>
+      resolveInitialAudioLabMode(
+        runtimeConfig.audioLabEnabled,
+        isExhibitionMode,
+      ),
+  );
+  const [vadThreshold, setVadThreshold] = useState(
+    () =>
+      getExhibitionAudioPresetConfig(runtimeConfig.audioPreset)
+        .defaultVadThreshold ?? DEFAULT_VAD_THRESHOLD,
+  );
+  const [audioEndpointMs, setAudioEndpointMs] = useState<AudioEndpointMs>(
+    runtimeConfig.audioEndpointMs,
+  );
+  const ttsPlaying = isSpeaking || isReactionPlaying;
+  const voiceLab = useVoiceLab({
+    enabled: runtimeConfig.audioLabEnabled,
+    mode: audioLabMode,
+    preset: runtimeConfig.audioPreset,
+    audioEndpointMs,
+    ttsPlaying,
+  });
   const voiceInput = useVoiceInput({
+    audioMode: audioLabMode,
+    audioPreset: runtimeConfig.audioPreset,
+    audioEndpointMs,
     language: 'ja-JP',
-    onEvent: (event) => voiceEventHandlerRef.current?.(event),
+    ttsPlaying,
+    onDiagnostic: voiceLab.handleDiagnostic,
+    onEvent: (event) => {
+      voiceLab.handleVoiceEvent(event);
+      voiceEventHandlerRef.current?.(event);
+    },
+    vadThreshold,
   });
   const {
     errorCode: voiceInputErrorCode,
@@ -252,6 +306,26 @@ export default function App() {
     start: startVoiceInput,
     stop: stopVoiceInput,
   } = voiceInput;
+
+  const handleAudioLabModeChange = useCallback(
+    (nextMode: AudioLabMode) => {
+      if (isVoiceInputEnabled || !isAudioLabMode(nextMode)) return;
+      setAudioLabMode(nextMode);
+    },
+    [isVoiceInputEnabled],
+  );
+
+  const handleVadThresholdChange = useCallback((nextThreshold: number) => {
+    setVadThreshold(clampVadThreshold(nextThreshold));
+  }, []);
+
+  const handleAudioEndpointChange = useCallback(
+    (nextEndpoint: number) => {
+      if (isVoiceInputEnabled || !isAudioEndpointMs(nextEndpoint)) return;
+      setAudioEndpointMs(nextEndpoint);
+    },
+    [isVoiceInputEnabled],
+  );
   const playbackCoordinator = useMemo(
     () =>
       new PerformancePlaybackCoordinator({
@@ -483,6 +557,90 @@ export default function App() {
     onPerformanceResult: handlePerformanceResult,
     onInteractionAction: handleInteractionAction,
   });
+
+  const clearBargeInTimer = useCallback(() => {
+    if (bargeInTimerRef.current === null) return;
+    window.clearTimeout(bargeInTimerRef.current);
+    bargeInTimerRef.current = null;
+  }, []);
+
+  const dispatchBargeIn = useCallback(
+    (event: BargeInEvent) => {
+      const transition = reduceBargeIn(bargeInStateRef.current, event);
+      bargeInStateRef.current = transition.state;
+      setBargeInState(transition.state);
+
+      if (transition.effects.includes('duck')) {
+        clearBargeInTimer();
+        setDucked(true);
+        voiceLab.handleDiagnostic({
+          type: 'barge_in',
+          at: Date.now(),
+          action: 'duck',
+          state: transition.state,
+          ttsPlaying,
+          reason: transition.reason,
+        });
+        bargeInTimerRef.current = window.setTimeout(() => {
+          bargeInTimerRef.current = null;
+          setBargeInTimeoutToken((token) => token + 1);
+        }, BARGE_IN_TIMEOUT_MS);
+      }
+
+      if (transition.effects.includes('interrupt')) {
+        voiceLab.handleDiagnostic({
+          type: 'barge_in',
+          at: Date.now(),
+          action: 'interrupt',
+          state: transition.state,
+          ttsPlaying,
+          reason: transition.reason,
+        });
+      }
+
+      if (transition.effects.includes('restore')) {
+        clearBargeInTimer();
+        setDucked(false);
+        voiceLab.handleDiagnostic({
+          type: 'barge_in',
+          at: Date.now(),
+          action: 'restore',
+          state: transition.state,
+          ttsPlaying,
+          reason: transition.reason,
+        });
+      }
+
+      return transition;
+    },
+    [clearBargeInTimer, setDucked, ttsPlaying, voiceLab],
+  );
+
+  useEffect(() => {
+    if (bargeInTimeoutToken === 0) return;
+    dispatchBargeIn({ type: 'timeout' });
+  }, [bargeInTimeoutToken, dispatchBargeIn]);
+
+  useEffect(() => {
+    if (audioLabMode === 'exhibition-mix' && ttsPlaying) return;
+    if (bargeInStateRef.current !== 'ducked') return;
+    dispatchBargeIn({ type: 'tts_stopped' });
+  }, [audioLabMode, dispatchBargeIn, ttsPlaying]);
+
+  useEffect(() => {
+    if (audioLabMode === 'exhibition-mix') return;
+    clearBargeInTimer();
+    if (bargeInStateRef.current === 'idle') return;
+    dispatchBargeIn({ type: 'reset' });
+  }, [audioLabMode, clearBargeInTimer, dispatchBargeIn]);
+
+  useEffect(() => {
+    return () => {
+      clearBargeInTimer();
+      setDucked(false);
+    };
+  }, [clearBargeInTimer, setDucked]);
+
   const displayEmotion = activeEmotionCue?.emotion ?? performer.state.emotion.value;
   const isPerformerBusy = isBusy || activePlan !== null;
   const exhibitionPresentationState: ExhibitionPresentationState = isPerformerBusy
@@ -512,6 +670,12 @@ export default function App() {
     sessionGenerationRef.current = nextGeneration;
 
     stopVoiceInput();
+    clearBargeInTimer();
+    if (bargeInStateRef.current !== 'idle') {
+      dispatchBargeIn({ type: 'reset' });
+    } else {
+      setDucked(false);
+    }
     stopReaction();
     stageRef.current?.stopReactionMotion();
     activeVoiceSegmentRef.current = null;
@@ -546,9 +710,12 @@ export default function App() {
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
   }, [
+    clearBargeInTimer,
+    dispatchBargeIn,
     resetConversation,
     resetRuntime,
     resetTurn,
+    setDucked,
     stopReaction,
     stopVoiceInput,
   ]);
@@ -674,6 +841,14 @@ export default function App() {
           stopReaction();
           stageRef.current?.stopReactionMotion();
           setVoiceValidationError('');
+          const isBargeInCandidate =
+            audioLabMode === 'exhibition-mix' && ttsPlaying;
+          if (audioLabMode === 'exhibition-mix') {
+            dispatchBargeIn({
+              type: 'speech_started',
+              ttsPlaying,
+            });
+          }
           voiceReactionIdRef.current += 1;
           setListeningReaction({
             id: voiceReactionIdRef.current,
@@ -681,6 +856,7 @@ export default function App() {
             target: 'viewer',
           });
           clearBackchannelTimer();
+          if (isBargeInCandidate) return;
           const segmentId = event.segmentId;
           const delayMs = scheduleListeningBackchannel();
           if (delayMs === null) return;
@@ -715,6 +891,15 @@ export default function App() {
           activeVoiceSegmentRef.current = null;
           setListeningReaction(undefined);
           const message = event.text.trim();
+          const acceptedForBargeIn =
+            message.length > 0 && message.length <= MAX_VOICE_TEXT_LENGTH;
+          const bargeInTransition =
+            audioLabMode === 'exhibition-mix'
+              ? dispatchBargeIn({
+                  type: 'transcript_finalized',
+                  accepted: acceptedForBargeIn,
+                })
+              : null;
           if (!message) {
             setVoiceValidationError('');
             return;
@@ -729,7 +914,14 @@ export default function App() {
           setVoiceValidationError('');
           cancelNonSpeechPlan();
           cancelActiveCardReactionPlan();
-          interruptCurrentTurn('voice_interrupt');
+          interruptCurrentTurn(
+            bargeInTransition?.effects.includes('interrupt')
+              ? 'voice_barge_in'
+              : 'voice_interrupt',
+          );
+          if (bargeInTransition?.effects.includes('interrupt')) {
+            dispatchBargeIn({ type: 'reset' });
+          }
           const trigger: PerformerTrigger = {
             kind: 'viewer_message',
             text: message,
@@ -748,6 +940,14 @@ export default function App() {
         case 'recognition_stopped':
         case 'recognition_failed':
           clearBackchannelTimer();
+          if (audioLabMode === 'exhibition-mix') {
+            dispatchBargeIn({
+              type:
+                event.type === 'recognition_stopped'
+                  ? 'recognition_stopped'
+                  : 'recognition_failed',
+            });
+          }
           stopReaction();
           stageRef.current?.stopReactionMotion();
           activeVoiceSegmentRef.current = null;
@@ -764,14 +964,17 @@ export default function App() {
       cancelNonSpeechPlan,
       clearBackchannelTimer,
       createPlanForTrigger,
+      dispatchBargeIn,
       handleReplyAccepted,
       interruptCurrentTurn,
       isBusy,
       isMuted,
+      audioLabMode,
       playReaction,
       prepare,
       readCardContext,
       sendVoice,
+      ttsPlaying,
       stopReaction,
     ],
   );
@@ -1225,6 +1428,33 @@ export default function App() {
           </button>
         </form>
       </section>
+
+      {runtimeConfig.audioLabEnabled && (
+        <AudioLabPanel
+          audioLevel={voiceInput.audioLevel}
+          audioEndpointMs={audioEndpointMs}
+          bargeInState={bargeInState}
+          effectiveThreshold={voiceInput.effectiveThreshold}
+          isMicActive={isVoiceInputEnabled}
+          isVoiceInputSupported={isVoiceInputSupported}
+          isSttProcessing={voiceInput.isSttProcessing}
+          isVadSpeech={voiceInput.isVadSpeech}
+          mediaSettings={voiceInput.mediaSettings}
+          sttRuntime={voiceInput.sttRuntime}
+          mode={audioLabMode}
+          preset={runtimeConfig.audioPreset}
+          onExport={voiceLab.downloadJsonl}
+          onAudioEndpointChange={handleAudioEndpointChange}
+          onModeChange={handleAudioLabModeChange}
+          onVoiceToggle={handleVoiceToggle}
+          onVadThresholdChange={handleVadThresholdChange}
+          snapshot={voiceLab.snapshot}
+          ttsPlaying={ttsPlaying}
+          vadScore={voiceInput.vadScore}
+          vadThreshold={vadThreshold}
+          noiseFloor={voiceInput.noiseFloor}
+        />
+      )}
     </main>
   );
 }

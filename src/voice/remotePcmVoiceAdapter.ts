@@ -9,6 +9,27 @@ import {
   PCM_TARGET_SAMPLE_RATE,
 } from './pcm16.js';
 import type { VoiceInputEvent } from './voiceInput.js';
+import {
+  AUDIO_PROCESSING_CONSTRAINTS,
+  DEFAULT_AUDIO_ENDPOINT_MS,
+  DEFAULT_AUDIO_INPUT_MODE,
+  DEFAULT_EXHIBITION_AUDIO_PRESET,
+  DEFAULT_VAD_THRESHOLD,
+  getExhibitionAudioPresetConfig,
+  isSttRuntimeInfo,
+  sanitizeMediaTrackSettings,
+  type AudioLabMediaSettings,
+  type AudioLabMode,
+  type AudioEndpointMs,
+  type ExhibitionAudioPreset,
+  type VoiceInputDiagnostic,
+} from './audioLab.js';
+import { AdaptiveRmsVad } from './adaptiveRmsVad.js';
+import {
+  getVadHangoverChunkCount,
+  RmsVad,
+  calculatePcm16Rms,
+} from './rmsVad.js';
 
 const SOCKET_OPEN_TIMEOUT_MS = 8_000;
 const STOP_GRACE_PERIOD_MS = 250;
@@ -16,6 +37,11 @@ const MAX_SOCKET_BUFFERED_BYTES = 512 * 1024;
 
 interface RemotePcmVoiceAdapterOptions extends VoiceInputAdapterOptions {
   webSocketUrl?: string;
+  audioMode?: AudioLabMode;
+  audioPreset?: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
+  vadThreshold?: number;
+  diagnostics?: boolean;
 }
 
 interface WindowWithWebkitAudioContext extends Window {
@@ -30,6 +56,8 @@ interface VoiceStartMessage {
   channels: number;
   format: 'pcm_s16le';
   chunkMs: number;
+  endSilenceMs?: AudioEndpointMs;
+  diagnostics?: boolean;
 }
 
 function now(): number {
@@ -49,6 +77,62 @@ function readWebSocketUrl(override?: string): string | null {
     url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   }
   return url.toString();
+}
+
+function readAudioConstraints(
+  audioMode: AudioLabMode,
+  audioPreset: ExhibitionAudioPreset,
+): MediaTrackConstraints {
+  if (audioMode === 'exhibition-mix') {
+    return getExhibitionAudioPresetConfig(audioPreset).requestedConstraints;
+  }
+
+  if (audioMode === DEFAULT_AUDIO_INPUT_MODE) {
+    return { echoCancellation: true };
+  }
+
+  return {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  };
+}
+
+function readMediaTrackSettings(
+  stream: MediaStream,
+  requested: MediaTrackConstraints,
+): AudioLabMediaSettings {
+  const track = stream.getAudioTracks()[0];
+  const supportedConstraints =
+    typeof navigator.mediaDevices.getSupportedConstraints === 'function'
+      ? navigator.mediaDevices.getSupportedConstraints()
+      : {};
+  const supported = Object.fromEntries(
+    AUDIO_PROCESSING_CONSTRAINTS.flatMap((name) =>
+      typeof supportedConstraints[name] === 'boolean'
+        ? [[name, supportedConstraints[name]]]
+        : [],
+    ),
+  ) as AudioLabMediaSettings['supported'];
+
+  let applied: AudioLabMediaSettings['applied'] = {};
+  try {
+    applied = sanitizeMediaTrackSettings(track?.getSettings());
+  } catch {
+    applied = {};
+  }
+
+  return {
+    requested: Object.fromEntries(
+      AUDIO_PROCESSING_CONSTRAINTS.flatMap((name) =>
+        typeof requested[name] === 'boolean'
+          ? [[name, requested[name] as boolean]]
+          : [],
+      ),
+    ) as AudioLabMediaSettings['requested'],
+    supported,
+    applied,
+  };
 }
 
 function readSupportErrorCode(): string | null {
@@ -102,6 +186,40 @@ function normalizeVoiceInputEvent(value: unknown): VoiceInputEvent | null {
   return value;
 }
 
+function isVoiceInputDiagnostic(value: unknown): value is VoiceInputDiagnostic {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.type !== 'string' || typeof record.at !== 'number') {
+    return false;
+  }
+  if (record.type === 'stt_runtime') {
+    return isSttRuntimeInfo(record.runtime) && Number.isFinite(record.at);
+  }
+  if (record.type === 'stt_queued' || record.type === 'stt_started') {
+    return (
+      typeof record.segmentId === 'string' && Number.isFinite(record.at)
+    );
+  }
+  if (record.type === 'stt_observed') {
+    return (
+      typeof record.segmentId === 'string' &&
+      typeof record.rawText === 'string' &&
+      typeof record.acceptedText === 'string' &&
+      (record.filterReason === undefined ||
+        typeof record.filterReason === 'string') &&
+      Number.isFinite(record.at)
+    );
+  }
+  return false;
+}
+
+function normalizeVoiceInputDiagnostic(
+  value: unknown,
+): VoiceInputDiagnostic | null {
+  if (!isVoiceInputDiagnostic(value)) return null;
+  return value;
+}
+
 function waitForSocketOpen(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     let timeoutId: number | null = null;
@@ -143,6 +261,29 @@ export function createRemotePcmVoiceAdapter(
 ): VoiceInputAdapter {
   const supportErrorCode = readSupportErrorCode();
   const AudioContextConstructor = readAudioContextConstructor();
+  const audioMode = options.audioMode ?? DEFAULT_AUDIO_INPUT_MODE;
+  const audioPreset = options.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET;
+  const audioEndpointMs = options.audioEndpointMs ?? DEFAULT_AUDIO_ENDPOINT_MS;
+  const presetConfig = getExhibitionAudioPresetConfig(audioPreset);
+  const requestedAudioConstraints = readAudioConstraints(audioMode, audioPreset);
+  const usesSelectableEndpoint =
+    audioMode === 'processed' || audioMode === 'processed-vad';
+  const endpointMs = usesSelectableEndpoint ? audioEndpointMs : 600;
+  const hangoverChunkCount = getVadHangoverChunkCount(endpointMs);
+  const rmsVad =
+    audioMode === 'processed-vad'
+      ? new RmsVad(options.vadThreshold ?? DEFAULT_VAD_THRESHOLD, {
+          hangoverChunkCount,
+        })
+      : null;
+  const adaptiveRmsVad =
+    audioMode === 'exhibition-mix' && presetConfig.browserGateEnabled
+      ? new AdaptiveRmsVad(options.vadThreshold ?? presetConfig.defaultVadThreshold, {
+          noiseFloorMultiplier: presetConfig.noiseFloorMultiplier,
+          hangoverChunkCount: getVadHangoverChunkCount(600),
+        })
+      : null;
+  const activeVad = rmsVad ?? adaptiveRmsVad;
   let disposed = false;
   let enabled = false;
   let mediaStream: MediaStream | null = null;
@@ -155,6 +296,8 @@ export function createRemotePcmVoiceAdapter(
   let stoppedEventSent = false;
 
   const emit = (event: VoiceInputEvent) => options.onEvent(event);
+  const emitDiagnostic = (diagnostic: VoiceInputDiagnostic) =>
+    options.onDiagnostic?.(diagnostic);
 
   const emitStoppedOnce = () => {
     if (stoppedEventSent) return;
@@ -174,6 +317,7 @@ export function createRemotePcmVoiceAdapter(
     zeroGainNode = null;
     mediaStream?.getTracks().forEach((track) => track.stop());
     mediaStream = null;
+    activeVad?.reset();
     const currentContext = audioContext;
     audioContext = null;
     if (currentSocket) {
@@ -234,8 +378,16 @@ export function createRemotePcmVoiceAdapter(
       }
       await audioContext.resume();
       mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true },
+        audio: requestedAudioConstraints,
         video: false,
+      });
+      emitDiagnostic({
+        type: 'media_settings',
+        at: now(),
+        settings: readMediaTrackSettings(
+          mediaStream,
+          requestedAudioConstraints,
+        ),
       });
       await audioContext.audioWorklet.addModule(
         new URL('./pcmCaptureWorklet.js', import.meta.url),
@@ -255,16 +407,23 @@ export function createRemotePcmVoiceAdapter(
           return;
         }
         const voiceEvent = normalizeVoiceInputEvent(parsed);
-        if (!voiceEvent) {
-          fail('invalid-voice-event');
+        if (voiceEvent) {
+          if (voiceEvent.type === 'recognition_stopped') emitStoppedOnce();
+          if (voiceEvent.type === 'recognition_failed') {
+            enabled = false;
+            void closeResources();
+          }
+          emit(voiceEvent);
           return;
         }
-        if (voiceEvent.type === 'recognition_stopped') emitStoppedOnce();
-        if (voiceEvent.type === 'recognition_failed') {
-          enabled = false;
-          void closeResources();
+
+        const diagnostic = normalizeVoiceInputDiagnostic(parsed);
+        if (diagnostic) {
+          emitDiagnostic(diagnostic);
+          return;
         }
-        emit(voiceEvent);
+
+        fail('invalid-voice-event');
       };
       nextSocket.onerror = () => {
         if (enabled) fail('voice-transport-unavailable');
@@ -281,6 +440,8 @@ export function createRemotePcmVoiceAdapter(
           channels: PCM_CHANNEL_COUNT,
           format: 'pcm_s16le',
           chunkMs: PCM_CHUNK_DURATION_MS,
+          ...(usesSelectableEndpoint ? { endSilenceMs: endpointMs } : {}),
+          ...(options.diagnostics ? { diagnostics: true } : {}),
         } satisfies VoiceStartMessage),
       );
 
@@ -295,7 +456,59 @@ export function createRemotePcmVoiceAdapter(
         },
       });
       captureNode.port.onmessage = (event: MessageEvent<unknown>) => {
-        sendBinaryFrame(event.data);
+        if (!(event.data instanceof ArrayBuffer)) return;
+        const audioLevel = calculatePcm16Rms(event.data);
+        if (!activeVad) {
+          emitDiagnostic({
+            type: 'audio_level',
+            at: now(),
+            audioLevel,
+            vadScore: null,
+            vadSpeech: false,
+            sentToStt: true,
+            noiseFloor: null,
+            effectiveThreshold: null,
+            vadThreshold: null,
+          });
+          sendBinaryFrame(event.data);
+          return;
+        }
+
+        const vadResult = activeVad.process(event.data, now());
+        const noiseFloor = adaptiveRmsVad?.getNoiseFloor() ?? null;
+        const effectiveThreshold = adaptiveRmsVad?.getEffectiveThreshold() ??
+          rmsVad?.getThreshold() ??
+          null;
+        const vadThreshold = adaptiveRmsVad?.getThreshold() ??
+          rmsVad?.getThreshold() ??
+          null;
+        emitDiagnostic({
+          type: 'audio_level',
+          at: now(),
+          audioLevel,
+          vadScore: vadResult.score,
+          vadSpeech: vadResult.speechActive,
+          sentToStt: vadResult.forwardedChunks.length > 0,
+          noiseFloor,
+          effectiveThreshold,
+          vadThreshold,
+        });
+        for (const vadEvent of vadResult.events) {
+          if (vadEvent.type !== 'rejected') continue;
+          emitDiagnostic({
+            type: 'vad_rejected',
+            at: vadEvent.at,
+            candidateDurationMs: vadEvent.candidateDurationMs,
+            maxScore: vadEvent.maxScore,
+            reason: vadEvent.reason,
+            noiseFloor,
+            effectiveThreshold,
+            vadThreshold,
+          });
+        }
+        for (const forwardedChunk of vadResult.forwardedChunks) {
+          sendBinaryFrame(forwardedChunk);
+        }
       };
       sourceNode = audioContext.createMediaStreamSource(mediaStream);
       zeroGainNode = audioContext.createGain();
@@ -317,6 +530,26 @@ export function createRemotePcmVoiceAdapter(
     if (stopPromise) return stopPromise;
     stopPromise = (async () => {
       enabled = false;
+      for (const vadEvent of activeVad?.flush(now()) ?? []) {
+        if (vadEvent.type !== 'rejected') continue;
+        const noiseFloor = adaptiveRmsVad?.getNoiseFloor() ?? null;
+        const effectiveThreshold = adaptiveRmsVad?.getEffectiveThreshold() ??
+          rmsVad?.getThreshold() ??
+          null;
+        const vadThreshold = adaptiveRmsVad?.getThreshold() ??
+          rmsVad?.getThreshold() ??
+          null;
+        emitDiagnostic({
+          type: 'vad_rejected',
+          at: vadEvent.at,
+          candidateDurationMs: vadEvent.candidateDurationMs,
+          maxScore: vadEvent.maxScore,
+          reason: vadEvent.reason,
+          noiseFloor,
+          effectiveThreshold,
+          vadThreshold,
+        });
+      }
       const currentSocket = socket;
       if (currentSocket?.readyState === WebSocket.OPEN) {
         currentSocket.send(JSON.stringify({ type: 'stop' }));
@@ -340,6 +573,12 @@ export function createRemotePcmVoiceAdapter(
     supportErrorCode,
     start,
     stop,
+    setVadThreshold(value: number) {
+      activeVad?.setThreshold(value);
+    },
+    setTtsPlaying(isPlaying: boolean) {
+      adaptiveRmsVad?.setTtsPlaying(isPlaying);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
