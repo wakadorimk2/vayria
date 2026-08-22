@@ -1,5 +1,4 @@
 export const STAGE_PRESET = {
-  backgroundColor: '#242633',
   camera: {
     fov: 30,
     visibleHeightRatio: 0.48,

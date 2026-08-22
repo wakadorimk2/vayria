@@ -145,7 +145,16 @@ input {
   height: 100%;
   min-height: 55dvh;
   overflow: hidden;
-  background: #242633;
+  --stage-background-focus: #566576;
+  --stage-background-mid: #3c4a5b;
+  --stage-background-edge: #26313f;
+  background-color: var(--stage-background-edge);
+  background: radial-gradient(
+    ellipse at 50% 36%,
+    var(--stage-background-focus) 0%,
+    var(--stage-background-mid) 42%,
+    var(--stage-background-edge) 100%
+  );
 }
 
 .card-prototype {
@@ -747,7 +756,6 @@ input {
   .app-shell[data-app-mode="exhibition"] .vrm-stage {
     height: 100%;
     min-height: 0;
-    background: #242633;
   }
 
   .app-shell[data-app-mode="exhibition"] .vrm-stage::after {
@@ -755,11 +763,11 @@ input {
     z-index: 1;
     inset: 0;
     background:
-      linear-gradient(to bottom, transparent 55%, rgb(10 12 18 / 30%)),
+      linear-gradient(to bottom, transparent 64%, rgb(10 12 18 / 18%)),
       radial-gradient(
-        ellipse at 50% 32%,
-        transparent 22%,
-        rgb(10 12 18 / 20%) 100%
+        ellipse at 50% 36%,
+        transparent 28%,
+        rgb(10 12 18 / 14%) 100%
       );
     content: "";
     pointer-events: none;
