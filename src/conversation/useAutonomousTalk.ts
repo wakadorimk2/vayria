@@ -8,8 +8,10 @@ interface UseAutonomousTalkOptions {
   cancelAutonomous: () => void;
   getNextAutonomousDelay: () => number;
   isBusy: boolean;
+  isLoopEnabled: boolean;
   isMuted: boolean;
   isReady: boolean;
+  sessionGeneration: number;
   onIdleTick: () => Promise<boolean>;
 }
 
@@ -17,8 +19,10 @@ export function useAutonomousTalk({
   cancelAutonomous,
   getNextAutonomousDelay,
   isBusy,
+  isLoopEnabled,
   isMuted,
   isReady,
+  sessionGeneration,
   onIdleTick,
 }: UseAutonomousTalkOptions) {
   const [isVisible, setIsVisible] = useState(
@@ -54,25 +58,32 @@ export function useAutonomousTalk({
       cancelAutonomous();
       return;
     }
-    if (!isReady || !isVisible || isBusy) return;
+    if (!isLoopEnabled || !isReady || !isVisible || isBusy) return;
 
     const delay = Math.max(
       0,
       Math.round(getNextAutonomousDelayRef.current()),
     );
     const timer = setTimeout(() => {
-      void onIdleTickRef.current().finally(() => {
-        setScheduleVersion((current) => current + 1);
-      });
+      void onIdleTickRef.current()
+        .then((shouldContinue) => {
+          if (!shouldContinue) return;
+          setScheduleVersion((current) => current + 1);
+        })
+        .catch(() => {
+          // A failed autonomous tick stops the loop until the next manual action or reset.
+        });
     }, delay);
 
     return () => clearTimeout(timer);
   }, [
     cancelAutonomous,
     isBusy,
+    isLoopEnabled,
     isMuted,
     isReady,
     isVisible,
     scheduleVersion,
+    sessionGeneration,
   ]);
 }

@@ -35,6 +35,18 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 脳内カードは弱い内部状態として扱い、`activatedCards`が空のまま発話する場合があります。
 直前の自律発話と同じ目立つ表現、比喩、文型、テンションは自然に避けます。
 
+発話、沈黙、非発話反応が完了すると、次の自律発話を予約します。
+通信失敗が発生すると、自律発話ループを停止します。
+手動入力またはSession Resetでループを再開できます。
+ミュートとタブ非表示はループだけを一時停止し、会話の履歴、話題、演者状態、カード状態を保持します。
+
+Sessionはページ内だけの一時状態です。
+履歴、話題、直前の自律返答、演者状態、カードのターン状態を含みます。
+localモードの開発画面には`Session Reset`を表示します。
+Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻します。
+既存の`Reset Turn`はカードのターン状態だけを戻します。
+音量設定と読み込み済みアバターはSession Resetでも保持します。
+
 ## 必要なもの
 
 - Node.js 24（現在の検証環境）
@@ -158,7 +170,40 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
    `main`は`5187`を使用します。
    各worker worktreeは`5188`から`5210`の未使用ポートを使用します。
 
-7. 自作または利用許可を持つ VRM を次の場所へ置きます。
+7. VRMの正本をGitリポジトリの外へ保存します。
+
+   既定の正本パスは次です。
+
+   ```text
+   %USERPROFILE%\.vayria\avatar\model.vrm
+   ```
+
+   現在のmain worktreeにあるVRMを初回の正本へ移行する場合は、次を実行します。
+   この操作はmain worktreeの元ファイルを削除しません。
+
+   ```powershell
+   New-Item -ItemType Directory -Path "$env:USERPROFILE\.vayria\avatar" -Force
+   Copy-Item -LiteralPath 'C:\Users\wakad\projects\vayria\public\avatar\model.vrm' `
+     -Destination "$env:USERPROFILE\.vayria\avatar\model.vrm"
+   ```
+
+   Codexのworktreeセットアップは、正本がある場合に、VRMがないworktreeへコピーします。
+   既存のVRMは自動で上書きしません。
+
+   現在のworktreeだけを明示的に同期する場合は、次を実行します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Sync-VayriaAvatar.ps1
+   ```
+
+   全worktreeを明示的に同期する場合は、対象を確認してから`-Force`を指定します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Sync-VayriaAvatar.ps1 `
+     -AllWorktrees -Force
+   ```
+
+   各worktreeの実行用コピーは次のパスです。
 
    ```text
    public/avatar/model.vrm
@@ -221,11 +266,12 @@ Windows ファイアウォールは、プライベートネットワーク上の
 
 `VITE_API_BASE_URL=/` は現在のページと同じ接続先を使用します。別の HTTPS API を使用する場合だけ、`VITE_API_BASE_URL` を変更します。
 
-`public` モードは将来の公開用設定名です。公開 URL、公開中継、認証、セッション管理は今回の対象外です。
+`public` モードは将来の公開用設定名です。公開 URL、公開中継、認証、永続セッション管理は今回の対象外です。
 `getUserMedia()` とカメラ背景も今回の対象外です。カメラを追加する場合は HTTPS または同等の Secure Context が必要です。
 
 `.env.local` と `public/avatar/*.vrm` は Git の追跡対象外です。
 `.env.exhibition` と `.env.exhibition.local` も Git の追跡対象外です。
+VRMの正本もGitリポジトリの外に置きます。`.worktreeinclude`には追加しません。
 API key と AivisSpeech の設定は Vite の Node middleware だけが読みます。
 ブラウザー bundle には埋め込みません。
 

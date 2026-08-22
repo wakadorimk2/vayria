@@ -250,6 +250,16 @@ export function useConversation(
     setConversationState('idle', null);
   }, [finishActivePlanAsCancelled, invalidateCurrentTurn, setConversationState]);
 
+  const resetConversation = useCallback(() => {
+    finishActivePlanAsCancelled();
+    invalidateCurrentTurn(true);
+    historyRef.current = [];
+    lastAutonomousReplyRef.current = null;
+    setReply('');
+    setError('');
+    setConversationState('idle', null);
+  }, [finishActivePlanAsCancelled, invalidateCurrentTurn, setConversationState]);
+
   const appendHistory = useCallback(
     (items: ConversationHistoryItem[]) => {
       historyRef.current = [...historyRef.current, ...items].slice(-historyLimit);
@@ -678,6 +688,7 @@ export function useConversation(
     isBusy,
     isManualBusy: isBusy && source === 'manual',
     reply,
+    resetConversation,
     sendAutonomous,
     sendManual,
     source,

@@ -383,6 +383,7 @@ input {
 }
 
 .reset-turn-button,
+.reset-session-button,
 .swap-button {
   border: 1px solid #5a6068;
   border-radius: 999px;
@@ -396,6 +397,12 @@ input {
   font-size: 0.62rem;
 }
 
+.reset-session-button {
+  padding: 0.22rem 0.55rem;
+  border-color: #8b5d55;
+  font-size: 0.62rem;
+}
+
 .swap-button {
   padding: 0.3rem 0.85rem;
   border-color: #d78256;
@@ -406,7 +413,9 @@ input {
 }
 
 .reset-turn-button:hover,
-.reset-turn-button:focus-visible {
+.reset-turn-button:focus-visible,
+.reset-session-button:hover,
+.reset-session-button:focus-visible {
   border-color: #8b929b;
 }
 
@@ -416,6 +425,7 @@ input {
 }
 
 .reset-turn-button:focus-visible,
+.reset-session-button:focus-visible,
 .swap-button:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
