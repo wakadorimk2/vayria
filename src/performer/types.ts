@@ -1,5 +1,67 @@
 import type { Emotion } from '../character/emotion.js';
-import type { VoiceInteractionAction } from '../voice/voiceInteraction.js';
+
+export const CONVERSATION_ACTIONS = [
+  'take_floor',
+  'listen',
+  'backchannel',
+  'react_nonverbally',
+  'wait',
+  'silence',
+] as const;
+
+export type ConversationAction = (typeof CONVERSATION_ACTIONS)[number];
+
+export const CONVERSATION_BACKCHANNEL_CUES = ['none', 'un', 'uun'] as const;
+
+export type ConversationBackchannelCue =
+  (typeof CONVERSATION_BACKCHANNEL_CUES)[number];
+
+export interface ConversationActionDecision {
+  action: ConversationAction;
+  backchannelCue: ConversationBackchannelCue;
+}
+
+export function isConversationAction(
+  value: unknown,
+): value is ConversationAction {
+  return (
+    typeof value === 'string' &&
+    (CONVERSATION_ACTIONS as readonly string[]).includes(value)
+  );
+}
+
+export function isConversationBackchannelCue(
+  value: unknown,
+): value is ConversationBackchannelCue {
+  return (
+    typeof value === 'string' &&
+    (CONVERSATION_BACKCHANNEL_CUES as readonly string[]).includes(value)
+  );
+}
+
+export function isConversationActionDecision(
+  value: unknown,
+): value is ConversationActionDecision {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some(
+      (key) => key !== 'action' && key !== 'backchannelCue',
+    )
+  ) {
+    return false;
+  }
+  if (!isConversationAction(record.action)) return false;
+  if (!isConversationBackchannelCue(record.backchannelCue)) return false;
+
+  return (
+    (record.action === 'backchannel' && record.backchannelCue !== 'none') ||
+    (record.action !== 'backchannel' && record.backchannelCue === 'none')
+  );
+}
 
 export type AttentionTarget = 'viewer' | 'chat' | 'game' | 'none';
 
@@ -162,6 +224,7 @@ export interface DirectionContribution {
 export interface ActionIntent {
   trigger: PerformerTrigger['kind'];
   preferredIntent: 'speak' | 'wait' | 'ignore' | 'react_nonverbally';
+  actionDecision?: ConversationActionDecision;
   attentionTarget: AttentionTarget;
   emotionCue?: {
     emotion: Emotion;
@@ -186,6 +249,7 @@ export interface PerformancePlan {
   planId: string;
   trigger: PerformerTrigger['kind'];
   intent: 'speak' | 'wait' | 'ignore' | 'react_nonverbally';
+  actionDecision?: ConversationActionDecision;
   behavior?: PerformanceBehavior;
   preReaction?: {
     leadBeforeSpeechMs: number;
@@ -233,7 +297,7 @@ export interface PerformanceResult {
   outcome: 'completed' | 'cancelled' | 'interrupted' | 'failed';
   trigger: PerformerTrigger['kind'];
   intent: PerformancePlan['intent'];
-  interactionAction?: VoiceInteractionAction;
+  interactionAction?: ConversationAction;
   spokenText?: string;
   emotionCue?: {
     emotion: Emotion;

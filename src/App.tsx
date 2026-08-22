@@ -25,6 +25,7 @@ import {
 import { useWildcardDirection } from './cards/wildcardDirection';
 import { usePerformerRuntime } from './performer/usePerformerRuntime';
 import type {
+  ConversationActionDecision,
   PerformancePlan,
   PerformanceResult,
   PerformerTrigger,
@@ -40,7 +41,6 @@ import { useVoiceInput } from './voice/useVoiceInput';
 import {
   LISTENING_THINKING_MOTION_ASSET_ID,
   type VoiceBackchannelCue,
-  type VoiceInteractionDecision,
 } from './voice/voiceInteraction';
 import {
   MAX_VOICE_TEXT_LENGTH,
@@ -260,8 +260,8 @@ export default function App() {
     [play, stageMotionPort, stop],
   );
 
-  const handleVoiceReaction = useCallback(
-    (decision: VoiceInteractionDecision) => {
+  const handleInteractionAction = useCallback(
+    (decision: ConversationActionDecision) => {
       if (decision.action === 'take_floor') return;
 
       stopReaction();
@@ -294,6 +294,11 @@ export default function App() {
         } else {
           setListeningReaction(undefined);
         }
+        return;
+      }
+
+      if (decision.action !== 'backchannel') {
+        setListeningReaction(undefined);
         return;
       }
 
@@ -387,6 +392,7 @@ export default function App() {
           outcome: 'completed',
           trigger: plan.trigger,
           intent: plan.intent,
+          interactionAction: plan.actionDecision?.action,
         });
       }, plan.preReaction?.leadBeforeSpeechMs ?? 0);
       nonSpeechTimerRef.current = timer;
@@ -409,6 +415,7 @@ export default function App() {
       outcome: 'cancelled',
       trigger: plan.trigger,
       intent: plan.intent,
+      interactionAction: plan.actionDecision?.action,
     });
   }, [handlePerformanceResult]);
 
@@ -431,7 +438,7 @@ export default function App() {
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
     onPerformanceResult: handlePerformanceResult,
-    onVoiceReaction: handleVoiceReaction,
+    onInteractionAction: handleInteractionAction,
   });
   const displayEmotion = activeEmotionCue?.emotion ?? performer.state.emotion.value;
   const isPerformerBusy = isBusy || activePlan !== null;
@@ -614,6 +621,10 @@ export default function App() {
     (event: VoiceInputEvent) => {
       switch (event.type) {
         case 'speech_started': {
+          cancelNonSpeechPlan();
+          if (isBusy || activePlanRef.current !== null) {
+            interruptCurrentTurn('voice_interrupt');
+          }
           activeVoiceSegmentRef.current = event.segmentId;
           stopReaction();
           stageRef.current?.stopReactionMotion();
@@ -678,7 +689,12 @@ export default function App() {
             text: message,
           };
           const plan = createPlanForTrigger(trigger);
-          beginReply();
+          if (
+            !plan.actionDecision ||
+            plan.actionDecision.action === 'take_floor'
+          ) {
+            beginReply();
+          }
           if (!isMuted) void prepare();
           void sendVoice(message, readCardContext(), acceptReply, plan);
           return;
@@ -703,6 +719,7 @@ export default function App() {
       clearBackchannelTimer,
       createPlanForTrigger,
       interruptCurrentTurn,
+      isBusy,
       isMuted,
       playReaction,
       prepare,
@@ -870,7 +887,9 @@ export default function App() {
       text: trimmedInput,
     };
     const plan = createPlanForTrigger(trigger);
-    beginReply();
+    if (!plan.actionDecision || plan.actionDecision.action === 'take_floor') {
+      beginReply();
+    }
     if (!isMuted) void prepare();
     setInput('');
     void sendManual(trimmedInput, readCardContext(), acceptReply, plan);

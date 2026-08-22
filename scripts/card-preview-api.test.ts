@@ -3,12 +3,14 @@ import test from 'node:test';
 import {
   buildCardPreviewSystemPrompt,
   buildVoiceInteractionPolicySystemPrompt,
-  createVoiceReactionResponse,
+  createInteractionReactionResponse,
   isContentBearingVoiceMessage,
   normalizeVoiceInteractionDecision,
   parseCardPreviewResponse,
+  parseConversationActionPolicy,
   parseVoiceInteractionPolicy,
   readCardPreviewRequest,
+  readConversationEvent,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
 
@@ -130,6 +132,61 @@ test('voice interaction policy accepts only compatible action and cue pairs', ()
   );
 });
 
+test('common conversation policy accepts non-speech actions and rejects wait', () => {
+  assert.deepEqual(
+    parseConversationActionPolicy(
+      '{"action":"react_nonverbally","backchannelCue":"none"}',
+    ),
+    { action: 'react_nonverbally', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    parseConversationActionPolicy(
+      '{"action":"silence","backchannelCue":"none"}',
+    ),
+    { action: 'silence', backchannelCue: 'none' },
+  );
+  assert.throws(
+    () =>
+      parseConversationActionPolicy(
+        '{"action":"wait","backchannelCue":"none"}',
+      ),
+    /invalid action or cue/,
+  );
+  assert.throws(
+    () =>
+      parseConversationActionPolicy(
+        '{"action":"react_nonverbally","backchannelCue":"un"}',
+      ),
+    /invalid action or cue/,
+  );
+});
+
+test('conversation events validate the shared interactionAction field', () => {
+  assert.equal(
+    readConversationEvent({
+      at: '2026-08-23T00:00:00.000Z',
+      elapsedMs: 0,
+      event: 'turn_completed',
+      source: 'manual',
+      turnId: 'turn-1',
+      interactionAction: 'react_nonverbally',
+    }).interactionAction,
+    'react_nonverbally',
+  );
+  assert.throws(
+    () =>
+      readConversationEvent({
+        at: '2026-08-23T00:00:00.000Z',
+        elapsedMs: 0,
+        event: 'turn_completed',
+        source: 'manual',
+        turnId: 'turn-1',
+        interactionAction: 'unknown',
+      }),
+    /interactionAction is invalid/,
+  );
+});
+
 test('voice policy prompt prioritizes content-bearing utterances', () => {
   const prompt = buildVoiceInteractionPolicySystemPrompt(
     null,
@@ -139,6 +196,8 @@ test('voice policy prompt prioritizes content-bearing utterances', () => {
   assert.match(prompt, /question, request, concrete fact, feeling, preference, experience/);
   assert.match(prompt, /Do not use listen or backchannel for a content-bearing utterance/);
   assert.match(prompt, /clearly unfinished fragment/);
+  assert.match(prompt, /react_nonverbally/);
+  assert.match(prompt, /wait is reserved for autonomous scheduling/);
 });
 
 test('voice content classifier separates topics from phatic and unfinished speech', () => {
@@ -149,13 +208,13 @@ test('voice content classifier separates topics from phatic and unfinished speec
   assert.equal(isContentBearingVoiceMessage('今日は雨だったけど…'), false);
 });
 
-test('voice policy safety net promotes content-bearing non-floor decisions', () => {
+test('common policy safety net keeps ambiguous decisions for the LLM', () => {
   assert.deepEqual(
     normalizeVoiceInteractionDecision('今日は雨だった', {
       action: 'backchannel',
       backchannelCue: 'un',
     }),
-    { action: 'take_floor', backchannelCue: 'none' },
+    { action: 'backchannel', backchannelCue: 'un' },
   );
   assert.deepEqual(
     normalizeVoiceInteractionDecision('えっと…', {
@@ -180,9 +239,9 @@ test('voice reply prompt asks for short concrete grounding', () => {
   assert.match(VOICE_REPLY_INSTRUCTION, /generic acknowledgment/);
 });
 
-test('non-floor voice reactions return no spoken text or activated cards', () => {
+test('non-floor reactions return no spoken text or activated cards', () => {
   assert.deepEqual(
-    createVoiceReactionResponse({
+    createInteractionReactionResponse({
       action: 'listen',
       backchannelCue: 'none',
     }),
@@ -190,12 +249,12 @@ test('non-floor voice reactions return no spoken text or activated cards', () =>
       text: '',
       emotion: 'neutral',
       activatedCards: [],
-      voiceAction: 'listen',
+      interactionAction: 'listen',
       backchannelCue: 'none',
     },
   );
   assert.deepEqual(
-    createVoiceReactionResponse({
+    createInteractionReactionResponse({
       action: 'backchannel',
       backchannelCue: 'un',
     }),
@@ -203,7 +262,7 @@ test('non-floor voice reactions return no spoken text or activated cards', () =>
       text: '',
       emotion: 'neutral',
       activatedCards: [],
-      voiceAction: 'backchannel',
+      interactionAction: 'backchannel',
       backchannelCue: 'un',
     },
   );

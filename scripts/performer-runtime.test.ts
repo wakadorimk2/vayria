@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   aggregateDirectionContributions,
   applyPlanLocalModifiers,
+  classifyFastPathAction,
+  classifyViewerMessageFastPath,
   createActionIntent,
   createInitialPerformerState,
   DEFAULT_SPEECH_MOTION_ASSET_ID,
@@ -138,6 +140,55 @@ test('opaque external stimulus uses the neutral Core baseline', () => {
   assert.deepEqual(trigger.metadata, { origin: 'wildcard' });
 });
 
+test('conversation fast path classifies explicit questions as take_floor', () => {
+  assert.deepEqual(
+    classifyViewerMessageFastPath('それ、どういう意味？'),
+    { action: 'take_floor', backchannelCue: 'none' },
+  );
+});
+
+test('conversation fast path classifies unfinished speech as listen', () => {
+  assert.deepEqual(
+    classifyViewerMessageFastPath('今日はさ…'),
+    { action: 'listen', backchannelCue: 'none' },
+  );
+});
+
+test('conversation fast path classifies phatic speech as backchannel', () => {
+  assert.deepEqual(
+    classifyViewerMessageFastPath('うん'),
+    { action: 'backchannel', backchannelCue: 'un' },
+  );
+  assert.deepEqual(
+    classifyViewerMessageFastPath('うーん'),
+    { action: 'backchannel', backchannelCue: 'uun' },
+  );
+});
+
+test('conversation fast path leaves ambiguous viewer speech for the LLM', () => {
+  assert.equal(classifyViewerMessageFastPath('今日は雨だった'), null);
+});
+
+test('conversation fast path maps external stimulus and autonomous skips', () => {
+  const state = createState();
+  assert.deepEqual(
+    classifyFastPathAction(
+      { kind: 'external_stimulus', semanticCue: 'external_stimulus' },
+      state,
+    ),
+    { action: 'react_nonverbally', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    classifyFastPathAction(
+      { kind: 'idle_tick', elapsedMs: 1_000 },
+      state,
+      DEFAULT_PERFORMER_PROFILE,
+      () => 0.99,
+    ),
+    { action: 'wait', backchannelCue: 'none' },
+  );
+});
+
 test('require_speech and attention target are Direction contributions', () => {
   assert.equal(DEFAULT_SPEECH_MOTION_ASSET_ID, 'speech-gentle');
   const trigger: PerformerTrigger = {
@@ -159,6 +210,10 @@ test('require_speech and attention target are Direction contributions', () => {
   );
 
   assert.equal(plan.intent, 'speak');
+  assert.deepEqual(plan.actionDecision, {
+    action: 'take_floor',
+    backchannelCue: 'none',
+  });
   assert.equal(plan.preReaction?.gaze?.target, 'viewer');
   assert.equal(
     plan.preReaction?.leadBeforeSpeechMs,
