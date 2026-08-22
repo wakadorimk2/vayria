@@ -20,6 +20,7 @@ interface CardGamePrototypeProps {
   game: CardGamePrototypeController;
   isInteractionLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
+  onSessionReset?: () => void;
   onSelectionActiveChange?: (isActive: boolean) => void;
 }
 
@@ -113,6 +114,7 @@ export function CardGamePrototype({
   game,
   isInteractionLocked = false,
   onCardInserted,
+  onSessionReset,
   onSelectionActiveChange,
 }: CardGamePrototypeProps) {
   const {
@@ -442,14 +444,25 @@ export function CardGamePrototype({
               </span>
             </span>
             {SHOW_DEVELOPER_CONTROLS && (
-              <button
-                className="reset-turn-button"
-                disabled={isInteractionLocked}
-                onClick={resetTurn}
-                type="button"
-              >
-                Reset Turn
-              </button>
+              <>
+                <button
+                  className="reset-turn-button"
+                  disabled={isInteractionLocked}
+                  onClick={resetTurn}
+                  type="button"
+                >
+                  Reset Turn
+                </button>
+                {onSessionReset && (
+                  <button
+                    className="reset-session-button"
+                    onClick={onSessionReset}
+                    type="button"
+                  >
+                    Session Reset
+                  </button>
+                )}
+              </>
             )}
           </div>
         </header>

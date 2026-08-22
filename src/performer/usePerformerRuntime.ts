@@ -97,6 +97,13 @@ export function usePerformerRuntime(
     [updateState],
   );
 
+  const resetRuntime = useCallback(() => {
+    planProfileRef.current.clear();
+    activePlanIdRef.current = null;
+    autonomousStartedRef.current = false;
+    updateState(createInitialPerformerState(Date.now(), profileRef.current));
+  }, [updateState]);
+
   const setPhase = useCallback(
     (phase: PerformerState['phase']) => {
       updateState({
@@ -146,6 +153,7 @@ export function usePerformerRuntime(
     completePlan,
     cancelPlan,
     getNextAutonomousDelay,
+    resetRuntime,
     setPhase,
   };
 }
