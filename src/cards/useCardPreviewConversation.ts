@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
-import type { PlayAudio } from '../audio/useAudioLipSync';
 import { apiUrl } from '../runtimeConfig';
+import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
   PerformancePlan,
   PerformanceResult,
@@ -68,8 +68,7 @@ async function readCardPreviewResponse(
 }
 
 export function useCardPreviewConversation(
-  playAudio: PlayAudio,
-  stopAudio: () => void,
+  playback: PerformancePlayback,
   options: CardPreviewConversationOptions = {},
 ) {
   const [reply, setReply] = useState('');
@@ -120,14 +119,14 @@ export function useCardPreviewConversation(
     generationRef.current += 1;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
-    stopAudio();
+    playback.stop();
     const activePlan = activePlanRef.current;
     if (activePlan) emitResult(activePlan, 'cancelled');
     setReply('');
     setError('');
     setIsBusy(false);
     setStatus('idle');
-  }, [emitResult, stopAudio]);
+  }, [emitResult, playback]);
 
   const startPreview = useCallback(
     async (cardId: string, plan: PerformancePlan) => {
@@ -209,13 +208,14 @@ export function useCardPreviewConversation(
 
         const audioData = await ttsResponse.arrayBuffer();
         if (generation !== generationRef.current) return;
-        await playAudio(audioData, {
-          onStart: () => {
-            speechStartedAt = Date.now();
+        const playbackResult = await playback.play(plan, audioData, {
+          onSpeechStart: (startedAt) => {
+            speechStartedAt = startedAt;
             if (generation === generationRef.current) setStatus('speaking');
           },
         });
         if (generation !== generationRef.current) return;
+        if (!playbackResult) return;
 
         setIsBusy(false);
         setStatus('idle');
@@ -226,7 +226,7 @@ export function useCardPreviewConversation(
             intensity: preview.emotion === 'neutral' ? 0.25 : 0.7,
           },
           speechStartedAt,
-          speechEndedAt: Date.now(),
+          speechEndedAt: playbackResult.speechEndedAt,
         });
       } catch (caughtError) {
         if (generation !== generationRef.current || isAbortError(caughtError)) {
@@ -246,7 +246,7 @@ export function useCardPreviewConversation(
         }
       }
     },
-    [cancelPreview, emitResult, playAudio],
+    [cancelPreview, emitResult, playback],
   );
 
   useEffect(() => {
@@ -254,10 +254,10 @@ export function useCardPreviewConversation(
       generationRef.current += 1;
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
-      stopAudio();
+      playback.stop();
       activePlanRef.current = null;
     };
-  }, [stopAudio]);
+  }, [playback]);
 
   return {
     cancelPreview,

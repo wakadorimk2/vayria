@@ -199,6 +199,17 @@
       "loop": false,
       "correctionProfileId": "vayria-default-v1",
       "contentSha256": "2cb11a972c1a9cbedaac87a3218286f0c0821d7223bee88f4f8eee031e7f074e"
+    },
+    {
+      "assetId": "speech-gentle",
+      "file": "speech-gentle.vrma",
+      "source": "saved",
+      "tags": ["idle"],
+      "durationMs": 3950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "3b3c9c886d4a57337bede1aa0698eff6dcaa82c9b2fecf4c7dee38d091d7edc7"
     }
   ]
 }

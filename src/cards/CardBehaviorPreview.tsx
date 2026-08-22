@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { VrmStage } from '../avatar/VrmStage';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { VrmStage, type VrmStageHandle } from '../avatar/VrmStage';
 import { useAudioLipSync } from '../audio/useAudioLipSync';
 import type { Emotion } from '../character/emotion';
 import type {
@@ -7,6 +7,7 @@ import type {
   PerformancePlan,
   PerformanceResult,
 } from '../performer/types';
+import { PerformancePlaybackCoordinator } from '../performer/performancePlayback';
 import { usePerformerRuntime } from '../performer/usePerformerRuntime';
 import { cardPool } from './cardPool';
 import {
@@ -133,6 +134,18 @@ function formatModifierValue(
   if (typeof value !== 'number') return '中立';
   if (key === 'responseDelayMs') return `${formatSignedNumber(value)} ms`;
   return formatSignedNumber(value);
+}
+
+class StageMotionPortAdapter {
+  private port: VrmStageHandle | null = null;
+
+  get(): VrmStageHandle | null {
+    return this.port;
+  }
+
+  set(port: VrmStageHandle | null): void {
+    this.port = port;
+  }
 }
 
 function ModifierList({
@@ -280,9 +293,22 @@ export function CardBehaviorPreview() {
     intensity: number;
   } | null>(null);
   const activePlanRef = useRef<PerformancePlan | null>(null);
+  const stageRef = useRef<VrmStageHandle>(null);
+  const [stageMotionPortAdapter] = useState(
+    () => new StageMotionPortAdapter(),
+  );
   const selectionGenerationRef = useRef(0);
   const prefersReducedMotion = usePrefersReducedMotion();
   const { mouthOpen, play, prepare, stop } = useAudioLipSync(1);
+  const playbackCoordinator = useMemo(
+    () =>
+      new PerformancePlaybackCoordinator({
+        getMotionPort: () => stageMotionPortAdapter.get(),
+        playAudio: play,
+        stopAudio: stop,
+      }),
+    [play, stageMotionPortAdapter, stop],
+  );
   const performer = usePerformerRuntime();
   const {
     completePlan,
@@ -292,7 +318,12 @@ export function CardBehaviorPreview() {
   const handlePerformancePlan = useCallback((plan: PerformancePlan) => {
     activePlanRef.current = plan;
     setActivePlan(plan);
-  }, []);
+    playbackCoordinator.prepare(plan);
+  }, [playbackCoordinator]);
+
+  const handleStageReady = useCallback(() => {
+    stageMotionPortAdapter.set(stageRef.current);
+  }, [stageMotionPortAdapter]);
 
   const handlePerformanceCue = useCallback(
     (
@@ -316,7 +347,7 @@ export function CardBehaviorPreview() {
     [completePlan],
   );
 
-  const preview = useCardPreviewConversation(play, stop, {
+  const preview = useCardPreviewConversation(playbackCoordinator, {
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
     onPerformanceResult: handlePerformanceResult,
@@ -422,7 +453,9 @@ export function CardBehaviorPreview() {
               emotion={displayEmotion}
               motionScale={prefersReducedMotion ? 0 : 1}
               mouthOpen={mouthOpen}
+              onReady={handleStageReady}
               performancePlan={activePlan ?? undefined}
+              ref={stageRef}
               sessionGeneration={motionSessionGeneration}
               stageVariant="card-preview"
             />

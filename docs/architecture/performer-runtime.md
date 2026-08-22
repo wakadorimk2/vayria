@@ -23,7 +23,7 @@ App.tsx
 useConversation
        ├─ /api/chat
        ├─ /api/tts
-       └─ audio playback
+       └─ PerformancePlaybackCoordinator
        ↓
 VrmStage
 ```
@@ -237,7 +237,49 @@ LLM → TTS → playback
 
 `leadBeforeSpeechMs` is the lead time from plan activation to `/api/chat`.
 
-The v0.1 plan does not implement a general timeline engine.
+`PerformanceTiming` keeps the coarse playback timing for one plan.
+
+- `motionLeadMs` starts prepared body motion before audio playback.
+- `motionEnterBlendMs` raises VRMA weight from zero at the motion start boundary.
+- `motionExitBlendMs` lowers VRMA weight after the post-speech hold.
+- `motionPreparationTimeoutMs` bounds the wait for a prepared VRMA.
+- `postSpeechHoldMs` keeps the motion pose after audio ends.
+
+通常の `speak` plan は、既定で保存済みVRMA `speech-gentle` を使います。
+`speech-gentle` は、通常発話向けに手元の動きを中心とした暫定assetです。カード用VRMAは通常発話の既定値に使いません。
+発話前は `preReaction.gaze` と `IdleController` が、視線・呼吸・微細な揺れを担当します。
+VRMAの開始と終了では、IdleとVRMAを境界だけクロスフェードします。VRMAの主再生中はIdleを停止し、同じ骨へ手続き型動作とVRMAを重ねません。
+`MotionPlayer` はVRMA clip生成後に `MotionPlaybackProfile` を適用します。hipsの初期位置を保持し、hips・上体の回転を60%、首・頭・look-atを35%へ縮小します。腕、脚、表情トラックは変更しません。
+
+`leadBeforeSpeechMs` and `motionLeadMs` have different meanings.
+
+The plan does not implement a general timeline engine.
+
+For a speech plan, `PerformancePlaybackCoordinator` follows this order:
+
+```text
+plan activation
+  ↓
+preReaction: gaze and Idle motion
+  ↓
+VRMA preparation starts
+  ↓ TTS ready and audio decoded
+MotionPlaybackProfile is applied to the prepared clip
+  ↓
+motion starts at t=-motionLeadMs with weight 0
+  ↓ motionEnterBlendMs
+VRMA becomes the main body motion
+  ↓
+audio and lip sync start
+  ↓ audio ends
+postSpeechHoldMs
+  ↓
+motion exit blend starts
+  ↓ motionExitBlendMs
+Idle resumes
+```
+
+If VRMA preparation times out or fails, audio starts without body motion.
 
 TTS and avatar profiles are optional for non-speech plans.
 
@@ -315,14 +357,18 @@ WildCard contribution
   ↓
 Performance Plan
   ↓
-leadBeforeSpeechMs: body reaction starts at t=0
+leadBeforeSpeechMs: response pipeline starts after the body plan
   ↓
 /api/chat with performanceContext
   ↓
 /api/tts with ttsProfile
   ↓
-audio playback
+VRMA preparation and audio decode
   ↓
+motion start
+  ↓ motionLeadMs
+audio playback and lip sync
+  ↓ postSpeechHoldMs
 PerformanceResult
   ↓
 Performer State reducer
@@ -461,7 +507,7 @@ The current MVP uses the existing VRM stage and a small head-yaw gaze approximat
 - trust, affinity, and durable personality growth;
 - generic timeline engine;
 - speech queue, sentence-level TTS, barge-in, and resume;
-- complex VRMA selection graphs and runtime blending;
+- complex VRMA selection graphs and full timeline blending;
 - arbitrary card DSL;
 - direct dependency on an external OSS runtime.
 
@@ -483,6 +529,8 @@ The current code implements the vertical slice for all six boundaries.
 ### Known risks
 
 - The current audio path still plays one complete WAV at a time.
+- Coarse audio and motion timing uses one playback coordinator.
+- Word and sentence gesture cues are not implemented.
 - The current VRM gaze implementation uses head-yaw bias, not a full eye target controller.
 - The current LLM contract still contains WildCard card validation in the local API.
 - Topic remains conversation-owned in v0.1. Runtime topic ownership is a v0.2 migration.
@@ -510,8 +558,13 @@ The following checks are required for future changes:
 - initiative decisions stay outside `useAutonomousTalk`.
 - state changes use `PerformanceResult` and the reducer.
 - no-card baseline still speaks, waits, and reacts.
-- `PerformancePlan` activation starts gaze and motion at t=0.
+- `PerformancePlan` activation starts gaze and motion preparation.
 - `leadBeforeSpeechMs` delays `/api/chat` after the body reaction begins.
+- prepared body motion starts before audio by `motionLeadMs`.
+- VRMA enters over `motionEnterBlendMs` and exits over `motionExitBlendMs`.
+- MotionPlaybackProfile anchors hips translation and attenuates head and torso rotation without changing the saved VRMA asset.
+- audio-only fallback runs after `motionPreparationTimeoutMs`.
+- `postSpeechHoldMs` delays the exit blend after audio ends.
 - effect result does not depend on contribution order.
 - `require_speech` remains a WildCard contribution.
 - stale generation, cancellation, and TTS failure return safely to `idle`.

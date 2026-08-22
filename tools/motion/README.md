@@ -89,4 +89,5 @@ public/avatar/motions/<asset-file>.vrma
 
 腕の開き、腕振り、肘、肩、stance、step width、root、pelvis の値は、実際の VRM で確認して更新します。
 
-補正処理は browser の `VrmStage` へ実装しません。
+このprofileは生成時のretarget補正用です。browserの再生補正は別の
+`MotionPlaybackProfile`として`MotionPlayer`がclip生成後に適用します。
