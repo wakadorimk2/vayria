@@ -728,6 +728,82 @@
     inset 0 1px 0 rgb(255 255 255 / 68%);
 }
 
+.app-shell[data-app-mode="exhibition"] .card-zone--hand .wildcard-card {
+  transform-origin: 50% 100%;
+  transition:
+    transform 260ms cubic-bezier(0.2, 0.85, 0.25, 1),
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+.app-shell[data-app-mode="exhibition"]
+  .card-zone--hand
+  .card-zone__cards
+  > .wildcard-card:nth-child(1) {
+  --card-rotation: -8deg;
+  --card-lift: 5px;
+}
+
+.app-shell[data-app-mode="exhibition"]
+  .card-zone--hand
+  .card-zone__cards
+  > .wildcard-card:nth-child(2) {
+  --card-rotation: -4deg;
+  --card-lift: 2px;
+}
+
+.app-shell[data-app-mode="exhibition"]
+  .card-zone--hand
+  .card-zone__cards
+  > .wildcard-card:nth-child(3) {
+  --card-rotation: 0deg;
+  --card-lift: 0px;
+}
+
+.app-shell[data-app-mode="exhibition"]
+  .card-zone--hand
+  .card-zone__cards
+  > .wildcard-card:nth-child(4) {
+  --card-rotation: 4deg;
+  --card-lift: 2px;
+}
+
+.app-shell[data-app-mode="exhibition"]
+  .card-zone--hand
+  .card-zone__cards
+  > .wildcard-card:nth-child(5) {
+  --card-rotation: 8deg;
+  --card-lift: 5px;
+}
+
+.app-shell[data-app-mode="exhibition"]
+  .card-zone--hand
+  .wildcard-card:hover:not(.wildcard-card--disabled):not(
+    .wildcard-card--selected
+  ),
+.app-shell[data-app-mode="exhibition"]
+  .card-zone--hand
+  .wildcard-card:active:not(.wildcard-card--disabled):not(
+    .wildcard-card--selected
+  ),
+.app-shell[data-app-mode="exhibition"]
+  .card-zone--hand
+  .wildcard-card:focus-visible:not(.wildcard-card--disabled):not(
+    .wildcard-card--selected
+  ) {
+  z-index: 6;
+  transform: translateY(calc(var(--card-lift) - 16px))
+    rotate(var(--card-rotation));
+}
+
+.app-shell[data-app-mode="exhibition"]
+  .card-zone--hand
+  .wildcard-card--selected:not(.wildcard-card--dragging) {
+  z-index: 10;
+  transform: translateY(calc(var(--card-lift) - 28px))
+    rotate(var(--card-rotation));
+}
+
 .wildcard-card.wildcard-card--active {
   --card-lift: -6px;
 
@@ -952,7 +1028,29 @@
     transition: border-color 100ms linear, box-shadow 100ms linear;
   }
 
+  .app-shell[data-app-mode="exhibition"] .card-zone--hand .wildcard-card {
+    transition: border-color 100ms linear, box-shadow 100ms linear;
+  }
+
   .wildcard-card:hover:not(.wildcard-card--disabled) {
+    transform: translateY(var(--card-lift)) rotate(var(--card-rotation));
+  }
+
+  .app-shell[data-app-mode="exhibition"]
+    .card-zone--hand
+    .wildcard-card:hover:not(.wildcard-card--disabled):not(
+      .wildcard-card--selected
+    ),
+  .app-shell[data-app-mode="exhibition"]
+    .card-zone--hand
+    .wildcard-card:active:not(.wildcard-card--disabled):not(
+      .wildcard-card--selected
+    ),
+  .app-shell[data-app-mode="exhibition"]
+    .card-zone--hand
+    .wildcard-card:focus-visible:not(.wildcard-card--disabled):not(
+      .wildcard-card--selected
+    ) {
     transform: translateY(var(--card-lift)) rotate(var(--card-rotation));
   }
 

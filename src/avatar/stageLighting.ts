@@ -1,5 +1,4 @@
 import {
-  Color,
   DirectionalLight,
   HemisphereLight,
   type Scene,
@@ -33,8 +32,6 @@ export function setupStageLighting(
   scene: Scene,
   lighting: StageLighting = STAGE_PRESET.lighting,
 ): void {
-  scene.background = new Color(STAGE_PRESET.backgroundColor);
-
   const hemisphere = lighting.hemisphere;
   scene.add(
     new HemisphereLight(
