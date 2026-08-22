@@ -18,6 +18,10 @@ import {
   type ChatCardContext,
 } from './conversation/useConversation';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
+import {
+  CARD_INTERACTION_ATTENTION_DURATION_MS,
+  shouldReactToCardInteraction,
+} from './cards/cardReactions';
 import { useWildcardDirection } from './cards/wildcardDirection';
 import { usePerformerRuntime } from './performer/usePerformerRuntime';
 import type {
@@ -27,6 +31,7 @@ import type {
 } from './performer/types';
 import { runtimeConfig } from './runtimeConfig';
 import { fetchListeningBackchannels } from './voice/backchannel';
+import type { ListeningBackchannelAudio } from './voice/backchannelPolicy';
 import {
   scheduleListeningBackchannel,
   selectListeningBackchannelIndex,
@@ -45,6 +50,11 @@ import {
   type BargeInState,
 } from './voice/audioLab.js';
 import { useVoiceLab } from './voice/useVoiceLab';
+import {
+  LISTENING_THINKING_MOTION_ASSET_ID,
+  type VoiceBackchannelCue,
+  type VoiceInteractionDecision,
+} from './voice/voiceInteraction';
 import {
   MAX_VOICE_TEXT_LENGTH,
   type ListeningReactionCue,
@@ -181,6 +191,9 @@ export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
+  const [cardAttentionTarget, setCardAttentionTarget] = useState<
+    'game' | null
+  >(null);
   const [audioControl, setAudioControl] = useState(readAudioControlState);
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>({ topic: null, topicTurns: 0 });
@@ -213,6 +226,7 @@ export default function App() {
   const [stageMotionPort, setStageMotionPort] =
     useState<VrmStageHandle | null>(null);
   const nonSpeechTimerRef = useRef<number | null>(null);
+  const cardAttentionTimerRef = useRef<number | null>(null);
   const sessionGenerationRef = useRef(0);
   const {
     isAudioUnlocked,
@@ -224,6 +238,7 @@ export default function App() {
     prepare,
     setDucked,
     stop,
+    stopReaction,
   } = useAudioLipSync(volume);
   const [listeningReaction, setListeningReaction] =
     useState<ListeningReactionCue | undefined>();
@@ -233,8 +248,10 @@ export default function App() {
   );
   const voiceReactionIdRef = useRef(0);
   const activeVoiceSegmentRef = useRef<string | null>(null);
-  const backchannelAudioRef = useRef<ArrayBuffer[]>([]);
-  const backchannelVariantIndexRef = useRef<number | null>(null);
+  const backchannelAudioRef = useRef<ListeningBackchannelAudio[]>([]);
+  const backchannelVariantIndexRef = useRef<
+    Record<Exclude<VoiceBackchannelCue, 'none'>, number | null>
+  >({ un: null, uun: null });
   const backchannelLoadingRef = useRef<Promise<void> | null>(null);
   const backchannelTimerRef = useRef<number | null>(null);
   const bargeInTimerRef = useRef<number | null>(null);
@@ -300,6 +317,83 @@ export default function App() {
         stopAudio: stop,
       }),
     [play, stageMotionPort, stop],
+  );
+
+  const handleVoiceReaction = useCallback(
+    (decision: VoiceInteractionDecision) => {
+      if (decision.action === 'take_floor') return;
+
+      stopReaction();
+      voiceReactionIdRef.current += 1;
+      const reactionId = voiceReactionIdRef.current;
+
+      if (decision.action === 'listen') {
+        setListeningReaction({
+          id: reactionId,
+          kind: 'thinking',
+          target: 'viewer',
+        });
+        const motionPromise = stageRef.current?.playReactionMotion(
+          LISTENING_THINKING_MOTION_ASSET_ID,
+          reactionId,
+        );
+        if (motionPromise) {
+          void motionPromise.then(
+            () => {
+              if (voiceReactionIdRef.current === reactionId) {
+                setListeningReaction(undefined);
+              }
+            },
+            () => {
+              if (voiceReactionIdRef.current === reactionId) {
+                setListeningReaction(undefined);
+              }
+            },
+          );
+        } else {
+          setListeningReaction(undefined);
+        }
+        return;
+      }
+
+      setListeningReaction({
+        id: reactionId,
+        kind: 'nod',
+        target: 'viewer',
+      });
+      const cue = decision.backchannelCue === 'uun' ? 'uun' : 'un';
+      const playCue = () => {
+        if (voiceReactionIdRef.current !== reactionId) return;
+        const candidates = backchannelAudioRef.current.filter(
+          (audio) => audio.cue === cue,
+        );
+        const variantIndex = selectListeningBackchannelIndex(
+          candidates.length,
+          backchannelVariantIndexRef.current[cue],
+        );
+        const selectedAudio =
+          variantIndex === null ? undefined : candidates[variantIndex];
+        if (!selectedAudio) {
+          setListeningReaction(undefined);
+          return;
+        }
+        void playReaction(selectedAudio.audioData).then((played) => {
+          if (played) {
+            backchannelVariantIndexRef.current[cue] = variantIndex;
+          }
+          if (voiceReactionIdRef.current === reactionId) {
+            setListeningReaction(undefined);
+          }
+        });
+      };
+
+      if (backchannelLoadingRef.current) {
+        void backchannelLoadingRef.current.then(playCue);
+      } else {
+        playCue();
+      }
+    },
+    [playReaction, stopReaction],
   );
 
   const handlePerformancePlan = useCallback((plan: PerformancePlan) => {
@@ -396,6 +490,7 @@ export default function App() {
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
     onPerformanceResult: handlePerformanceResult,
+    onVoiceReaction: handleVoiceReaction,
   });
 
   const clearBargeInTimer = useCallback(() => {
@@ -516,9 +611,11 @@ export default function App() {
     } else {
       setDucked(false);
     }
+    stopReaction();
+    stageRef.current?.stopReactionMotion();
     activeVoiceSegmentRef.current = null;
     setListeningReaction(undefined);
-    backchannelVariantIndexRef.current = null;
+    backchannelVariantIndexRef.current = { un: null, uun: null };
     if (backchannelTimerRef.current !== null) {
       window.clearTimeout(backchannelTimerRef.current);
       backchannelTimerRef.current = null;
@@ -528,6 +625,12 @@ export default function App() {
       window.clearTimeout(nonSpeechTimerRef.current);
       nonSpeechTimerRef.current = null;
     }
+
+    if (cardAttentionTimerRef.current !== null) {
+      window.clearTimeout(cardAttentionTimerRef.current);
+      cardAttentionTimerRef.current = null;
+    }
+    setCardAttentionTarget(null);
 
     resetConversation();
     resetRuntime();
@@ -546,8 +649,28 @@ export default function App() {
     resetRuntime,
     resetTurn,
     setDucked,
+    stopReaction,
     stopVoiceInput,
   ]);
+
+  const handleCardInteraction = useCallback(() => {
+    if (!isExhibitionMode) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+    if (!shouldReactToCardInteraction()) return;
+
+    setCardAttentionTarget('game');
+    if (cardAttentionTimerRef.current !== null) {
+      window.clearTimeout(cardAttentionTimerRef.current);
+    }
+    const timerId = window.setTimeout(() => {
+      if (cardAttentionTimerRef.current !== timerId) return;
+      cardAttentionTimerRef.current = null;
+      setCardAttentionTarget(null);
+    }, CARD_INTERACTION_ATTENTION_DURATION_MS);
+    cardAttentionTimerRef.current = timerId;
+  }, [isExhibitionMode]);
 
   useEffect(() => {
     const serialized = JSON.stringify({ volume, lastAudibleVolume });
@@ -582,6 +705,9 @@ export default function App() {
     return () => {
       if (nonSpeechTimerRef.current !== null) {
         window.clearTimeout(nonSpeechTimerRef.current);
+      }
+      if (cardAttentionTimerRef.current !== null) {
+        window.clearTimeout(cardAttentionTimerRef.current);
       }
     };
   }, []);
@@ -632,11 +758,17 @@ export default function App() {
     backchannelLoadingRef.current = loading;
   }, []);
 
+  useEffect(() => {
+    preloadBackchannel();
+  }, [preloadBackchannel]);
+
   const handleVoiceEvent = useCallback(
     (event: VoiceInputEvent) => {
       switch (event.type) {
         case 'speech_started': {
           activeVoiceSegmentRef.current = event.segmentId;
+          stopReaction();
+          stageRef.current?.stopReactionMotion();
           setVoiceValidationError('');
           const isBargeInCandidate =
             audioLabMode === 'exhibition-mix' && ttsPlaying;
@@ -660,16 +792,20 @@ export default function App() {
           backchannelTimerRef.current = window.setTimeout(() => {
             backchannelTimerRef.current = null;
             if (activeVoiceSegmentRef.current !== segmentId) return;
-            const audioData = backchannelAudioRef.current;
+            const audioData = backchannelAudioRef.current.filter(
+              (audio) => audio.cue === 'un',
+            );
             const variantIndex = selectListeningBackchannelIndex(
               audioData.length,
-              backchannelVariantIndexRef.current,
+              backchannelVariantIndexRef.current.un,
             );
             if (variantIndex === null) return;
             const selectedAudio = audioData[variantIndex];
             if (!selectedAudio) return;
-            void playReaction(selectedAudio).then((played) => {
-              if (played) backchannelVariantIndexRef.current = variantIndex;
+            void playReaction(selectedAudio.audioData).then((played) => {
+              if (played) {
+                backchannelVariantIndexRef.current.un = variantIndex;
+              }
             });
           }, delayMs);
           return;
@@ -679,6 +815,8 @@ export default function App() {
           return;
         case 'utterance_finalized': {
           clearBackchannelTimer();
+          stopReaction();
+          stageRef.current?.stopReactionMotion();
           activeVoiceSegmentRef.current = null;
           setListeningReaction(undefined);
           const message = event.text.trim();
@@ -733,6 +871,8 @@ export default function App() {
                   : 'recognition_failed',
             });
           }
+          stopReaction();
+          stageRef.current?.stopReactionMotion();
           activeVoiceSegmentRef.current = null;
           setListeningReaction(undefined);
           return;
@@ -756,6 +896,7 @@ export default function App() {
       readCardContext,
       sendVoice,
       ttsPlaying,
+      stopReaction,
     ],
   );
 
@@ -908,6 +1049,8 @@ export default function App() {
     event.preventDefault();
     if (!trimmedInput || isManualBusy) return;
     setIsAutonomousLoopEnabled(true);
+    stopReaction();
+    stageRef.current?.stopReactionMotion();
     if (source === 'autonomous') cancelAutonomous();
     cancelNonSpeechPlan();
     const trigger: PerformerTrigger = {
@@ -1057,7 +1200,11 @@ export default function App() {
 
       <section className="avatar-area" aria-label="VRM character">
         <VrmStage
-          attentionTarget={performer.state.attention.target}
+          attentionTarget={
+            activePlan !== null
+              ? performer.state.attention.target
+              : cardAttentionTarget ?? performer.state.attention.target
+          }
           emotion={displayEmotion}
           isExhibitionMode={isExhibitionMode}
           listeningReaction={listeningReaction}
@@ -1077,7 +1224,8 @@ export default function App() {
         )}
         <CardGamePrototype
           game={cardGame}
-          isInteractionLocked={isPerformerBusy}
+          isResetLocked={isPerformerBusy}
+          onCardInteraction={handleCardInteraction}
           onCardInserted={handleCardInserted}
           onSessionReset={resetSession}
           onSelectionActiveChange={setIsCardSelectionActive}
@@ -1090,17 +1238,19 @@ export default function App() {
       >
         <div className="conversation-copy" aria-live="polite">
           {reply && <p className="reply">{reply}</p>}
-          <p className="status">
-            {isMuted && status === 'idle'
-              ? 'ミュート中です。テキスト会話は利用できます。'
-              : conversationStatusLabel}
-          </p>
+          {(!isExhibitionMode || !reply) && (
+            <p className="status">
+              {isMuted && status === 'idle'
+                ? 'ミュート中です。テキスト会話は利用できます。'
+                : conversationStatusLabel}
+            </p>
+          )}
           {conversationError && (
             <p className="conversation-error" role="alert">
               {conversationError}
             </p>
           )}
-          {isVoiceInputEnabled && (
+          {isVoiceInputEnabled && !isExhibitionMode && (
             <p className="voice-input-hint">
               {runtimeConfig.voiceTransport === 'remote'
                 ? 'PCM音声サービスを使用中です。ヘッドセットを推奨します。'

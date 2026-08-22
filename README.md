@@ -133,6 +133,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    ```dotenv
    OPENAI_API_KEY=
    VAYRIA_SECRET_FILE=C:\Users\<Windowsユーザー名>\.vayria\secrets.env
+   VAYRIA_HTTPS_CONFIG_FILE=
    AIVIS_BASE_URL=http://127.0.0.1:10101
    AIVIS_SPEED_SCALE=1.15
    AIVIS_PITCH_SCALE=0
@@ -142,6 +143,8 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
    `VAYRIA_SECRET_FILE`を設定した場合、外部ファイルの`OPENAI_API_KEY`を優先します。
    `VAYRIA_SECRET_FILE`を設定しない場合は、既存の`.env.local`直書き方式を使用します。
+   `VAYRIA_HTTPS_CONFIG_FILE`を設定した場合、共有ファイルのHTTPS設定を優先します。
+   `VAYRIA_HTTPS_CONFIG_FILE`を設定しない場合は、既存の`VAYRIA_HTTPS_*`直接設定を使用します。
 
    アプリは emotion に対応する zonoko style ID を `/speakers` から取得します。
    音声パラメーターは省略できます。省略時は上記の値を使います。
@@ -193,6 +196,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    `.env.exhibition.example`を毎回コピーする必要はありません。
    既存の`.env.local`は上書きしません。
    `.env.local`には実キーを保存しません。
+   `%USERPROFILE%\.vayria\https.env`が存在する場合、Setup scriptは同じHTTPS設定ファイルの絶対パスを各worktreeへ記録します。
 
    CodexアプリのSettingsでLocal environmentを作成し、アプリが生成したプロジェクト`.codex`設定を確認します。
    設定スキーマは手書きしません。
@@ -331,7 +335,10 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    `mkcert -CAROOT`が返すルートCAをiPadへインストールします。
    iPadの「設定 > 一般 > 情報 > 証明書信頼設定」でルートCAを信頼します。
 
-4. `.env.exhibition.local`へ証明書とSTTサービスの設定を追加します。
+4. 共有HTTPS設定ファイルを一度だけ作成します。
+
+   既定のパスは`C:\Users\<Windowsユーザー名>\.vayria\https.env`です。
+   証明書と秘密鍵はworktreeへコピーしません。
 
    ```dotenv
    VITE_AUDIO_PRESET=mild
@@ -339,18 +346,45 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    VAYRIA_HTTPS=true
    VAYRIA_HTTPS_CERT_FILE=C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-cert.pem
    VAYRIA_HTTPS_KEY_FILE=C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-key.pem
-   VAYRIA_STT_WS_URL=ws://127.0.0.1:8787/stream
    ```
 
-5. AivisSpeech とPython STTサービスを Windows PC で起動します。
+   `Setup-VayriaWorktree.ps1`は、このファイルが存在する場合に各worktreeの`.env.local`へ参照先を記録します。
+   既存の`.env.local`は上書きしません。
+   既存worktreeへ反映する場合は、内容を確認してから次を実行します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Initialize-WorktreeEnv.ps1 `
+     -WorktreePath 'C:\path\to\worktree' `
+     -Port 5188 `
+     -HttpsConfigFile 'C:\Users\<Windowsユーザー名>\.vayria\https.env' `
+     -Force
+   ```
+
+   `VITE_VOICE_INPUT_TRANSPORT`と`VAYRIA_STT_WS_URL`は、各worktreeの`.env.exhibition.local`へ残します。
+
+5. AivisSpeechをWindows PCで起動します。
+   AivisSpeechは今回の起動コマンドでは起動しません。
+   `AIVIS_BASE_URL`で設定した既存のサービスを使用します。
+
+6. 対象worktreeで、Python STTとexhibitionフロントを起動します。
+
+   ```powershell
+   npm run exhibition:start
+   ```
+
+   このコマンドは、Python STTを別のPowerShell窓で起動します。
+   exhibitionフロントは、現在のPowerShell窓で起動します。
+   Python STTが`127.0.0.1:8787`で待ち受けた後に、フロントを起動します。
+   フロントを`Ctrl+C`で停止すると、このコマンドが起動したPython STTも停止します。
+   既に`8787`番ポートが使用中の場合は、既存プロセスを停止せずにエラーを表示します。
+
+   手動で起動する場合は、次の2つのPowerShell窓を使用します。
 
    ```powershell
    Push-Location tools/stt
    uv run python -m vayria_stt.server
    Pop-Location
    ```
-
-6. exhibition モードで Vite を起動します。
 
    ```powershell
    npm run dev:exhibition
@@ -492,7 +526,7 @@ npm run stress -- `
 
 ## 自然さPlaycheck
 
-固定6ケースと5軸rubricで、AITuberの自然さをOwnerが確認できます。
+固定7ケースと5軸rubricで、AITuberの自然さをOwnerが確認できます。
 評価専用UIは追加しません。PCの対話CLIが採点を受け付けます。
 
 PCだけで確認する場合は、Viteを起動します。
@@ -536,7 +570,7 @@ CLIは`runId`、`playcheckRunId`付きURL、採点コマンドを表示します
 npm run playcheck -- score --run-id <runId>
 ```
 
-CLIは6ケースの前提、操作、観察点を表示します。
+CLIは7ケースの前提、操作、観察点を表示します。
 iPadでケースを実行し、PCへ戻ってEnterを押します。
 CLIが自然さに関する5つの質問と短い所感を尋ねます。
 入力はケースごとに保存されます。

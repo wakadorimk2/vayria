@@ -176,3 +176,32 @@ test('cancellation stops waiting playback and ignores stale motion', async () =>
   assert.equal(await playback, null);
   assert.deepEqual(events, ['audio_stop', 'motion_stop']);
 });
+
+test('voice pending plans reprepare motion when the same turn takes the floor', () => {
+  const preparedAssets: Array<string | undefined> = [];
+  const motionPort: PerformanceMotionPort = {
+    prepareMotion: async (plan) => {
+      preparedAssets.push(plan.motion?.assetId);
+      return true;
+    },
+    startPreparedMotion: () => 1_000,
+    finishMotion: () => undefined,
+    stopMotion: () => undefined,
+  };
+  const coordinator = new PerformancePlaybackCoordinator({
+    getMotionPort: () => motionPort,
+    playAudio: async () => undefined,
+    stopAudio: () => undefined,
+  });
+  const pendingPlan = createPlan({
+    intent: 'react_nonverbally',
+    motion: undefined,
+  });
+  const speakingPlan = createPlan();
+
+  coordinator.prepare(pendingPlan);
+  coordinator.prepare(speakingPlan);
+
+  assert.deepEqual(preparedAssets, [undefined, 'gesture']);
+  coordinator.stop();
+});

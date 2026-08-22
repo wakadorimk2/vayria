@@ -131,10 +131,13 @@ CLIは次の順で進みます。
 
 1. `idle_presence`
 2. `manual_response`
-3. `autonomous_turn`
-4. `silence_gap`
-5. `continuity_variation`
-6. `interruption`
+3. `voice_listener_reaction`
+4. `autonomous_turn`
+5. `silence_gap`
+6. `continuity_variation`
+7. `interruption`
+
+`voice_listener_reaction`では、具体的な話題、感情または好み、フィラーまたは未完発話を1回ずつ試します。内容のある発話では、短い返答が話題・感情・質問意図のいずれかを拾うかを確認します。フィラーまたは未完発話では、非発話反応が維持されるかを確認します。
 
 途中でCLIを終了した場合は、同じコマンドで未完了ケースから再開します。
 特定ケースを再採点する場合は、次を使います。
@@ -162,7 +165,7 @@ npm run playcheck -- score --run-id <runId> --case interruption
 
 ## 4. runを確定する
 
-6ケースの採点後に、同じPowerShellで実行します。
+7ケースの採点後に、同じPowerShellで実行します。
 
 ```powershell
 npm run playcheck -- finalize --run-id <runId>

@@ -1,4 +1,5 @@
 import type { Emotion } from '../character/emotion.js';
+import type { VoiceInteractionAction } from '../voice/voiceInteraction.js';
 
 export type AttentionTarget = 'viewer' | 'chat' | 'game' | 'none';
 
@@ -232,6 +233,7 @@ export interface PerformanceResult {
   outcome: 'completed' | 'cancelled' | 'interrupted' | 'failed';
   trigger: PerformerTrigger['kind'];
   intent: PerformancePlan['intent'];
+  interactionAction?: VoiceInteractionAction;
   spokenText?: string;
   emotionCue?: {
     emotion: Emotion;

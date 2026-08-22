@@ -201,6 +201,17 @@
       "contentSha256": "2cb11a972c1a9cbedaac87a3218286f0c0821d7223bee88f4f8eee031e7f074e"
     },
     {
+      "assetId": "listening-thinking",
+      "file": "listening-thinking.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 3000,
+      "fps": 20,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "45ee0277476c347e6e1ffecf2d91b7f9e37d4a25655b10d958cd721e0551f563"
+    },
+    {
       "assetId": "speech-gentle",
       "file": "speech-gentle.vrma",
       "source": "saved",

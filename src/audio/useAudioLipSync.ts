@@ -155,12 +155,16 @@ export function useAudioLipSync(volume = 1) {
     setIsReactionPlaying(false);
   }, []);
 
+  const stopReaction = useCallback(() => {
+    reactionGenerationRef.current += 1;
+    clearReactionPlayback();
+  }, [clearReactionPlayback]);
+
   const stop = useCallback(() => {
     generationRef.current += 1;
-    reactionGenerationRef.current += 1;
     clearPlayback();
-    clearReactionPlayback();
-  }, [clearPlayback, clearReactionPlayback]);
+    stopReaction();
+  }, [clearPlayback, stopReaction]);
 
   const setDucked = useCallback((ducked: boolean) => {
     duckedRef.current = ducked;
@@ -418,6 +422,7 @@ export function useAudioLipSync(volume = 1) {
     playReaction,
     prepare,
     setDucked,
+    stopReaction,
     stop,
   };
 }

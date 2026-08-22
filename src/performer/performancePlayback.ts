@@ -43,6 +43,7 @@ interface PerformancePlaybackOptions {
 interface PreparationState {
   controller: AbortController;
   planId: string;
+  assetId: string | null;
   promise: Promise<boolean>;
 }
 
@@ -71,7 +72,13 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
   }
 
   prepare(plan: PerformancePlan): void {
-    if (this.preparation?.planId === plan.planId) return;
+    const assetId = plan.motion?.assetId ?? null;
+    if (
+      this.preparation?.planId === plan.planId &&
+      this.preparation.assetId === assetId
+    ) {
+      return;
+    }
 
     if (this.activePlanId && this.activePlanId !== plan.planId) {
       this.generation += 1;
@@ -88,7 +95,7 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
       .then((ready) => ready)
       .catch(() => false) ?? Promise.resolve(false);
 
-    this.preparation = { controller, planId: plan.planId, promise };
+    this.preparation = { controller, planId: plan.planId, assetId, promise };
   }
 
   async play(
@@ -96,7 +103,11 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
     audioData: ArrayBuffer,
     callbacks: PerformancePlaybackCallbacks = {},
   ): Promise<PerformancePlaybackResult | null> {
-    if (this.preparation?.planId !== plan.planId) {
+    const assetId = plan.motion?.assetId ?? null;
+    if (
+      this.preparation?.planId !== plan.planId ||
+      this.preparation.assetId !== assetId
+    ) {
       this.prepare(plan);
     }
 

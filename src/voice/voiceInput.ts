@@ -9,7 +9,7 @@ export type VoiceInputPhase =
 
 export interface ListeningReactionCue {
   id: number;
-  kind: 'nod';
+  kind: 'nod' | 'thinking';
   target: 'viewer';
 }
 

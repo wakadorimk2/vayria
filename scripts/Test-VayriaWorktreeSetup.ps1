@@ -61,6 +61,8 @@ function Invoke-SetupScript {
     [Parameter(Mandatory = $true)]
     [string]$ExternalSecretFile,
 
+    [string]$ExternalHttpsConfigFile,
+
     [Parameter(Mandatory = $true)]
     [string]$AvatarSourcePath,
 
@@ -80,6 +82,13 @@ function Invoke-SetupScript {
     '-AvatarSourcePath'
     $AvatarSourcePath
   )
+
+  if (-not [string]::IsNullOrWhiteSpace($ExternalHttpsConfigFile)) {
+    $arguments += @(
+      '-HttpsConfigFile'
+      $ExternalHttpsConfigFile
+    )
+  }
 
   if ($ExpectFailure) {
     & $pwshCommand @arguments *> $null
@@ -193,6 +202,7 @@ $worktreeFive = Join-Path $testRoot 'worktree-five'
 $worktreeSix = Join-Path $testRoot 'worktree-six'
 $secretDirectory = Join-Path $testRoot 'secret folder'
 $secretFile = Join-Path $secretDirectory 'secrets.env'
+$httpsConfigFile = Join-Path $secretDirectory 'https.env'
 $avatarSourceDirectory = Join-Path $testRoot 'avatar source folder'
 $avatarSourceFile = Join-Path $avatarSourceDirectory 'model.vrm'
 $repositoryAvatar = Join-Path $repositoryRoot 'public\avatar\model.vrm'
@@ -212,6 +222,11 @@ $worktreeSixEnv = Join-Path $worktreeSix '.env.local'
 try {
   New-Item -ItemType Directory -Path $repositoryRoot, $secretDirectory, $avatarSourceDirectory -Force | Out-Null
   Set-Content -LiteralPath $secretFile -Value 'OPENAI_API_KEY=test-worktree-key' -Encoding utf8
+  Set-Content -LiteralPath $httpsConfigFile -Value @(
+    'VAYRIA_HTTPS=true'
+    'VAYRIA_HTTPS_CERT_FILE=C:\shared\vayria-cert.pem'
+    'VAYRIA_HTTPS_KEY_FILE=C:\shared\vayria-key.pem'
+  ) -Encoding utf8
   Set-Content -LiteralPath $avatarSourceFile -Value 'test-vrm-payload' -Encoding utf8
 
   Invoke-NativeChecked -Command $gitCommand -Arguments @('init', '--quiet', $repositoryRoot)
@@ -227,8 +242,8 @@ try {
   Invoke-NativeChecked -Command $gitCommand -Arguments @('-C', $repositoryRoot, 'worktree', 'add', '--quiet', '--detach', $worktreeFive, 'HEAD')
   Invoke-NativeChecked -Command $gitCommand -Arguments @('-C', $repositoryRoot, 'worktree', 'add', '--quiet', '--detach', $worktreeSix, 'HEAD')
 
-  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile -UseCurrentDirectory
-  Invoke-SetupScript -Worktree $worktreeTwo -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile
+  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -ExternalHttpsConfigFile $httpsConfigFile -AvatarSourcePath $avatarSourceFile -UseCurrentDirectory
+  Invoke-SetupScript -Worktree $worktreeTwo -ExternalSecretFile $secretFile -ExternalHttpsConfigFile $httpsConfigFile -AvatarSourcePath $avatarSourceFile
 
   $portOne = [int](Get-EnvironmentValue -Path $worktreeOneEnv -Name 'VAYRIA_PORT')
   $portTwo = [int](Get-EnvironmentValue -Path $worktreeTwoEnv -Name 'VAYRIA_PORT')
@@ -286,11 +301,16 @@ try {
     if (-not [string]::Equals($secretReference, [IO.Path]::GetFullPath($secretFile), [StringComparison]::OrdinalIgnoreCase)) {
       throw "The generated environment has an unexpected secret file reference: $envPath"
     }
+
+    $httpsConfigReference = Get-EnvironmentValue -Path $envPath -Name 'VAYRIA_HTTPS_CONFIG_FILE'
+    if (-not [string]::Equals($httpsConfigReference, [IO.Path]::GetFullPath($httpsConfigFile), [StringComparison]::OrdinalIgnoreCase)) {
+      throw "The generated environment has an unexpected HTTPS config file reference: $envPath"
+    }
   }
 
   $hashBeforeRerun = (Get-FileHash -LiteralPath $worktreeOneEnv -Algorithm SHA256).Hash
   $avatarHashBeforeRerun = (Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash
-  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile
+  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -ExternalHttpsConfigFile $httpsConfigFile -AvatarSourcePath $avatarSourceFile
   $hashAfterRerun = (Get-FileHash -LiteralPath $worktreeOneEnv -Algorithm SHA256).Hash
   if ($hashBeforeRerun -ne $hashAfterRerun) {
     throw 'Setup changed an existing .env.local.'
@@ -302,7 +322,7 @@ try {
   $missingAvatarSource = Join-Path $avatarSourceDirectory 'missing.vrm'
   $worktreeTwoEnvironmentHash = (Get-FileHash -LiteralPath $worktreeTwoEnv -Algorithm SHA256).Hash
   Remove-Item -LiteralPath $worktreeTwoAvatar -Force
-  Invoke-SetupScript -Worktree $worktreeTwo -ExternalSecretFile $secretFile -AvatarSourcePath $missingAvatarSource
+  Invoke-SetupScript -Worktree $worktreeTwo -ExternalSecretFile $secretFile -ExternalHttpsConfigFile $httpsConfigFile -AvatarSourcePath $missingAvatarSource
   if ((Get-FileHash -LiteralPath $worktreeTwoEnv -Algorithm SHA256).Hash -ne $worktreeTwoEnvironmentHash) {
     throw 'Setup changed an existing .env.local when the VRM source was missing.'
   }
@@ -313,7 +333,7 @@ try {
 
   Set-Content -LiteralPath $worktreeOneAvatar -Value 'local-worktree-vrm' -Encoding utf8
   $protectedAvatarHash = (Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash
-  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile
+  Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -ExternalHttpsConfigFile $httpsConfigFile -AvatarSourcePath $avatarSourceFile
   if ((Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash -ne $protectedAvatarHash) {
     throw 'Setup overwrote a differing VRM without explicit synchronization.'
   }
@@ -333,7 +353,7 @@ try {
     $listener = $reservation.Listener
     $listenerPort = $reservation.Port
 
-    Invoke-SetupScript -Worktree $worktreeThree -ExternalSecretFile $secretFile -AvatarSourcePath $avatarSourceFile
+    Invoke-SetupScript -Worktree $worktreeThree -ExternalSecretFile $secretFile -ExternalHttpsConfigFile $httpsConfigFile -AvatarSourcePath $avatarSourceFile
     $portThree = [int](Get-EnvironmentValue -Path $worktreeThreeEnv -Name 'VAYRIA_PORT')
     if ($portThree -le $listenerPort) {
       throw "The setup did not skip the TCP-used port ${listenerPort}: $portThree"
@@ -369,6 +389,8 @@ try {
       ('"{0}"' -f $case.Worktree)
       '-SecretFile'
       ('"{0}"' -f $secretFile)
+      '-HttpsConfigFile'
+      ('"{0}"' -f $httpsConfigFile)
       '-AvatarSourcePath'
       ('"{0}"' -f $avatarSourceFile)
     )
@@ -404,6 +426,11 @@ try {
     if (-not [string]::Equals($secretReference, [IO.Path]::GetFullPath($secretFile), [StringComparison]::OrdinalIgnoreCase)) {
       throw "The generated environment has an unexpected secret file reference: $envPath"
     }
+
+    $httpsConfigReference = Get-EnvironmentValue -Path $envPath -Name 'VAYRIA_HTTPS_CONFIG_FILE'
+    if (-not [string]::Equals($httpsConfigReference, [IO.Path]::GetFullPath($httpsConfigFile), [StringComparison]::OrdinalIgnoreCase)) {
+      throw "The generated environment has an unexpected HTTPS config file reference: $envPath"
+    }
   }
 
   Invoke-AvatarSyncScript -Worktree $repositoryRoot -AvatarSourcePath $avatarSourceFile -AllWorktrees -Force
@@ -428,6 +455,12 @@ try {
   Invoke-SetupScript -Worktree $worktreeFour -ExternalSecretFile $missingSecretFile -AvatarSourcePath $avatarSourceFile -ExpectFailure
   if (Test-Path -LiteralPath $worktreeFourEnv) {
     throw 'Setup created .env.local after the secret file check failed.'
+  }
+
+  $missingHttpsConfigFile = Join-Path $secretDirectory 'missing-https.env'
+  Invoke-SetupScript -Worktree $worktreeFour -ExternalSecretFile $secretFile -ExternalHttpsConfigFile $missingHttpsConfigFile -AvatarSourcePath $avatarSourceFile
+  if (-not [string]::IsNullOrEmpty((Get-EnvironmentValue -Path $worktreeFourEnv -Name 'VAYRIA_HTTPS_CONFIG_FILE'))) {
+    throw 'Setup recorded a missing HTTPS config file.'
   }
 
   Invoke-NativeChecked -Command $gitCommand -Arguments @('-C', $repositoryRoot, 'worktree', 'remove', '--force', $worktreeOne)

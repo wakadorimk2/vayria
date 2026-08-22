@@ -3,6 +3,7 @@ import test from 'node:test';
 import { cardPool } from '../src/cards/cardPool.js';
 import {
   CARD_BEHAVIORS,
+  CARD_INTERACTION_ATTENTION_CHANCE,
   CARD_MODIFIERS,
   CARD_REACTION_AXES,
   CARD_REACTION_MODIFIER_FIELDS,
@@ -10,6 +11,7 @@ import {
   CARD_REACTION_VISIBLE_FIELDS,
   createCardPreviewContribution,
   M1_INITIAL_BRAIN_CARD_IDS,
+  shouldReactToCardInteraction,
 } from '../src/cards/cardReactions.js';
 
 const EXPECTED_M1_CARD_IDS = [
@@ -122,4 +124,11 @@ test('card preview contribution forces speech and viewer attention', () => {
   assert.equal(contribution.effects[0].durationMs, 30_000);
   assert.equal(contribution.effects[0].decay, 'exponential');
   assert.deepEqual(contribution.effects[0].modifiers, CARD_MODIFIERS.rain);
+});
+
+test('card interaction attention uses a strict 35 percent boundary', () => {
+  assert.equal(CARD_INTERACTION_ATTENTION_CHANCE, 0.35);
+  assert.equal(shouldReactToCardInteraction(() => 0.34), true);
+  assert.equal(shouldReactToCardInteraction(() => 0.35), false);
+  assert.equal(shouldReactToCardInteraction(() => Number.NaN), false);
 });
