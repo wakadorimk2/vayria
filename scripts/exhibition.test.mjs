@@ -1,0 +1,249 @@
+import assert from 'node:assert/strict';
+import { Readable } from 'node:stream';
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import test from 'node:test';
+import {
+  appendObservationRecord,
+  getCapturePaths,
+  initializeCaptureForTest,
+  parseObservationCommand,
+  readCaptureObservations,
+  resolveCaptureSelection,
+} from './exhibition-capture.mjs';
+import {
+  createCsv,
+  exportCapture,
+  parseExportArgs,
+} from './exhibition-export.mjs';
+import {
+  parseObserveArgs,
+  runObserver,
+} from './exhibition-observe.mjs';
+
+test('observation CLI selects a capture safely and supports latest', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vayria-exhibition-cli-'));
+  try {
+    const older = 'ex-20260822000000-abcdef12';
+    const newer = 'ex-20260822000100-abcdef34';
+    await initializeCaptureForTest(root, {
+      captureId: older,
+      startedAt: '2026-08-22T00:00:00.000Z',
+    });
+    await initializeCaptureForTest(root, {
+      captureId: newer,
+      startedAt: '2026-08-22T00:01:00.000Z',
+    });
+
+    assert.deepEqual(parseObserveArgs(['--latest'], { VAYRIA_PLAYCHECK_ROOT: root }), {
+      captureId: null,
+      latest: true,
+      help: false,
+      localRoot: root,
+    });
+    const selected = await resolveCaptureSelection({
+      localRoot: root,
+      latest: true,
+    });
+    assert.equal(selected.captureId, newer);
+    await assert.rejects(
+      resolveCaptureSelection({
+        localRoot: root,
+        captureId: '../escape',
+      }),
+      /Invalid exhibition capture ID/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('observation commands validate notes, scores, and N/A reasons', () => {
+  assert.deepEqual(parseObservationCommand('note 返答の間を観察'), {
+    command: 'note',
+    note: '返答の間を観察',
+  });
+  assert.deepEqual(parseObservationCommand('score timing 3'), {
+    command: 'score',
+    axis: 'timing',
+    score: 3,
+  });
+  assert.deepEqual(
+    parseObservationCommand('score emotion N/A 音声を確認できなかった'),
+    {
+      command: 'score',
+      axis: 'emotion',
+      score: 'N/A',
+      reason: '音声を確認できなかった',
+    },
+  );
+  assert.throws(
+    () => parseObservationCommand('score unknown 2'),
+    /Unknown rubric axis/,
+  );
+  assert.throws(
+    () => parseObservationCommand('score timing 4'),
+    /must be 0, 1, 2, 3, or N\/A/,
+  );
+  assert.throws(
+    () => parseObservationCommand('score timing N/A'),
+    /requires a reason/,
+  );
+  assert.throws(
+    () => parseObservationCommand(`note ${'x'.repeat(501)}`),
+    /500 characters or fewer/,
+  );
+});
+
+test('observer CLI saves notes, numeric scores, and N/A reasons without deleting data', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vayria-exhibition-observe-'));
+  const captureId = 'ex-20260822000200-abcdef56';
+  try {
+    await initializeCaptureForTest(root, { captureId });
+    const output = { isTTY: false, chunks: [], write(value) { this.chunks.push(value); } };
+    const result = await runObserver({
+      localRoot: root,
+      captureId,
+      input: Readable.from([
+        'note 画面を邪魔せず観察できた\n',
+        'score timing 2\n',
+        'score emotion N/A 音声確認なし\n',
+        'exit\n',
+      ]),
+      output,
+      now: () => '2026-08-22T00:02:01.000Z',
+    });
+    assert.equal(result.savedCount, 3);
+    const observations = await readCaptureObservations(root, captureId);
+    assert.equal(observations.length, 3);
+    assert.equal(observations[0].note, '画面を邪魔せず観察できた');
+    assert.equal(observations[1].score, 2);
+    assert.equal(observations[2].score, 'N/A');
+    assert.equal(observations[2].reason, '音声確認なし');
+    assert.match(output.chunks.join(''), /保存しました/);
+    await assert.doesNotReject(readFile(getCapturePaths(root, captureId).metadataPath));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('export keeps incomplete captures and makes JSON and CSV counts agree', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vayria-exhibition-export-'));
+  const captureId = 'ex-20260822000300-abcdef78';
+  try {
+    await initializeCaptureForTest(root, {
+      captureId,
+      startedAt: '2026-08-22T00:03:00.000Z',
+      status: 'active',
+    });
+    const paths = getCapturePaths(root, captureId);
+    await writeFile(
+      paths.eventsPath,
+      [
+        {
+          captureId,
+          event: 'llm_done',
+          at: '2026-08-22T00:03:01.000Z',
+          origin: 'server',
+          turnId: 'turn-1',
+          source: 'manual',
+          elapsedMs: 100,
+        },
+        {
+          captureId,
+          event: 'tts_ready',
+          at: '2026-08-22T00:03:02.000Z',
+          origin: 'server',
+          turnId: 'turn-1',
+          source: 'manual',
+          durationMs: 250,
+        },
+      ].map((event) => JSON.stringify(event)).join('\n') + '\n',
+      'utf8',
+    );
+    await appendObservationRecord(
+      root,
+      captureId,
+      { command: 'note', note: '自然, もう一度確認' },
+      '2026-08-22T00:03:03.000Z',
+    );
+    await appendObservationRecord(
+      root,
+      captureId,
+      { command: 'score', axis: 'timing', score: 2 },
+      '2026-08-22T00:03:04.000Z',
+    );
+    await appendObservationRecord(
+      root,
+      captureId,
+      { command: 'score', axis: 'emotion', score: 'N/A', reason: '音声なし' },
+      '2026-08-22T00:03:05.000Z',
+    );
+
+    const result = await exportCapture({
+      localRoot: root,
+      captureId,
+      generatedAt: '2026-08-22T00:04:00.000Z',
+    });
+    assert.equal(result.summary.capture.status, 'active');
+    assert.equal(result.summary.runtime.eventCount, 2);
+    assert.equal(result.summary.runtime.turnCount, 1);
+    assert.deepEqual(result.summary.runtime.eventTypes, {
+      llm_done: 1,
+      tts_ready: 1,
+    });
+    assert.equal(result.summary.runtime.latency.averageMs, 175);
+    assert.equal(result.summary.runtime.latency.p95Ms, 250);
+    assert.equal(result.summary.observations.noteCount, 1);
+    assert.equal(result.summary.observations.scoreCount, 2);
+    assert.equal(result.summary.observations.axisScores.timing.average, 2);
+    assert.deepEqual(result.summary.observations.axisScores.emotion.naReasons, ['音声なし']);
+    assert.equal(result.summary.rowCount, 5);
+
+    const csv = await readFile(result.rowsPath, 'utf8');
+    assert.equal(csv.trim().split(/\r?\n/).length, 6);
+    assert.match(csv, /"自然, もう一度確認"/);
+    assert.match(csv, /runtime,.*llm_done/);
+    assert.match(csv, /observation,.*score/);
+    assert.match(
+      await readFile(paths.eventsPath, 'utf8'),
+      /llm_done/,
+      'raw runtime JSONL remains after export',
+    );
+    assert.deepEqual(parseExportArgs(['--latest'], { VAYRIA_PLAYCHECK_ROOT: root }), {
+      captureId: null,
+      latest: true,
+      help: false,
+      localRoot: root,
+      outputDir: null,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('CSV generation escapes commas and preserves the same row set', () => {
+  const csv = createCsv({
+    metadata: {
+      captureId: 'ex-20260822000400-abcdef90',
+      mode: 'exhibition',
+    },
+    events: [],
+    observations: [
+      {
+        captureId: 'ex-20260822000400-abcdef90',
+        at: '2026-08-22T00:04:00.000Z',
+        type: 'note',
+        note: 'a,b',
+      },
+    ],
+  });
+  assert.match(csv, /"a,b"/);
+  assert.equal(csv.trim().split(/\r?\n/).length, 2);
+});

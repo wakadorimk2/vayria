@@ -54,6 +54,7 @@ export default defineConfig(({ mode }) => {
         aivisTempoDynamicsScale:
           serverEnvironment.AIVIS_TEMPO_DYNAMICS_SCALE,
         playcheckRoot: serverEnvironment.VAYRIA_PLAYCHECK_ROOT,
+        exhibitionCaptureEnabled: mode === 'exhibition',
       }),
     ],
     server: {
