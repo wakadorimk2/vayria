@@ -53,6 +53,7 @@ export default defineConfig(({ mode }) => {
         aivisIntonationScale: serverEnvironment.AIVIS_INTONATION_SCALE,
         aivisTempoDynamicsScale:
           serverEnvironment.AIVIS_TEMPO_DYNAMICS_SCALE,
+        playcheckRoot: serverEnvironment.VAYRIA_PLAYCHECK_ROOT,
       }),
     ],
     server: {

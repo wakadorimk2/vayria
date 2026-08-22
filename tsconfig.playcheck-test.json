@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/playcheck-test",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/playcheck-test.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/playcheck.ts",
+    "server/playcheckStore.ts",
+    "scripts/playcheck-store.test.ts"
+  ]
+}
