@@ -356,7 +356,17 @@ npm run dev:exhibition
 npm run playcheck -- start --base-url http://<PCのLANアドレス>:5187/
 ```
 
-CLIが表示した`playcheckRunId`付きURLをiPadで開きます。
+CLIが生成したQRページがPCの既定ブラウザーで開きます。
+iPadのカメラでQRコードを読み取ります。
+iPadとWindows PCは同じLANに接続してください。
+QRページを自動で開かない場合は、次を使います。
+
+```powershell
+npm run playcheck -- start --base-url http://<PCのLANアドレス>:5187/ --no-open-qr
+```
+
+その場合は、CLIに表示された`QR page`のパスをPCのブラウザーで開きます。
+CLIは従来の`playcheckRunId`付きURLも表示します。
 同じrun IDを指定して、PCで対話式採点を開始します。
 
 ```powershell

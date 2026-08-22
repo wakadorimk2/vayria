@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import {
   mkdir,
   readdir,
@@ -7,7 +8,8 @@ import {
 } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import QRCode from 'qrcode';
 
 export const SCENARIO_IDS = Object.freeze([
   'idle_presence',
@@ -163,6 +165,7 @@ export function parseArgs(argv) {
     baseUrl: DEFAULT_BASE_URL,
     force: false,
     localRoot: DEFAULT_LOCAL_ROOT,
+    openQr: true,
     resultsRoot: DEFAULT_RESULTS_ROOT,
     runId: null,
     caseId: null,
@@ -173,6 +176,10 @@ export function parseArgs(argv) {
     const argument = argv[index];
     if (argument === '--force') {
       options.force = true;
+      continue;
+    }
+    if (argument === '--no-open-qr') {
+      options.openQr = false;
       continue;
     }
     if (argument === '--help' || argument === '-h') continue;
@@ -228,6 +235,94 @@ export function createRunTemplate({
 async function writeJson(path, value) {
   await mkdir(resolve(path, '..'), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character]);
+}
+
+function createQrPageHtml({ qrSvg, runId, url }) {
+  return `<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vayria Owner Playcheck</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f3f4f6; color: #111827; }
+      main { width: min(92vw, 720px); box-sizing: border-box; padding: 32px; text-align: center; background: #fff; border-radius: 20px; box-shadow: 0 16px 48px rgb(17 24 39 / 12%); }
+      h1 { margin: 0 0 12px; font-size: 1.6rem; }
+      p { line-height: 1.6; }
+      .qr { display: inline-block; margin: 20px 0; padding: 16px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; }
+      .qr svg { display: block; width: min(72vw, 512px); height: auto; }
+      code { overflow-wrap: anywhere; word-break: break-word; }
+      .url { padding: 12px; text-align: left; background: #f9fafb; border-radius: 8px; }
+      .hint { margin-bottom: 0; color: #4b5563; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Vayria Owner Playcheck</h1>
+      <p>iPadのカメラで、次のQRコードを読み取ってください。</p>
+      <div class="qr" aria-label="Playcheck URLのQRコード">${qrSvg}</div>
+      <p><strong>run ID:</strong> <code>${escapeHtml(runId)}</code></p>
+      <p class="url"><strong>読み取り先:</strong><br><code>${escapeHtml(url)}</code></p>
+      <p class="hint">iPadとWindows PCが同じLANに接続されていることを確認してください。</p>
+    </main>
+  </body>
+</html>
+`;
+}
+
+async function writeQrPage({ localRoot, runId, url }) {
+  const qrSvg = await QRCode.toString(url, {
+    type: 'svg',
+    errorCorrectionLevel: 'M',
+    margin: 2,
+    width: 512,
+    color: {
+      dark: '#111827',
+      light: '#ffffff',
+    },
+  });
+  const qrPath = resolve(localRoot, 'launch', `${runId}.html`);
+  await mkdir(resolve(qrPath, '..'), { recursive: true });
+  await writeFile(qrPath, createQrPageHtml({ qrSvg, runId, url }), 'utf8');
+  return qrPath;
+}
+
+export function openQrPage(
+  filePath,
+  {
+    platform = process.platform,
+    spawnProcess = spawn,
+  } = {},
+) {
+  const absolutePath = resolve(filePath);
+  const target = platform === 'win32'
+    ? pathToFileURL(absolutePath).href
+    : absolutePath;
+  const launchers = {
+    darwin: ['open', [target]],
+    linux: ['xdg-open', [target]],
+    win32: ['rundll32.exe', ['url.dll,FileProtocolHandler', target]],
+  };
+  const launcher = launchers[platform];
+  if (!launcher) throw new Error(`Opening a QR page is unsupported on ${platform}.`);
+  const child = spawnProcess(launcher[0], launcher[1], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.on?.('error', () => undefined);
+  child.unref?.();
+  return { command: launcher[0], args: launcher[1], path: absolutePath };
 }
 
 async function readJson(path) {
@@ -636,10 +731,16 @@ export async function startRun({
   await writeJson(workPath, template);
   const url = new URL(normalizedBaseUrl);
   url.searchParams.set('playcheckRunId', effectiveRunId);
+  const qrPath = await writeQrPage({
+    localRoot,
+    runId: effectiveRunId,
+    url: url.toString(),
+  });
   return {
     runId: effectiveRunId,
     workPath,
     rawPath: resolve(localRoot, 'raw', `${effectiveRunId}.jsonl`),
+    qrPath,
     url: url.toString(),
     template,
   };
@@ -860,7 +961,7 @@ export async function finalizeRun({
 function printHelp() {
   console.log(`Playcheck commands:
 
-  npm run playcheck -- start [--base-url URL] [--run-id ID]
+  npm run playcheck -- start [--base-url URL] [--run-id ID] [--no-open-qr]
   npm run playcheck -- score --run-id ID [--case CASE]
   npm run playcheck -- finalize --run-id ID [--work PATH]
 
@@ -868,6 +969,7 @@ Optional paths:
   --local-root PATH       default: ${DEFAULT_LOCAL_ROOT}
   --results-root PATH     default: ${DEFAULT_RESULTS_ROOT}
   --case CASE             score one case instead of the next incomplete case
+  --no-open-qr             do not open the generated QR page automatically
   --force                 allow replacing an existing generated file
 `);
 }
@@ -880,8 +982,18 @@ async function main() {
   }
   if (options.command === 'start') {
     const run = await startRun(options);
+    if (options.openQr) {
+      try {
+        openQrPage(run.qrPath);
+      } catch (error) {
+        console.log(
+          `QRページを自動で開けませんでした。パスをブラウザーで開いてください: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     console.log(`Playcheck run: ${run.runId}`);
     console.log(`Open: ${run.url}`);
+    console.log(`QR page: ${run.qrPath}`);
     console.log(`Score: npm run playcheck -- score --run-id ${run.runId}`);
     console.log(`State: ${run.workPath}`);
     console.log(`Raw events: ${run.rawPath}`);

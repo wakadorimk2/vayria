@@ -10,6 +10,7 @@ import {
   createRunTemplate,
   finalizeRun,
   isValidRunId,
+  openQrPage,
   parseArgs,
   parseInteractiveScore,
   scoreRun,
@@ -102,6 +103,24 @@ test('score arguments and interactive score values are validated', () => {
   assert.throws(() => parseInteractiveScore('4'), /must be 0, 1, 2, 3, or N\/A/);
 });
 
+test('start accepts --no-open-qr and the browser launcher is injectable', () => {
+  const options = parseArgs(['start', '--no-open-qr']);
+  assert.equal(options.openQr, false);
+
+  const calls = [];
+  const launched = openQrPage('playcheck-results/local/launch/test.html', {
+    platform: 'win32',
+    spawnProcess(command, args, spawnOptions) {
+      calls.push({ command, args, spawnOptions });
+      return { unref() {} };
+    },
+  });
+  assert.equal(launched.command, 'rundll32.exe');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].spawnOptions.detached, true);
+  assert.equal(calls[0].spawnOptions.stdio, 'ignore');
+});
+
 test('start accepts the CLI default and a copied Markdown URL', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vayria-playcheck-start-'));
   try {
@@ -112,6 +131,10 @@ test('start accepts the CLI default and a copied Markdown URL', async () => {
     });
     assert.equal(isValidRunId(started.runId), true);
     assert.equal(started.template.baseUrl, 'http://127.0.0.1:5187/');
+    const qrPage = await readFile(started.qrPath, 'utf8');
+    assert.match(qrPage, /<svg/);
+    assert.match(qrPage, /playcheckRunId=/);
+    assert.match(qrPage, new RegExp(started.runId));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -263,6 +286,23 @@ test('start and finalize create an anonymous result and cumulative summary', asy
     assert.equal(summary.runCount, 1);
     assert.equal(summary.passCount, 1);
     assert.equal(summary.latestRunId, RUN_ID);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('QR pages contain only launch data and no forbidden runtime content', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vayria-playcheck-qr-'));
+  try {
+    const started = await startRun({
+      localRoot: join(root, 'local'),
+      runId: RUN_ID,
+      baseUrl: 'http://192.168.1.9:5189/',
+    });
+    const qrPage = await readFile(started.qrPath, 'utf8');
+    assert.match(qrPage, /http:\/\/192\.168\.1\.9:5189\/\?playcheckRunId=/);
+    assert.doesNotMatch(qrPage, /apiKey|audioData|history|prompt|response text/);
+    assert.doesNotMatch(qrPage, /OPENAI_API_KEY|sk-[A-Za-z0-9]/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

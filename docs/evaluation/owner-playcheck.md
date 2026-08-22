@@ -29,12 +29,19 @@ npm run playcheck -- start --base-url http://<PCのLANアドレス>:5187/
 CLIは次を表示します。
 
 - `runId`
+- QRページのパス
 - `playcheckRunId`付きURL
 - 対話式採点コマンド
 - 作業状態JSONのパス
 - 生イベントJSONLのパス
 
-表示されたURLをiPadで開きます。
+CLIはQRページをPCの既定ブラウザーで開きます。
+iPadのカメラでQRコードを読み取ります。
+iPadとWindows PCは同じLANに接続してください。
+QRページを自動で開かない場合は、`--no-open-qr`を追加します。
+その場合は、CLIに表示された`QR page`のパスをPCのブラウザーで開きます。
+
+QRを使わない場合は、CLIに表示された`playcheckRunId`付きURLをiPadで開けます。
 URLの`playcheckRunId`は変更しません。
 
 ## 3. PCで対話式採点を開始する
