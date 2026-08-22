@@ -3,6 +3,8 @@ import { DEFAULT_PERFORMER_PROFILE } from './profile.js';
 import type {
   ActionIntent,
   AttentionTarget,
+  ConversationAction,
+  ConversationActionDecision,
   DirectionContribution,
   DirectionEffect,
   DirectionModifiers,
@@ -17,6 +19,139 @@ const MIN_EFFECT_INTENSITY = 0.001;
 const MAX_SEMANTIC_BIASES = 12;
 export const DEFAULT_SPEECH_MOTION_ASSET_ID = 'speech-gentle';
 let planSequence = 0;
+
+const PHATIC_ONLY_MESSAGES = new Set([
+  'うん',
+  'うんうん',
+  'はい',
+  'はいはい',
+  'ええ',
+  'そう',
+  'そうそう',
+  'そうだね',
+  'そうなんだ',
+  'そうか',
+  'なるほど',
+  'なるほどね',
+  'そっか',
+  'あの',
+  'えっと',
+  'えーと',
+  'その',
+  'まあ',
+  'んー',
+  'うーん',
+  'ね',
+  'あ',
+]);
+const UNFINISHED_ENDING =
+  /(?:けど|けれど|けれども|ですが|なので|だから|から|ので|し|っていうか|というか|なんていうか)$/u;
+const TERMINAL_PUNCTUATION = /[。．.!！?？、,，…\s]+$/u;
+const ELLIPSIS_ENDING = /(?:…|\.{3,})$/u;
+
+function normalizeConversationText(message: string): string {
+  return message.normalize('NFKC').replace(/\s+/gu, '').trim();
+}
+
+function createActionDecision(
+  action: ConversationAction,
+  backchannelCue: ConversationActionDecision['backchannelCue'] = 'none',
+): ConversationActionDecision {
+  return { action, backchannelCue };
+}
+
+export function isDefiniteQuestionMessage(message: string): boolean {
+  return /[?？]/u.test(normalizeConversationText(message));
+}
+
+export function isDefiniteUnfinishedMessage(message: string): boolean {
+  const normalized = normalizeConversationText(message);
+  if (!normalized || isDefiniteQuestionMessage(normalized)) return false;
+  if (ELLIPSIS_ENDING.test(normalized)) return true;
+  const withoutTerminalPunctuation = normalized.replace(
+    TERMINAL_PUNCTUATION,
+    '',
+  );
+  return UNFINISHED_ENDING.test(withoutTerminalPunctuation);
+}
+
+export function isDefiniteBackchannelMessage(message: string): boolean {
+  const normalized = normalizeConversationText(message);
+  if (!normalized || isDefiniteQuestionMessage(normalized)) return false;
+  if (ELLIPSIS_ENDING.test(normalized)) return false;
+  const withoutTerminalPunctuation = normalized.replace(
+    TERMINAL_PUNCTUATION,
+    '',
+  );
+  return PHATIC_ONLY_MESSAGES.has(withoutTerminalPunctuation);
+}
+
+export function classifyViewerMessageFastPath(
+  message: string,
+): ConversationActionDecision | null {
+  if (isDefiniteQuestionMessage(message)) {
+    return createActionDecision('take_floor');
+  }
+  if (isDefiniteUnfinishedMessage(message)) {
+    return createActionDecision('listen');
+  }
+  if (isDefiniteBackchannelMessage(message)) {
+    const normalized = normalizeConversationText(message).replace(
+      TERMINAL_PUNCTUATION,
+      '',
+    );
+    return createActionDecision(
+      'backchannel',
+      normalized === 'んー' || normalized === 'うーん' ? 'uun' : 'un',
+    );
+  }
+  return null;
+}
+
+function actionToPerformanceIntent(
+  decision: ConversationActionDecision,
+): ActionIntent['preferredIntent'] {
+  switch (decision.action) {
+    case 'take_floor':
+      return 'speak';
+    case 'react_nonverbally':
+      return 'react_nonverbally';
+    case 'listen':
+    case 'backchannel':
+    case 'wait':
+    case 'silence':
+      return 'wait';
+  }
+}
+
+export function classifyFastPathAction(
+  trigger: PerformerTrigger,
+  state: PerformerState,
+  profile: PerformerProfile = DEFAULT_PERFORMER_PROFILE,
+  random = Math.random,
+): ConversationActionDecision | null {
+  switch (trigger.kind) {
+    case 'viewer_message':
+      return classifyViewerMessageFastPath(trigger.text);
+    case 'external_stimulus':
+      return createActionDecision('react_nonverbally');
+    case 'memory_callback':
+      return createActionDecision('take_floor');
+    case 'idle_tick': {
+      const initiative = clamp(profile.initiativeBaseline);
+      const energyFactor = 0.55 + state.energy * 0.45;
+      const speakChance = clamp(0.16 + initiative * 0.62 * energyFactor);
+      const roll = random();
+      return createActionDecision(
+        roll < speakChance
+          ? 'take_floor'
+          : roll < speakChance + 0.18
+            ? 'react_nonverbally'
+            : 'wait',
+      );
+    }
+  }
+}
 
 export function clamp(value: number, minimum = 0, maximum = 1): number {
   if (!Number.isFinite(value)) return minimum;
@@ -137,42 +272,51 @@ export function createActionIntent(
 ): ActionIntent {
   const speechContext = baseSpeechContext(profile);
   const attentionTarget = state.attention.target;
+  const actionDecision = classifyFastPathAction(
+    trigger,
+    state,
+    profile,
+    random,
+  );
 
   switch (trigger.kind) {
     case 'viewer_message':
       return {
         trigger: trigger.kind,
-        preferredIntent: 'speak',
+        preferredIntent: actionDecision
+          ? actionToPerformanceIntent(actionDecision)
+          : 'speak',
+        ...(actionDecision ? { actionDecision } : {}),
         attentionTarget: 'viewer',
         speechContext,
       };
     case 'external_stimulus':
       return {
         trigger: trigger.kind,
-        preferredIntent: 'react_nonverbally',
+        preferredIntent: actionDecision
+          ? actionToPerformanceIntent(actionDecision)
+          : 'react_nonverbally',
+        ...(actionDecision ? { actionDecision } : {}),
         attentionTarget,
         speechContext,
       };
     case 'memory_callback':
       return {
         trigger: trigger.kind,
-        preferredIntent: 'speak',
+        preferredIntent: actionDecision
+          ? actionToPerformanceIntent(actionDecision)
+          : 'speak',
+        ...(actionDecision ? { actionDecision } : {}),
         attentionTarget: 'chat',
         speechContext,
-      };
+    };
     case 'idle_tick': {
-      const initiative = clamp(profile.initiativeBaseline);
-      const energyFactor = 0.55 + state.energy * 0.45;
-      const speakChance = clamp(0.16 + initiative * 0.62 * energyFactor);
-      const roll = random();
       return {
         trigger: trigger.kind,
-        preferredIntent:
-          roll < speakChance
-            ? 'speak'
-            : roll < speakChance + 0.18
-              ? 'react_nonverbally'
-              : 'ignore',
+        preferredIntent: actionDecision
+          ? actionToPerformanceIntent(actionDecision)
+          : 'wait',
+        ...(actionDecision ? { actionDecision } : {}),
         attentionTarget: attentionTarget === 'none' ? 'viewer' : attentionTarget,
         speechContext,
       };
@@ -364,10 +508,15 @@ export function resolvePerformancePlan(
     (constraint) =>
       constraint.kind === 'require_speech' && constraint.scope === 'current_plan',
   );
-  const resolvedIntent =
-    requiresSpeech && intent.preferredIntent !== 'speak'
-      ? 'speak'
-      : intent.preferredIntent;
+  let resolvedActionDecision = intent.actionDecision;
+  let resolvedIntent = intent.preferredIntent;
+  if (resolvedActionDecision) {
+    resolvedIntent = actionToPerformanceIntent(resolvedActionDecision);
+  }
+  if (requiresSpeech && resolvedIntent !== 'speak') {
+    resolvedIntent = 'speak';
+    resolvedActionDecision = createActionDecision('take_floor');
+  }
   const directness = clamp(
     effectiveProfile.gazeDirectnessBaseline + aggregate.modifiers.attentionStrength,
   );
@@ -404,6 +553,9 @@ export function resolvePerformancePlan(
     planId,
     trigger: intent.trigger,
     intent: resolvedIntent,
+    ...(resolvedActionDecision
+      ? { actionDecision: resolvedActionDecision }
+      : {}),
     ...(aggregate.planOverrides?.behavior
       ? { behavior: aggregate.planOverrides.behavior }
       : {}),

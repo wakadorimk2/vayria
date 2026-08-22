@@ -2,9 +2,9 @@ import type { Emotion } from '../character/emotion';
 import { runtimeConfig } from '../runtimeConfig';
 import type { ConversationSource } from './useConversation';
 import {
-  isVoiceInteractionAction,
-  type VoiceInteractionAction,
-} from '../voice/voiceInteraction';
+  isConversationAction,
+  type ConversationAction,
+} from '../performer/types';
 
 export const CONVERSATION_EVENTS = [
   'input_received',
@@ -25,7 +25,7 @@ export type ConversationEventName = (typeof CONVERSATION_EVENTS)[number];
 interface ConversationEventDetails {
   durationMs?: number;
   emotion?: Emotion;
-  interactionAction?: VoiceInteractionAction;
+  interactionAction?: ConversationAction;
   phase?: 'llm' | 'tts';
   reason?: string;
 }
@@ -56,7 +56,7 @@ function readSafeDetails(
       : {}),
     ...(details.emotion ? { emotion: details.emotion } : {}),
     ...(details.interactionAction &&
-    isVoiceInteractionAction(details.interactionAction)
+    isConversationAction(details.interactionAction)
       ? { interactionAction: details.interactionAction }
       : {}),
     ...(details.phase ? { phase: details.phase } : {}),
