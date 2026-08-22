@@ -58,8 +58,15 @@ function readVoiceInputTransport(
 }
 
 const mode = readAppMode(import.meta.env.VITE_APP_MODE);
+function readAudioLabEnabled(search: string): boolean {
+  if (!import.meta.env.DEV) return false;
+  return new URLSearchParams(search).get('audioLab') === '1';
+}
+
 export const runtimeConfig = Object.freeze({
   apiBaseUrl: readApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
+  audioLabEnabled:
+    typeof window !== 'undefined' && readAudioLabEnabled(window.location.search),
   mode,
   voiceTransport: readVoiceInputTransport(
     import.meta.env.VITE_VOICE_INPUT_TRANSPORT,

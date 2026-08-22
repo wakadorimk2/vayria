@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vayria_stt.transcriber import FasterWhisperTranscriber, Transcriber
+from vayria_stt.transcriber import (
+    FasterWhisperTranscriber,
+    Transcriber,
+    TranscriptionResult,
+)
 
 
 class FakeTranscriber:
@@ -83,6 +87,24 @@ def test_standalone_viewing_thanks_hallucination_is_discarded() -> None:
     )
 
     assert text == ""
+
+
+def test_diagnostics_preserve_raw_text_and_filtered_text() -> None:
+    provider = FasterWhisperTranscriber()
+    provider._model = FakeWhisperModel(
+        [FakeSegment(" ご視聴ありがとうございました。 ")]
+    )
+
+    result = provider.transcribe_pcm16_with_diagnostics(
+        b"\x00\x01" * 320,
+        sample_rate=16_000,
+        language="ja",
+    )
+
+    assert isinstance(result, TranscriptionResult)
+    assert result.raw_text == "ご視聴ありがとうございました。"
+    assert result.text == ""
+    assert result.filter_reason == "known-hallucination"
 
 
 def test_normal_speech_is_preserved() -> None:

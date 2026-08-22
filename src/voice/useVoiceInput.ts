@@ -3,6 +3,13 @@ import { createBrowserSpeechRecognitionAdapter } from './browserSpeechRecognitio
 import { createRemotePcmVoiceAdapter } from './remotePcmVoiceAdapter';
 import type { VoiceInputAdapter } from './voiceAdapter';
 import {
+  DEFAULT_AUDIO_INPUT_MODE,
+  DEFAULT_VAD_THRESHOLD,
+  type AudioLabMediaSettings,
+  type AudioLabMode,
+  type VoiceInputDiagnostic,
+} from './audioLab.js';
+import {
   createVoiceInputController,
   INITIAL_VOICE_INPUT_SNAPSHOT,
   type VoiceInputController,
@@ -14,7 +21,11 @@ import { runtimeConfig, type VoiceInputTransport } from '../runtimeConfig';
 export interface UseVoiceInputOptions {
   language?: string;
   transport?: VoiceInputTransport;
+  audioMode?: AudioLabMode;
+  vadThreshold?: number;
+  ttsPlaying?: boolean;
   onEvent?: (event: VoiceInputEvent) => void;
+  onDiagnostic?: (diagnostic: VoiceInputDiagnostic) => void;
 }
 
 function isFatalVoiceError(code: string | null): boolean {
@@ -42,6 +53,8 @@ function isFatalVoiceError(code: string | null): boolean {
 }
 
 export function useVoiceInput(options: UseVoiceInputOptions = {}) {
+  const audioMode = options.audioMode ?? DEFAULT_AUDIO_INPUT_MODE;
+  const vadThreshold = options.vadThreshold ?? DEFAULT_VAD_THRESHOLD;
   const optionsRef = useRef(options);
   const controllerRef = useRef<VoiceInputController | null>(null);
   const adapterRef = useRef<VoiceInputAdapter | null>(null);
@@ -50,40 +63,117 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   );
   const [isEnabled, setIsEnabled] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
+  const [lastDiagnostic, setLastDiagnostic] =
+    useState<VoiceInputDiagnostic | null>(null);
+  const [audioLevel, setAudioLevel] = useState<number | null>(null);
+  const [vadScore, setVadScore] = useState<number | null>(null);
+  const [noiseFloor, setNoiseFloor] = useState<number | null>(null);
+  const [effectiveThreshold, setEffectiveThreshold] = useState<number | null>(
+    null,
+  );
+  const [isVadSpeech, setIsVadSpeech] = useState(false);
+  const [isSttProcessing, setIsSttProcessing] = useState(false);
+  const [mediaSettings, setMediaSettings] =
+    useState<AudioLabMediaSettings | null>(null);
 
   useEffect(() => {
     optionsRef.current = options;
   }, [options]);
 
   useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setIsEnabled(false);
+      setIsSttProcessing(false);
+      setIsVadSpeech(false);
+      setAudioLevel(null);
+      setVadScore(null);
+      setNoiseFloor(null);
+      setEffectiveThreshold(null);
+      setLastDiagnostic(null);
+      setMediaSettings(null);
+    });
+
     const controller = controllerRef.current ?? createVoiceInputController();
     controllerRef.current = controller;
     const unsubscribe = controller.subscribe(setSnapshot);
     const adapterOptions = {
       language: optionsRef.current.language,
       onEvent: (event: VoiceInputEvent) => {
+        if (!active) return;
         controller.dispatch(event);
         optionsRef.current.onEvent?.(event);
-        if (event.type === 'listening_started') {
-          setIsEnabled(true);
+        switch (event.type) {
+          case 'listening_started':
+            setIsEnabled(true);
+            break;
+          case 'speech_started':
+            setIsVadSpeech(true);
+            break;
+          case 'speech_ended':
+            setIsVadSpeech(false);
+            setIsSttProcessing(true);
+            break;
+          case 'utterance_finalized':
+            setIsSttProcessing(false);
+            break;
+          case 'recognition_stopped':
+            setIsEnabled(false);
+            setIsVadSpeech(false);
+            setIsSttProcessing(false);
+            break;
+          case 'recognition_failed':
+            if (isFatalVoiceError(event.code)) setIsEnabled(false);
+            setIsVadSpeech(false);
+            setIsSttProcessing(false);
+            break;
+          case 'interim_transcript_updated':
+            break;
         }
-        if (event.type === 'recognition_stopped') {
-          setIsEnabled(false);
-        }
-        if (
-          event.type === 'recognition_failed' &&
-          isFatalVoiceError(event.code)
-        ) {
-          setIsEnabled(false);
+      },
+      onDiagnostic: (diagnostic: VoiceInputDiagnostic) => {
+        if (!active) return;
+        setLastDiagnostic(diagnostic);
+        optionsRef.current.onDiagnostic?.(diagnostic);
+        switch (diagnostic.type) {
+          case 'media_settings':
+            setMediaSettings(diagnostic.settings);
+            break;
+          case 'audio_level':
+            setAudioLevel(diagnostic.audioLevel);
+            setVadScore(diagnostic.vadScore);
+            setNoiseFloor(diagnostic.noiseFloor);
+            setEffectiveThreshold(diagnostic.effectiveThreshold);
+            setIsVadSpeech(diagnostic.vadSpeech);
+            break;
+          case 'stt_started':
+            setIsSttProcessing(true);
+            break;
+          case 'stt_observed':
+            setIsSttProcessing(false);
+            break;
+          case 'vad_rejected':
+            setIsVadSpeech(false);
+            break;
         }
       },
     };
+    const configuredTransport =
+      optionsRef.current.transport ?? runtimeConfig.voiceTransport;
+    const useRemote = audioMode !== 'baseline' || configuredTransport === 'remote';
     const adapter =
-      (optionsRef.current.transport ?? runtimeConfig.voiceTransport) ===
-      'remote'
-        ? createRemotePcmVoiceAdapter(adapterOptions)
+      useRemote
+        ? createRemotePcmVoiceAdapter({
+            ...adapterOptions,
+            audioMode,
+            vadThreshold:
+              optionsRef.current.vadThreshold ?? DEFAULT_VAD_THRESHOLD,
+            diagnostics: runtimeConfig.audioLabEnabled,
+          })
         : createBrowserSpeechRecognitionAdapter(adapterOptions);
     adapterRef.current = adapter;
+    adapter.setTtsPlaying?.(Boolean(optionsRef.current.ttsPlaying));
     setIsSupported(adapter.isSupported);
 
     if (!adapter.isSupported) {
@@ -95,11 +185,20 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     }
 
     return () => {
+      active = false;
       unsubscribe();
       adapter.dispose();
       adapterRef.current = null;
     };
-  }, []);
+  }, [audioMode]);
+
+  useEffect(() => {
+    adapterRef.current?.setVadThreshold?.(vadThreshold);
+  }, [vadThreshold]);
+
+  useEffect(() => {
+    adapterRef.current?.setTtsPlaying?.(Boolean(options.ttsPlaying));
+  }, [options.ttsPlaying]);
 
   const start = useCallback(async () => {
     const adapter = adapterRef.current;
@@ -118,6 +217,14 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     errorCode: snapshot.errorCode,
     isEnabled,
     isSupported,
+    lastDiagnostic,
+    audioLevel,
+    vadScore,
+    noiseFloor,
+    effectiveThreshold,
+    isVadSpeech,
+    isSttProcessing,
+    mediaSettings,
     phase: snapshot.phase,
     start,
     stop,

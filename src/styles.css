@@ -1026,3 +1026,216 @@ input {
     transition: none;
   }
 }
+
+.audio-lab-panel {
+  position: fixed;
+  z-index: 30;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: min(43rem, calc(100vw - 1.5rem));
+  max-height: calc(100dvh - 1.5rem);
+  color: #d8d4cc;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.audio-lab-panel details {
+  max-height: inherit;
+  overflow: hidden;
+  border: 1px solid rgb(171 179 190 / 30%);
+  border-radius: 0.65rem;
+  background: rgb(17 20 25 / 92%);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 30%);
+  pointer-events: auto;
+}
+
+.audio-lab-panel summary {
+  padding: 0.5rem 0.7rem;
+  color: #bcb8b0;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.audio-lab-panel__body {
+  max-height: calc(100dvh - 4rem);
+  overflow: auto;
+  padding: 0 0.7rem 0.7rem;
+  scrollbar-color: #59616d transparent;
+}
+
+.audio-lab-panel__field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  padding: 0.4rem 0;
+}
+
+.audio-lab-panel__field input[type="range"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: #aab4c1;
+}
+
+.audio-lab-panel select,
+.audio-lab-panel button {
+  min-height: 1.8rem;
+  border: 1px solid rgb(171 179 190 / 35%);
+  border-radius: 0.35rem;
+  background: #20252d;
+  color: #e1ddd5;
+  font-size: 0.72rem;
+}
+
+.audio-lab-panel select {
+  min-width: 9.5rem;
+  padding: 0.2rem 0.35rem;
+}
+
+.audio-lab-panel button {
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+
+.audio-lab-panel button:hover,
+.audio-lab-panel button:focus-visible,
+.audio-lab-panel select:focus-visible,
+.audio-lab-panel input:focus-visible {
+  outline: 1px solid #d4d9df;
+  outline-offset: 1px;
+}
+
+.audio-lab-panel button:disabled,
+.audio-lab-panel select:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.audio-lab-panel__hint {
+  margin: 0.1rem 0 0.4rem;
+  color: #9299a3;
+  font-size: 0.66rem;
+}
+
+.audio-lab-panel__meter-block {
+  padding: 0.45rem 0;
+}
+
+.audio-lab-panel__meter-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #aaaeb5;
+  font-size: 0.66rem;
+}
+
+.audio-lab-panel meter {
+  display: block;
+  width: 100%;
+  height: 0.65rem;
+  margin: 0.25rem 0 0.5rem;
+  accent-color: #9daab9;
+}
+
+.audio-lab-panel__status-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.3rem;
+  margin: 0.2rem 0 0.5rem;
+}
+
+.audio-lab-panel__status-grid div {
+  padding: 0.35rem;
+  border: 1px solid rgb(171 179 190 / 16%);
+  border-radius: 0.35rem;
+  background: rgb(33 38 47 / 70%);
+}
+
+.audio-lab-panel__status-grid dt {
+  color: #858d98;
+  font-size: 0.61rem;
+}
+
+.audio-lab-panel__status-grid dd {
+  margin: 0.15rem 0 0;
+  color: #a8adb5;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.audio-lab-panel__status-grid dd[data-active="true"] {
+  color: #d6dbe0;
+}
+
+.audio-lab-panel__section {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgb(171 179 190 / 15%);
+}
+
+.audio-lab-panel__section h2 {
+  margin: 0 0 0.25rem;
+  color: #9ba2ac;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.audio-lab-panel__section p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.audio-lab-panel pre {
+  max-height: 7rem;
+  margin: 0;
+  overflow: auto;
+  padding: 0.4rem;
+  border-radius: 0.3rem;
+  background: #0d0f13;
+  color: #afb8c2;
+  font-size: 0.62rem;
+  white-space: pre-wrap;
+}
+
+.audio-lab-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.6rem;
+  white-space: nowrap;
+}
+
+.audio-lab-panel th,
+.audio-lab-panel td {
+  padding: 0.25rem 0.3rem;
+  border-bottom: 1px solid rgb(171 179 190 / 12%);
+  text-align: right;
+}
+
+.audio-lab-panel th:first-child,
+.audio-lab-panel td:first-child {
+  text-align: left;
+}
+
+.audio-lab-panel__export {
+  margin-top: 0.65rem;
+  color: #c3cbd4;
+}
+
+@media (max-width: 620px) {
+  .audio-lab-panel {
+    top: 0.45rem;
+    right: 0.45rem;
+    width: calc(100vw - 0.9rem);
+    font-size: 0.68rem;
+  }
+
+  .audio-lab-panel__status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

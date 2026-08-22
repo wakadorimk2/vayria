@@ -59,8 +59,16 @@ PythonサービスはWebRTC VADとfaster-whisperを実行します。
 展示モードではHTTPSとPython STTサービスが必要です。
 音声入力を利用できない場合は、テキスト入力を使用してください。
 スピーカー使用時はVayriaの音声を認識する可能性があります。初回確認ではヘッドセットを推奨します。
-音声データは録音ファイルへ保存しません。音声内容をログへ出力しません。
-認識された最終文字列だけをchat APIへ渡します。
+音声データは録音ファイルへ保存しません。
+通常経路では音声内容をログへ出力しません。
+Audio Labを有効にした開発調査では、raw transcriptを調査ログへ保存します。
+会話には認識された最終文字列だけを渡します。
+
+音声入力の比較調査は、開発サーバーを起動してURLへ`?audioLab=1`を追加します。
+Audio LabのMode A/B/C/D、固定ケース、JSONLログは
+[`docs/evaluation/voice-audio-lab.md`](docs/evaluation/voice-audio-lab.md)を参照してください。
+`?audioLab=1`を付けたAudio Labは、初期ModeにExhibition Mixを選びます。
+通常のlocal/exhibition起動は、既存のBaseline経路を使います。
 
 Sessionはページ内だけの一時状態です。
 履歴、話題、直前の自律返答、演者状態、カードのターン状態を含みます。

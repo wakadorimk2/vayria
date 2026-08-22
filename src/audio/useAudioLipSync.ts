@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  BARGE_IN_DUCK_GAIN,
+  BARGE_IN_GAIN_RAMP_MS,
+} from '../voice/audioLab.js';
 
 const SMOOTHING_FACTOR = 0.5;
 const RMS_CEILING = 0.12;
@@ -43,6 +47,7 @@ export function useAudioLipSync(volume = 1) {
   const generationRef = useRef(0);
   const reactionGenerationRef = useRef(0);
   const primaryPlaybackActiveRef = useRef(false);
+  const duckedRef = useRef(false);
   const primaryMouthOpenRef = useRef(0);
   const reactionMouthOpenRef = useRef(0);
   const volumeRef = useRef(normalizedVolume);
@@ -56,14 +61,18 @@ export function useAudioLipSync(volume = 1) {
 
     if (!gainRef.current) {
       const gain = contextRef.current.createGain();
-      gain.gain.value = volumeRef.current;
+      gain.gain.value =
+        volumeRef.current * (duckedRef.current ? BARGE_IN_DUCK_GAIN : 1);
       gain.connect(contextRef.current.destination);
       gainRef.current = gain;
     }
 
     if (!reactionGainRef.current) {
       const reactionGain = contextRef.current.createGain();
-      reactionGain.gain.value = volumeRef.current * REACTION_GAIN_SCALE;
+      reactionGain.gain.value =
+        volumeRef.current *
+        REACTION_GAIN_SCALE *
+        (duckedRef.current ? BARGE_IN_DUCK_GAIN : 1);
       reactionGain.connect(contextRef.current.destination);
       reactionGainRef.current = reactionGain;
     }
@@ -152,6 +161,27 @@ export function useAudioLipSync(volume = 1) {
     clearPlayback();
     clearReactionPlayback();
   }, [clearPlayback, clearReactionPlayback]);
+
+  const setDucked = useCallback((ducked: boolean) => {
+    duckedRef.current = ducked;
+    const context = contextRef.current;
+    if (!context || context.state === 'closed') return;
+
+    const targetMultiplier = ducked ? BARGE_IN_DUCK_GAIN : 1;
+    const targetTime = context.currentTime + BARGE_IN_GAIN_RAMP_MS / 1_000;
+    for (const [gain, baseGain] of [
+      [gainRef.current, volumeRef.current],
+      [reactionGainRef.current, volumeRef.current * REACTION_GAIN_SCALE],
+    ] as const) {
+      if (!gain) continue;
+      gain.gain.cancelScheduledValues(context.currentTime);
+      gain.gain.setValueAtTime(gain.gain.value, context.currentTime);
+      gain.gain.linearRampToValueAtTime(
+        baseGain * targetMultiplier,
+        targetTime,
+      );
+    }
+  }, []);
 
   const play = useCallback<PlayAudio>(
     async (audioData, options) => {
@@ -350,12 +380,17 @@ export function useAudioLipSync(volume = 1) {
     const context = contextRef.current;
     const gain = gainRef.current;
     if (context && gain && context.state !== 'closed') {
-      gain.gain.setValueAtTime(normalizedVolume, context.currentTime);
+      gain.gain.setValueAtTime(
+        normalizedVolume * (duckedRef.current ? BARGE_IN_DUCK_GAIN : 1),
+        context.currentTime,
+      );
     }
     const reactionGain = reactionGainRef.current;
     if (context && reactionGain && context.state !== 'closed') {
       reactionGain.gain.setValueAtTime(
-        normalizedVolume * REACTION_GAIN_SCALE,
+        normalizedVolume *
+          REACTION_GAIN_SCALE *
+          (duckedRef.current ? BARGE_IN_DUCK_GAIN : 1),
         context.currentTime,
       );
     }
@@ -382,6 +417,7 @@ export function useAudioLipSync(volume = 1) {
     play,
     playReaction,
     prepare,
+    setDucked,
     stop,
   };
 }

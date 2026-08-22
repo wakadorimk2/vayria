@@ -5,12 +5,16 @@ This service accepts 16 kHz mono PCM16 WebSocket frames on localhost.
 The Vayria browser sends the following wire messages:
 
 1. JSON `start` with `language`, `sampleRate`, `channels`, `format`, and `chunkMs`.
+   Audio Lab may add `diagnostics: true`.
 2. Binary PCM16 frames.
 3. JSON `stop` when the microphone stops.
 
 The service uses WebRTC VAD with 20 ms frames. It emits `speech_started` after
 two speech frames. It emits `speech_ended` and starts batch transcription after
 600 ms of silence. It emits `utterance_finalized` after faster-whisper returns.
+When diagnostics are enabled, it also emits `stt_started` and `stt_observed`.
+The diagnostic event includes raw and filtered text. The filtered text remains
+the only text sent in `utterance_finalized`.
 
 The service listens on `127.0.0.1` by default. It does not write audio files or
 log audio content.

@@ -11,7 +11,11 @@ from typing import Any
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from .transcriber import FasterWhisperTranscriber, Transcriber
+from .transcriber import (
+    FasterWhisperTranscriber,
+    Transcriber,
+    TranscriptionResult,
+)
 from .vad import (
     CHANNELS,
     PcmUtteranceDetector,
@@ -35,6 +39,7 @@ class StreamConfig:
     channels: int
     audio_format: str
     chunk_ms: int
+    diagnostics: bool = False
 
 
 def _timestamp() -> int:
@@ -44,14 +49,15 @@ def _timestamp() -> int:
 def _parse_start(payload: Any) -> StreamConfig:
     if not isinstance(payload, dict) or payload.get("type") != "start":
         raise WireProtocolError("invalid-start-message")
-    expected = {"type", "language", "sampleRate", "channels", "format", "chunkMs"}
-    if set(payload) != expected:
+    required = {"type", "language", "sampleRate", "channels", "format", "chunkMs"}
+    if set(payload) - required - {"diagnostics"} or not required.issubset(payload):
         raise WireProtocolError("invalid-start-message")
     language = payload["language"]
     sample_rate = payload["sampleRate"]
     channels = payload["channels"]
     audio_format = payload["format"]
     chunk_ms = payload["chunkMs"]
+    diagnostics = payload.get("diagnostics", False)
     if (
         not isinstance(language, str)
         or not language
@@ -62,10 +68,18 @@ def _parse_start(payload: Any) -> StreamConfig:
         or audio_format != SUPPORTED_FORMAT
         or not isinstance(chunk_ms, int)
         or chunk_ms != SUPPORTED_CHUNK_MS
+        or not isinstance(diagnostics, bool)
     ):
         raise WireProtocolError("unsupported-audio-format")
     normalized_language = language.split("-", 1)[0].lower()
-    return StreamConfig(normalized_language, sample_rate, channels, audio_format, chunk_ms)
+    return StreamConfig(
+        normalized_language,
+        sample_rate,
+        channels,
+        audio_format,
+        chunk_ms,
+        diagnostics,
+    )
 
 
 async def _send_event(connection: ServerConnection, payload: dict[str, Any]) -> None:
@@ -77,22 +91,57 @@ async def _transcription_worker(
     queue: asyncio.Queue[tuple[str, bytes]],
     transcriber: Transcriber,
     language: str,
+    diagnostics: bool,
 ) -> None:
     while True:
         segment_id, pcm = await queue.get()
         try:
-            text = await asyncio.to_thread(
-                transcriber.transcribe_pcm16,
-                pcm,
-                sample_rate=SAMPLE_RATE,
-                language=language,
+            if diagnostics:
+                await _send_event(
+                    connection,
+                    {
+                        "type": "stt_started",
+                        "segmentId": segment_id,
+                        "at": _timestamp(),
+                    },
+                )
+            diagnostic_transcriber = getattr(
+                transcriber,
+                "transcribe_pcm16_with_diagnostics",
+                None,
             )
+            if callable(diagnostic_transcriber):
+                result = await asyncio.to_thread(
+                    diagnostic_transcriber,
+                    pcm,
+                    sample_rate=SAMPLE_RATE,
+                    language=language,
+                )
+            else:
+                text = await asyncio.to_thread(
+                    transcriber.transcribe_pcm16,
+                    pcm,
+                    sample_rate=SAMPLE_RATE,
+                    language=language,
+                )
+                result = TranscriptionResult(text, text, None)
+            if diagnostics:
+                observed = {
+                    "type": "stt_observed",
+                    "segmentId": segment_id,
+                    "rawText": result.raw_text,
+                    "acceptedText": result.text,
+                    "at": _timestamp(),
+                }
+                if result.filter_reason is not None:
+                    observed["filterReason"] = result.filter_reason
+                await _send_event(connection, observed)
             await _send_event(
                 connection,
                 {
                     "type": "utterance_finalized",
                     "segmentId": segment_id,
-                    "text": text,
+                    "text": result.text,
                     "at": _timestamp(),
                 },
             )
@@ -133,7 +182,13 @@ async def handle_connection(
         detector = PcmUtteranceDetector(classifier=WebRtcSpeechClassifier())
         queue = asyncio.Queue()
         worker = asyncio.create_task(
-            _transcription_worker(connection, queue, transcriber, config.language)
+            _transcription_worker(
+                connection,
+                queue,
+                transcriber,
+                config.language,
+                config.diagnostics,
+            )
         )
         await _send_event(connection, {"type": "listening_started", "at": _timestamp()})
 

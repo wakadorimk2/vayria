@@ -160,6 +160,13 @@ export function createBrowserSpeechRecognitionAdapter(
       if (!transcript) continue;
       if (result.isFinal && !finalized) {
         finalized = true;
+        options.onDiagnostic?.({
+          type: 'stt_observed',
+          segmentId: activeSegmentId,
+          rawText: transcript,
+          acceptedText: transcript,
+          at: now(),
+        });
         options.onEvent({
           type: 'utterance_finalized',
           segmentId: activeSegmentId,

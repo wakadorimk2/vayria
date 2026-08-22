@@ -1,0 +1,455 @@
+import type { VoiceInputEvent } from './voiceInput.js';
+
+export const AUDIO_LAB_MODES = [
+  'baseline',
+  'processed',
+  'processed-vad',
+  'exhibition-mix',
+] as const;
+
+export type AudioLabMode = (typeof AUDIO_LAB_MODES)[number];
+
+export const DEFAULT_AUDIO_INPUT_MODE: AudioLabMode = 'baseline';
+export const DEFAULT_AUDIO_LAB_MODE: AudioLabMode = 'exhibition-mix';
+export const DEFAULT_VAD_THRESHOLD = 0.02;
+export const VAD_THRESHOLD_MIN = 0.005;
+export const VAD_THRESHOLD_MAX = 0.2;
+export const VAD_THRESHOLD_STEP = 0.005;
+export const ADAPTIVE_NOISE_FLOOR_INITIAL = 0.005;
+export const ADAPTIVE_NOISE_FLOOR_ALPHA = 0.05;
+export const ADAPTIVE_NOISE_FLOOR_MULTIPLIER = 2.5;
+export const BARGE_IN_DUCK_GAIN = 0.12;
+export const BARGE_IN_GAIN_RAMP_MS = 20;
+export const BARGE_IN_TIMEOUT_MS = 2_500;
+
+export const AUDIO_PROCESSING_CONSTRAINTS = [
+  'echoCancellation',
+  'noiseSuppression',
+  'autoGainControl',
+] as const;
+
+export type AudioProcessingConstraint =
+  (typeof AUDIO_PROCESSING_CONSTRAINTS)[number];
+
+export type BargeInState = 'idle' | 'ducked' | 'confirmed' | 'restored';
+export type BargeInAction = 'duck' | 'interrupt' | 'restore';
+
+export const KNOWN_HALLUCINATION_PHRASES = [
+  'ご視聴ありがとうございました',
+  'ありがとうございました',
+  'ご覧いただきありがとうございました',
+] as const;
+
+export type AudioLabRequestedConstraints = Partial<
+  Record<AudioProcessingConstraint, boolean>
+>;
+
+export interface AudioLabAppliedMediaSettings {
+  echoCancellation?: boolean | string;
+  noiseSuppression?: boolean;
+  autoGainControl?: boolean;
+  sampleRate?: number;
+  sampleSize?: number;
+  channelCount?: number;
+  latency?: number;
+}
+
+export interface AudioLabMediaSettings {
+  requested: AudioLabRequestedConstraints;
+  supported: Partial<Record<AudioProcessingConstraint, boolean>>;
+  applied: AudioLabAppliedMediaSettings;
+}
+
+export type VoiceInputDiagnostic =
+  | {
+      type: 'media_settings';
+      at: number;
+      settings: AudioLabMediaSettings;
+    }
+  | {
+      type: 'audio_level';
+      at: number;
+      audioLevel: number;
+      vadScore: number | null;
+      vadSpeech: boolean;
+      sentToStt: boolean;
+      noiseFloor: number | null;
+      effectiveThreshold: number | null;
+      vadThreshold: number | null;
+    }
+  | {
+      type: 'vad_rejected';
+      at: number;
+      candidateDurationMs: number;
+      maxScore: number;
+      reason: string;
+      noiseFloor: number | null;
+      effectiveThreshold: number | null;
+      vadThreshold: number | null;
+    }
+  | {
+      type: 'barge_in';
+      at: number;
+      action: BargeInAction;
+      state: BargeInState;
+      ttsPlaying: boolean;
+      reason?: string;
+    }
+  | {
+      type: 'stt_started';
+      segmentId: string;
+      at: number;
+    }
+  | {
+      type: 'stt_observed';
+      segmentId: string;
+      at: number;
+      rawText: string;
+      acceptedText: string;
+      filterReason?: string;
+    };
+
+export function isAudioLabMode(value: unknown): value is AudioLabMode {
+  return (
+    typeof value === 'string' &&
+    (AUDIO_LAB_MODES as readonly string[]).includes(value)
+  );
+}
+
+export function resolveInitialAudioLabMode(
+  audioLabEnabled: boolean,
+): AudioLabMode {
+  return audioLabEnabled ? DEFAULT_AUDIO_LAB_MODE : DEFAULT_AUDIO_INPUT_MODE;
+}
+
+export function clampVadThreshold(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_VAD_THRESHOLD;
+  return Math.max(VAD_THRESHOLD_MIN, Math.min(value, VAD_THRESHOLD_MAX));
+}
+
+function normalizePhrase(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(/[\s。、．.!！?？…「」『』"'、,，]/g, '')
+    .trim();
+}
+
+export function findKnownHallucinationPhrase(
+  value: string,
+): string | null {
+  const normalized = normalizePhrase(value);
+  if (!normalized) return null;
+
+  return (
+    KNOWN_HALLUCINATION_PHRASES.find(
+      (phrase) => normalizePhrase(phrase) === normalized,
+    ) ?? null
+  );
+}
+
+export function sanitizeMediaTrackSettings(
+  settings: unknown,
+): AudioLabAppliedMediaSettings {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return {};
+  }
+  const record = settings as Record<string, unknown>;
+
+  return {
+    ...(typeof record.echoCancellation === 'boolean' ||
+    typeof record.echoCancellation === 'string'
+      ? { echoCancellation: record.echoCancellation }
+      : {}),
+    ...(typeof record.noiseSuppression === 'boolean'
+      ? { noiseSuppression: record.noiseSuppression }
+      : {}),
+    ...(typeof record.autoGainControl === 'boolean'
+      ? { autoGainControl: record.autoGainControl }
+      : {}),
+    ...(typeof record.sampleRate === 'number'
+      ? { sampleRate: record.sampleRate }
+      : {}),
+    ...(typeof record.sampleSize === 'number'
+      ? { sampleSize: record.sampleSize }
+      : {}),
+    ...(typeof record.channelCount === 'number'
+      ? { channelCount: record.channelCount }
+      : {}),
+    ...(typeof record.latency === 'number'
+      ? { latency: record.latency }
+      : {}),
+  };
+}
+
+export interface VoiceLabModeSummary {
+  utteranceCount: number;
+  candidateCount: number;
+  sttSuccessCount: number;
+  vadRejectCount: number;
+  noiseLikeSttCount: number;
+  knownHallucinationCount: number;
+  ttsOverlapCount: number;
+  averageSttLatencyMs: number | null;
+  bargeInTriggeredCount: number;
+  bargeInConfirmedCount: number;
+  bargeInRestoredCount: number;
+  bargeInTimeoutCount: number;
+}
+
+export interface VoiceLabSessionSummary extends VoiceLabModeSummary {
+  byMode: Record<AudioLabMode, VoiceLabModeSummary>;
+}
+
+export interface VoiceLabSessionStartedRecord {
+  kind: 'session_started';
+  timestamp: string;
+  sessionId: string;
+  mode: AudioLabMode;
+}
+
+export interface VoiceLabModeChangedRecord {
+  kind: 'mode_changed';
+  timestamp: string;
+  sessionId: string;
+  mode: AudioLabMode;
+}
+
+export interface VoiceLabUtteranceRecord {
+  kind: 'utterance';
+  timestamp: string;
+  sessionId: string;
+  mode: AudioLabMode;
+  segmentId: string | null;
+  speechStartAt: string | null;
+  speechEndAt: string | null;
+  sttStartedAt: string | null;
+  sttResultAt: string;
+  sttLatencyMs: number | null;
+  recognizedText: string;
+  rawRecognizedText: string;
+  audioDurationMs: number | null;
+  maxVadScore?: number | null;
+  vadThreshold?: number | null;
+  effectiveThreshold?: number | null;
+  noiseFloor?: number | null;
+  vadAccepted: boolean | null;
+  rejectReason: string | null;
+  ttsPlayingDuringUtterance: boolean;
+  mediaTrackSettings: AudioLabMediaSettings | null;
+  knownHallucinationPhrase: string | null;
+  error: string | null;
+}
+
+export interface VoiceLabVadRejectedRecord {
+  kind: 'vad_rejected';
+  timestamp: string;
+  sessionId: string;
+  mode: AudioLabMode;
+  speechStartAt: string | null;
+  speechEndAt: string;
+  audioDurationMs: number;
+  vadAccepted: false;
+  rejectReason: string;
+  maxVadScore: number;
+  vadThreshold?: number | null;
+  effectiveThreshold?: number | null;
+  noiseFloor?: number | null;
+  ttsPlayingDuringUtterance: boolean;
+  mediaTrackSettings: AudioLabMediaSettings | null;
+}
+
+export interface VoiceLabBargeInRecord {
+  kind: 'barge_in';
+  timestamp: string;
+  sessionId: string;
+  mode: AudioLabMode;
+  action: BargeInAction;
+  state: BargeInState;
+  ttsPlaying: boolean;
+  reason?: string;
+}
+
+export interface VoiceLabErrorRecord {
+  kind: 'error';
+  timestamp: string;
+  sessionId: string;
+  mode: AudioLabMode;
+  error: string;
+  segmentId: string | null;
+}
+
+export interface VoiceLabSessionSummaryRecord {
+  kind: 'session_summary';
+  timestamp: string;
+  sessionId: string;
+  summary: VoiceLabSessionSummary;
+}
+
+export type VoiceLabRecord =
+  | VoiceLabSessionStartedRecord
+  | VoiceLabModeChangedRecord
+  | VoiceLabUtteranceRecord
+  | VoiceLabVadRejectedRecord
+  | VoiceLabBargeInRecord
+  | VoiceLabErrorRecord
+  | VoiceLabSessionSummaryRecord;
+
+export interface VoiceLabSnapshot {
+  sessionId: string | null;
+  records: VoiceLabRecord[];
+  summary: VoiceLabSessionSummary;
+  latestRecord: VoiceLabRecord | null;
+  latestTranscript: string;
+  latestError: string | null;
+}
+
+export function createEmptyModeSummary(): VoiceLabModeSummary {
+  return {
+    utteranceCount: 0,
+    candidateCount: 0,
+    sttSuccessCount: 0,
+    vadRejectCount: 0,
+    noiseLikeSttCount: 0,
+    knownHallucinationCount: 0,
+    ttsOverlapCount: 0,
+    averageSttLatencyMs: null,
+    bargeInTriggeredCount: 0,
+    bargeInConfirmedCount: 0,
+    bargeInRestoredCount: 0,
+    bargeInTimeoutCount: 0,
+  };
+}
+
+export function createEmptySummary(): VoiceLabSessionSummary {
+  return {
+    ...createEmptyModeSummary(),
+    byMode: {
+      baseline: createEmptyModeSummary(),
+      processed: createEmptyModeSummary(),
+      'processed-vad': createEmptyModeSummary(),
+      'exhibition-mix': createEmptyModeSummary(),
+    },
+  };
+}
+
+export function timestampFromMilliseconds(value: number): string {
+  return new Date(value).toISOString();
+}
+
+export function millisecondsBetween(
+  startAt: string | null,
+  endAt: string | null,
+): number | null {
+  if (!startAt || !endAt) return null;
+  const start = Date.parse(startAt);
+  const end = Date.parse(endAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.max(0, end - start);
+}
+
+export function isVoiceInputDiagnostic(
+  value: unknown,
+): value is VoiceInputDiagnostic {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.type !== 'string' || typeof record.at !== 'number') {
+    return false;
+  }
+  if (record.type === 'media_settings') {
+    return Boolean(record.settings) && Number.isFinite(record.at);
+  }
+  if (record.type === 'audio_level') {
+    return (
+      typeof record.audioLevel === 'number' &&
+      (record.vadScore === null || typeof record.vadScore === 'number') &&
+      typeof record.vadSpeech === 'boolean' &&
+      typeof record.sentToStt === 'boolean' &&
+      (record.noiseFloor === undefined ||
+        record.noiseFloor === null ||
+        typeof record.noiseFloor === 'number') &&
+      (record.effectiveThreshold === undefined ||
+        record.effectiveThreshold === null ||
+        typeof record.effectiveThreshold === 'number') &&
+      (record.vadThreshold === undefined ||
+        record.vadThreshold === null ||
+        typeof record.vadThreshold === 'number') &&
+      Number.isFinite(record.at)
+    );
+  }
+  if (record.type === 'vad_rejected') {
+    return (
+      typeof record.candidateDurationMs === 'number' &&
+      typeof record.maxScore === 'number' &&
+      typeof record.reason === 'string' &&
+      (record.noiseFloor === undefined ||
+        record.noiseFloor === null ||
+        typeof record.noiseFloor === 'number') &&
+      (record.effectiveThreshold === undefined ||
+        record.effectiveThreshold === null ||
+        typeof record.effectiveThreshold === 'number') &&
+      (record.vadThreshold === undefined ||
+        record.vadThreshold === null ||
+        typeof record.vadThreshold === 'number') &&
+      Number.isFinite(record.at)
+    );
+  }
+  if (record.type === 'barge_in') {
+    return (
+      (record.action === 'duck' ||
+        record.action === 'interrupt' ||
+        record.action === 'restore') &&
+      (record.state === 'idle' ||
+        record.state === 'ducked' ||
+        record.state === 'confirmed' ||
+        record.state === 'restored') &&
+      typeof record.ttsPlaying === 'boolean' &&
+      Number.isFinite(record.at)
+    );
+  }
+  if (record.type === 'stt_started') {
+    return (
+      typeof record.segmentId === 'string' && Number.isFinite(record.at)
+    );
+  }
+  if (record.type === 'stt_observed') {
+    return (
+      typeof record.segmentId === 'string' &&
+      typeof record.rawText === 'string' &&
+      typeof record.acceptedText === 'string' &&
+      Number.isFinite(record.at)
+    );
+  }
+  return false;
+}
+
+export function isVoiceLabRecord(value: unknown): value is VoiceLabRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.kind !== 'string' ||
+    typeof record.timestamp !== 'string' ||
+    typeof record.sessionId !== 'string'
+  ) {
+    return false;
+  }
+  if (!Number.isFinite(Date.parse(record.timestamp))) return false;
+  return [
+    'session_started',
+    'mode_changed',
+    'utterance',
+    'vad_rejected',
+    'barge_in',
+    'error',
+    'session_summary',
+  ].includes(record.kind);
+}
+
+export function voiceEventTypeIsFinalized(
+  event: VoiceInputEvent,
+): boolean {
+  return event.type === 'utterance_finalized';
+}

@@ -19,6 +19,13 @@ class Transcriber(Protocol):
         """Transcribe an in-memory PCM16 utterance into text."""
 
 
+@dataclass(frozen=True)
+class TranscriptionResult:
+    raw_text: str
+    text: str
+    filter_reason: str | None
+
+
 def _normalized_for_hallucination_check(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text)
     normalized = re.sub(r"\s+", "", normalized)
@@ -40,12 +47,16 @@ def _is_confident_segment(segment: object) -> bool:
     )
 
 
-def _filter_transcription_segments(segments: Iterable[object]) -> str:
-    accepted_text = "".join(
+def _raw_transcription_segments(segments: Iterable[object]) -> str:
+    return "".join(
         str(getattr(segment, "text", ""))
         for segment in segments
         if _is_confident_segment(segment)
     ).strip()
+
+
+def _filter_transcription_segments(segments: Iterable[object]) -> str:
+    accepted_text = _raw_transcription_segments(segments)
     if not accepted_text:
         return ""
 
@@ -75,9 +86,15 @@ class FasterWhisperTranscriber:
             )
         return self._model
 
-    def transcribe_pcm16(self, pcm: bytes, *, sample_rate: int, language: str) -> str:
+    def transcribe_pcm16_with_diagnostics(
+        self,
+        pcm: bytes,
+        *,
+        sample_rate: int,
+        language: str,
+    ) -> TranscriptionResult:
         if not pcm:
-            return ""
+            return TranscriptionResult('', '', 'empty-audio')
 
         import numpy as np
 
@@ -94,6 +111,24 @@ class FasterWhisperTranscriber:
                 condition_on_previous_text=False,
                 vad_filter=False,
             )
-            return _filter_transcription_segments(segments)
+            raw_text = _raw_transcription_segments(segments)
+            if not raw_text:
+                return TranscriptionResult('', '', 'empty-or-low-confidence')
+
+            normalized = _normalized_for_hallucination_check(raw_text)
+            if normalized in HALLUCINATION_ONLY_PHRASES:
+                return TranscriptionResult(
+                    raw_text,
+                    '',
+                    'known-hallucination',
+                )
+            return TranscriptionResult(raw_text, raw_text, None)
         finally:
             del audio
+
+    def transcribe_pcm16(self, pcm: bytes, *, sample_rate: int, language: str) -> str:
+        return self.transcribe_pcm16_with_diagnostics(
+            pcm,
+            sample_rate=sample_rate,
+            language=language,
+        ).text

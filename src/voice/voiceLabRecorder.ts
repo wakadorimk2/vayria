@@ -1,0 +1,497 @@
+import type {
+  VoiceInputDiagnostic,
+  AudioLabMode,
+  VoiceLabRecord,
+  VoiceLabSessionSummary,
+  VoiceLabSnapshot,
+  VoiceLabUtteranceRecord,
+} from './audioLab.js';
+import {
+  createEmptySummary,
+  findKnownHallucinationPhrase,
+  millisecondsBetween,
+  timestampFromMilliseconds,
+  type AudioLabMediaSettings,
+} from './audioLab.js';
+import type { VoiceInputEvent } from './voiceInput.js';
+
+interface ActiveUtterance {
+  mode: AudioLabMode;
+  segmentId: string;
+  speechStartAt: string;
+  speechEndAt: string | null;
+  sttStartedAt: string | null;
+  rawText: string;
+  acceptedText: string;
+  maxVadScore: number | null;
+  vadThreshold: number | null;
+  effectiveThreshold: number | null;
+  noiseFloor: number | null;
+  ttsPlayingDuringUtterance: boolean;
+  mediaTrackSettings: AudioLabMediaSettings | null;
+}
+
+interface PendingSttObservation {
+  rawText: string;
+  acceptedText: string;
+}
+
+export interface VoiceLabRecorderOptions {
+  enabled: boolean;
+  mode: AudioLabMode;
+  sessionId?: string;
+  onRecord?: (record: VoiceLabRecord) => void;
+}
+
+function createSessionId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `vl-${crypto.randomUUID()}`;
+  }
+  return `vl-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function cloneSummary(summary: VoiceLabSessionSummary): VoiceLabSessionSummary {
+  return {
+    ...summary,
+    byMode: {
+      baseline: { ...summary.byMode.baseline },
+      processed: { ...summary.byMode.processed },
+      'processed-vad': { ...summary.byMode['processed-vad'] },
+      'exhibition-mix': { ...summary.byMode['exhibition-mix'] },
+    },
+  };
+}
+
+function emptySnapshot(): VoiceLabSnapshot {
+  return {
+    sessionId: null,
+    records: [],
+    summary: createEmptySummary(),
+    latestRecord: null,
+    latestTranscript: '',
+    latestError: null,
+  };
+}
+
+export class VoiceLabRecorder {
+  private readonly enabled: boolean;
+  private readonly onRecord?: (record: VoiceLabRecord) => void;
+  private readonly sessionId: string | null;
+  private currentMode: AudioLabMode;
+  private currentTtsPlaying = false;
+  private currentMediaSettings: AudioLabMediaSettings | null = null;
+  private started = false;
+  private records: VoiceLabRecord[] = [];
+  private summary = createEmptySummary();
+  private latestRecord: VoiceLabRecord | null = null;
+  private latestTranscript = '';
+  private latestError: string | null = null;
+  private readonly activeUtterances = new Map<string, ActiveUtterance>();
+  private readonly pendingSttObservations = new Map<
+    string,
+    PendingSttObservation
+  >();
+  private readonly pendingFinalizedEvents = new Map<
+    string,
+    Extract<VoiceInputEvent, { type: 'utterance_finalized' }>
+  >();
+  private pendingMaxVadScore: number | null = null;
+  private pendingVadThreshold: number | null = null;
+  private pendingEffectiveThreshold: number | null = null;
+  private pendingNoiseFloor: number | null = null;
+  private readonly latencyTotals = new Map<
+    AudioLabMode,
+    { count: number; totalMs: number }
+  >();
+
+  constructor(options: VoiceLabRecorderOptions) {
+    this.enabled = options.enabled;
+    this.currentMode = options.mode;
+    this.sessionId = options.enabled
+      ? options.sessionId ?? createSessionId()
+      : null;
+    this.onRecord = options.onRecord;
+  }
+
+  start(): void {
+    if (!this.enabled || this.started || !this.sessionId) return;
+    this.started = true;
+    this.appendRecord({
+      kind: 'session_started',
+      timestamp: new Date().toISOString(),
+      sessionId: this.sessionId,
+      mode: this.currentMode,
+    });
+  }
+
+  finish(): void {
+    if (!this.enabled || !this.started || !this.sessionId) return;
+    const finishedAt = timestampFromMilliseconds(Date.now());
+    for (const [segmentId, finalizedEvent] of this.pendingFinalizedEvents) {
+      const active = this.activeUtterances.get(segmentId);
+      if (active) active.speechEndAt = finishedAt;
+      this.pendingFinalizedEvents.delete(segmentId);
+      this.recordFinalizedUtterance(finalizedEvent);
+    }
+    this.appendRecord({
+      kind: 'session_summary',
+      timestamp: new Date().toISOString(),
+      sessionId: this.sessionId,
+      summary: cloneSummary(this.summary),
+    });
+    this.started = false;
+  }
+
+  setMode(mode: AudioLabMode): void {
+    if (this.currentMode === mode) return;
+    this.currentMode = mode;
+    this.currentMediaSettings = null;
+    this.resetPendingVadMetrics();
+    if (!this.enabled || !this.started || !this.sessionId) return;
+    this.appendRecord({
+      kind: 'mode_changed',
+      timestamp: new Date().toISOString(),
+      sessionId: this.sessionId,
+      mode,
+    });
+  }
+
+  setTtsPlaying(isPlaying: boolean): void {
+    this.currentTtsPlaying = isPlaying;
+    if (!isPlaying) return;
+    for (const active of this.activeUtterances.values()) {
+      active.ttsPlayingDuringUtterance = true;
+    }
+  }
+
+  handleDiagnostic(diagnostic: VoiceInputDiagnostic): void {
+    if (!this.enabled) return;
+    switch (diagnostic.type) {
+      case 'media_settings':
+        this.currentMediaSettings = diagnostic.settings;
+        return;
+      case 'stt_started': {
+        const active = this.activeUtterances.get(diagnostic.segmentId);
+        if (active) active.sttStartedAt = timestampFromMilliseconds(diagnostic.at);
+        return;
+      }
+      case 'stt_observed': {
+        this.pendingSttObservations.set(diagnostic.segmentId, {
+          rawText: diagnostic.rawText,
+          acceptedText: diagnostic.acceptedText,
+        });
+        const active = this.activeUtterances.get(diagnostic.segmentId);
+        if (active) {
+          active.rawText = diagnostic.rawText;
+          active.acceptedText = diagnostic.acceptedText;
+        }
+        this.latestTranscript = diagnostic.acceptedText;
+        return;
+      }
+      case 'barge_in': {
+        const record = {
+          kind: 'barge_in' as const,
+          timestamp: timestampFromMilliseconds(diagnostic.at),
+          sessionId: this.sessionId!,
+          mode: this.currentMode,
+          action: diagnostic.action,
+          state: diagnostic.state,
+          ttsPlaying: diagnostic.ttsPlaying,
+          ...(diagnostic.reason ? { reason: diagnostic.reason } : {}),
+        };
+        this.appendRecord(record);
+        this.updateBargeInSummary(record);
+        return;
+      }
+      case 'audio_level': {
+        if (diagnostic.vadScore === null) return;
+        const active = this.activeUtterances.values().next().value as
+          | ActiveUtterance
+          | undefined;
+        if (active) {
+          active.maxVadScore = Math.max(
+            active.maxVadScore ?? 0,
+            diagnostic.vadScore,
+          );
+          active.vadThreshold = diagnostic.vadThreshold;
+          active.effectiveThreshold = diagnostic.effectiveThreshold;
+          active.noiseFloor = diagnostic.noiseFloor;
+          return;
+        }
+        this.pendingMaxVadScore = Math.max(
+          this.pendingMaxVadScore ?? 0,
+          diagnostic.vadScore,
+        );
+        this.pendingVadThreshold = diagnostic.vadThreshold;
+        this.pendingEffectiveThreshold = diagnostic.effectiveThreshold;
+        this.pendingNoiseFloor = diagnostic.noiseFloor;
+        return;
+      }
+      case 'vad_rejected':
+        this.recordVadRejection(diagnostic);
+        return;
+    }
+  }
+
+  handleVoiceEvent(event: VoiceInputEvent): void {
+    if (!this.enabled) return;
+    switch (event.type) {
+      case 'speech_started':
+        this.activeUtterances.set(event.segmentId, {
+          mode: this.currentMode,
+          segmentId: event.segmentId,
+          speechStartAt: timestampFromMilliseconds(event.at),
+          speechEndAt: null,
+          sttStartedAt: null,
+          rawText: this.pendingSttObservations.get(event.segmentId)?.rawText ?? '',
+          acceptedText:
+            this.pendingSttObservations.get(event.segmentId)?.acceptedText ?? '',
+          maxVadScore: this.pendingMaxVadScore,
+          vadThreshold: this.pendingVadThreshold,
+          effectiveThreshold: this.pendingEffectiveThreshold,
+          noiseFloor: this.pendingNoiseFloor,
+          ttsPlayingDuringUtterance: this.currentTtsPlaying,
+          mediaTrackSettings: this.currentMediaSettings,
+        });
+        this.resetPendingVadMetrics();
+        return;
+      case 'speech_ended': {
+        const active = this.activeUtterances.get(event.segmentId);
+        if (!active) return;
+        active.speechEndAt = timestampFromMilliseconds(event.at);
+        if (!active.sttStartedAt) active.sttStartedAt = active.speechEndAt;
+        const pendingFinalizedEvent = this.pendingFinalizedEvents.get(
+          event.segmentId,
+        );
+        if (pendingFinalizedEvent) {
+          this.pendingFinalizedEvents.delete(event.segmentId);
+          this.recordFinalizedUtterance(pendingFinalizedEvent);
+        }
+        return;
+      }
+      case 'interim_transcript_updated':
+        this.latestTranscript = event.text;
+        return;
+      case 'utterance_finalized':
+        if (
+          this.activeUtterances.has(event.segmentId) &&
+          !this.activeUtterances.get(event.segmentId)?.speechEndAt
+        ) {
+          this.pendingFinalizedEvents.set(event.segmentId, event);
+          return;
+        }
+        this.recordFinalizedUtterance(event);
+        return;
+      case 'recognition_failed':
+        this.latestError = event.code;
+        this.appendRecord({
+          kind: 'error',
+          timestamp: timestampFromMilliseconds(event.at),
+          sessionId: this.sessionId!,
+          mode: this.currentMode,
+          error: event.code,
+          segmentId: null,
+        });
+        return;
+      case 'recognition_stopped':
+        for (const [segmentId, finalizedEvent] of this.pendingFinalizedEvents) {
+          const active = this.activeUtterances.get(segmentId);
+          if (active) active.speechEndAt = timestampFromMilliseconds(event.at);
+          this.pendingFinalizedEvents.delete(segmentId);
+          this.recordFinalizedUtterance(finalizedEvent);
+        }
+        for (const active of this.activeUtterances.values()) {
+          this.latestError = 'recognition-stopped-before-result';
+          this.appendRecord({
+            kind: 'error',
+            timestamp: timestampFromMilliseconds(event.at),
+            sessionId: this.sessionId!,
+            mode: active.mode,
+            error: 'recognition-stopped-before-result',
+            segmentId: active.segmentId,
+          });
+        }
+        this.activeUtterances.clear();
+        this.resetPendingVadMetrics();
+        return;
+      case 'listening_started':
+        return;
+    }
+  }
+
+  getSnapshot(): VoiceLabSnapshot {
+    if (!this.enabled || !this.sessionId) return emptySnapshot();
+    return {
+      sessionId: this.sessionId,
+      records: [...this.records],
+      summary: cloneSummary(this.summary),
+      latestRecord: this.latestRecord,
+      latestTranscript: this.latestTranscript,
+      latestError: this.latestError,
+    };
+  }
+
+  private recordFinalizedUtterance(
+    event: Extract<VoiceInputEvent, { type: 'utterance_finalized' }>,
+  ): void {
+    const active = this.activeUtterances.get(event.segmentId) ?? {
+      mode: this.currentMode,
+      segmentId: event.segmentId,
+      speechStartAt: '',
+      speechEndAt: null,
+      sttStartedAt: null,
+      rawText: '',
+      acceptedText: '',
+      maxVadScore: null,
+      vadThreshold: null,
+      effectiveThreshold: null,
+      noiseFloor: null,
+      ttsPlayingDuringUtterance: this.currentTtsPlaying,
+      mediaTrackSettings: this.currentMediaSettings,
+    };
+    const timestamp = timestampFromMilliseconds(event.at);
+    const observation = this.pendingSttObservations.get(event.segmentId);
+    const recognizedText = event.text.trim();
+    const rawRecognizedText = (
+      observation?.rawText || active.rawText || recognizedText
+    ).trim();
+    const knownHallucinationPhrase = findKnownHallucinationPhrase(
+      rawRecognizedText || recognizedText,
+    );
+    const speechStartAt = active.speechStartAt || null;
+    const speechEndAt = active.speechEndAt;
+    const sttStartedAt =
+      active.sttStartedAt ?? speechEndAt ?? speechStartAt;
+    const sttLatencyMs = millisecondsBetween(sttStartedAt, timestamp);
+    const rejectReason = !recognizedText
+      ? knownHallucinationPhrase
+        ? 'known-hallucination-filtered'
+        : 'empty-transcript'
+      : null;
+    const record: VoiceLabUtteranceRecord = {
+      kind: 'utterance',
+      timestamp,
+      sessionId: this.sessionId!,
+      mode: active.mode,
+      segmentId: event.segmentId,
+      speechStartAt,
+      speechEndAt,
+      sttStartedAt,
+      sttResultAt: timestamp,
+      sttLatencyMs,
+      recognizedText,
+      rawRecognizedText,
+      audioDurationMs: millisecondsBetween(speechStartAt, speechEndAt),
+      maxVadScore: active.maxVadScore,
+      vadThreshold: active.vadThreshold,
+      effectiveThreshold: active.effectiveThreshold,
+      noiseFloor: active.noiseFloor,
+      vadAccepted:
+        active.mode === 'processed-vad' || active.mode === 'exhibition-mix'
+          ? true
+          : null,
+      rejectReason,
+      ttsPlayingDuringUtterance:
+        active.ttsPlayingDuringUtterance || this.currentTtsPlaying,
+      mediaTrackSettings: active.mediaTrackSettings,
+      knownHallucinationPhrase,
+      error: null,
+    };
+
+    this.appendRecord(record);
+    this.updateSummary(record);
+    this.activeUtterances.delete(event.segmentId);
+    this.pendingSttObservations.delete(event.segmentId);
+    this.latestTranscript = recognizedText;
+  }
+
+  private recordVadRejection(diagnostic: Extract<VoiceInputDiagnostic, { type: 'vad_rejected' }>): void {
+    if (!this.sessionId) return;
+    const record = {
+      kind: 'vad_rejected' as const,
+      timestamp: timestampFromMilliseconds(diagnostic.at),
+      sessionId: this.sessionId,
+      mode: this.currentMode,
+      speechStartAt: null,
+      speechEndAt: timestampFromMilliseconds(diagnostic.at),
+      audioDurationMs: Math.max(0, Math.round(diagnostic.candidateDurationMs)),
+      vadAccepted: false as const,
+      rejectReason: diagnostic.reason,
+      maxVadScore: diagnostic.maxScore,
+      vadThreshold: diagnostic.vadThreshold,
+      effectiveThreshold: diagnostic.effectiveThreshold,
+      noiseFloor: diagnostic.noiseFloor,
+      ttsPlayingDuringUtterance: this.currentTtsPlaying,
+      mediaTrackSettings: this.currentMediaSettings,
+    };
+    this.appendRecord(record);
+    this.summary.vadRejectCount += 1;
+    this.summary.candidateCount += 1;
+    this.summary.byMode[this.currentMode].vadRejectCount += 1;
+    this.summary.byMode[this.currentMode].candidateCount += 1;
+    this.resetPendingVadMetrics();
+  }
+
+  private updateSummary(record: VoiceLabUtteranceRecord): void {
+    const known = record.knownHallucinationPhrase !== null;
+    const successful = record.recognizedText.length > 0;
+    const noiseLike = !successful && !known;
+    const targets = [this.summary, this.summary.byMode[record.mode]];
+    for (const target of targets) {
+      target.utteranceCount += 1;
+      target.candidateCount += 1;
+      if (successful) target.sttSuccessCount += 1;
+      if (noiseLike) target.noiseLikeSttCount += 1;
+      if (known) target.knownHallucinationCount += 1;
+      if (record.ttsPlayingDuringUtterance) target.ttsOverlapCount += 1;
+    }
+
+    if (record.sttLatencyMs !== null) {
+      const total = this.latencyTotals.get(record.mode) ?? {
+        count: 0,
+        totalMs: 0,
+      };
+      total.count += 1;
+      total.totalMs += record.sttLatencyMs;
+      this.latencyTotals.set(record.mode, total);
+      const modeSummary = this.summary.byMode[record.mode];
+      modeSummary.averageSttLatencyMs = total.totalMs / total.count;
+      const overall = [...this.latencyTotals.values()].reduce(
+        (current, value) => ({
+          count: current.count + value.count,
+          totalMs: current.totalMs + value.totalMs,
+        }),
+        { count: 0, totalMs: 0 },
+      );
+      this.summary.averageSttLatencyMs =
+        overall.count > 0 ? overall.totalMs / overall.count : null;
+    }
+  }
+
+  private updateBargeInSummary(
+    record: Extract<VoiceLabRecord, { kind: 'barge_in' }>,
+  ): void {
+    const targets = [this.summary, this.summary.byMode[record.mode]];
+    for (const target of targets) {
+      if (record.action === 'duck') target.bargeInTriggeredCount += 1;
+      if (record.action === 'interrupt') target.bargeInConfirmedCount += 1;
+      if (record.action === 'restore') {
+        target.bargeInRestoredCount += 1;
+        if (record.reason === 'timeout') target.bargeInTimeoutCount += 1;
+      }
+    }
+  }
+
+  private resetPendingVadMetrics(): void {
+    this.pendingMaxVadScore = null;
+    this.pendingVadThreshold = null;
+    this.pendingEffectiveThreshold = null;
+    this.pendingNoiseFloor = null;
+  }
+
+  private appendRecord(record: VoiceLabRecord): void {
+    this.records.push(record);
+    this.latestRecord = record;
+    this.onRecord?.(record);
+  }
+}

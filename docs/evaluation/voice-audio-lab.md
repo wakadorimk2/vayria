@@ -1,0 +1,192 @@
+# Vayria Audio Lab 手順
+
+Audio Labは、同じ端末、同じマイク、同じ発話条件で音声入力経路を比較するための開発者向け機能です。
+通常の展示画面では表示しません。
+
+## 起動
+
+### PC Chrome
+
+1. Vayriaを開発モードで起動します。
+
+   ```powershell
+   npm run dev
+   ```
+
+2. `http://127.0.0.1:5187/?audioLab=1`を開きます。
+3. Mode AでWeb Speechを使う場合は、Python STTサービスは不要です。
+4. Mode B/C/Dを使う場合は、Python STTサービスを起動します。
+
+   ```powershell
+   Push-Location tools/stt
+   uv run --no-cache python -m vayria_stt.server
+   Pop-Location
+   ```
+
+### iPad Safariとホーム画面追加PWA
+
+1. HTTPSを有効にしたexhibitionモードを起動します。
+2. PCとiPadを同じLANへ接続します。
+3. iPad Safariで、Viteが表示したHTTPS URLへアクセスします。
+4. URLの末尾へ`?audioLab=1`を追加します。
+5. マイク許可を与えます。
+6. 必要な場合はSafariの共有メニューからホーム画面へ追加します。
+7. Mode B/C/Dでは、PC上でPython STTサービスを起動したままにします。
+
+HTTPS証明書とexhibitionの起動方法は、ルートのREADMEを参照してください。
+Audio Labは開発ビルドでだけ有効です。
+`?audioLab=1`で開くAudio Labの初期Modeは`Exhibition Mix`です。
+query parameterなしの通常起動は`Baseline`です。
+
+## Mode A/B/C/Dの比較
+
+Audio Labパネルの操作順は次です。
+
+`Audio mode → VAD threshold → level / score → status → summary → Export`
+
+1. 音声入力を停止します。
+2. Audio modeを選びます。
+3. 音声入力を開始します。
+4. 1つのテストケースを実行します。
+5. 音声入力を停止します。
+6. `Export JSONL`を押します。
+7. 同じ距離、声量、待機時間で次のModeを実行します。
+
+Mode変更は、マイク入力中はできません。
+VAD thresholdは、音声入力中も変更できます。
+初期値は`0.02`です。
+UIの範囲は`0.005`から`0.2`です。
+比較を始めるときは、まず初期Modeの`Exhibition Mix`を確認します。
+既存経路との比較では、マイクを停止してから`Baseline`を選びます。
+
+- `Baseline`: 既存の経路を使用します。localの既定値は`SpeechRecognition`または`webkitSpeechRecognition`です。exhibitionで既存のRemote PCM設定を使う場合は、既存のPython STT経路を使用します。
+- `Processed`: Remote PCMへ接続し、`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。
+- `Processed + VAD`: ProcessedにRMSベースのブラウザー側VADを追加します。200msチャンクを使います。既存のPython WebRTC VADと600ms無音終了処理も残します。
+- `Exhibition Mix`: Processedに適応型RMSゲート、既存のPython WebRTC VAD、barge-in、TTS duckingを追加します。Mode DはRemote PCM経路を使います。
+
+## Mode Dの確認ポイント
+
+Mode Dは展示環境向けの組み合わせです。
+
+1. `echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。
+2. SafariまたはOSが返した実値をMediaTrack settingsへ記録します。
+3. AudioWorkletの200ms PCMチャンクで適応型RMSゲートを実行します。
+4. ゲートを通過した元のPCMだけをPython WebRTC VADへ送ります。
+5. Python側のfaster-whisperへ音声を送ります。
+
+初期のnoise floorは`0.005`です。
+noise floorの更新係数は`0.05`です。
+effective thresholdは`max(user threshold, noise floor * 2.5)`です。
+speech開始は1チャンクです。
+speech終了はthreshold未満3チャンクです。
+candidate rejectはnoise floor未満2チャンクです。
+ゲートはPCMの音量を加工しません。
+
+Mode DでTTS再生中にspeech startを検出すると、TTS音量を20msで約`0.12`へ下げます。
+accepted transcriptが返ると、現在の会話ターンをbarge-inとして停止します。
+空transcript、既知誤認識、STTエラー、停止、2.5秒timeoutではTTS音量を復元します。
+Mode A/B/Cではこのbarge-in状態機械を使いません。
+
+Mode Dのログにはnoise floor、effective threshold、最大VAD score、barge-in状態を保存します。
+raw audioは保存しません。
+
+Mode B/C/DでPython STTサービスが停止している場合、音声サービス接続エラーを表示します。
+Mode AのWeb Speech経路は、ブラウザーやOSの音声認識サービス差を含みます。
+Mode AとMode B/CのSTTエンジンが異なる場合、マイク前処理だけの比較にはなりません。
+
+## 固定して試す10ケース
+
+次のケースを、同じ順番でMode A、B、C、Dへ適用します。
+
+1. 端末の近くから普通の声で話す
+2. 端末から50cm程度離れて話す
+3. 端末から80cm程度離れて話す
+4. 小声で話す
+5. 10秒程度無言で待つ
+6. 周囲で別の人が話す
+7. VayriaのTTS再生中に何も話さない
+8. VayriaのTTS再生中にユーザーが割り込む
+9. 「うん」「あー」などの短い発話を行う
+10. 軽い環境ノイズを流す
+
+ケースごとに距離、発話文、声量、TTSの文、待機時間を固定します。
+Modeを変えた後に同じ条件を再現します。
+各ケースのJSONLファイル名に、Modeとケース番号をメモすると比較しやすくなります。
+
+## iPad内蔵マイクと外部マイク
+
+iPad内蔵マイクでは、端末から話す位置を20〜40cmに固定します。
+端末の向きとTTS音量を固定します。
+話者の位置を固定します。
+
+外部マイクを使う場合は、iPadOSの既定入力に設定します。
+Audio Labには入力デバイス選択UIを追加していません。
+指向性マイクは話者へ向けます。
+マイクと話者の距離を20〜40cmに固定します。
+スピーカーとマイクの距離をできるだけ離します。
+マイクのdeviceIdとgroupIdは保存しません。
+
+会場で測る場合は、次の順で確認します。
+
+1. 会場の通常音量を再現します。
+2. Mode A、B、C、Dで同じ発話文を話します。
+3. TTS再生中の無言と割り込みを各Modeで試します。
+4. Export JSONLで候補数、reject数、latency、barge-inを保存します。
+5. Mode Dのnoise floorとeffective thresholdをケースごとに比較します。
+
+Mode Dでも、同じ音量と同じ距離の競合話者は分離できません。
+適応RMSゲートは方向を判定しません。
+会場で競合話者が多い場合は、話す位置と指向性マイクが主要な対策です。
+
+## 表示とログ
+
+Audio Labは次を表示します。
+
+- マイク入力状態
+- VAD speech状態
+- STT処理状態
+- TTS再生状態
+- マイクレベル
+- RMS由来のVAD score
+- 要求済み、対応可能、適用済みのMediaTrack settings
+- 最新発話と最新エラー
+- Mode別summary
+
+Mode AのWeb Speech経路では、マイクレベルとMediaTrack settingsを取得しません。
+パネルの`Unavailable`は、その経路では値を測れないという意味です。
+Mode B/C/Dでsettingsが空の場合も、ブラウザーまたはiPadOSが値を返さなかった可能性があります。
+settingsは`getSettings()`で得た値を使います。
+Mode Dでは、適応noise floor、effective threshold、barge-in state、TTS ducking状態も表示します。
+`noiseSuppression`または`autoGainControl`が未適用でも、ブラウザーまたはiPadOSの制約です。Mode Dの起動失敗とは解釈しません。
+`deviceId`と`groupId`は保存しません。
+
+保存先は`VAYRIA_PLAYCHECK_ROOT`の下です。
+未設定時の保存先は次です。
+
+```text
+playcheck-results/local/voice-lab/<sessionId>/events.jsonl
+```
+
+音声データは保存しません。
+JSONLには、発話時刻、speech区間、STT時刻、latency、raw transcript、会話へ渡したtranscript、VAD判定、reject理由、TTS重複、匿名化済みsettings、エラーを保存します。
+raw transcriptは調査ログだけに保存し、会話本文へは渡しません。
+既知の誤認識メトリクスは次の3語を数えます。
+
+- ご視聴ありがとうございました
+- ありがとうございました
+- ご覧いただきありがとうございました
+
+このメトリクスは比較用です。
+本番会話の固定語フィルタではありません。
+
+## 参考コマンド
+
+```powershell
+npm run test:voice
+npm run typecheck
+npm run lint
+npm run build
+Push-Location tools/stt
+uv run --no-cache pytest
+Pop-Location
+```

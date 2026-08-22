@@ -11,9 +11,13 @@
   },
   "include": [
     "src/voice/browserSpeechRecognition.ts",
+    "src/voice/audioLab.ts",
     "src/voice/backchannelPolicy.ts",
     "src/voice/pcm16.ts",
+    "src/voice/rmsVad.ts",
     "src/voice/voiceInput.ts",
+    "src/voice/voiceLabRecorder.ts",
+    "server/voiceLabStore.ts",
     "scripts/voice-input.test.ts"
   ]
 }
