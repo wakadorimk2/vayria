@@ -223,7 +223,11 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
 manifest の `assetId`、SHA-256、duration、tag、補正 profile ID が、再生 asset の契約です。
 
-現在の manifest は空です。
+現在の manifest には、Card Pool用18本と通常発話用1本の保存済みVRMAが登録されています。
+
+通常発話の既定主動作は `speech-gentle` です。手元を中心とした穏やかな身体動作を使います。
+
+発話前は、視線・呼吸・微細な揺れを手続き型の前反応として使います。VRMAの開始は180msでIdleからクロスフェードします。音声終了後は250msの余韻を保持し、その後400msでVRMAからIdleへ戻ります。再生中はVRMA単独です。
 
 curated VRMA は、構造検証と実際の Vayria VRM での owner Playcheck 後に登録します。
 
@@ -470,11 +474,18 @@ Gitには`docs/evaluation/results/`の匿名集計だけを保存します。
 ブラウザーは開発時に、次の会話イベントを構造化ログへ出力します。
 
 `input_received`、`llm_start`、`llm_done`、`tts_start`、`tts_ready`、
-`animation_start`、`turn_completed`、`turn_aborted`、`turn_failed`
+`motion_ready`、`motion_start`、`animation_start`、`turn_completed`、
+`turn_aborted`、`turn_failed`
 
 ログはブラウザーのコンソールとViteのターミナルへ出力します。
 入力本文、返答本文、履歴、API keyはイベントログへ含めません。
 `animation_start`は音声再生とリップシンク開始時点です。
+`motion_ready`はVRMAの準備完了時点です。
+`motion_start`は身体モーションの開始時点です。
+発話計画は、既定でモーションを180ms先行させます。
+モーションは既定で180msかけて開始し、音声終了後250msの余韻の後、400msかけてIdleへ戻ります。
+VRMAの準備が1200msを超えた場合は、音声のみを再生します。
+通常発話の既定assetは`speech-gentle`です。カードプレビューが別のassetを指定した場合は、そのassetを優先します。
 
 各provider requestは`X-Performer-Turn-Id`で会話イベントと関連付けます。
 serverは既存clientの`X-Wildcard-Turn-Id`も互換目的で受理します。
@@ -489,7 +500,7 @@ serverは既存clientの`X-Wildcard-Turn-Id`も互換目的で受理します。
 - コメント取得、fake audience、配信サービス連携
 - TTSキュー、発話分割、ストリーミング、割り込み再開
 - 話題の永続記憶
-- ARDY runtime generation、自由な motion selector、複雑な VRMA blending
+- ARDY runtime generation、自由な motion selector、複雑なVRMAタイムライン制御
 - 長期的な mood、感情履歴
 - production server と deployment
 

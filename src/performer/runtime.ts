@@ -15,6 +15,7 @@ import type {
 
 const MIN_EFFECT_INTENSITY = 0.001;
 const MAX_SEMANTIC_BIASES = 12;
+export const DEFAULT_SPEECH_MOTION_ASSET_ID = 'speech-gentle';
 let planSequence = 0;
 
 export function clamp(value: number, minimum = 0, maximum = 1): number {
@@ -427,6 +428,27 @@ export function resolvePerformancePlan(
             ),
           }
         : undefined,
+    motion:
+      resolvedIntent === 'speak'
+        ? { assetId: DEFAULT_SPEECH_MOTION_ASSET_ID }
+        : undefined,
+    timing: {
+      motionLeadMs: Math.round(
+        clamp(effectiveProfile.motionLeadMs, 0, 300),
+      ),
+      motionEnterBlendMs: Math.round(
+        clamp(effectiveProfile.motionEnterBlendMs, 0, 1_000),
+      ),
+      motionExitBlendMs: Math.round(
+        clamp(effectiveProfile.motionExitBlendMs, 0, 1_000),
+      ),
+      motionPreparationTimeoutMs: Math.round(
+        clamp(effectiveProfile.motionPreparationTimeoutMs, 0, 1_500),
+      ),
+      postSpeechHoldMs: Math.round(
+        clamp(effectiveProfile.postSpeechHoldMs, 0, 2_000),
+      ),
+    },
     avatarProfile: {
       expressionHoldMs: 800,
       gazeDirectness: directness,

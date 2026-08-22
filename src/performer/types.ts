@@ -60,6 +60,11 @@ export interface PerformerProfile {
   energyBaseline: number;
   responseDelayBaselineMs: number;
   leadBeforeSpeechMs: number;
+  motionLeadMs: number;
+  motionEnterBlendMs: number;
+  motionExitBlendMs: number;
+  motionPreparationTimeoutMs: number;
+  postSpeechHoldMs: number;
   autonomousInitialDelayMs: number;
   autonomousMinDelayMs: number;
   autonomousMaxDelayMs: number;
@@ -168,6 +173,14 @@ export interface ActionIntent {
   };
 }
 
+export interface PerformanceTiming {
+  motionLeadMs: number;
+  motionEnterBlendMs: number;
+  motionExitBlendMs: number;
+  motionPreparationTimeoutMs: number;
+  postSpeechHoldMs: number;
+}
+
 export interface PerformancePlan {
   planId: string;
   trigger: PerformerTrigger['kind'];
@@ -191,6 +204,7 @@ export interface PerformancePlan {
   motion?: {
     assetId: string;
   };
+  timing: PerformanceTiming;
   speech?: {
     delayMs: number;
     llmContext: {
@@ -223,6 +237,7 @@ export interface PerformanceResult {
     emotion: Emotion;
     intensity: number;
   };
+  motionStartedAt?: number;
   speechStartedAt?: number;
   speechEndedAt?: number;
 }

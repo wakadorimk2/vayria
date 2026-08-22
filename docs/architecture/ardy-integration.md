@@ -55,7 +55,8 @@ ARDY native motion
 
 保存済み asset と runtime asset は同じ `correctionProfileId` を使用します。
 
-`VrmStage` は補正 profile を読みません。
+生成時の補正 profile と、browser再生時の `MotionPlaybackProfile` は役割を分離します。
+`MotionPlayer` は clip生成後に、hips移動と頭部・上体回転を再生用profileで縮小します。
 
 ## 未実装の境界
 

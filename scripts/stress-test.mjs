@@ -10,6 +10,8 @@ export const EVENT_NAMES = Object.freeze([
   'llm_done',
   'tts_start',
   'tts_ready',
+  'motion_ready',
+  'motion_start',
   'animation_start',
   'turn_completed',
   'turn_aborted',

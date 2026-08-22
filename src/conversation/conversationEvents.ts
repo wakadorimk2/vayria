@@ -8,6 +8,8 @@ export const CONVERSATION_EVENTS = [
   'llm_done',
   'tts_start',
   'tts_ready',
+  'motion_ready',
+  'motion_start',
   'animation_start',
   'turn_completed',
   'turn_aborted',
