@@ -212,6 +212,30 @@ test('cancelled and interrupted results do not apply completed speech state', ()
   }
 });
 
+test('failed results return to idle without applying completed speech state', () => {
+  const previousState = createState({
+    phase: 'synthesizing',
+    energy: 0.4,
+    emotion: { value: 'joy', activation: 0.7, updatedAt: 100 },
+    lastSpeechAt: 50,
+  });
+
+  const nextState = reducePerformanceResult(previousState, {
+    planId: 'plan-failed',
+    completedAt: 100,
+    outcome: 'failed',
+    trigger: 'idle_tick',
+    intent: 'speak',
+    spokenText: '失敗した返答',
+    emotionCue: { emotion: 'angry', intensity: 1 },
+  });
+
+  assert.equal(nextState.phase, 'idle');
+  assert.equal(nextState.energy, previousState.energy);
+  assert.deepEqual(nextState.emotion, previousState.emotion);
+  assert.equal(nextState.lastSpeechAt, previousState.lastSpeechAt);
+});
+
 test('initiative changes autonomous cadence while preserving the initial delay', () => {
   const state = createState();
   const lowInitiative = {
