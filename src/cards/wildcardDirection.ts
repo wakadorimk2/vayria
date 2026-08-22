@@ -9,6 +9,7 @@ import { getEffectIntensity } from '../performer/runtime';
 import { CARD_MODIFIERS } from './cardReactions';
 import type { CardSwapResult } from './useCardGamePrototype';
 import type { CardZoneState } from './useCardGamePrototype';
+import { getCardPerformancePlanOverrides } from './cardMotionAssets';
 
 const FORCED_EFFECT_DURATION_MS = 30_000;
 const BACKGROUND_INTENSITY = 0.2;
@@ -64,6 +65,7 @@ function createContribution(
   effects: DirectionEffect[],
   now: number,
   requiresSpeech = false,
+  planOverrides?: DirectionContribution['planOverrides'],
 ): DirectionContribution {
   const activeEffects = effects.filter(
     (effect) => getEffectIntensity(effect, now) > 0.001,
@@ -80,6 +82,7 @@ function createContribution(
     semanticCues: [...new Set(semanticCues)],
     triggers: [trigger],
     ...(requiresSpeech ? { attentionTarget: 'viewer' as const } : {}),
+    ...(planOverrides === undefined ? {} : { planOverrides }),
   };
 }
 
@@ -139,7 +142,13 @@ function createController(zones: CardZoneState): WildcardDirectionController {
         semanticCue: `something_changed:${result.insertedCardId}`,
         metadata: { origin: 'wildcard' },
       };
-      return createContribution(trigger, getEffects(now), now, true);
+      return createContribution(
+        trigger,
+        getEffects(now),
+        now,
+        true,
+        getCardPerformancePlanOverrides(result.insertedCardId),
+      );
     },
     getContribution: (trigger, now = Date.now()) =>
       direction.contribute({ trigger, now }),

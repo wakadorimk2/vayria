@@ -218,6 +218,7 @@ export interface AggregatedDirectionState {
   semanticCues: string[];
   activeDirectionIds: string[];
   attentionTarget: AttentionTarget | null;
+  planOverrides?: DirectionContribution['planOverrides'];
 }
 
 export function aggregateDirectionContributions(
@@ -231,6 +232,9 @@ export function aggregateDirectionContributions(
   const sortedContributions = [...contributions].sort((left, right) =>
     left.directionId.localeCompare(right.directionId),
   );
+  const planOverrides = sortedContributions
+    .map((contribution) => contribution.planOverrides)
+    .find((candidate) => candidate !== undefined);
 
   for (const contribution of sortedContributions) {
     for (const constraint of contribution.constraints) {
@@ -284,6 +288,7 @@ export function aggregateDirectionContributions(
     semanticCues: sortedSemanticCues.slice(0, MAX_SEMANTIC_BIASES),
     activeDirectionIds: [...activeDirectionIds].sort(),
     attentionTarget,
+    planOverrides,
   };
 }
 
@@ -370,6 +375,11 @@ export function resolvePerformancePlan(
     aggregate.attentionTarget ?? getAttentionTarget(intent.attentionTarget);
   const planId = createPlanId();
   const activeDirectionIds = aggregate.activeDirectionIds;
+  const motion = aggregate.planOverrides
+    ? aggregate.planOverrides.motion
+    : resolvedIntent === 'speak'
+      ? { assetId: DEFAULT_SPEECH_MOTION_ASSET_ID }
+      : undefined;
   const preReaction =
     resolvedIntent === 'speak' || resolvedIntent === 'react_nonverbally'
       ? {
@@ -394,6 +404,9 @@ export function resolvePerformancePlan(
     planId,
     trigger: intent.trigger,
     intent: resolvedIntent,
+    ...(aggregate.planOverrides?.behavior
+      ? { behavior: aggregate.planOverrides.behavior }
+      : {}),
     preReaction,
     speech:
       resolvedIntent === 'speak'
@@ -428,10 +441,7 @@ export function resolvePerformancePlan(
             ),
           }
         : undefined,
-    motion:
-      resolvedIntent === 'speak'
-        ? { assetId: DEFAULT_SPEECH_MOTION_ASSET_ID }
-        : undefined,
+    motion,
     timing: {
       motionLeadMs: Math.round(
         clamp(effectiveProfile.motionLeadMs, 0, 300),
