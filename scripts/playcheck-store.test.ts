@@ -64,7 +64,6 @@ test('Playcheck store rejects path-like run IDs', async () => {
     /Invalid Playcheck run ID/,
   );
 });
-
 test('exhibition capture IDs and paths reject traversal', () => {
   assert.equal(
     isExhibitionCaptureId('ex-20260822000000-abcdef12'),

@@ -68,7 +68,7 @@ The current source mapping is:
 | Autonomous timer and environment checks | `src/conversation/useAutonomousTalk.ts` |
 | In-memory session orchestration | `src/App.tsx`, conversation and card hooks |
 | LLM and TTS provider boundary | `server/localApi.ts` |
-| Expression, gaze approximation, and idle motion | `src/avatar/VrmStage.tsx`, `src/avatar/idleMotion.ts` |
+| Expression, gaze, and idle motion | `src/avatar/VrmStage.tsx`, `src/avatar/idleMotion.ts`, `src/avatar/idleGaze.ts` |
 | Saved VRMA catalog and body clip playback | `src/avatar/motion/`, `src/avatar/VrmStage.tsx` |
 
 ### Exhibition observability
@@ -420,13 +420,13 @@ The long-term state model is outside the 9/23 MVP.
 
 Borrow queue and cancellation concepts from the audio pipeline.
 
-Borrow the idle blink, look-at, and eye-saccade direction for future avatar work.
+Use AIRI's VRM LookAt target handling as a reference for current avatar work.
 
 Do not add a direct AIRI dependency.
 
 The repository is MIT licensed.
 
-The current MVP uses the existing VRM stage and a small head-yaw gaze approximation.
+The current MVP uses the existing VRM stage and an idle VRM LookAt controller. Models without VRM LookAt use a small head-yaw fallback.
 
 - [chat orchestrator](https://github.com/moeru-ai/airi/blob/main/packages/core-agent/src/runtime/chat-orchestrator-runtime.ts)
 - [speech pipeline](https://github.com/moeru-ai/airi/blob/main/packages/pipelines-audio/src/speech-pipeline.ts)
@@ -483,7 +483,7 @@ The current code implements the vertical slice for all six boundaries.
 ### Known risks
 
 - The current audio path still plays one complete WAV at a time.
-- The current VRM gaze implementation uses head-yaw bias, not a full eye target controller.
+- VRM models without LookAt use a head-yaw fallback, so their idle gaze cannot move individual eyes.
 - The current LLM contract still contains WildCard card validation in the local API.
 - Topic remains conversation-owned in v0.1. Runtime topic ownership is a v0.2 migration.
 - Energy and attention modifiers are plan-local in v0.1. Persistent impulses need a separate contract.

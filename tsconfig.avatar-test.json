@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/avatar-test",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/avatar-test.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/avatar/idleGaze.ts",
+    "scripts/idle-gaze.test.ts"
+  ]
+}

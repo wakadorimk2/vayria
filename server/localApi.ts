@@ -320,8 +320,8 @@ async function recordStructuredEvent(
 
   try {
     await capture.appendEvent(record);
-  } catch (error) {
-    console.warn('Exhibition event recording failed.', error);
+    } catch (error) {
+      console.warn('Exhibition event recording failed.', error);
   }
 }
 

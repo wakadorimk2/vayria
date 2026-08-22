@@ -98,7 +98,6 @@ npm run playcheck:ipad -- --no-open-qr
 他のURLはCLIに表示します。
 
 PCだけで確認する場合は、`npm run dev`と`http://127.0.0.1:5187/`を使います。
-
 CLIは次を表示します。
 
 - `runId`
