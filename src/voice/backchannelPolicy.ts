@@ -1,3 +1,5 @@
+import type { VoiceBackchannelCue } from './voiceInteraction.js';
+
 export interface ListeningBackchannelProfile {
   readonly rateScale: number;
   readonly intonationScale: number;
@@ -5,16 +7,19 @@ export interface ListeningBackchannelProfile {
 
 export const LISTENING_BACKCHANNEL_PROFILES = [
   { rateScale: 0.92, intonationScale: 0.82 },
-  { rateScale: 0.96, intonationScale: 0.96 },
   { rateScale: 1.0, intonationScale: 1.0 },
-  { rateScale: 1.04, intonationScale: 1.08 },
-  { rateScale: 1.08, intonationScale: 0.9 },
   { rateScale: 0.94, intonationScale: 1.16 },
 ] as const satisfies readonly ListeningBackchannelProfile[];
 
-export const LISTENING_BACKCHANNEL_PROBABILITY = 0.35;
-export const LISTENING_BACKCHANNEL_MIN_DELAY_MS = 1_200;
-export const LISTENING_BACKCHANNEL_MAX_DELAY_MS = 1_800;
+export interface ListeningBackchannelAudio {
+  cue: Exclude<VoiceBackchannelCue, 'none'>;
+  variantIndex: number;
+  audioData: ArrayBuffer;
+}
+
+export const LISTENING_BACKCHANNEL_PROBABILITY = 0.5;
+export const LISTENING_BACKCHANNEL_MIN_DELAY_MS = 900;
+export const LISTENING_BACKCHANNEL_MAX_DELAY_MS = 1_400;
 
 export type RandomSource = () => number;
 
@@ -58,8 +63,8 @@ export function selectListeningBackchannelIndex(
 }
 
 export function collectSuccessfulBackchannelAudio(
-  results: readonly PromiseSettledResult<ArrayBuffer>[],
-): ArrayBuffer[] {
+  results: readonly PromiseSettledResult<ListeningBackchannelAudio>[],
+): ListeningBackchannelAudio[] {
   return results.flatMap((result) =>
     result.status === 'fulfilled' ? [result.value] : [],
   );

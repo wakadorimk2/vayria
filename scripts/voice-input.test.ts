@@ -18,6 +18,7 @@ import {
   LISTENING_BACKCHANNEL_PROBABILITY,
   LISTENING_BACKCHANNEL_PROFILES,
   collectSuccessfulBackchannelAudio,
+  type ListeningBackchannelAudio,
   scheduleListeningBackchannel,
   selectListeningBackchannelIndex,
 } from '../src/voice/backchannelPolicy.js';
@@ -297,13 +298,10 @@ test('PCM16 encoding clamps samples and uses little-endian signed integers', () 
   );
 });
 
-test('listening backchannel provides six TTS profiles', () => {
+test('listening backchannel provides three TTS profiles', () => {
   assert.deepEqual(LISTENING_BACKCHANNEL_PROFILES, [
     { rateScale: 0.92, intonationScale: 0.82 },
-    { rateScale: 0.96, intonationScale: 0.96 },
     { rateScale: 1, intonationScale: 1 },
-    { rateScale: 1.04, intonationScale: 1.08 },
-    { rateScale: 1.08, intonationScale: 0.9 },
     { rateScale: 0.94, intonationScale: 1.16 },
   ]);
 });
@@ -336,14 +334,22 @@ test('listening backchannel schedules only within the configured probability and
 });
 
 test('listening backchannel selection avoids immediate repetition', () => {
-  assert.equal(selectListeningBackchannelIndex(6, null, () => 0), 0);
-  assert.equal(selectListeningBackchannelIndex(6, 0, () => 0), 1);
+  assert.equal(selectListeningBackchannelIndex(3, null, () => 0), 0);
+  assert.equal(selectListeningBackchannelIndex(3, 0, () => 0), 1);
   assert.equal(selectListeningBackchannelIndex(0, null, () => 0), null);
 });
 
 test('listening backchannel pool keeps successful TTS results only', () => {
-  const firstAudio = new ArrayBuffer(1);
-  const secondAudio = new ArrayBuffer(2);
+  const firstAudio: ListeningBackchannelAudio = {
+    cue: 'un',
+    variantIndex: 0,
+    audioData: new ArrayBuffer(1),
+  };
+  const secondAudio: ListeningBackchannelAudio = {
+    cue: 'uun',
+    variantIndex: 1,
+    audioData: new ArrayBuffer(2),
+  };
   assert.deepEqual(
     collectSuccessfulBackchannelAudio([
       { status: 'fulfilled', value: firstAudio },

@@ -40,6 +40,7 @@
 | --- | --- | --- | --- |
 | `idle_presence` | アバターと音声を準備する | 無入力で20秒以上待つ | `presence`, `embodiment` |
 | `manual_response` | セッションをリセットする | 短い入力を1回送る | `timing`, `emotion`, `embodiment` |
+| `voice_listener_reaction` | マイクと音声を有効にする | 具体的な話題、感情または好み、フィラーまたは未完発話を1回ずつ送る | `timing`, `continuity`, `emotion`, `embodiment` |
 | `autonomous_turn` | 自律発話を有効にする | 次の自律候補を待つ | `timing`, `continuity`, `emotion` |
 | `silence_gap` | 自律発話を継続する | 沈黙または非発話反応を待つ | `presence`, `timing`, `embodiment` |
 | `continuity_variation` | 自律発話を複数回待つ | 話題継続と話題変更を観察する | `continuity`, `emotion` |

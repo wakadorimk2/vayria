@@ -7,6 +7,10 @@ import type {
   PerformancePlan,
   PerformanceResult,
 } from '../performer/types';
+import {
+  isVoiceInteractionDecision,
+  type VoiceInteractionDecision,
+} from '../voice/voiceInteraction';
 
 export type ConversationStatus =
   | 'idle'
@@ -38,9 +42,11 @@ export interface AutonomousDecision {
 interface ChatResponse {
   action?: unknown;
   activatedCards: unknown;
+  backchannelCue?: unknown;
   emotion: unknown;
   text: string;
   topic?: unknown;
+  voiceAction?: unknown;
 }
 
 export interface ChatCardContext {
@@ -68,6 +74,7 @@ interface ConversationOptions {
   ) => void;
   onPerformancePlan?: (plan: PerformancePlan) => void;
   onPerformanceResult?: (result: PerformanceResult) => void;
+  onVoiceReaction?: (decision: VoiceInteractionDecision) => void;
 }
 
 interface ErrorResponse {
@@ -144,6 +151,27 @@ function readAutonomousDecision(
   return { action, topic: normalizedTopic };
 }
 
+function readVoiceInteractionDecision(
+  action: unknown,
+  backchannelCue: unknown,
+): VoiceInteractionDecision {
+  const decision = { action, backchannelCue };
+  if (!isVoiceInteractionDecision(decision)) {
+    throw new Error('AI の音声会話アクション形式が正しくありません。');
+  }
+  return decision;
+}
+
+function createVoicePendingPlan(plan: PerformancePlan): PerformancePlan {
+  return {
+    ...plan,
+    intent: 'react_nonverbally',
+    motion: undefined,
+    speech: undefined,
+    ttsProfile: undefined,
+  };
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
@@ -182,15 +210,18 @@ export function useConversation(
   const onPerformanceCueRef = useRef(options.onPerformanceCue);
   const onPerformancePlanRef = useRef(options.onPerformancePlan);
   const onPerformanceResultRef = useRef(options.onPerformanceResult);
+  const onVoiceReactionRef = useRef(options.onVoiceReaction);
 
   useEffect(() => {
     onPerformanceCueRef.current = options.onPerformanceCue;
     onPerformancePlanRef.current = options.onPerformancePlan;
     onPerformanceResultRef.current = options.onPerformanceResult;
+    onVoiceReactionRef.current = options.onVoiceReaction;
   }, [
     options.onPerformanceCue,
     options.onPerformancePlan,
     options.onPerformanceResult,
+    options.onVoiceReaction,
   ]);
 
   const setConversationState = useCallback(
@@ -326,9 +357,12 @@ export function useConversation(
         }
       }
 
+      const pendingPlan =
+        turnSource === 'voice' ? createVoicePendingPlan(plan) : plan;
+      let executionPlan = pendingPlan;
       activePlanRef.current = plan;
-      onPerformancePlanRef.current?.(plan);
-      playback.prepare(plan);
+      onPerformancePlanRef.current?.(pendingPlan);
+      playback.prepare(pendingPlan);
       const generation = generationRef.current + 1;
       generationRef.current = generation;
       setError('');
@@ -344,11 +378,14 @@ export function useConversation(
       let responseEmotion: Emotion | undefined;
       let motionStartedAt: number | undefined;
       let speechStartedAt: number | undefined;
+      let voiceDecision: VoiceInteractionDecision | null = null;
 
       try {
-        await waitMilliseconds(plan.preReaction?.leadBeforeSpeechMs ?? 0);
+        if (turnSource !== 'voice') {
+          await waitMilliseconds(plan.preReaction?.leadBeforeSpeechMs ?? 0);
+        }
         if (generation !== generationRef.current) {
-          emitResult(plan, 'interrupted');
+          emitResult(pendingPlan, 'interrupted');
           emitTerminalEvent('turn_aborted', { reason: 'superseded' });
           return { completed: false, decision: null };
         }
@@ -368,7 +405,12 @@ export function useConversation(
               : {}),
           },
           body: JSON.stringify({
-            mode: turnSource === 'autonomous' ? 'autonomous' : 'manual',
+            mode:
+              turnSource === 'autonomous'
+                ? 'autonomous'
+                : turnSource === 'voice'
+                  ? 'voice'
+                  : 'manual',
             ...(message === null ? {} : { message }),
             history: historyRef.current,
             ...cardContext,
@@ -399,7 +441,7 @@ export function useConversation(
           phase: 'llm',
         });
         if (generation !== generationRef.current) {
-          emitResult(plan, 'interrupted');
+          emitResult(executionPlan, 'interrupted');
           emitTerminalEvent('turn_aborted', { reason: 'superseded', phase: 'llm' });
           return { completed: false, decision: null };
         }
@@ -410,6 +452,12 @@ export function useConversation(
           throw new Error('AI の返答形式が正しくありません。');
         }
         const responseText = chatPayload.text.trim();
+        if (turnSource === 'voice') {
+          voiceDecision = readVoiceInteractionDecision(
+            chatPayload.voiceAction,
+            chatPayload.backchannelCue,
+          );
+        }
         const autonomousDecision =
           turnSource === 'autonomous'
             ? readAutonomousDecision(
@@ -419,7 +467,13 @@ export function useConversation(
               )
             : null;
         if (
-          (INTERACTIVE_SOURCES.includes(turnSource) && !responseText) ||
+          (INTERACTIVE_SOURCES.includes(turnSource) &&
+            turnSource !== 'voice' &&
+            !responseText) ||
+          (voiceDecision?.action === 'take_floor' && !responseText) ||
+          (voiceDecision !== null &&
+            voiceDecision.action !== 'take_floor' &&
+            responseText) ||
           (autonomousDecision?.action !== 'silence' &&
             autonomousDecision !== null &&
             !responseText) ||
@@ -429,8 +483,15 @@ export function useConversation(
         }
         const activatedCards = readActivatedCards(
           chatPayload.activatedCards,
-          autonomousDecision !== null,
+          autonomousDecision !== null || voiceDecision !== null,
         );
+        if (
+          voiceDecision !== null &&
+          voiceDecision.action !== 'take_floor' &&
+          activatedCards.length
+        ) {
+          throw new Error('音声の非発話反応はカードを発動できません。');
+        }
         if (autonomousDecision?.action === 'silence' && activatedCards.length) {
           throw new Error('沈黙する自律応答はカードを発動できません。');
         }
@@ -440,16 +501,38 @@ export function useConversation(
         }
         if (
           cardContext.forcedCardId &&
+          (voiceDecision === null || voiceDecision.action === 'take_floor') &&
           !activatedCards.includes(cardContext.forcedCardId)
         ) {
           throw new Error('AI が交換したカードを発動しませんでした。');
         }
 
         responseEmotion = normalizeEmotion(chatPayload.emotion);
+        if (voiceDecision && voiceDecision.action !== 'take_floor') {
+          appendHistory([{ role: 'user', content: message ?? '' }]);
+          setConversationState('idle', null);
+          emitResult(pendingPlan, 'completed', {
+            interactionAction: voiceDecision.action,
+            emotionCue: { emotion: 'neutral', intensity: 0 },
+          });
+          onVoiceReactionRef.current?.(voiceDecision);
+          emitTerminalEvent('turn_completed', {
+            reason: voiceDecision.action,
+            interactionAction: voiceDecision.action,
+          });
+          return { completed: true, decision: null };
+        }
+
+        if (turnSource === 'voice') {
+          executionPlan = plan;
+          activePlanRef.current = plan;
+          onPerformancePlanRef.current?.(plan);
+          playback.prepare(plan);
+        }
         if (autonomousDecision?.action === 'silence') {
           onReplyAccepted([]);
           setConversationState('idle', null);
-          emitResult(plan, 'completed', {
+          emitResult(executionPlan, 'completed', {
             emotionCue: { emotion: responseEmotion, intensity: 0 },
           });
           emitTerminalEvent('turn_completed', { reason: 'silence' });
@@ -457,7 +540,7 @@ export function useConversation(
         }
 
         setReply(responseText);
-        onPerformanceCueRef.current?.(plan.planId, {
+        onPerformanceCueRef.current?.(executionPlan.planId, {
           emotion: responseEmotion,
           intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
         });
@@ -472,7 +555,7 @@ export function useConversation(
 
         if (isMutedRef.current) {
           setConversationState('idle', null);
-          emitResult(plan, 'cancelled', {
+          emitResult(executionPlan, 'cancelled', {
             emotionCue: {
               emotion: responseEmotion,
               intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
@@ -492,7 +575,7 @@ export function useConversation(
         currentPhase = 'tts';
         await waitMilliseconds(plan.speech?.delayMs ?? 0);
         if (generation !== generationRef.current) {
-          emitResult(plan, 'interrupted');
+          emitResult(executionPlan, 'interrupted');
           emitTerminalEvent('turn_aborted', {
             reason: 'superseded',
             phase: currentPhase,
@@ -522,7 +605,7 @@ export function useConversation(
           signal: ttsController.signal,
         });
         if (generation !== generationRef.current) {
-          emitResult(plan, 'interrupted');
+          emitResult(executionPlan, 'interrupted');
           emitTerminalEvent('turn_aborted', { reason: 'superseded', phase: 'tts' });
           return { completed: false, decision: null };
         }
@@ -543,7 +626,7 @@ export function useConversation(
         if (generation !== generationRef.current || isMutedRef.current) {
           if (generation === generationRef.current) {
             setConversationState('idle', null);
-            emitResult(plan, 'cancelled', {
+            emitResult(executionPlan, 'cancelled', {
               emotionCue: {
                 emotion: responseEmotion,
                 intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
@@ -554,7 +637,7 @@ export function useConversation(
               phase: currentPhase,
             });
           } else {
-            emitResult(plan, 'interrupted');
+            emitResult(executionPlan, 'interrupted');
             emitTerminalEvent('turn_aborted', { reason: 'superseded', phase: 'tts' });
           }
           return {
@@ -580,12 +663,12 @@ export function useConversation(
           },
         });
         if (generation !== generationRef.current) {
-          emitResult(plan, 'interrupted');
+          emitResult(executionPlan, 'interrupted');
           emitTerminalEvent('turn_aborted', { reason: 'superseded' });
           return { completed: false, decision: null };
         }
         if (!playbackResult) {
-          emitResult(plan, 'interrupted');
+          emitResult(executionPlan, 'interrupted');
           emitTerminalEvent('turn_aborted', { reason: 'superseded' });
           return { completed: false, decision: null };
         }
@@ -595,7 +678,7 @@ export function useConversation(
           appendHistory([{ role: 'assistant', content: responseText }]);
         }
         setConversationState('idle', null);
-        emitResult(plan, 'completed', {
+        emitResult(executionPlan, 'completed', {
           spokenText: responseText,
           emotionCue: {
             emotion: responseEmotion,
@@ -612,7 +695,7 @@ export function useConversation(
           abortControllerRef.current = null;
         }
         if (generation !== generationRef.current) {
-          emitResult(plan, 'interrupted');
+          emitResult(executionPlan, 'interrupted');
           emitTerminalEvent('turn_aborted', {
             reason: 'superseded',
             phase: currentPhase,
@@ -621,7 +704,7 @@ export function useConversation(
         }
         if (isAbortError(caughtError)) {
           setConversationState('idle', null);
-          emitResult(plan, 'cancelled');
+          emitResult(executionPlan, 'cancelled');
           emitTerminalEvent('turn_aborted', { reason: 'aborted' });
           return {
             completed:
@@ -637,7 +720,7 @@ export function useConversation(
             : '会話処理に失敗しました。',
         );
         setConversationState('error', null);
-        emitResult(plan, 'failed');
+        emitResult(executionPlan, 'failed');
         emitTerminalEvent('turn_failed', {
           reason: 'request_failed',
           phase: currentPhase,
