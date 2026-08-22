@@ -17,6 +17,7 @@ import {
 } from '@pixiv/three-vrm';
 import { BlinkController } from './BlinkController';
 import { EmotionExpressionController } from './EmotionExpressionController';
+import { IdleGazeController } from './idleGaze';
 import { applyBasePose, IdleController } from './idleMotion';
 import { frameAvatar } from './cameraPreset';
 import { setupStageLighting } from './stageLighting';
@@ -207,6 +208,7 @@ export function VrmStage({
     let animationFrame = 0;
     let mouthExpression: string | null = null;
     let idleController: IdleController | null = null;
+    let idleGazeController: IdleGazeController | null = null;
     let blinkController: BlinkController | null = null;
     let emotionController: EmotionExpressionController | null = null;
     let appliedEmotion: Emotion | null = null;
@@ -270,6 +272,10 @@ export function VrmStage({
           loadedVrmRef.current = vrm;
           applyBasePose(vrm);
           idleController = new IdleController(vrm);
+          idleGazeController = new IdleGazeController(
+            vrm,
+            initialBounds.getSize(new Vector3()).y,
+          );
           motionPlayerRef.current = new MotionPlayer(vrm.scene);
           blinkController = new BlinkController(vrm);
           emotionController = new EmotionExpressionController(vrm);
@@ -362,9 +368,18 @@ export function VrmStage({
         const headYawBias = requestedHeadYawBias * safeMotionScale;
         const isBodyMotionPlaying =
           motionPlayerRef.current?.isPlaying() ?? false;
+        const idleGazeFrame = idleGazeController?.update(
+          delta,
+          camera.position,
+          !isBodyMotionPlaying && !performancePlanRef.current,
+        );
         idleController?.setEnabled(!isBodyMotionPlaying);
         if (!isBodyMotionPlaying) {
-          idleController?.update(delta, idleMotionWeight, headYawBias);
+          idleController?.update(
+            delta,
+            idleMotionWeight,
+            headYawBias + (idleGazeFrame?.fallbackHeadYawBias ?? 0),
+          );
         }
         motionPlayerRef.current?.update(delta);
         if (
@@ -397,9 +412,11 @@ export function VrmStage({
       blinkController?.dispose();
       emotionController?.dispose();
       idleController?.dispose();
+      idleGazeController?.dispose();
       blinkController = null;
       emotionController = null;
       idleController = null;
+      idleGazeController = null;
       motionAbortControllerRef.current?.abort();
       motionRequestGenerationRef.current += 1;
       motionPlayerRef.current?.dispose();
