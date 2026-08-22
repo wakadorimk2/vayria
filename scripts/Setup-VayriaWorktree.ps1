@@ -5,7 +5,9 @@ param(
   [ValidateRange(0, 65535)]
   [int]$Port = 0,
 
-  [string]$SecretFile = (Join-Path $env:USERPROFILE '.vayria\secrets.env')
+  [string]$SecretFile = (Join-Path $env:USERPROFILE '.vayria\secrets.env'),
+
+  [string]$AvatarSourcePath = (Join-Path $env:USERPROFILE '.vayria\avatar\model.vrm')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +17,9 @@ $worktreePortEnd = 5999
 $portMutexName = 'Vayria.WorktreePortAllocation'
 $gitCommand = (Get-Command git.exe -CommandType Application -ErrorAction Stop |
   Select-Object -First 1).Source
+$pwshCommand = (Get-Command pwsh.exe -CommandType Application -ErrorAction Stop |
+  Select-Object -First 1).Source
+$avatarSyncScript = Join-Path $PSScriptRoot 'Sync-VayriaAvatar.ps1'
 
 if ($Port -ne 0 -and ($Port -lt $worktreePortStart -or $Port -gt $worktreePortEnd)) {
   throw "Port must be 0 for automatic allocation or from $worktreePortStart to $worktreePortEnd."
@@ -58,6 +63,38 @@ function Resolve-SecretFile {
   }
 
   return $resolvedPath
+}
+
+function Invoke-AvatarSynchronization {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepositoryRoot,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SourcePath
+  )
+
+  $syncArguments = @(
+    '-NoProfile'
+    '-File'
+    $avatarSyncScript
+    '-WorktreePath'
+    $RepositoryRoot
+    '-AvatarSourcePath'
+    $SourcePath
+    '-AllowMissingSource'
+    '-AllowMismatchedTarget'
+  )
+
+  if ($WhatIfPreference) {
+    $syncArguments += '-WhatIf'
+  }
+
+  & $pwshCommand @syncArguments
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) {
+    throw "Vayria VRM synchronization failed with exit code ${exitCode}."
+  }
 }
 
 function Get-EnvironmentValue {
@@ -262,6 +299,7 @@ function Invoke-WorktreeInitialization {
 $repositoryRoot = Resolve-WorktreeRoot -Path $WorktreePath
 $envPath = Join-Path $repositoryRoot '.env.local'
 $resolvedSecretFile = Resolve-SecretFile -Path $SecretFile
+Invoke-AvatarSynchronization -RepositoryRoot $repositoryRoot -SourcePath $AvatarSourcePath
 $mutex = [Threading.Mutex]::new($false, $portMutexName)
 $lockAcquired = $false
 

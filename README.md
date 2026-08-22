@@ -156,7 +156,40 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
    `main`は`5187`を使用します。
    各worker worktreeは`5188`以降の未使用ポートを使用します。
 
-7. 自作または利用許可を持つ VRM を次の場所へ置きます。
+7. VRMの正本をGitリポジトリの外へ保存します。
+
+   既定の正本パスは次です。
+
+   ```text
+   %USERPROFILE%\.vayria\avatar\model.vrm
+   ```
+
+   現在のmain worktreeにあるVRMを初回の正本へ移行する場合は、次を実行します。
+   この操作はmain worktreeの元ファイルを削除しません。
+
+   ```powershell
+   New-Item -ItemType Directory -Path "$env:USERPROFILE\.vayria\avatar" -Force
+   Copy-Item -LiteralPath 'C:\Users\wakad\projects\vayria\public\avatar\model.vrm' `
+     -Destination "$env:USERPROFILE\.vayria\avatar\model.vrm"
+   ```
+
+   Codexのworktreeセットアップは、正本がある場合に、VRMがないworktreeへコピーします。
+   既存のVRMは自動で上書きしません。
+
+   現在のworktreeだけを明示的に同期する場合は、次を実行します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Sync-VayriaAvatar.ps1
+   ```
+
+   全worktreeを明示的に同期する場合は、対象を確認してから`-Force`を指定します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Sync-VayriaAvatar.ps1 `
+     -AllWorktrees -Force
+   ```
+
+   各worktreeの実行用コピーは次のパスです。
 
    ```text
    public/avatar/model.vrm
@@ -215,6 +248,7 @@ Windows ファイアウォールは、プライベートネットワーク上の
 
 `.env.local` と `public/avatar/*.vrm` は Git の追跡対象外です。
 `.env.exhibition` も Git の追跡対象外です。
+VRMの正本もGitリポジトリの外に置きます。`.worktreeinclude`には追加しません。
 API key と AivisSpeech の設定は Vite の Node middleware だけが読みます。
 ブラウザー bundle には埋め込みません。
 
