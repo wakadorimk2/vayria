@@ -232,11 +232,36 @@ try {
 
   $portOne = [int](Get-EnvironmentValue -Path $worktreeOneEnv -Name 'VAYRIA_PORT')
   $portTwo = [int](Get-EnvironmentValue -Path $worktreeTwoEnv -Name 'VAYRIA_PORT')
-  if ($portOne -lt 5188 -or $portOne -gt 5999) {
+  if ($portOne -lt 5188 -or $portOne -gt 5210) {
     throw "The first allocated port is outside the worker range: $portOne"
   }
-  if ($portTwo -lt 5188 -or $portTwo -gt 5999 -or $portTwo -eq $portOne) {
+  if ($portTwo -lt 5188 -or $portTwo -gt 5210 -or $portTwo -eq $portOne) {
     throw "The second allocated port is invalid or duplicated: $portTwo"
+  }
+
+  $exhibitionCases = @(
+    @{
+      EnvPath = Join-Path $worktreeOne '.env.exhibition.local'
+      Port    = $portOne
+    }
+    @{
+      EnvPath = Join-Path $worktreeTwo '.env.exhibition.local'
+      Port    = $portTwo
+    }
+  )
+  foreach ($case in $exhibitionCases) {
+    if (-not (Test-Path -LiteralPath $case.EnvPath -PathType Leaf)) {
+      throw "The generated exhibition environment is missing: $($case.EnvPath)"
+    }
+    if ((Get-EnvironmentValue -Path $case.EnvPath -Name 'VITE_APP_MODE') -ne 'exhibition') {
+      throw "The generated exhibition environment has an unexpected mode: $($case.EnvPath)"
+    }
+    if ((Get-EnvironmentValue -Path $case.EnvPath -Name 'VAYRIA_BIND_HOST') -ne '0.0.0.0') {
+      throw "The generated exhibition environment has an unexpected bind host: $($case.EnvPath)"
+    }
+    if ([int](Get-EnvironmentValue -Path $case.EnvPath -Name 'VAYRIA_PORT') -ne $case.Port) {
+      throw "The generated exhibition environment has an unexpected port: $($case.EnvPath)"
+    }
   }
 
   $avatarHash = (Get-FileHash -LiteralPath $avatarSourceFile -Algorithm SHA256).Hash
