@@ -65,6 +65,53 @@ export interface PerformerProfile {
   autonomousMaxDelayMs: number;
 }
 
+export type BehaviorStance =
+  | 'inquisitive'
+  | 'skeptical'
+  | 'drowsy'
+  | 'weathered'
+  | 'awed'
+  | 'timid'
+  | 'curious'
+  | 'seeking'
+  | 'secretive'
+  | 'alarmed'
+  | 'delighted'
+  | 'buoyant'
+  | 'withdrawn'
+  | 'assertive'
+  | 'uncanny'
+  | 'uncertain'
+  | 'vigilant'
+  | 'disoriented';
+
+export type CardGestureIntent =
+  | 'inspect'
+  | 'withdraw'
+  | 'expand'
+  | 'contract'
+  | 'release'
+  | 'lean_in'
+  | 'self_hold'
+  | 'look_up'
+  | 'conceal'
+  | 'brace'
+  | 'open'
+  | 'sway'
+  | 'lower'
+  | 'present'
+  | 'freeze'
+  | 'stare'
+  | 'scan'
+  | 'orient';
+
+export interface PerformanceBehavior {
+  stance: BehaviorStance;
+  energy: 'low' | 'medium' | 'high';
+  engagement: 'direct' | 'cautious' | 'inward' | 'distant';
+  gestureIntent: CardGestureIntent;
+}
+
 export interface DirectionModifiers {
   responseDelayMs: number;
   initiative: number;
@@ -125,6 +172,7 @@ export interface PerformancePlan {
   planId: string;
   trigger: PerformerTrigger['kind'];
   intent: 'speak' | 'wait' | 'ignore' | 'react_nonverbally';
+  behavior?: PerformanceBehavior;
   preReaction?: {
     leadBeforeSpeechMs: number;
     gaze?: {

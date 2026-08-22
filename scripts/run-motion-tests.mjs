@@ -1,10 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
-const testFile = resolve(
-  'node_modules/.tmp/motion-test/scripts/motion-manifest.test.js',
-);
-const result = spawnSync(process.execPath, ['--test', testFile], {
+const testFiles = [
+  resolve('node_modules/.tmp/motion-test/scripts/card-motion-assets.test.js'),
+  resolve('node_modules/.tmp/motion-test/scripts/motion-player.test.js'),
+  resolve('node_modules/.tmp/motion-test/scripts/motion-manifest.test.js'),
+];
+const result = spawnSync(process.execPath, ['--test', ...testFiles], {
   stdio: 'inherit',
 });
 

@@ -1,4 +1,4 @@
-import type { WildcardCardData } from './cardTypes';
+import type { WildcardCardData } from './cardTypes.js';
 
 export const cardPool = [
   {

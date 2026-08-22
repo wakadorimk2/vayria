@@ -1,5 +1,204 @@
 {
   "schemaVersion": 1,
   "avatarSha256": null,
-  "assets": []
+  "assets": [
+    {
+      "assetId": "card-chicken",
+      "file": "A person stands in place and repeatedly bobs the head forwar.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 9950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "4fe25905b468c4e0c9c445657e67c473b50128ef166747991c06297bff3a04de"
+    },
+    {
+      "assetId": "card-suspicious",
+      "file": "A person takes a half-step backward in place. _ A person rai.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 13950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "4252212112bdea47dcc8e6e6ec9803a01c13b39de6065894ba4ead8bcd606f14"
+    },
+    {
+      "assetId": "card-gigantic",
+      "file": "A person spreads both arms wide apart. _ A person tilts the .vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 15950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "2cf0e7780d8d321aeba8b6c442d6e1bd9b7f9a1323d98ae7c47f3a1d63ced546"
+    },
+    {
+      "assetId": "card-tiny",
+      "file": "A person curls the body inward to make the posture small. _ .vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 11950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "09456239ed3326b40c213f45036ec4e1cc88bcaec67f167648b54b85452e8b5b"
+    },
+    {
+      "assetId": "card-sleepy",
+      "file": "A person slowly yawns while standing in place. _ A person sl.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 14950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "6b5748aa9a63c7be1927e5fecbee848ef82e12f0610e2e24031385566b04ec13"
+    },
+    {
+      "assetId": "card-curious",
+      "file": "A person leans the upper body forward. _ A person tilts the .vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 9950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "1d525db92f4aa5e3264b7e23dabf4250404dc325d88b5d2c1755c0d2b86fc63d"
+    },
+    {
+      "assetId": "card-hungry",
+      "file": "A person places one hand on the stomach. _ A person bends sl.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 9950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "9f359a26f9d40f5ea99c0350e081bbd59b4dcf20813e81443f5b537c0534deca"
+    },
+    {
+      "assetId": "card-rain",
+      "file": "A person looks up at the sky. _ A person hunches both should.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 15950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "f9a6c8cf40395fde4917283f430998ec85311ef77e7efc5a775b6dfdc6460b1a"
+    },
+    {
+      "assetId": "card-secret",
+      "file": "A person places an index finger against the lips. _ A person.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 12950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "671e4d691488388ec1d14c0135d39163136db24948c811d3a244301ad1eff9e2"
+    },
+    {
+      "assetId": "card-panic",
+      "file": "A person makes small quick waving motions with both hands. _.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 14950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "109e2aadcb6e681ae82a48284c5ee1434864321283aff2a51df49147b2de96a1"
+    },
+    {
+      "assetId": "card-sparkle",
+      "file": "A person spreads both arms wide outward from the chest. _ A .vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 10950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "04fe7ffb9f238deb69735d8c5a7cfa5612442b555b5e149b9838145f4b4b3074"
+    },
+    {
+      "assetId": "card-underwater",
+      "file": "A person slowly sways the whole body from side to side as if.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 11950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "d285e68028ec5736eb1ec9bdc46b5f88ab729afbc4712139faa105cb39636e06"
+    },
+    {
+      "assetId": "card-lonely",
+      "file": "A person lowers both shoulders into a slumped posture. _ A p.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 15950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "89fe916c10d2e43a0b99ab8f7dcbd23ba93f725ca66b3bcf74daef8aba0f90fd"
+    },
+    {
+      "assetId": "card-confident",
+      "file": "A person pushes the chest forward into a proud upright postu.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 12950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "c286ad6aedc333733eda5a40e676fde8d5b53e974272a18bcd8f4290fcc0d716"
+    },
+    {
+      "assetId": "card-strange",
+      "file": "A person comes to a complete stop and holds still. _ A perso.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 8950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "d57998a0e3c6de02d7236266c6ba81ab1a6243855ce061a8bf7dafdd2b256028"
+    },
+    {
+      "assetId": "card-deja-vu",
+      "file": "A person gazes steadily into the distance. _ A person stops .vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 11950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "34b42e3073194147bf10da3a56998727c7a982c8b475bde63b572af80b68e2f0"
+    },
+    {
+      "assetId": "card-distant-thunder",
+      "file": "A person turns their face to the side, alertly watching the .vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 9950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "6b4178e0b5a004b520ed29d3dde4455b430f16ef055422c449bd2ff8722dcc81"
+    },
+    {
+      "assetId": "card-upside-down",
+      "file": "A person looks down at their feet. _ A person looks up at th.vrma",
+      "source": "saved",
+      "tags": ["reaction"],
+      "durationMs": 20950,
+      "fps": 50,
+      "loop": false,
+      "correctionProfileId": "vayria-default-v1",
+      "contentSha256": "2cb11a972c1a9cbedaac87a3218286f0c0821d7223bee88f4f8eee031e7f074e"
+    }
+  ]
 }
