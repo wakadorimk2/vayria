@@ -279,6 +279,65 @@ iPad と Windows PC は同一 LAN に接続してください。Wi-Fi と Ethern
 LAN アドレスはソースへ記述しません。起動時に表示された URL を使用します。
 `main` worktreeは`5187`、worker worktreeは`5188`から`5210`の割り当てポートを使用します。
 
+### 展示中の受動ログとOwner観察
+
+`npm run dev:exhibition`は、起動から停止までを1つの展示キャプチャとして保存します。
+通常の`npm run dev`は展示キャプチャを保存しません。
+来場者へ入力、確認画面、匿名ID表示、QR操作は追加しません。
+
+端末1で展示を起動します。
+
+```powershell
+npm run dev:exhibition
+```
+
+Viteのターミナルに表示された`captureId`を使い、端末2でOwner観察CLIを起動します。
+
+```powershell
+npm run exhibition:observe -- --capture-id <captureId>
+```
+
+最新の展示キャプチャを選ぶ場合は、次を使います。
+
+```powershell
+npm run exhibition:observe -- --latest
+```
+
+展示中は、次の短い入力だけを保存できます。
+
+```text
+note <短文>
+score <axis> <0|1|2|3|N/A> [reason]
+```
+
+`axis`は`presence`、`timing`、`continuity`、`emotion`、`embodiment`です。
+`N/A`には理由が必要です。
+メモと理由は500文字以内です。
+`exit`で観察CLIを終了しても、既存データは削除しません。
+Viteを`Ctrl+C`で停止しても、キャプチャは保存先に残ります。
+
+展示停止後に、JSON集計とCSV行データを生成します。
+
+```powershell
+npm run exhibition:export -- --capture-id <captureId>
+```
+
+保存先は`VAYRIA_PLAYCHECK_ROOT`配下の次です。
+
+```text
+playcheck-results/local/exhibition/<captureId>/
+  metadata.json
+  events.jsonl
+  observations.jsonl
+  export/summary.json
+  export/rows.csv
+```
+
+展示イベントには発話本文、履歴、API key、個人情報を保存しません。
+Ownerも、メモと理由へ発話本文、履歴、API key、個人情報を貼り付けません。
+`playcheckRunId`がある既存のPlaycheckイベントは、従来のraw保存を優先します。
+`public`モードのユーザー入力は今回実装しません。
+
 Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187`から`5210`の受信を一度だけ許可してください。
 インターネットへポート転送は設定しないでください。
 
@@ -362,29 +421,27 @@ npm run dev
 npm run playcheck -- start --base-url http://127.0.0.1:5187/
 ```
 
-展示モードでiPadを使う場合は、Viteの`Network` URLを使用します。
+展示モードでiPadを使う場合は、次のコマンドを実行します。
 
 ```powershell
-npm run dev:exhibition
+npm run playcheck:ipad
 ```
 
-別の端末で次を実行します。
-
-```powershell
-npm run playcheck -- start --base-url http://<PCのLANアドレス>:5187/
-```
-
-CLIが生成したQRページがPCの既定ブラウザーで開きます。
+このコマンドは、exhibitionモードのViteを起動します。
+Viteの`Network` URLから評価runとQRページを作成します。
+QRページをPCの既定ブラウザーで開きます。
 iPadのカメラでQRコードを読み取ります。
 iPadとWindows PCは同じLANに接続してください。
+複数の`Network` URLがある場合は、先頭URLをQRに使います。
+他のURLはCLIに表示します。
 QRページを自動で開かない場合は、次を使います。
 
 ```powershell
-npm run playcheck -- start --base-url http://<PCのLANアドレス>:5187/ --no-open-qr
+npm run playcheck:ipad -- --no-open-qr
 ```
 
 その場合は、CLIに表示された`QR page`のパスをPCのブラウザーで開きます。
-CLIは従来の`playcheckRunId`付きURLも表示します。
+CLIは`runId`、`playcheckRunId`付きURL、採点コマンドを表示します。
 同じrun IDを指定して、PCで対話式採点を開始します。
 
 ```powershell

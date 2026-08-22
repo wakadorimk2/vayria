@@ -22,6 +22,11 @@ import {
   appendPlaycheckRecord,
   type PlaycheckRecord,
 } from './playcheckStore.js';
+import {
+  createExhibitionCapture,
+  type ExhibitionCaptureWriter,
+  type ExhibitionEventRecord,
+} from './exhibitionCaptureStore.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -63,7 +68,7 @@ const CARD_BY_ID: ReadonlyMap<string, WildcardCardData> = new Map(
 
 let activeProviderRequests = 0;
 
-interface LocalApiConfig {
+export interface LocalApiConfig {
   openAiApiKey?: string;
   aivisBaseUrl?: string;
   aivisSpeedScale?: string;
@@ -71,6 +76,8 @@ interface LocalApiConfig {
   aivisIntonationScale?: string;
   aivisTempoDynamicsScale?: string;
   playcheckRoot?: string;
+  exhibitionCaptureEnabled?: boolean;
+  exhibitionCapture?: ExhibitionCaptureWriter;
 }
 
 interface AivisTtsSettings {
@@ -254,37 +261,67 @@ async function recordStructuredEvent(
   logStructuredEvent(event, fields);
 
   const runId = fields.runId;
-  if (!isPlaycheckRunId(runId)) return;
+  if (isPlaycheckRunId(runId)) {
+    const record: PlaycheckRecord = {
+      at: new Date().toISOString(),
+      event,
+      runId,
+    };
+    for (const field of PLAYCHECK_RECORD_FIELDS) {
+      const value = fields[field];
+      if (
+        typeof value === 'string' ||
+        typeof value === 'number'
+      ) {
+        if (
+          field === 'reason' &&
+          (typeof value !== 'string' || !SAFE_PLAYCHECK_REASONS.has(value))
+        ) {
+          continue;
+        }
+        record[field] = value;
+      }
+    }
 
-  const record: PlaycheckRecord = {
+    try {
+      await appendPlaycheckRecord(
+        config.playcheckRoot ?? 'playcheck-results/local',
+        runId,
+        record,
+      );
+    } catch (error) {
+      console.warn('Playcheck event recording failed.', error);
+    }
+    return;
+  }
+
+  const capture = config.exhibitionCapture;
+  if (!capture) return;
+
+  const record: ExhibitionEventRecord = {
+    captureId: capture.captureId,
     at: new Date().toISOString(),
     event,
-    runId,
   };
-  for (const field of PLAYCHECK_RECORD_FIELDS) {
+  for (const field of ['origin', ...PLAYCHECK_RECORD_FIELDS]) {
     const value = fields[field];
+    if (typeof value !== 'string' && typeof value !== 'number') continue;
     if (
-      typeof value === 'string' ||
-      typeof value === 'number'
+      field === 'reason' &&
+      (typeof value !== 'string' || !SAFE_PLAYCHECK_REASONS.has(value))
     ) {
-      if (
-        field === 'reason' &&
-        (typeof value !== 'string' || !SAFE_PLAYCHECK_REASONS.has(value))
-      ) {
-        continue;
-      }
-      record[field] = value;
+      continue;
     }
+    if (field === 'origin' && value !== 'client' && value !== 'server') {
+      continue;
+    }
+    record[field] = value;
   }
 
   try {
-    await appendPlaycheckRecord(
-      config.playcheckRoot ?? 'playcheck-results/local',
-      runId,
-      record,
-    );
+    await capture.appendEvent(record);
   } catch (error) {
-    console.warn('Playcheck event recording failed.', error);
+    console.warn('Exhibition event recording failed.', error);
   }
 }
 
@@ -1830,6 +1867,62 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
   return {
     name: 'performer-local-api',
     configureServer(server) {
+      const exhibitionCapture = config.exhibitionCaptureEnabled
+        ? createExhibitionCapture(
+            config.playcheckRoot ?? 'playcheck-results/local',
+          )
+        : undefined;
+      const requestConfig = exhibitionCapture
+        ? { ...config, exhibitionCapture }
+        : config;
+
+      if (exhibitionCapture) {
+        let stoppingFromInterrupt = false;
+        const finishCapture = async (): Promise<void> => {
+          await exhibitionCapture.finish();
+        };
+        const onInterrupt = (): void => {
+          if (stoppingFromInterrupt) return;
+          stoppingFromInterrupt = true;
+          void (async () => {
+            try {
+              await server.close();
+              await finishCapture();
+            } catch (error) {
+              console.warn('Exhibition capture shutdown failed.', error);
+            } finally {
+              process.exitCode = 130;
+            }
+          })();
+        };
+        process.once('SIGINT', onInterrupt);
+
+        void exhibitionCapture.ready
+          .then(() => {
+            console.info(
+              '[exhibition-capture]',
+              `captureId=${exhibitionCapture.captureId}`,
+              `path=${exhibitionCapture.paths.directoryPath}`,
+            );
+            console.info(
+              '[exhibition-capture]',
+              `observe=npm run exhibition:observe -- --capture-id ${exhibitionCapture.captureId}`,
+            );
+          })
+          .catch((error: unknown) => {
+            console.warn(
+              'Exhibition capture initialization failed.',
+              error,
+            );
+          });
+        server.httpServer?.once('close', () => {
+          process.removeListener('SIGINT', onInterrupt);
+          void finishCapture().catch((error: unknown) => {
+            console.warn('Exhibition capture finalization failed.', error);
+          });
+        });
+      }
+
       void reportAivisSelection(config);
       server.middlewares.use((request, response, next) => {
         const pathname = new URL(
@@ -1846,7 +1939,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
           return;
         }
 
-        void handleRequest(request, response, config);
+        void handleRequest(request, response, requestConfig);
       });
     },
   };

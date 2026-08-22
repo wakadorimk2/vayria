@@ -12,6 +12,7 @@
   "include": [
     "src/playcheck.ts",
     "server/playcheckStore.ts",
+    "server/exhibitionCaptureStore.ts",
     "scripts/playcheck-store.test.ts"
   ]
 }

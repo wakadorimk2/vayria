@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createServer, loadEnv } from 'vite';
 import { openQrPage, startRun } from './playcheck.mjs';
 
@@ -98,7 +100,8 @@ export async function startIpadPlaycheck({
     writeLine(output, `Score: npm run playcheck -- score --run-id ${run.runId}`);
     writeLine(output, `State: ${run.workPath}`);
     writeLine(output, `Raw events: ${run.rawPath}`);
-    writeLine(output, 'Ctrl+CでViteとこの評価runを終了します。');
+    writeLine(output, 'Ctrl+CでViteを安全に停止します。');
+    writeLine(output, '評価runの状態とイベントは保存先に保持します。');
 
     return { localRoot, networkUrls, run, server };
   } catch (error) {
@@ -163,7 +166,7 @@ async function main() {
 
 if (
   process.argv[1] &&
-  new URL(import.meta.url).pathname.endsWith(process.argv[1].replaceAll('\\', '/'))
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
 ) {
   main().catch((error) => {
     console.error(

@@ -4,27 +4,100 @@
 評価専用UIは使いません。
 Ownerは採点JSONを直接編集しません。
 
-## 1. Vayriaを起動する
+## 展示中の受動ログとOwner観察
 
-展示モードでは、PCで次を実行します。
+展示で来場者へ入力を求めません。
+展示画面に確認画面、匿名ID、QR操作を追加しません。
+Ownerは、展示を操作する端末とは別のPowerShellへ短文メモを入力できます。
+
+端末1で展示を起動します。
 
 ```powershell
 npm run dev:exhibition
 ```
 
-Viteが表示する`Network` URLを確認します。
-URLのホストには、Windows PCのLANアドレスを使います。
-`127.0.0.1`はiPadからアクセスできません。
-
-PCだけで確認する場合は、`npm run dev`と`http://127.0.0.1:5187/`を使います。
-
-## 2. runを作る
-
-別のPowerShellで、Viteの`Network` URLを使ってrunを作ります。
+Viteのターミナルに表示された`captureId`を使い、端末2で観察CLIを起動します。
 
 ```powershell
-npm run playcheck -- start --base-url http://<PCのLANアドレス>:5187/
+npm run exhibition:observe -- --capture-id <captureId>
 ```
+
+最新のキャプチャを使う場合は、次を使います。
+
+```powershell
+npm run exhibition:observe -- --latest
+```
+
+展示中に入力できる形式は次です。
+
+```text
+note <短文>
+score <axis> <0|1|2|3|N/A> [reason]
+```
+
+`axis`は既存の5軸です。
+`N/A`には理由が必要です。
+メモと理由は500文字以内です。
+Owner入力は任意です。
+入力がなくてもruntimeイベントは自動保存されます。
+
+展示を止めた後、次でJSON集計とCSVを生成します。
+
+```powershell
+npm run exhibition:export -- --capture-id <captureId>
+```
+
+`--latest`も使用できます。
+
+```powershell
+npm run exhibition:export -- --latest
+```
+
+キャプチャは`VAYRIA_PLAYCHECK_ROOT`配下へ保存します。
+
+```text
+playcheck-results/local/exhibition/<captureId>/
+  metadata.json
+  events.jsonl
+  observations.jsonl
+  export/summary.json
+  export/rows.csv
+```
+
+`Ctrl+C`でViteを停止しても、キャプチャと観察ログは削除しません。
+未完了キャプチャもexportできます。
+展示イベントへ発話本文、履歴、API key、個人情報は保存しません。
+Ownerも、メモと理由へそれらを入力しません。
+
+この受動ログは展示キャプチャ用です。
+`playcheck:ipad`の既存の`runId`評価フローは、次の手順で継続します。
+
+## 1. Vayriaと評価runを起動する
+
+PCで次を実行します。
+
+```powershell
+npm run playcheck:ipad
+```
+
+このコマンドは、exhibitionモードのViteを起動します。
+Viteの`Network` URLから評価runを作成します。
+QRページをPCの既定ブラウザーで開きます。
+iPadのカメラでQRコードを読み取ります。
+iPadとWindows PCは同じLANに接続してください。
+`127.0.0.1`はiPadからアクセスできません。
+
+QRページを自動で開かない場合は、次を使います。
+
+```powershell
+npm run playcheck:ipad -- --no-open-qr
+```
+
+その場合は、CLIに表示された`QR page`のパスをPCのブラウザーで開きます。
+複数の`Network` URLがある場合は、先頭URLをQRに使います。
+他のURLはCLIに表示します。
+
+PCだけで確認する場合は、`npm run dev`と`http://127.0.0.1:5187/`を使います。
 
 CLIは次を表示します。
 
@@ -35,16 +108,7 @@ CLIは次を表示します。
 - 作業状態JSONのパス
 - 生イベントJSONLのパス
 
-CLIはQRページをPCの既定ブラウザーで開きます。
-iPadのカメラでQRコードを読み取ります。
-iPadとWindows PCは同じLANに接続してください。
-QRページを自動で開かない場合は、`--no-open-qr`を追加します。
-その場合は、CLIに表示された`QR page`のパスをPCのブラウザーで開きます。
-
-QRを使わない場合は、CLIに表示された`playcheckRunId`付きURLをiPadで開けます。
-URLの`playcheckRunId`は変更しません。
-
-## 3. PCで対話式採点を開始する
+## 2. PCで対話式採点を開始する
 
 表示されたrun IDを使います。
 
@@ -80,7 +144,7 @@ CLIは次の順で進みます。
 npm run playcheck -- score --run-id <runId> --case interruption
 ```
 
-## 4. 採点ルール
+## 3. 採点ルール
 
 各軸は次の値で入力します。
 
@@ -97,7 +161,7 @@ npm run playcheck -- score --run-id <runId> --case interruption
 
 基準の詳細は`naturalness-rubric.md`を参照します。
 
-## 5. runを確定する
+## 4. runを確定する
 
 6ケースの採点後に、同じPowerShellで実行します。
 
