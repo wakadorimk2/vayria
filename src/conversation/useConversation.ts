@@ -4,13 +4,11 @@ import { createConversationEventEmitter } from './conversationEvents';
 import { apiUrl } from '../runtimeConfig';
 import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
+  ConversationActionDecision,
   PerformancePlan,
   PerformanceResult,
 } from '../performer/types';
-import {
-  isVoiceInteractionDecision,
-  type VoiceInteractionDecision,
-} from '../voice/voiceInteraction';
+import { isConversationActionDecision } from '../performer/types';
 
 export type ConversationStatus =
   | 'idle'
@@ -46,7 +44,7 @@ interface ChatResponse {
   emotion: unknown;
   text: string;
   topic?: unknown;
-  voiceAction?: unknown;
+  interactionAction?: unknown;
 }
 
 export interface ChatCardContext {
@@ -74,7 +72,7 @@ interface ConversationOptions {
   ) => void;
   onPerformancePlan?: (plan: PerformancePlan) => void;
   onPerformanceResult?: (result: PerformanceResult) => void;
-  onVoiceReaction?: (decision: VoiceInteractionDecision) => void;
+  onInteractionAction?: (decision: ConversationActionDecision) => void;
 }
 
 interface ErrorResponse {
@@ -151,18 +149,21 @@ function readAutonomousDecision(
   return { action, topic: normalizedTopic };
 }
 
-function readVoiceInteractionDecision(
+function readConversationActionDecision(
   action: unknown,
   backchannelCue: unknown,
-): VoiceInteractionDecision {
+): ConversationActionDecision {
   const decision = { action, backchannelCue };
-  if (!isVoiceInteractionDecision(decision)) {
-    throw new Error('AI の音声会話アクション形式が正しくありません。');
+  if (
+    !isConversationActionDecision(decision) ||
+    decision.action === 'wait'
+  ) {
+    throw new Error('AI の会話行動アクション形式が正しくありません。');
   }
   return decision;
 }
 
-function createVoicePendingPlan(plan: PerformancePlan): PerformancePlan {
+function createInteractionReactionPlan(plan: PerformancePlan): PerformancePlan {
   return {
     ...plan,
     intent: 'react_nonverbally',
@@ -210,18 +211,18 @@ export function useConversation(
   const onPerformanceCueRef = useRef(options.onPerformanceCue);
   const onPerformancePlanRef = useRef(options.onPerformancePlan);
   const onPerformanceResultRef = useRef(options.onPerformanceResult);
-  const onVoiceReactionRef = useRef(options.onVoiceReaction);
+  const onInteractionActionRef = useRef(options.onInteractionAction);
 
   useEffect(() => {
     onPerformanceCueRef.current = options.onPerformanceCue;
     onPerformancePlanRef.current = options.onPerformancePlan;
     onPerformanceResultRef.current = options.onPerformanceResult;
-    onVoiceReactionRef.current = options.onVoiceReaction;
+    onInteractionActionRef.current = options.onInteractionAction;
   }, [
     options.onPerformanceCue,
     options.onPerformancePlan,
     options.onPerformanceResult,
-    options.onVoiceReaction,
+    options.onInteractionAction,
   ]);
 
   const setConversationState = useCallback(
@@ -358,7 +359,7 @@ export function useConversation(
       }
 
       const pendingPlan =
-        turnSource === 'voice' ? createVoicePendingPlan(plan) : plan;
+        turnSource === 'voice' ? createInteractionReactionPlan(plan) : plan;
       let executionPlan = pendingPlan;
       activePlanRef.current = plan;
       onPerformancePlanRef.current?.(pendingPlan);
@@ -367,6 +368,30 @@ export function useConversation(
       generationRef.current = generation;
       setError('');
       setConversationState('thinking', turnSource);
+      const localInteractionDecision =
+        INTERACTIVE_SOURCES.includes(turnSource) &&
+        plan.actionDecision &&
+        plan.actionDecision.action !== 'take_floor'
+          ? plan.actionDecision
+          : null;
+      if (localInteractionDecision) {
+        const reactionPlan = createInteractionReactionPlan(plan);
+        activePlanRef.current = plan;
+        onPerformancePlanRef.current?.(reactionPlan);
+        playback.prepare(reactionPlan);
+        appendHistory([{ role: 'user', content: message ?? '' }]);
+        setConversationState('idle', null);
+        emitResult(reactionPlan, 'completed', {
+          interactionAction: localInteractionDecision.action,
+          emotionCue: { emotion: 'neutral', intensity: 0 },
+        });
+        onInteractionActionRef.current?.(localInteractionDecision);
+        emitTerminalEvent('turn_completed', {
+          reason: localInteractionDecision.action,
+          interactionAction: localInteractionDecision.action,
+        });
+        return { completed: true, decision: null };
+      }
       const turnControl = {
         interrupt: (reason: string) => {
           emitTerminalEvent('turn_aborted', { reason });
@@ -378,7 +403,7 @@ export function useConversation(
       let responseEmotion: Emotion | undefined;
       let motionStartedAt: number | undefined;
       let speechStartedAt: number | undefined;
-      let voiceDecision: VoiceInteractionDecision | null = null;
+      let interactionDecision: ConversationActionDecision | null = null;
 
       try {
         if (turnSource !== 'voice') {
@@ -452,9 +477,9 @@ export function useConversation(
           throw new Error('AI の返答形式が正しくありません。');
         }
         const responseText = chatPayload.text.trim();
-        if (turnSource === 'voice') {
-          voiceDecision = readVoiceInteractionDecision(
-            chatPayload.voiceAction,
+        if (INTERACTIVE_SOURCES.includes(turnSource)) {
+          interactionDecision = readConversationActionDecision(
+            chatPayload.interactionAction,
             chatPayload.backchannelCue,
           );
         }
@@ -468,11 +493,10 @@ export function useConversation(
             : null;
         if (
           (INTERACTIVE_SOURCES.includes(turnSource) &&
-            turnSource !== 'voice' &&
+            interactionDecision?.action === 'take_floor' &&
             !responseText) ||
-          (voiceDecision?.action === 'take_floor' && !responseText) ||
-          (voiceDecision !== null &&
-            voiceDecision.action !== 'take_floor' &&
+          (interactionDecision !== null &&
+            interactionDecision.action !== 'take_floor' &&
             responseText) ||
           (autonomousDecision?.action !== 'silence' &&
             autonomousDecision !== null &&
@@ -483,14 +507,14 @@ export function useConversation(
         }
         const activatedCards = readActivatedCards(
           chatPayload.activatedCards,
-          autonomousDecision !== null || voiceDecision !== null,
+          autonomousDecision !== null || interactionDecision !== null,
         );
         if (
-          voiceDecision !== null &&
-          voiceDecision.action !== 'take_floor' &&
+          interactionDecision !== null &&
+          interactionDecision.action !== 'take_floor' &&
           activatedCards.length
         ) {
-          throw new Error('音声の非発話反応はカードを発動できません。');
+          throw new Error('非発話反応はカードを発動できません。');
         }
         if (autonomousDecision?.action === 'silence' && activatedCards.length) {
           throw new Error('沈黙する自律応答はカードを発動できません。');
@@ -501,24 +525,32 @@ export function useConversation(
         }
         if (
           cardContext.forcedCardId &&
-          (voiceDecision === null || voiceDecision.action === 'take_floor') &&
+          (interactionDecision === null ||
+            interactionDecision.action === 'take_floor') &&
           !activatedCards.includes(cardContext.forcedCardId)
         ) {
           throw new Error('AI が交換したカードを発動しませんでした。');
         }
 
         responseEmotion = normalizeEmotion(chatPayload.emotion);
-        if (voiceDecision && voiceDecision.action !== 'take_floor') {
+        if (
+          interactionDecision &&
+          interactionDecision.action !== 'take_floor'
+        ) {
+          const reactionPlan = createInteractionReactionPlan(plan);
+          activePlanRef.current = plan;
+          onPerformancePlanRef.current?.(reactionPlan);
+          playback.prepare(reactionPlan);
           appendHistory([{ role: 'user', content: message ?? '' }]);
           setConversationState('idle', null);
-          emitResult(pendingPlan, 'completed', {
-            interactionAction: voiceDecision.action,
+          emitResult(reactionPlan, 'completed', {
+            interactionAction: interactionDecision.action,
             emotionCue: { emotion: 'neutral', intensity: 0 },
           });
-          onVoiceReactionRef.current?.(voiceDecision);
+          onInteractionActionRef.current?.(interactionDecision);
           emitTerminalEvent('turn_completed', {
-            reason: voiceDecision.action,
-            interactionAction: voiceDecision.action,
+            reason: interactionDecision.action,
+            interactionAction: interactionDecision.action,
           });
           return { completed: true, decision: null };
         }
@@ -533,9 +565,13 @@ export function useConversation(
           onReplyAccepted([]);
           setConversationState('idle', null);
           emitResult(executionPlan, 'completed', {
+            interactionAction: 'silence',
             emotionCue: { emotion: responseEmotion, intensity: 0 },
           });
-          emitTerminalEvent('turn_completed', { reason: 'silence' });
+          emitTerminalEvent('turn_completed', {
+            reason: 'silence',
+            interactionAction: 'silence',
+          });
           return { completed: true, decision: autonomousDecision };
         }
 
@@ -679,6 +715,11 @@ export function useConversation(
         }
         setConversationState('idle', null);
         emitResult(executionPlan, 'completed', {
+          interactionAction:
+            interactionDecision?.action ??
+            (autonomousDecision
+              ? 'take_floor'
+              : executionPlan.actionDecision?.action),
           spokenText: responseText,
           emotionCue: {
             emotion: responseEmotion,
@@ -688,7 +729,17 @@ export function useConversation(
           speechStartedAt: playbackResult.speechStartedAt ?? speechStartedAt,
           speechEndedAt: playbackResult.speechEndedAt,
         });
-        emitTerminalEvent('turn_completed');
+        emitTerminalEvent('turn_completed', {
+          ...(interactionDecision?.action
+            ? { interactionAction: interactionDecision.action }
+            : autonomousDecision
+            ? {
+                  interactionAction: 'take_floor',
+                }
+              : executionPlan.actionDecision?.action
+                ? { interactionAction: executionPlan.actionDecision.action }
+                : {}),
+        });
         return { completed: true, decision: autonomousDecision };
       } catch (caughtError) {
         if (abortControllerRef.current === requestController) {

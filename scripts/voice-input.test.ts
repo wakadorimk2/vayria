@@ -54,6 +54,7 @@ import {
   readVoiceLabRecord,
   readVoiceLabRecords,
 } from '../server/voiceLabStore.js';
+import { isVoiceInteractionDecision } from '../src/voice/voiceInteraction.js';
 
 const initial: VoiceInputSnapshot = {
   phase: 'idle',
@@ -61,6 +62,37 @@ const initial: VoiceInputSnapshot = {
   transcript: '',
   errorCode: null,
 };
+
+test('voice reaction contract keeps backchannel cues compatible', () => {
+  assert.equal(
+    isVoiceInteractionDecision({
+      action: 'listen',
+      backchannelCue: 'none',
+    }),
+    true,
+  );
+  assert.equal(
+    isVoiceInteractionDecision({
+      action: 'backchannel',
+      backchannelCue: 'uun',
+    }),
+    true,
+  );
+  assert.equal(
+    isVoiceInteractionDecision({
+      action: 'backchannel',
+      backchannelCue: 'none',
+    }),
+    false,
+  );
+  assert.equal(
+    isVoiceInteractionDecision({
+      action: 'take_floor',
+      backchannelCue: 'un',
+    }),
+    false,
+  );
+});
 
 interface FakeSpeechResult {
   isFinal: boolean;
