@@ -7,8 +7,10 @@
     "dev": "vite",
     "dev:exhibition": "vite --mode exhibition",
     "build": "tsc -b && vite build",
-    "test": "npm run test:performer && node --test scripts/stress-test.test.mjs",
+    "test": "npm run test:performer && npm run test:secret-config && npm run test:worktree-setup && node --test scripts/stress-test.test.mjs",
     "test:performer": "tsc -p tsconfig.performer-test.json && node scripts/run-performer-tests.mjs",
+    "test:secret-config": "tsc -p tsconfig.secret-config-test.json && node scripts/run-secret-config-tests.mjs",
+    "test:worktree-setup": "pwsh -NoProfile -File .\\scripts\\Test-VayriaWorktreeSetup.ps1",
     "stress": "node scripts/stress-test.mjs",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint ."

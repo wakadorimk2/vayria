@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { localApiPlugin } from './server/localApi';
+import { resolveOpenAiApiKey } from './server/secretConfig';
 
 const DEFAULT_DEV_HOST = '127.0.0.1';
 const DEFAULT_DEV_PORT = 5187;
@@ -45,7 +46,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       localApiPlugin({
-        openAiApiKey: serverEnvironment.OPENAI_API_KEY,
+        openAiApiKey: resolveOpenAiApiKey(serverEnvironment),
         aivisBaseUrl: serverEnvironment.AIVIS_BASE_URL,
         aivisSpeedScale: serverEnvironment.AIVIS_SPEED_SCALE,
         aivisPitchScale: serverEnvironment.AIVIS_PITCH_SCALE,
