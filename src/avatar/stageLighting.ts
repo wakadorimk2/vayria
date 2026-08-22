@@ -5,8 +5,34 @@ import {
 } from 'three';
 import { STAGE_PRESET } from './stagePreset';
 
-export function setupStageLighting(scene: Scene): void {
-  const hemisphere = STAGE_PRESET.lighting.hemisphere;
+interface StageLighting {
+  hemisphere: {
+    skyColor: string;
+    groundColor: string;
+    intensity: number;
+  };
+  key: {
+    color: string;
+    intensity: number;
+    position: readonly [number, number, number];
+  };
+  fill: {
+    color: string;
+    intensity: number;
+    position: readonly [number, number, number];
+  };
+  back: {
+    color: string;
+    intensity: number;
+    position: readonly [number, number, number];
+  };
+}
+
+export function setupStageLighting(
+  scene: Scene,
+  lighting: StageLighting = STAGE_PRESET.lighting,
+): void {
+  const hemisphere = lighting.hemisphere;
   scene.add(
     new HemisphereLight(
       hemisphere.skyColor,
@@ -15,9 +41,9 @@ export function setupStageLighting(scene: Scene): void {
     ),
   );
 
-  addDirectionalLight(scene, STAGE_PRESET.lighting.key);
-  addDirectionalLight(scene, STAGE_PRESET.lighting.fill);
-  addDirectionalLight(scene, STAGE_PRESET.lighting.back);
+  addDirectionalLight(scene, lighting.key);
+  addDirectionalLight(scene, lighting.fill);
+  addDirectionalLight(scene, lighting.back);
 }
 
 function addDirectionalLight(

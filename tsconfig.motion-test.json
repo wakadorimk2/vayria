@@ -11,6 +11,11 @@
   },
   "include": [
     "src/avatar/motion/motionTypes.ts",
+    "src/avatar/motion/motionPlayer.ts",
+    "src/cards/cardMotionAssets.ts",
+    "src/cards/cardPool.ts",
+    "scripts/card-motion-assets.test.ts",
+    "scripts/motion-player.test.ts",
     "scripts/motion-manifest.test.ts"
   ]
 }

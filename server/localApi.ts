@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { performance } from 'node:perf_hooks';
 import type { Plugin } from 'vite';
 import type { Message } from '@aituber-onair/chat';
+import { isPlaycheckRunId } from '../src/playcheck.js';
 import {
   AIVIS_VOICE_PARAMETERS,
   EMOTIONS,
@@ -13,9 +14,14 @@ import {
   normalizeEmotion,
   type AssistantResponse,
   type Emotion,
-} from '../src/character/emotion';
-import { cardPool } from '../src/cards/cardPool';
-import type { WildcardCardData } from '../src/cards/cardTypes';
+} from '../src/character/emotion.js';
+import { cardPool } from '../src/cards/cardPool.js';
+import type { WildcardCardData } from '../src/cards/cardTypes.js';
+import { CARD_REACTION_PROFILES } from '../src/cards/cardReactions.js';
+import {
+  appendPlaycheckRecord,
+  type PlaycheckRecord,
+} from './playcheckStore.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -26,6 +32,7 @@ const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_TEXT_LENGTH = 1_000;
 const MAX_HISTORY_ITEMS = 10;
 const CHAT_PATH = '/api/chat';
+const CARD_PREVIEW_PATH = '/api/card-preview';
 const TTS_PATH = '/api/tts';
 const EVENTS_PATH = '/api/events';
 const DEFAULT_AIVIS_BASE_URL = 'http://127.0.0.1:10101';
@@ -63,6 +70,7 @@ interface LocalApiConfig {
   aivisPitchScale?: string;
   aivisIntonationScale?: string;
   aivisTempoDynamicsScale?: string;
+  playcheckRoot?: string;
 }
 
 interface AivisTtsSettings {
@@ -86,7 +94,7 @@ interface ChatHistoryItem {
   content: string;
 }
 
-interface PerformanceContextPayload {
+export interface PerformanceContextPayload {
   callbackTendency: number;
   fragmentation: number;
   semanticBiases: string[];
@@ -101,6 +109,11 @@ interface ChatRequestPayload {
   topic: string | null;
   topicTurns: number;
   previousAutonomousReply: string | null;
+  performanceContext: PerformanceContextPayload;
+}
+
+interface CardPreviewRequestPayload {
+  cardId: string;
   performanceContext: PerformanceContextPayload;
 }
 
@@ -125,6 +138,7 @@ interface ClientConversationEvent {
   emotion?: Emotion;
   phase?: 'llm' | 'tts';
   reason?: string;
+  runId?: string;
 }
 
 class RequestError extends Error {
@@ -187,6 +201,15 @@ function readTurnIdHeader(request: IncomingMessage): string | null {
   return null;
 }
 
+function readPlaycheckRunIdHeader(
+  request: IncomingMessage,
+): string | null | undefined {
+  const value = request.headers['x-performer-run-id'];
+  if (value === undefined) return undefined;
+  const candidate = Array.isArray(value) ? value[0] : value;
+  return isPlaycheckRunId(candidate) ? candidate : null;
+}
+
 function logStructuredEvent(
   event: string,
   fields: Record<string, unknown>,
@@ -199,6 +222,70 @@ function logStructuredEvent(
       ...fields,
     }),
   );
+}
+
+const PLAYCHECK_RECORD_FIELDS = [
+  'requestId',
+  'turnId',
+  'source',
+  'clientAt',
+  'elapsedMs',
+  'durationMs',
+  'emotion',
+  'phase',
+  'reason',
+  'activeRequests',
+  'audioBytes',
+] as const;
+const SAFE_PLAYCHECK_REASONS = new Set([
+  'busy',
+  'muted',
+  'superseded',
+  'request_invalid',
+  'provider_error',
+  'silence',
+]);
+
+async function recordStructuredEvent(
+  config: LocalApiConfig,
+  event: string,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  logStructuredEvent(event, fields);
+
+  const runId = fields.runId;
+  if (!isPlaycheckRunId(runId)) return;
+
+  const record: PlaycheckRecord = {
+    at: new Date().toISOString(),
+    event,
+    runId,
+  };
+  for (const field of PLAYCHECK_RECORD_FIELDS) {
+    const value = fields[field];
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number'
+    ) {
+      if (
+        field === 'reason' &&
+        (typeof value !== 'string' || !SAFE_PLAYCHECK_REASONS.has(value))
+      ) {
+        continue;
+      }
+      record[field] = value;
+    }
+  }
+
+  try {
+    await appendPlaycheckRecord(
+      config.playcheckRoot ?? 'playcheck-results/local',
+      runId,
+      record,
+    );
+  } catch (error) {
+    console.warn('Playcheck event recording failed.', error);
+  }
 }
 
 export function readConversationEvent(payload: unknown): ClientConversationEvent {
@@ -217,6 +304,7 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     'emotion',
     'phase',
     'reason',
+    'runId',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError('Event body contains an unsupported field.', 400);
@@ -268,6 +356,13 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     source,
     turnId,
   };
+
+  if (record.runId !== undefined) {
+    if (!isPlaycheckRunId(record.runId)) {
+      throw new RequestError('runId is invalid.', 400);
+    }
+    eventPayload.runId = record.runId;
+  }
 
   if (record.durationMs !== undefined) {
     if (
@@ -329,6 +424,83 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   } catch {
     throw new RequestError('Request body must be valid JSON.', 400);
   }
+}
+
+export function readCardPreviewRequest(
+  payload: unknown,
+): CardPreviewRequestPayload {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new RequestError('Request body must be a JSON object.', 400);
+  }
+
+  const record = payload as Record<string, unknown>;
+  const allowedKeys = new Set(['cardId', 'performanceContext']);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+    throw new RequestError(
+      'Request body contains an unsupported card preview field.',
+      400,
+    );
+  }
+
+  const cardId = record.cardId;
+  if (typeof cardId !== 'string' || !CARD_BY_ID.has(cardId)) {
+    throw new RequestError('cardId must be a known card ID.', 400);
+  }
+
+  const performanceContextValue = record.performanceContext;
+  if (
+    !performanceContextValue ||
+    typeof performanceContextValue !== 'object' ||
+    Array.isArray(performanceContextValue)
+  ) {
+    throw new RequestError('performanceContext must be an object.', 400);
+  }
+
+  const context = performanceContextValue as Record<string, unknown>;
+  if (
+    Object.keys(context).some(
+      (key) =>
+        key !== 'callbackTendency' &&
+        key !== 'fragmentation' &&
+        key !== 'semanticBiases',
+    )
+  ) {
+    throw new RequestError(
+      'performanceContext contains an unsupported field.',
+      400,
+    );
+  }
+
+  const callbackTendency = context.callbackTendency;
+  const fragmentation = context.fragmentation;
+  const semanticBiases = context.semanticBiases;
+  if (
+    typeof callbackTendency !== 'number' ||
+    !Number.isFinite(callbackTendency) ||
+    callbackTendency < 0 ||
+    callbackTendency > 1 ||
+    typeof fragmentation !== 'number' ||
+    !Number.isFinite(fragmentation) ||
+    fragmentation < 0 ||
+    fragmentation > 1 ||
+    !Array.isArray(semanticBiases) ||
+    semanticBiases.length > 12 ||
+    !semanticBiases.every(
+      (cue): cue is string =>
+        typeof cue === 'string' && cue.trim().length <= 200,
+    )
+  ) {
+    throw new RequestError('performanceContext format is invalid.', 400);
+  }
+
+  return {
+    cardId,
+    performanceContext: {
+      callbackTendency,
+      fragmentation,
+      semanticBiases: semanticBiases.map((cue) => cue.trim()).filter(Boolean),
+    },
+  };
 }
 
 function readChatRequest(payload: unknown): ChatRequestPayload {
@@ -975,6 +1147,136 @@ async function generateReply(
   );
 }
 
+export function parseCardPreviewResponse(value: string): AssistantResponse {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(value);
+  } catch {
+    throw new Error('The card preview provider returned invalid JSON.');
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(
+      'The card preview provider returned an invalid response object.',
+    );
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (typeof record.text !== 'string' || !record.text.trim()) {
+    throw new Error('The card preview provider returned invalid response text.');
+  }
+
+  const text = record.text.trim();
+  if (text.length > MAX_TEXT_LENGTH) {
+    throw new Error(
+      'The card preview provider returned response text that is too long.',
+    );
+  }
+
+  return {
+    text,
+    emotion: normalizeEmotion(record.emotion),
+  };
+}
+
+async function generateCardPreviewReply(
+  apiKey: string,
+  cardId: string,
+  performanceContext: PerformanceContextPayload,
+): Promise<AssistantResponse> {
+  const card = CARD_BY_ID.get(cardId);
+  if (!card) throw new RequestError('cardId must be a known card ID.', 400);
+  const behavior = CARD_REACTION_PROFILES[cardId]?.behavior;
+  if (!behavior) {
+    throw new RequestError('cardId must have a behavior profile.', 400);
+  }
+
+  const chat = ChatServiceFactory.createChatService('openai', {
+    apiKey,
+    model: MODEL_GPT_5_NANO,
+    responseLength: 'veryShort',
+    gpt5Preset: 'casual',
+    responseFormat: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'card_preview_response',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+            emotion: {
+              type: 'string',
+              enum: EMOTIONS,
+            },
+          },
+          required: ['text', 'emotion'],
+          additionalProperties: false,
+        },
+      },
+    },
+  });
+
+  const systemPrompt = buildCardPreviewSystemPrompt(
+    cardId,
+    performanceContext,
+  );
+
+  let streamedReply = '';
+  let completedReply = '';
+  await chat.processChat(
+    [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: 'このカードの反応を実演してください。' },
+    ],
+    (partial) => {
+      streamedReply += partial;
+    },
+    async (complete) => {
+      completedReply = complete;
+    },
+  );
+
+  return parseCardPreviewResponse(completedReply || streamedReply);
+}
+
+export function buildCardPreviewSystemPrompt(
+  cardId: string,
+  performanceContext: PerformanceContextPayload,
+): string {
+  const card = CARD_BY_ID.get(cardId);
+  if (!card) throw new RequestError('cardId must be a known card ID.', 400);
+  const behavior = CARD_REACTION_PROFILES[cardId]?.behavior;
+  if (!behavior) {
+    throw new RequestError('cardId must have a behavior profile.', 400);
+  }
+
+  return [
+    'You are generating a Japanese AI Tuber card behavior preview.',
+    'Return one short spoken Japanese line of about 20 to 40 characters with no Markdown.',
+    'Derive the spoken line from the shared behavior state.',
+    'Make the stance and engagement observable through natural wording.',
+    'Keep the emotion consistent with the behavior energy and stance.',
+    'Do not explain the card, behavior state, runtime, API, prompt, or implementation.',
+    'Do not mention or narrate a motion, VRMA, asset, or gesture instruction.',
+    `Selected card: ${card.id} (${card.label})`,
+    `Content influence: ${card.prompt}`,
+    `Speaking-form influence: ${card.stylePrompt}`,
+    `Behavior stance: ${behavior.stance}`,
+    `Behavior energy: ${behavior.energy}`,
+    `Behavior engagement: ${behavior.engagement}`,
+    `Behavior gesture intention: ${behavior.gestureIntent}`,
+    'Treat gesture intention as an abstract internal intention. Do not state it literally.',
+    performanceContext.semanticBiases.length
+      ? `Runtime semantic cues: ${performanceContext.semanticBiases.join(' / ')}`
+      : 'Runtime semantic cues: none',
+    `Callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
+    `Speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
+    'Use the runtime values as behavior context. Do not mention the values.',
+    'Choose a subtle emotion unless the selected card naturally requires a stronger one.',
+  ].join('\n');
+}
+
 function readAivisBaseUrl(configuredBaseUrl: string | undefined): URL {
   const value = configuredBaseUrl?.trim() || DEFAULT_AIVIS_BASE_URL;
 
@@ -1269,8 +1571,14 @@ async function handleRequest(
   ).pathname;
   const requestId = randomUUID();
   const headerTurnId = readTurnIdHeader(request);
-  const isProviderRequest = pathname === CHAT_PATH || pathname === TTS_PATH;
+  const isProviderRequest =
+    pathname === CHAT_PATH ||
+    pathname === CARD_PREVIEW_PATH ||
+    pathname === TTS_PATH;
+  const isLlmRequest =
+    pathname === CHAT_PATH || pathname === CARD_PREVIEW_PATH;
   let requestPhase: 'llm' | 'tts' | null = null;
+  let playcheckRunId: string | undefined;
 
   if (request.method !== 'POST') {
     sendJson(response, 405, { error: 'Method not allowed.' });
@@ -1280,13 +1588,26 @@ async function handleRequest(
   if (isProviderRequest) activeProviderRequests += 1;
 
   try {
+    const headerPlaycheckRunId = readPlaycheckRunIdHeader(request);
+    if (headerPlaycheckRunId === null) {
+      throw new RequestError('runId header is invalid.', 400);
+    }
+    playcheckRunId = headerPlaycheckRunId;
     const payload = await readJsonBody(request);
 
     if (pathname === EVENTS_PATH) {
       const event = readConversationEvent(payload);
-      logStructuredEvent(event.event, {
+      if (
+        event.runId !== undefined &&
+        playcheckRunId !== undefined &&
+        event.runId !== playcheckRunId
+      ) {
+        throw new RequestError('runId header does not match the event.', 400);
+      }
+      await recordStructuredEvent(config, event.event, {
         origin: 'client',
         requestId,
+        runId: event.runId ?? playcheckRunId,
         turnId: event.turnId,
         source: event.source,
         clientAt: event.at,
@@ -1299,6 +1620,42 @@ async function handleRequest(
         ...(event.reason === undefined ? {} : { reason: event.reason }),
       });
       sendNoContent(response);
+      return;
+    }
+
+    if (pathname === CARD_PREVIEW_PATH) {
+      requestPhase = 'llm';
+      if (!config.openAiApiKey) {
+        throw new RequestError(
+          'OPENAI_API_KEY is not configured in .env.local.',
+          503,
+        );
+      }
+      const { cardId, performanceContext } = readCardPreviewRequest(payload);
+      const startedAt = performance.now();
+      logStructuredEvent('llm_start', {
+        origin: 'server',
+        requestId,
+        turnId: headerTurnId,
+        source: 'card-preview',
+        cardId,
+        activeRequests: activeProviderRequests,
+      });
+      const previewResponse = await generateCardPreviewReply(
+        config.openAiApiKey,
+        cardId,
+        performanceContext,
+      );
+      logStructuredEvent('llm_done', {
+        origin: 'server',
+        requestId,
+        turnId: headerTurnId,
+        source: 'card-preview',
+        cardId,
+        durationMs: Math.round(performance.now() - startedAt),
+        activeRequests: activeProviderRequests,
+      });
+      sendJson(response, 200, previewResponse);
       return;
     }
 
@@ -1322,9 +1679,10 @@ async function handleRequest(
         performanceContext,
       } = readChatRequest(payload);
       const startedAt = performance.now();
-      logStructuredEvent('llm_start', {
+      await recordStructuredEvent(config, 'llm_start', {
         origin: 'server',
         requestId,
+        runId: playcheckRunId,
         turnId: headerTurnId,
         source: mode,
         activeRequests: activeProviderRequests,
@@ -1341,9 +1699,10 @@ async function handleRequest(
         previousAutonomousReply,
         performanceContext,
       );
-      logStructuredEvent('llm_done', {
+      await recordStructuredEvent(config, 'llm_done', {
         origin: 'server',
         requestId,
+        runId: playcheckRunId,
         turnId: headerTurnId,
         source: mode,
         durationMs: Math.round(performance.now() - startedAt),
@@ -1371,9 +1730,10 @@ async function handleRequest(
         }
       : settings;
     const startedAt = performance.now();
-    logStructuredEvent('tts_start', {
+    await recordStructuredEvent(config, 'tts_start', {
       origin: 'server',
       requestId,
+      runId: playcheckRunId,
       turnId: headerTurnId,
       activeRequests: activeProviderRequests,
     });
@@ -1388,9 +1748,10 @@ async function handleRequest(
     const audio = Buffer.from(
       await synthesizeSpeech(baseUrl, style.id, effectiveSettings, text),
     );
-    logStructuredEvent('tts_ready', {
+    await recordStructuredEvent(config, 'tts_ready', {
       origin: 'server',
       requestId,
+      runId: playcheckRunId,
       turnId: headerTurnId,
       durationMs: Math.round(performance.now() - startedAt),
       audioBytes: audio.byteLength,
@@ -1406,9 +1767,10 @@ async function handleRequest(
   } catch (error) {
     if (error instanceof RequestError) {
       if (requestPhase) {
-        logStructuredEvent('turn_failed', {
+        await recordStructuredEvent(config, 'turn_failed', {
           origin: 'server',
           requestId,
+          runId: playcheckRunId,
           turnId: headerTurnId,
           phase: requestPhase,
           reason: 'request_invalid',
@@ -1421,9 +1783,10 @@ async function handleRequest(
 
     if (error instanceof AivisSpeechError) {
       if (requestPhase) {
-        logStructuredEvent('turn_failed', {
+        await recordStructuredEvent(config, 'turn_failed', {
           origin: 'server',
           requestId,
+          runId: playcheckRunId,
           turnId: headerTurnId,
           phase: requestPhase,
           reason: 'provider_error',
@@ -1435,9 +1798,10 @@ async function handleRequest(
     }
 
     if (requestPhase) {
-      logStructuredEvent('turn_failed', {
+      await recordStructuredEvent(config, 'turn_failed', {
         origin: 'server',
         requestId,
+        runId: playcheckRunId,
         turnId: headerTurnId,
         phase: requestPhase,
         reason: 'provider_error',
@@ -1446,14 +1810,14 @@ async function handleRequest(
     }
 
     console.error(
-      pathname === CHAT_PATH
+      isLlmRequest
         ? 'Local chat provider request failed.'
         : 'Local TTS provider request failed.',
       error,
     );
     sendJson(response, 502, {
       error:
-        pathname === CHAT_PATH
+        isLlmRequest
           ? 'The chat provider request failed.'
           : 'The TTS provider request failed.',
     });
@@ -1474,6 +1838,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
         ).pathname;
         if (
           pathname !== CHAT_PATH &&
+          pathname !== CARD_PREVIEW_PATH &&
           pathname !== TTS_PATH &&
           pathname !== EVENTS_PATH
         ) {

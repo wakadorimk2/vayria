@@ -24,6 +24,7 @@ import { setupStageLighting } from './stageLighting';
 import { SavedMotionCatalog } from './motion/motionCatalog';
 import { MotionPlayer } from './motion/motionPlayer';
 import {
+  CARD_PREVIEW_LIGHTING,
   EXHIBITION_PORTRAIT_CAMERA,
   STAGE_PRESET,
 } from './stagePreset';
@@ -36,10 +37,12 @@ interface VrmStageProps {
   attentionTarget?: 'viewer' | 'chat' | 'game' | 'none';
   emotion: Emotion;
   isExhibitionMode?: boolean;
+  motionScale?: number;
   mouthOpen: number;
   onReady?: () => void;
   performancePlan?: PerformancePlan;
   sessionGeneration?: number;
+  stageVariant?: 'default' | 'card-preview';
 }
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
@@ -48,16 +51,19 @@ export function VrmStage({
   attentionTarget = 'none',
   emotion,
   isExhibitionMode = false,
+  motionScale = 1,
   mouthOpen,
   onReady,
   performancePlan,
   sessionGeneration = 0,
+  stageVariant = 'default',
 }: VrmStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouthOpenRef = useRef(mouthOpen);
   const emotionRef = useRef(emotion);
   const attentionTargetRef = useRef(attentionTarget);
+  const motionScaleRef = useRef(motionScale);
   const performancePlanRef = useRef(performancePlan);
   const onReadyRef = useRef(onReady);
   const [loadState, setLoadState] = useState<LoadState>('loading');
@@ -101,11 +107,12 @@ export function VrmStage({
     const player = motionPlayerRef.current;
     if (!vrm || !player) return;
 
-    if (!assetId) {
+    if (!assetId || motionScaleRef.current <= 0) {
       player.stop();
       return;
     }
 
+    player.stop();
     const controller = new AbortController();
     motionAbortControllerRef.current = controller;
 
@@ -140,6 +147,20 @@ export function VrmStage({
   }, []);
 
   useEffect(() => {
+    motionScaleRef.current = motionScale;
+    if (motionScale <= 0) {
+      motionRequestGenerationRef.current += 1;
+      motionAbortControllerRef.current?.abort();
+      motionPlayerRef.current?.stop();
+      return;
+    }
+
+    if (requestedMotionAssetIdRef.current) {
+      void syncMotionAsset();
+    }
+  }, [motionScale, syncMotionAsset]);
+
+  useEffect(() => {
     requestedMotionAssetIdRef.current = requestedMotionAssetId;
     void syncMotionAsset();
   }, [requestedMotionAssetId, syncMotionAsset]);
@@ -164,7 +185,12 @@ export function VrmStage({
       0.01,
       50,
     );
-    setupStageLighting(scene);
+    setupStageLighting(
+      scene,
+      stageVariant === 'card-preview'
+        ? CARD_PREVIEW_LIGHTING
+        : STAGE_PRESET.lighting,
+    );
 
     let renderer: WebGLRenderer;
     try {
@@ -319,6 +345,10 @@ export function VrmStage({
         const plan = performancePlanRef.current;
         const avatarProfile = plan?.avatarProfile;
         const preReaction = plan?.preReaction;
+        const safeMotionScale = Math.max(
+          0,
+          Math.min(motionScaleRef.current, 1),
+        );
         const gazeTarget = preReaction?.gaze?.target ?? attentionTargetRef.current;
         const gazeYawBias =
           gazeTarget === 'viewer'
@@ -328,11 +358,14 @@ export function VrmStage({
               : gazeTarget === 'game'
                 ? 0.35
                 : 0;
-        const idleMotionWeight =
+        const requestedIdleMotionWeight =
           avatarProfile?.idleMotionWeight ?? preReaction?.motion?.weight ?? 1;
-        const headYawBias =
+        const idleMotionWeight =
+          1 + (requestedIdleMotionWeight - 1) * safeMotionScale;
+        const requestedHeadYawBias =
           (avatarProfile?.headYawBias ?? preReaction?.motion?.headYawBias ?? 0) +
           gazeYawBias * (avatarProfile?.gazeDirectness ?? preReaction?.gaze?.directness ?? 0.72);
+        const headYawBias = requestedHeadYawBias * safeMotionScale;
         const isBodyMotionPlaying =
           motionPlayerRef.current?.isPlaying() ?? false;
         const idleGazeFrame = idleGazeController?.update(
@@ -395,7 +428,7 @@ export function VrmStage({
       }
       renderer.dispose();
     };
-  }, [isExhibitionMode, syncMotionAsset]);
+  }, [isExhibitionMode, stageVariant, syncMotionAsset]);
 
   return (
     <div className="vrm-stage" ref={containerRef}>

@@ -1,3 +1,5 @@
+import { readPlaycheckRunId } from './playcheck';
+
 const APP_MODES = ['local', 'exhibition', 'public'] as const;
 
 export type AppMode = (typeof APP_MODES)[number];
@@ -42,6 +44,10 @@ function readApiBaseUrl(value: unknown): string {
 export const runtimeConfig = Object.freeze({
   apiBaseUrl: readApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
   mode: readAppMode(import.meta.env.VITE_APP_MODE),
+  playcheckRunId:
+    typeof window === 'undefined'
+      ? null
+      : readPlaycheckRunId(window.location.search),
 });
 
 export function apiUrl(path: string): string {

@@ -164,6 +164,22 @@ test('require_speech and attention target are Direction contributions', () => {
   );
 });
 
+test('normal runtime plans remain free of Card Preview behavior state', () => {
+  const trigger: PerformerTrigger = {
+    kind: 'viewer_message',
+    text: 'こんにちは',
+  };
+  const plan = resolvePerformancePlan(
+    createActionIntent(trigger, createState()),
+    [],
+    createState(),
+    DEFAULT_PERFORMER_PROFILE,
+    100,
+  );
+
+  assert.equal(plan.behavior, undefined);
+});
+
 test('emotion inertia blends the cue with the previous emotion', () => {
   const previousState = createState({
     emotion: { value: 'joy', activation: 0.8, updatedAt: 100 },

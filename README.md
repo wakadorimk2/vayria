@@ -343,6 +343,73 @@ npm run stress -- `
   --max-p95-turn-ms 20000
 ```
 
+## 自然さPlaycheck
+
+固定6ケースと5軸rubricで、AITuberの自然さをOwnerが確認できます。
+評価専用UIは追加しません。PCの対話CLIが採点を受け付けます。
+
+PCだけで確認する場合は、Viteを起動します。
+
+端末1:
+
+```powershell
+npm run dev
+```
+
+端末2:
+
+```powershell
+npm run playcheck -- start --base-url http://127.0.0.1:5187/
+```
+
+展示モードでiPadを使う場合は、Viteの`Network` URLを使用します。
+
+```powershell
+npm run dev:exhibition
+```
+
+別の端末で次を実行します。
+
+```powershell
+npm run playcheck -- start --base-url http://<PCのLANアドレス>:5187/
+```
+
+CLIが生成したQRページがPCの既定ブラウザーで開きます。
+iPadのカメラでQRコードを読み取ります。
+iPadとWindows PCは同じLANに接続してください。
+QRページを自動で開かない場合は、次を使います。
+
+```powershell
+npm run playcheck -- start --base-url http://<PCのLANアドレス>:5187/ --no-open-qr
+```
+
+その場合は、CLIに表示された`QR page`のパスをPCのブラウザーで開きます。
+CLIは従来の`playcheckRunId`付きURLも表示します。
+同じrun IDを指定して、PCで対話式採点を開始します。
+
+```powershell
+npm run playcheck -- score --run-id <runId>
+```
+
+CLIは6ケースの前提、操作、観察点を表示します。
+iPadでケースを実行し、PCへ戻ってEnterを押します。
+CLIが自然さに関する5つの質問と短い所感を尋ねます。
+入力はケースごとに保存されます。
+途中で終了した場合は、同じ`score`コマンドで再開できます。
+特定ケースを再採点する場合は`--case <scenarioId>`を追加します。
+
+採点完了後に、匿名集計を生成します。
+
+```powershell
+npm run playcheck -- finalize --run-id <runId>
+```
+
+生イベントとCLIの作業状態は`playcheck-results/local/`へ保存します。
+作業状態のJSONはCLIが管理します。Ownerは直接編集しません。
+所感は匿名のrun結果へ保存します。
+発話本文、履歴、API key、個人情報は所感へ書きません。
+Gitには`docs/evaluation/results/`の匿名集計だけを保存します。
+
 ブラウザーは開発時に、次の会話イベントを構造化ログへ出力します。
 
 `input_received`、`llm_start`、`llm_done`、`tts_start`、`tts_ready`、
