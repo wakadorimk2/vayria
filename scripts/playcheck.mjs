@@ -14,6 +14,7 @@ import QRCode from 'qrcode';
 export const SCENARIO_IDS = Object.freeze([
   'idle_presence',
   'manual_response',
+  'voice_listener_reaction',
   'autonomous_turn',
   'silence_gap',
   'continuity_variation',
@@ -63,6 +64,13 @@ export const PLAYCHECK_CASES = Object.freeze([
     premise: 'セッションをリセットする。',
     operation: '短い入力を1回送る。',
     observation: '返答開始、声、感情、視線、口パクを観察する。',
+  },
+  {
+    id: 'voice_listener_reaction',
+    title: '音声入力への反応',
+    premise: 'マイクと音声を有効にする。セッションをリセットする。',
+    operation: '具体的な話題、感情または好み、フィラーまたは未完発話の3種類を1回ずつ送り、確定後の反応を観察する。',
+    observation: '入力中の「うん」、確定後の思考モーション、固定相槌を確認する。内容のある発話では、短い返答が話題・感情・質問意図のいずれかを1つ拾うかを確認する。フィラーまたは未完発話では、従来の非発話反応になるかを確認する。発話中の割り込み停止も観察する。',
   },
   {
     id: 'autonomous_turn',
@@ -862,7 +870,7 @@ export async function scoreRun({
         });
 
     if (targetIds.length === 0) {
-      writeOutput(output, 'このrunはすでに6ケースの採点が完了しています。');
+      writeOutput(output, 'このrunはすでに7ケースの採点が完了しています。');
       return { workPath, assessment, completedCaseIds: [], remainingCaseIds: [] };
     }
 
@@ -907,7 +915,7 @@ export async function scoreRun({
     if (remainingCaseIds.length > 0) {
       writeOutput(output, `残りのケース: ${remainingCaseIds.join(', ')}`);
     } else {
-      writeOutput(output, '6ケースの採点が完了しました。');
+      writeOutput(output, '7ケースの採点が完了しました。');
       writeOutput(output, `確定: npm run playcheck -- finalize --run-id ${runId}`);
     }
     return { workPath, assessment, completedCaseIds, remainingCaseIds };

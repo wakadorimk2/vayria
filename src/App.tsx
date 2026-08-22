@@ -31,11 +31,17 @@ import type {
 } from './performer/types';
 import { runtimeConfig } from './runtimeConfig';
 import { fetchListeningBackchannels } from './voice/backchannel';
+import type { ListeningBackchannelAudio } from './voice/backchannelPolicy';
 import {
   scheduleListeningBackchannel,
   selectListeningBackchannelIndex,
 } from './voice/backchannelPolicy';
 import { useVoiceInput } from './voice/useVoiceInput';
+import {
+  LISTENING_THINKING_MOTION_ASSET_ID,
+  type VoiceBackchannelCue,
+  type VoiceInteractionDecision,
+} from './voice/voiceInteraction';
 import {
   MAX_VOICE_TEXT_LENGTH,
   type ListeningReactionCue,
@@ -216,6 +222,7 @@ export default function App() {
     playReaction,
     prepare,
     stop,
+    stopReaction,
   } = useAudioLipSync(volume);
   const [listeningReaction, setListeningReaction] =
     useState<ListeningReactionCue | undefined>();
@@ -225,8 +232,10 @@ export default function App() {
   );
   const voiceReactionIdRef = useRef(0);
   const activeVoiceSegmentRef = useRef<string | null>(null);
-  const backchannelAudioRef = useRef<ArrayBuffer[]>([]);
-  const backchannelVariantIndexRef = useRef<number | null>(null);
+  const backchannelAudioRef = useRef<ListeningBackchannelAudio[]>([]);
+  const backchannelVariantIndexRef = useRef<
+    Record<Exclude<VoiceBackchannelCue, 'none'>, number | null>
+  >({ un: null, uun: null });
   const backchannelLoadingRef = useRef<Promise<void> | null>(null);
   const backchannelTimerRef = useRef<number | null>(null);
   const voiceInput = useVoiceInput({
@@ -249,6 +258,83 @@ export default function App() {
         stopAudio: stop,
       }),
     [play, stageMotionPort, stop],
+  );
+
+  const handleVoiceReaction = useCallback(
+    (decision: VoiceInteractionDecision) => {
+      if (decision.action === 'take_floor') return;
+
+      stopReaction();
+      voiceReactionIdRef.current += 1;
+      const reactionId = voiceReactionIdRef.current;
+
+      if (decision.action === 'listen') {
+        setListeningReaction({
+          id: reactionId,
+          kind: 'thinking',
+          target: 'viewer',
+        });
+        const motionPromise = stageRef.current?.playReactionMotion(
+          LISTENING_THINKING_MOTION_ASSET_ID,
+          reactionId,
+        );
+        if (motionPromise) {
+          void motionPromise.then(
+            () => {
+              if (voiceReactionIdRef.current === reactionId) {
+                setListeningReaction(undefined);
+              }
+            },
+            () => {
+              if (voiceReactionIdRef.current === reactionId) {
+                setListeningReaction(undefined);
+              }
+            },
+          );
+        } else {
+          setListeningReaction(undefined);
+        }
+        return;
+      }
+
+      setListeningReaction({
+        id: reactionId,
+        kind: 'nod',
+        target: 'viewer',
+      });
+      const cue = decision.backchannelCue === 'uun' ? 'uun' : 'un';
+      const playCue = () => {
+        if (voiceReactionIdRef.current !== reactionId) return;
+        const candidates = backchannelAudioRef.current.filter(
+          (audio) => audio.cue === cue,
+        );
+        const variantIndex = selectListeningBackchannelIndex(
+          candidates.length,
+          backchannelVariantIndexRef.current[cue],
+        );
+        const selectedAudio =
+          variantIndex === null ? undefined : candidates[variantIndex];
+        if (!selectedAudio) {
+          setListeningReaction(undefined);
+          return;
+        }
+        void playReaction(selectedAudio.audioData).then((played) => {
+          if (played) {
+            backchannelVariantIndexRef.current[cue] = variantIndex;
+          }
+          if (voiceReactionIdRef.current === reactionId) {
+            setListeningReaction(undefined);
+          }
+        });
+      };
+
+      if (backchannelLoadingRef.current) {
+        void backchannelLoadingRef.current.then(playCue);
+      } else {
+        playCue();
+      }
+    },
+    [playReaction, stopReaction],
   );
 
   const handlePerformancePlan = useCallback((plan: PerformancePlan) => {
@@ -345,6 +431,7 @@ export default function App() {
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
     onPerformanceResult: handlePerformanceResult,
+    onVoiceReaction: handleVoiceReaction,
   });
   const displayEmotion = activeEmotionCue?.emotion ?? performer.state.emotion.value;
   const isPerformerBusy = isBusy || activePlan !== null;
@@ -375,9 +462,11 @@ export default function App() {
     sessionGenerationRef.current = nextGeneration;
 
     stopVoiceInput();
+    stopReaction();
+    stageRef.current?.stopReactionMotion();
     activeVoiceSegmentRef.current = null;
     setListeningReaction(undefined);
-    backchannelVariantIndexRef.current = null;
+    backchannelVariantIndexRef.current = { un: null, uun: null };
     if (backchannelTimerRef.current !== null) {
       window.clearTimeout(backchannelTimerRef.current);
       backchannelTimerRef.current = null;
@@ -404,7 +493,13 @@ export default function App() {
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
-  }, [resetConversation, resetRuntime, resetTurn, stopVoiceInput]);
+  }, [
+    resetConversation,
+    resetRuntime,
+    resetTurn,
+    stopReaction,
+    stopVoiceInput,
+  ]);
 
   const handleCardInteraction = useCallback(() => {
     if (!isExhibitionMode) return;
@@ -511,11 +606,17 @@ export default function App() {
     backchannelLoadingRef.current = loading;
   }, []);
 
+  useEffect(() => {
+    preloadBackchannel();
+  }, [preloadBackchannel]);
+
   const handleVoiceEvent = useCallback(
     (event: VoiceInputEvent) => {
       switch (event.type) {
         case 'speech_started': {
           activeVoiceSegmentRef.current = event.segmentId;
+          stopReaction();
+          stageRef.current?.stopReactionMotion();
           setVoiceValidationError('');
           voiceReactionIdRef.current += 1;
           setListeningReaction({
@@ -530,16 +631,20 @@ export default function App() {
           backchannelTimerRef.current = window.setTimeout(() => {
             backchannelTimerRef.current = null;
             if (activeVoiceSegmentRef.current !== segmentId) return;
-            const audioData = backchannelAudioRef.current;
+            const audioData = backchannelAudioRef.current.filter(
+              (audio) => audio.cue === 'un',
+            );
             const variantIndex = selectListeningBackchannelIndex(
               audioData.length,
-              backchannelVariantIndexRef.current,
+              backchannelVariantIndexRef.current.un,
             );
             if (variantIndex === null) return;
             const selectedAudio = audioData[variantIndex];
             if (!selectedAudio) return;
-            void playReaction(selectedAudio).then((played) => {
-              if (played) backchannelVariantIndexRef.current = variantIndex;
+            void playReaction(selectedAudio.audioData).then((played) => {
+              if (played) {
+                backchannelVariantIndexRef.current.un = variantIndex;
+              }
             });
           }, delayMs);
           return;
@@ -549,6 +654,8 @@ export default function App() {
           return;
         case 'utterance_finalized': {
           clearBackchannelTimer();
+          stopReaction();
+          stageRef.current?.stopReactionMotion();
           activeVoiceSegmentRef.current = null;
           setListeningReaction(undefined);
           const message = event.text.trim();
@@ -579,6 +686,8 @@ export default function App() {
         case 'recognition_stopped':
         case 'recognition_failed':
           clearBackchannelTimer();
+          stopReaction();
+          stageRef.current?.stopReactionMotion();
           activeVoiceSegmentRef.current = null;
           setListeningReaction(undefined);
           return;
@@ -599,6 +708,7 @@ export default function App() {
       prepare,
       readCardContext,
       sendVoice,
+      stopReaction,
     ],
   );
 
@@ -751,6 +861,8 @@ export default function App() {
     event.preventDefault();
     if (!trimmedInput || isManualBusy) return;
     setIsAutonomousLoopEnabled(true);
+    stopReaction();
+    stageRef.current?.stopReactionMotion();
     if (source === 'autonomous') cancelAutonomous();
     cancelNonSpeechPlan();
     const trigger: PerformerTrigger = {

@@ -43,6 +43,7 @@ const MODEL_URL = `${import.meta.env.BASE_URL}avatar/model.vrm`;
 
 const LISTENING_NOD_DURATION_SECONDS = 0.48;
 const LISTENING_NOD_DEGREES = -4;
+const LISTENING_REACTION_EXIT_BLEND_MS = 400;
 
 function getListeningNodDegrees(elapsedSeconds: number): number {
   if (elapsedSeconds < 0 || elapsedSeconds >= LISTENING_NOD_DURATION_SECONDS) {
@@ -50,6 +51,53 @@ function getListeningNodDegrees(elapsedSeconds: number): number {
   }
   const progress = elapsedSeconds / LISTENING_NOD_DURATION_SECONDS;
   return LISTENING_NOD_DEGREES * Math.sin(progress * Math.PI);
+}
+
+function waitForMotionDelay(
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+
+    let settled = false;
+    const finish = (played: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      signal.removeEventListener('abort', handleAbort);
+      resolve(played);
+    };
+    const handleAbort = () => finish(false);
+    const timer = window.setTimeout(
+      () => finish(true),
+      Math.max(0, Math.round(delayMs)),
+    );
+    signal.addEventListener('abort', handleAbort, { once: true });
+  });
+}
+
+function createListeningReactionPlan(
+  assetId: string,
+  requestId: number,
+): PerformancePlan {
+  return {
+    planId: `voice-reaction-${requestId}`,
+    trigger: 'external_stimulus',
+    intent: 'react_nonverbally',
+    motion: { assetId },
+    timing: {
+      motionLeadMs: 0,
+      motionEnterBlendMs: 180,
+      motionExitBlendMs: LISTENING_REACTION_EXIT_BLEND_MS,
+      motionPreparationTimeoutMs: 1_500,
+      postSpeechHoldMs: 0,
+    },
+    activeDirectionIds: [],
+  };
 }
 
 interface VrmStageProps {
@@ -73,6 +121,8 @@ export interface VrmStageHandle {
   startPreparedMotion(planId: string): number | null;
   finishMotion(planId?: string): void;
   stopMotion(planId?: string): void;
+  playReactionMotion(assetId: string, requestId: number): Promise<boolean>;
+  stopReactionMotion(): void;
 }
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
@@ -116,9 +166,13 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const preparedMotionPlanIdRef = useRef<string | null>(null);
     const preparedMotionPromiseRef = useRef<{
       planId: string;
+      assetId: string;
       promise: Promise<boolean>;
     } | null>(null);
     const activeMotionPlanIdRef = useRef<string | null>(null);
+    const reactionMotionRequestRef = useRef(0);
+    const reactionMotionPlanIdRef = useRef<string | null>(null);
+    const reactionMotionControllerRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
       mouthOpenRef.current = mouthOpen;
@@ -162,7 +216,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           return false;
         }
 
-        if (preparedMotionPromiseRef.current?.planId === plan.planId) {
+        if (
+          preparedMotionPromiseRef.current?.planId === plan.planId &&
+          preparedMotionPromiseRef.current.assetId === assetId
+        ) {
           return preparedMotionPromiseRef.current.promise;
         }
 
@@ -234,13 +291,18 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           }
         })();
 
-        preparedMotionPromiseRef.current = { planId: plan.planId, promise };
+        preparedMotionPromiseRef.current = {
+          planId: plan.planId,
+          assetId,
+          promise,
+        };
         return promise;
       },
       [],
     );
 
     const stopMotion = useCallback((planId?: string) => {
+      if (!planId && reactionMotionPlanIdRef.current) return;
       if (
         planId &&
         preparedMotionPlanIdRef.current !== planId &&
@@ -273,6 +335,92 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       motionPlayerRef.current?.requestExit();
     }, []);
 
+    const startPreparedMotion = useCallback((planId: string): number | null => {
+      if (preparedMotionPlanIdRef.current !== planId) return null;
+      const player = motionPlayerRef.current;
+      if (!player?.startPrepared()) return null;
+      preparedMotionPlanIdRef.current = null;
+      activeMotionPlanIdRef.current = planId;
+      return performance.now();
+    }, []);
+
+    const stopReactionMotion = useCallback(() => {
+      reactionMotionRequestRef.current += 1;
+      reactionMotionControllerRef.current?.abort();
+      reactionMotionControllerRef.current = null;
+      const planId = reactionMotionPlanIdRef.current;
+      reactionMotionPlanIdRef.current = null;
+      if (planId) stopMotion(planId);
+    }, [stopMotion]);
+
+    const playReactionMotion = useCallback(
+      async (assetId: string, requestId: number): Promise<boolean> => {
+        stopReactionMotion();
+        if (
+          motionScaleRef.current <= 0 ||
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ) {
+          return false;
+        }
+
+        const vrm = loadedVrmRef.current;
+        const player = motionPlayerRef.current;
+        if (!vrm || !player || player.isPlaying()) return false;
+
+        const generation = ++reactionMotionRequestRef.current;
+        const controller = new AbortController();
+        reactionMotionControllerRef.current = controller;
+        const plan = createListeningReactionPlan(assetId, requestId);
+        reactionMotionPlanIdRef.current = plan.planId;
+
+        try {
+          const asset = await motionCatalogRef.current.get(
+            assetId,
+            controller.signal,
+          );
+          if (generation !== reactionMotionRequestRef.current) return false;
+
+          const prepared = await prepareMotion(plan, controller.signal);
+          if (
+            !prepared ||
+            generation !== reactionMotionRequestRef.current ||
+            controller.signal.aborted
+          ) {
+            return false;
+          }
+
+          if (startPreparedMotion(plan.planId) === null) return false;
+
+          const played = await waitForMotionDelay(
+            asset.durationMs,
+            controller.signal,
+          );
+          if (
+            !played ||
+            generation !== reactionMotionRequestRef.current ||
+            controller.signal.aborted
+          ) {
+            return false;
+          }
+
+          finishMotion(plan.planId);
+          await waitForMotionDelay(
+            LISTENING_REACTION_EXIT_BLEND_MS,
+            controller.signal,
+          );
+          return generation === reactionMotionRequestRef.current;
+        } finally {
+          if (reactionMotionControllerRef.current === controller) {
+            reactionMotionControllerRef.current = null;
+          }
+          if (reactionMotionPlanIdRef.current === plan.planId) {
+            reactionMotionPlanIdRef.current = null;
+          }
+        }
+      },
+      [finishMotion, prepareMotion, startPreparedMotion, stopReactionMotion],
+    );
+
     const syncMotionAsset = useCallback(() => {
       const plan = performancePlanRef.current;
       if (!plan?.motion) {
@@ -286,30 +434,33 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       ref,
       () => ({
         prepareMotion,
-        startPreparedMotion(planId) {
-          if (preparedMotionPlanIdRef.current !== planId) return null;
-          const player = motionPlayerRef.current;
-          if (!player?.startPrepared()) return null;
-          preparedMotionPlanIdRef.current = null;
-          activeMotionPlanIdRef.current = planId;
-          return performance.now();
-        },
+        startPreparedMotion,
         finishMotion,
         stopMotion,
+        playReactionMotion,
+        stopReactionMotion,
       }),
-      [finishMotion, prepareMotion, stopMotion],
+      [
+        finishMotion,
+        playReactionMotion,
+        prepareMotion,
+        startPreparedMotion,
+        stopMotion,
+        stopReactionMotion,
+      ],
     );
 
     useEffect(() => {
       motionScaleRef.current = motionScale;
       if (motionScale <= 0) {
+        stopReactionMotion();
         stopMotion();
         return;
       }
 
       const plan = performancePlanRef.current;
       if (plan?.motion) void prepareMotion(plan);
-    }, [motionScale, prepareMotion, stopMotion]);
+    }, [motionScale, prepareMotion, stopMotion, stopReactionMotion]);
 
     useEffect(() => {
       const previousPlanId = performancePlanRef.current?.planId;
@@ -328,8 +479,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
 
     useEffect(() => {
       if (sessionGeneration === 0) return;
+      stopReactionMotion();
       stopMotion();
-    }, [sessionGeneration, stopMotion]);
+    }, [sessionGeneration, stopMotion, stopReactionMotion]);
 
     useEffect(() => {
       const container = containerRef.current;
@@ -535,7 +687,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           const headYawBias = requestedHeadYawBias * safeMotionScale;
           const isBodyMotionPlaying =
             motionPlayerRef.current?.isPlaying() ?? false;
-          const listeningNodDegrees = listeningReactionState
+          const listeningNodDegrees =
+            listeningReactionState?.kind === 'nod'
             ? getListeningNodDegrees(
                 (performance.now() - listeningReactionStartedAtRef.current) /
                   1_000,
@@ -588,6 +741,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         emotionController = null;
         idleController = null;
         idleGazeController = null;
+        stopReactionMotion();
         stopMotion();
         motionPlayerRef.current?.dispose();
         motionPlayerRef.current = null;
@@ -598,7 +752,13 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         }
         renderer.dispose();
       };
-    }, [isExhibitionMode, stageVariant, stopMotion, syncMotionAsset]);
+    }, [
+      isExhibitionMode,
+      stageVariant,
+      stopMotion,
+      stopReactionMotion,
+      syncMotionAsset,
+    ]);
 
     return (
       <div className="vrm-stage" ref={containerRef}>

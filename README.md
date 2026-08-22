@@ -493,7 +493,7 @@ npm run stress -- `
 
 ## 自然さPlaycheck
 
-固定6ケースと5軸rubricで、AITuberの自然さをOwnerが確認できます。
+固定7ケースと5軸rubricで、AITuberの自然さをOwnerが確認できます。
 評価専用UIは追加しません。PCの対話CLIが採点を受け付けます。
 
 PCだけで確認する場合は、Viteを起動します。
@@ -537,7 +537,7 @@ CLIは`runId`、`playcheckRunId`付きURL、採点コマンドを表示します
 npm run playcheck -- score --run-id <runId>
 ```
 
-CLIは6ケースの前提、操作、観察点を表示します。
+CLIは7ケースの前提、操作、観察点を表示します。
 iPadでケースを実行し、PCへ戻ってEnterを押します。
 CLIが自然さに関する5つの質問と短い所感を尋ねます。
 入力はケースごとに保存されます。

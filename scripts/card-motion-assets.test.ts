@@ -46,7 +46,7 @@ test('every Card Pool card has one saved VRMA asset', () => {
   const cardIds = cardPool.map((card) => card.id);
   const assetIds = cardAssets.map((asset) => asset.assetId);
 
-  assert.equal(manifest.assets.length, 19);
+  assert.equal(manifest.assets.length, 20);
   assert.equal(cardAssets.length, 18);
   assert.equal(new Set(assetIds).size, 18);
   assert.deepEqual(
@@ -110,6 +110,33 @@ test('ordinary speech has one separate gentle motion asset', () => {
     resolveMotionPlaybackProfile(asset.correctionProfileId).profileId,
     'vayria-default-v1',
   );
+});
+
+test('voice listener reaction uses a three-second saved VRMA asset', () => {
+  const manifest = parseMotionManifest(
+    JSON.parse(fs.readFileSync(manifestPath, 'utf8')),
+  );
+  const asset = manifest.assets.find(
+    (candidate) => candidate.assetId === 'listening-thinking',
+  );
+  assert.ok(asset);
+  assert.equal(asset.file, 'listening-thinking.vrma');
+  assert.deepEqual(asset.tags, ['reaction']);
+  assert.equal(asset.durationMs, 3000);
+  assert.equal(asset.fps, 20);
+  assert.equal(asset.loop, false);
+  assert.equal(asset.correctionProfileId, 'vayria-default-v1');
+  const filePath = path.join(
+    repositoryRoot,
+    'public/avatar/motions',
+    asset.file,
+  );
+  assert.equal(fs.existsSync(filePath), true);
+  const contentSha256 = crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(filePath))
+    .digest('hex');
+  assert.equal(contentSha256, asset.contentSha256);
 });
 
 test('Card Pool preview adds a saved motion asset unless motion is reduced', () => {

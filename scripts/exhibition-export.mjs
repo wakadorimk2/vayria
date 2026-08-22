@@ -25,6 +25,7 @@ const CSV_COLUMNS = [
   'emotion',
   'phase',
   'reason',
+  'interactionAction',
   'axis',
   'score',
   'note',
@@ -178,6 +179,7 @@ function eventRow(captureId, event) {
     emotion: event.emotion,
     phase: event.phase,
     reason: event.reason,
+    interactionAction: event.interactionAction,
   };
 }
 

@@ -146,12 +146,16 @@ export function useAudioLipSync(volume = 1) {
     setIsReactionPlaying(false);
   }, []);
 
+  const stopReaction = useCallback(() => {
+    reactionGenerationRef.current += 1;
+    clearReactionPlayback();
+  }, [clearReactionPlayback]);
+
   const stop = useCallback(() => {
     generationRef.current += 1;
-    reactionGenerationRef.current += 1;
     clearPlayback();
-    clearReactionPlayback();
-  }, [clearPlayback, clearReactionPlayback]);
+    stopReaction();
+  }, [clearPlayback, stopReaction]);
 
   const play = useCallback<PlayAudio>(
     async (audioData, options) => {
@@ -382,6 +386,7 @@ export function useAudioLipSync(volume = 1) {
     play,
     playReaction,
     prepare,
+    stopReaction,
     stop,
   };
 }
