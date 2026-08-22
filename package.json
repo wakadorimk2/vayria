@@ -7,7 +7,8 @@
     "dev": "vite",
     "dev:exhibition": "vite --mode exhibition",
     "build": "tsc -b && vite build",
-    "test": "npm run test:performer && npm run test:motion && npm run test:secret-config && npm run test:worktree-setup && node --test scripts/stress-test.test.mjs",
+    "test": "npm run test:performer && npm run test:motion && npm run test:secret-config && npm run test:voice && npm run test:worktree-setup && node --test scripts/stress-test.test.mjs",
+    "test:voice": "tsc -p tsconfig.voice-input-test.json && node scripts/run-voice-input-tests.mjs",
     "test:performer": "tsc -p tsconfig.performer-test.json && node scripts/run-performer-tests.mjs",
     "test:motion": "tsc -p tsconfig.motion-test.json && node scripts/run-motion-tests.mjs",
     "test:secret-config": "tsc -p tsconfig.secret-config-test.json && node scripts/run-secret-config-tests.mjs",
@@ -22,7 +23,8 @@
     "@pixiv/three-vrm-animation": "2.1.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "three": "0.164.1"
+    "three": "0.164.1",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -30,6 +32,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/three": "0.164.1",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",

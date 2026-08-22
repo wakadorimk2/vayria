@@ -78,6 +78,7 @@ interface AivisStyle {
 }
 
 type ChatMode = 'manual' | 'autonomous';
+type ConversationEventSource = ChatMode | 'voice';
 type AutonomousAction = (typeof AUTONOMOUS_ACTIONS)[number];
 type ConversationEventName = (typeof CONVERSATION_EVENTS)[number];
 
@@ -119,7 +120,7 @@ interface ClientConversationEvent {
   at: string;
   elapsedMs: number;
   event: ConversationEventName;
-  source: ChatMode;
+  source: ConversationEventSource;
   turnId: string;
   durationMs?: number;
   emotion?: Emotion;
@@ -232,8 +233,8 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
   }
 
   const source = record.source;
-  if (source !== 'manual' && source !== 'autonomous') {
-    throw new RequestError('source must be manual or autonomous.', 400);
+  if (source !== 'manual' && source !== 'voice' && source !== 'autonomous') {
+    throw new RequestError('source must be manual, voice, or autonomous.', 400);
   }
 
   const event = record.event;

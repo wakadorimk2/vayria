@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const SMOOTHING_FACTOR = 0.5;
 const RMS_CEILING = 0.12;
+const REACTION_GAIN_SCALE = 0.55;
 
 export interface PlayAudioOptions {
   onStart?: () => void;
@@ -12,6 +13,8 @@ export type PlayAudio = (
   options?: PlayAudioOptions,
 ) => Promise<void>;
 
+export type PlayReactionAudio = (audioData: ArrayBuffer) => Promise<boolean>;
+
 function clampVolume(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.max(0, Math.min(value, 1));
@@ -21,20 +24,31 @@ export function useAudioLipSync(volume = 1) {
   const normalizedVolume = clampVolume(volume);
   const [mouthOpen, setMouthOpen] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isReactionPlaying, setIsReactionPlaying] = useState(false);
   const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
   const contextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const reactionAnalyserRef = useRef<AnalyserNode | null>(null);
+  const reactionGainRef = useRef<GainNode | null>(null);
+  const reactionSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const animationFrameRef = useRef(0);
+  const reactionAnimationFrameRef = useRef(0);
   const smoothedRmsRef = useRef(0);
+  const reactionSmoothedRmsRef = useRef(0);
   const generationRef = useRef(0);
+  const reactionGenerationRef = useRef(0);
+  const primaryPlaybackActiveRef = useRef(false);
+  const primaryMouthOpenRef = useRef(0);
+  const reactionMouthOpenRef = useRef(0);
   const volumeRef = useRef(normalizedVolume);
 
   const ensureAudioContext = useCallback(() => {
     if (!contextRef.current || contextRef.current.state === 'closed') {
       contextRef.current = new AudioContext();
       gainRef.current = null;
+      reactionGainRef.current = null;
     }
 
     if (!gainRef.current) {
@@ -42,6 +56,13 @@ export function useAudioLipSync(volume = 1) {
       gain.gain.value = volumeRef.current;
       gain.connect(contextRef.current.destination);
       gainRef.current = gain;
+    }
+
+    if (!reactionGainRef.current) {
+      const reactionGain = contextRef.current.createGain();
+      reactionGain.gain.value = volumeRef.current * REACTION_GAIN_SCALE;
+      reactionGain.connect(contextRef.current.destination);
+      reactionGainRef.current = reactionGain;
     }
 
     return contextRef.current;
@@ -69,14 +90,15 @@ export function useAudioLipSync(volume = 1) {
   }, [ensureAudioContext]);
 
   const clearPlayback = useCallback(() => {
-    if (sourceRef.current) {
+    const source = sourceRef.current;
+    sourceRef.current = null;
+    if (source) {
       try {
-        sourceRef.current.stop();
+        source.stop();
       } catch {
         // The source already stopped.
       }
-      sourceRef.current.disconnect();
-      sourceRef.current = null;
+      source.disconnect();
     }
 
     if (animationFrameRef.current) {
@@ -87,76 +109,206 @@ export function useAudioLipSync(volume = 1) {
     analyserRef.current?.disconnect();
     analyserRef.current = null;
     smoothedRmsRef.current = 0;
-    setMouthOpen(0);
+    primaryMouthOpenRef.current = 0;
+    setMouthOpen(reactionMouthOpenRef.current);
     setIsSpeaking(false);
+    primaryPlaybackActiveRef.current = false;
+  }, []);
+
+  const clearReactionPlayback = useCallback(() => {
+    const source = reactionSourceRef.current;
+    reactionSourceRef.current = null;
+    if (source) {
+      try {
+        source.stop();
+      } catch {
+        // The source already stopped.
+      }
+      source.disconnect();
+    }
+
+    if (reactionAnimationFrameRef.current) {
+      cancelAnimationFrame(reactionAnimationFrameRef.current);
+      reactionAnimationFrameRef.current = 0;
+    }
+
+    reactionAnalyserRef.current?.disconnect();
+    reactionAnalyserRef.current = null;
+    reactionSmoothedRmsRef.current = 0;
+    reactionMouthOpenRef.current = 0;
+    setMouthOpen(primaryMouthOpenRef.current);
+    setIsReactionPlaying(false);
   }, []);
 
   const stop = useCallback(() => {
     generationRef.current += 1;
+    reactionGenerationRef.current += 1;
     clearPlayback();
-  }, [clearPlayback]);
+    clearReactionPlayback();
+  }, [clearPlayback, clearReactionPlayback]);
 
   const play = useCallback<PlayAudio>(
     async (audioData, options) => {
       const generation = generationRef.current + 1;
       generationRef.current = generation;
+      reactionGenerationRef.current += 1;
       clearPlayback();
+      clearReactionPlayback();
+      primaryPlaybackActiveRef.current = true;
 
-      const context = ensureAudioContext();
-      if (context.state !== 'running') {
-        await context.resume();
-      }
-      if (context.state !== 'running') {
-        throw new Error('AudioContext is not running');
-      }
-      setIsAudioUnlocked(true);
-
-      const decodedAudio = await context.decodeAudioData(audioData.slice(0));
-      if (generation !== generationRef.current) return;
-
-      const source = context.createBufferSource();
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 2048;
-      source.buffer = decodedAudio;
-      source.connect(analyser);
-      analyser.connect(gainRef.current!);
-      sourceRef.current = source;
-      analyserRef.current = analyser;
-
-      const samples = new Float32Array(analyser.fftSize);
-      const updateMouth = () => {
-        if (
-          generation !== generationRef.current ||
-          analyserRef.current !== analyser
-        ) {
-          return;
+      try {
+        const context = ensureAudioContext();
+        if (context.state !== 'running') {
+          await context.resume();
         }
-
-        analyser.getFloatTimeDomainData(samples);
-        let squaredTotal = 0;
-        for (const sample of samples) {
-          squaredTotal += sample * sample;
+        if (context.state !== 'running') {
+          throw new Error('AudioContext is not running');
         }
-        const rms = Math.sqrt(squaredTotal / samples.length);
-        smoothedRmsRef.current =
-          smoothedRmsRef.current * SMOOTHING_FACTOR +
-          rms * (1 - SMOOTHING_FACTOR);
-        setMouthOpen(Math.min(smoothedRmsRef.current / RMS_CEILING, 1));
-        animationFrameRef.current = requestAnimationFrame(updateMouth);
-      };
+        setIsAudioUnlocked(true);
 
-      return new Promise<void>((resolve) => {
-        source.onended = () => {
-          if (generation === generationRef.current) clearPlayback();
-          resolve();
+        const decodedAudio = await context.decodeAudioData(audioData.slice(0));
+        if (generation !== generationRef.current) return;
+
+        const source = context.createBufferSource();
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 2048;
+        source.buffer = decodedAudio;
+        source.connect(analyser);
+        analyser.connect(gainRef.current!);
+        sourceRef.current = source;
+        analyserRef.current = analyser;
+
+        const samples = new Float32Array(analyser.fftSize);
+        const updateMouth = () => {
+          if (
+            generation !== generationRef.current ||
+            analyserRef.current !== analyser
+          ) {
+            return;
+          }
+
+          analyser.getFloatTimeDomainData(samples);
+          let squaredTotal = 0;
+          for (const sample of samples) {
+            squaredTotal += sample * sample;
+          }
+          const rms = Math.sqrt(squaredTotal / samples.length);
+          smoothedRmsRef.current =
+            smoothedRmsRef.current * SMOOTHING_FACTOR +
+            rms * (1 - SMOOTHING_FACTOR);
+          primaryMouthOpenRef.current = Math.min(
+            smoothedRmsRef.current / RMS_CEILING,
+            1,
+          );
+          setMouthOpen(
+            Math.max(primaryMouthOpenRef.current, reactionMouthOpenRef.current),
+          );
+          animationFrameRef.current = requestAnimationFrame(updateMouth);
         };
-        setIsSpeaking(true);
-        animationFrameRef.current = requestAnimationFrame(updateMouth);
-        source.start();
-        options?.onStart?.();
-      });
+
+        return new Promise<void>((resolve) => {
+          source.onended = () => {
+            if (generation === generationRef.current) clearPlayback();
+            resolve();
+          };
+          setIsSpeaking(true);
+          animationFrameRef.current = requestAnimationFrame(updateMouth);
+          source.start();
+          options?.onStart?.();
+        });
+      } catch (error) {
+        if (generation === generationRef.current) clearPlayback();
+        throw error;
+      }
     },
-    [clearPlayback, ensureAudioContext],
+    [clearPlayback, clearReactionPlayback, ensureAudioContext],
+  );
+
+  const playReaction = useCallback<PlayReactionAudio>(
+    async (audioData) => {
+      if (primaryPlaybackActiveRef.current) return false;
+
+      const generation = reactionGenerationRef.current + 1;
+      reactionGenerationRef.current = generation;
+      clearReactionPlayback();
+
+      try {
+        const context = ensureAudioContext();
+        if (context.state !== 'running') {
+          await context.resume();
+        }
+        if (
+          context.state !== 'running' ||
+          primaryPlaybackActiveRef.current ||
+          generation !== reactionGenerationRef.current
+        ) {
+          return false;
+        }
+        setIsAudioUnlocked(true);
+
+        const decodedAudio = await context.decodeAudioData(audioData.slice(0));
+        if (
+          primaryPlaybackActiveRef.current ||
+          generation !== reactionGenerationRef.current
+        ) {
+          return false;
+        }
+
+        const source = context.createBufferSource();
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 2048;
+        source.buffer = decodedAudio;
+        source.connect(analyser);
+        analyser.connect(reactionGainRef.current!);
+        reactionSourceRef.current = source;
+        reactionAnalyserRef.current = analyser;
+
+        const samples = new Float32Array(analyser.fftSize);
+        const updateMouth = () => {
+          if (
+            generation !== reactionGenerationRef.current ||
+            reactionAnalyserRef.current !== analyser
+          ) {
+            return;
+          }
+
+          analyser.getFloatTimeDomainData(samples);
+          let squaredTotal = 0;
+          for (const sample of samples) {
+            squaredTotal += sample * sample;
+          }
+          const rms = Math.sqrt(squaredTotal / samples.length);
+          reactionSmoothedRmsRef.current =
+            reactionSmoothedRmsRef.current * SMOOTHING_FACTOR +
+            rms * (1 - SMOOTHING_FACTOR);
+          reactionMouthOpenRef.current = Math.min(
+            reactionSmoothedRmsRef.current / RMS_CEILING,
+            1,
+          );
+          setMouthOpen(
+            Math.max(primaryMouthOpenRef.current, reactionMouthOpenRef.current),
+          );
+          reactionAnimationFrameRef.current = requestAnimationFrame(updateMouth);
+        };
+
+        return await new Promise<boolean>((resolve) => {
+          source.onended = () => {
+            const isCurrent = generation === reactionGenerationRef.current;
+            if (isCurrent) clearReactionPlayback();
+            resolve(isCurrent);
+          };
+          setIsReactionPlaying(true);
+          reactionAnimationFrameRef.current = requestAnimationFrame(updateMouth);
+          source.start();
+        });
+      } catch {
+        if (generation === reactionGenerationRef.current) {
+          clearReactionPlayback();
+        }
+        return false;
+      }
+    },
+    [clearReactionPlayback, ensureAudioContext],
   );
 
   useEffect(() => {
@@ -166,6 +318,13 @@ export function useAudioLipSync(volume = 1) {
     if (context && gain && context.state !== 'closed') {
       gain.gain.setValueAtTime(normalizedVolume, context.currentTime);
     }
+    const reactionGain = reactionGainRef.current;
+    if (context && reactionGain && context.state !== 'closed') {
+      reactionGain.gain.setValueAtTime(
+        normalizedVolume * REACTION_GAIN_SCALE,
+        context.currentTime,
+      );
+    }
   }, [normalizedVolume]);
 
   useEffect(() => {
@@ -173,6 +332,8 @@ export function useAudioLipSync(volume = 1) {
       stop();
       gainRef.current?.disconnect();
       gainRef.current = null;
+      reactionGainRef.current?.disconnect();
+      reactionGainRef.current = null;
       if (contextRef.current?.state !== 'closed') {
         void contextRef.current?.close();
       }
@@ -181,9 +342,11 @@ export function useAudioLipSync(volume = 1) {
 
   return {
     isAudioUnlocked,
+    isReactionPlaying,
     isSpeaking,
     mouthOpen,
     play,
+    playReaction,
     prepare,
     stop,
   };

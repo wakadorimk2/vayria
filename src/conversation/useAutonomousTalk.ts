@@ -8,6 +8,7 @@ interface UseAutonomousTalkOptions {
   cancelAutonomous: () => void;
   getNextAutonomousDelay: () => number;
   isBusy: boolean;
+  isVoiceInputActive: boolean;
   isLoopEnabled: boolean;
   isMuted: boolean;
   isReady: boolean;
@@ -19,6 +20,7 @@ export function useAutonomousTalk({
   cancelAutonomous,
   getNextAutonomousDelay,
   isBusy,
+  isVoiceInputActive,
   isLoopEnabled,
   isMuted,
   isReady,
@@ -58,7 +60,15 @@ export function useAutonomousTalk({
       cancelAutonomous();
       return;
     }
-    if (!isLoopEnabled || !isReady || !isVisible || isBusy) return;
+    if (
+      !isLoopEnabled ||
+      isVoiceInputActive ||
+      !isReady ||
+      !isVisible ||
+      isBusy
+    ) {
+      return;
+    }
 
     const delay = Math.max(
       0,
@@ -79,6 +89,7 @@ export function useAutonomousTalk({
   }, [
     cancelAutonomous,
     isBusy,
+    isVoiceInputActive,
     isLoopEnabled,
     isMuted,
     isReady,

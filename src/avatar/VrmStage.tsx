@@ -28,13 +28,26 @@ import {
 } from './stagePreset';
 import type { Emotion } from '../character/emotion';
 import type { PerformancePlan } from '../performer/types';
+import type { ListeningReactionCue } from '../voice/voiceInput';
 
 const MODEL_URL = `${import.meta.env.BASE_URL}avatar/model.vrm`;
+
+const LISTENING_NOD_DURATION_SECONDS = 0.48;
+const LISTENING_NOD_DEGREES = -4;
+
+function getListeningNodDegrees(elapsedSeconds: number): number {
+  if (elapsedSeconds < 0 || elapsedSeconds >= LISTENING_NOD_DURATION_SECONDS) {
+    return 0;
+  }
+  const progress = elapsedSeconds / LISTENING_NOD_DURATION_SECONDS;
+  return LISTENING_NOD_DEGREES * Math.sin(progress * Math.PI);
+}
 
 interface VrmStageProps {
   attentionTarget?: 'viewer' | 'chat' | 'game' | 'none';
   emotion: Emotion;
   isExhibitionMode?: boolean;
+  listeningReaction?: ListeningReactionCue;
   mouthOpen: number;
   onReady?: () => void;
   performancePlan?: PerformancePlan;
@@ -47,6 +60,7 @@ export function VrmStage({
   attentionTarget = 'none',
   emotion,
   isExhibitionMode = false,
+  listeningReaction,
   mouthOpen,
   onReady,
   performancePlan,
@@ -57,6 +71,11 @@ export function VrmStage({
   const mouthOpenRef = useRef(mouthOpen);
   const emotionRef = useRef(emotion);
   const attentionTargetRef = useRef(attentionTarget);
+  const listeningReactionRef = useRef(listeningReaction);
+  const listeningReactionIdRef = useRef<number | null>(
+    listeningReaction?.id ?? null,
+  );
+  const listeningReactionStartedAtRef = useRef(0);
   const performancePlanRef = useRef(performancePlan);
   const onReadyRef = useRef(onReady);
   const [loadState, setLoadState] = useState<LoadState>('loading');
@@ -82,6 +101,16 @@ export function VrmStage({
   useEffect(() => {
     attentionTargetRef.current = attentionTarget;
   }, [attentionTarget]);
+
+  useEffect(() => {
+    const nextId = listeningReaction?.id ?? null;
+    if (nextId !== listeningReactionIdRef.current) {
+      listeningReactionIdRef.current = nextId;
+      listeningReactionStartedAtRef.current =
+        nextId === null ? 0 : performance.now();
+    }
+    listeningReactionRef.current = listeningReaction;
+  }, [listeningReaction]);
 
   useEffect(() => {
     performancePlanRef.current = performancePlan;
@@ -313,7 +342,9 @@ export function VrmStage({
         const plan = performancePlanRef.current;
         const avatarProfile = plan?.avatarProfile;
         const preReaction = plan?.preReaction;
-        const gazeTarget = preReaction?.gaze?.target ?? attentionTargetRef.current;
+        const reaction = listeningReactionRef.current;
+        const gazeTarget =
+          reaction?.target ?? preReaction?.gaze?.target ?? attentionTargetRef.current;
         const gazeYawBias =
           gazeTarget === 'viewer'
             ? 0.6
@@ -327,11 +358,22 @@ export function VrmStage({
         const headYawBias =
           (avatarProfile?.headYawBias ?? preReaction?.motion?.headYawBias ?? 0) +
           gazeYawBias * (avatarProfile?.gazeDirectness ?? preReaction?.gaze?.directness ?? 0.72);
+        const listeningNodDegrees = reaction
+          ? getListeningNodDegrees(
+              (performance.now() - listeningReactionStartedAtRef.current) /
+                1_000,
+            )
+          : 0;
         const isBodyMotionPlaying =
           motionPlayerRef.current?.isPlaying() ?? false;
         idleController?.setEnabled(!isBodyMotionPlaying);
         if (!isBodyMotionPlaying) {
-          idleController?.update(delta, idleMotionWeight, headYawBias);
+          idleController?.update(
+            delta,
+            idleMotionWeight,
+            headYawBias,
+            listeningNodDegrees,
+          );
         }
         motionPlayerRef.current?.update(delta);
         if (

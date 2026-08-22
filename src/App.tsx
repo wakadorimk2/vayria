@@ -25,6 +25,13 @@ import type {
   PerformerTrigger,
 } from './performer/types';
 import { runtimeConfig } from './runtimeConfig';
+import { fetchListeningBackchannel } from './voice/backchannel';
+import { useVoiceInput } from './voice/useVoiceInput';
+import {
+  MAX_VOICE_TEXT_LENGTH,
+  type ListeningReactionCue,
+  type VoiceInputEvent,
+} from './voice/voiceInput';
 
 const STATUS_LABELS = {
   idle: '話しかけてください。',
@@ -33,6 +40,43 @@ const STATUS_LABELS = {
   speaking: '話しています。',
   error: '処理を完了できませんでした。',
 } as const;
+
+function getVoiceStatusLabel(
+  isEnabled: boolean,
+  phase: ReturnType<typeof useVoiceInput>['phase'],
+): string {
+  if (!isEnabled) return STATUS_LABELS.idle;
+  if (phase === 'speech_detected') return '聞いています。発話を検知しました。';
+  if (phase === 'utterance_finalized') return '聞き取りました。送信します…';
+  if (phase === 'error') return '音声入力を利用できません。';
+  return '聞いています…';
+}
+
+function getVoiceErrorMessage(code: string | null): string {
+  switch (code) {
+    case 'unsupported':
+      return 'このブラウザーは音声入力に対応していません。テキスト入力を利用してください。';
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'マイクの権限がありません。ブラウザーの設定を確認してください。';
+    case 'audio-capture':
+      return 'マイクを利用できません。接続とブラウザーの設定を確認してください。';
+    case 'insecure-context':
+      return '音声入力にはHTTPS接続が必要です。VayriaをHTTPSで開いてください。';
+    case 'audio-worklet-unsupported':
+      return 'このブラウザーはPCM音声入力に対応していません。テキスト入力を利用してください。';
+    case 'voice-transport-unavailable':
+    case 'voice-transport-closed':
+    case 'voice-transport-timeout':
+      return '音声サービスに接続できません。STTサービスが起動しているか確認してください。';
+    case 'stt-unavailable':
+      return '音声認識サービスを利用できません。STTサービスの設定を確認してください。';
+    case 'voice-transport-backpressure':
+      return '音声データの送信が詰まりました。接続を確認してください。';
+    default:
+      return code ? '音声入力でエラーが発生しました。' : '';
+  }
+}
 
 type ExhibitionPresentationState = 'idle' | 'selecting' | 'reacting';
 
@@ -152,9 +196,33 @@ export default function App() {
     isAudioUnlocked,
     mouthOpen,
     play,
+    playReaction,
     prepare,
     stop,
   } = useAudioLipSync(volume);
+  const [listeningReaction, setListeningReaction] =
+    useState<ListeningReactionCue | undefined>();
+  const [voiceValidationError, setVoiceValidationError] = useState('');
+  const voiceEventHandlerRef = useRef<((event: VoiceInputEvent) => void) | null>(
+    null,
+  );
+  const voiceReactionIdRef = useRef(0);
+  const activeVoiceSegmentRef = useRef<string | null>(null);
+  const backchannelAudioRef = useRef<ArrayBuffer | null>(null);
+  const backchannelLoadingRef = useRef<Promise<void> | null>(null);
+  const backchannelTimerRef = useRef<number | null>(null);
+  const voiceInput = useVoiceInput({
+    language: 'ja-JP',
+    onEvent: (event) => voiceEventHandlerRef.current?.(event),
+  });
+  const {
+    errorCode: voiceInputErrorCode,
+    isEnabled: isVoiceInputEnabled,
+    isSupported: isVoiceInputSupported,
+    phase: voiceInputPhase,
+    start: startVoiceInput,
+    stop: stopVoiceInput,
+  } = voiceInput;
 
   const handlePerformancePlan = useCallback((plan: PerformancePlan) => {
     activePlanRef.current = plan;
@@ -232,12 +300,14 @@ export default function App() {
   const {
     cancelAutonomous,
     error,
+    interruptCurrentTurn,
     isBusy,
     isManualBusy,
     reply,
     resetConversation,
     sendAutonomous,
     sendManual,
+    sendVoice,
     source,
     status,
   } = useConversation(play, stop, {
@@ -256,10 +326,24 @@ export default function App() {
       : 'idle';
   const trimmedInput = input.trim();
   const volumePercent = Math.round(volume * 100);
+  const conversationStatusLabel =
+    status === 'idle'
+      ? getVoiceStatusLabel(isVoiceInputEnabled, voiceInputPhase)
+      : STATUS_LABELS[status];
+  const voiceError = getVoiceErrorMessage(voiceInputErrorCode);
+  const conversationError = error || voiceValidationError || voiceError;
 
   const resetSession = useCallback(() => {
     const nextGeneration = sessionGenerationRef.current + 1;
     sessionGenerationRef.current = nextGeneration;
+
+    stopVoiceInput();
+    activeVoiceSegmentRef.current = null;
+    setListeningReaction(undefined);
+    if (backchannelTimerRef.current !== null) {
+      window.clearTimeout(backchannelTimerRef.current);
+      backchannelTimerRef.current = null;
+    }
 
     if (nonSpeechTimerRef.current !== null) {
       window.clearTimeout(nonSpeechTimerRef.current);
@@ -276,7 +360,7 @@ export default function App() {
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
-  }, [resetConversation, resetRuntime, resetTurn]);
+  }, [resetConversation, resetRuntime, resetTurn, stopVoiceInput]);
 
   useEffect(() => {
     const serialized = JSON.stringify({ volume, lastAudibleVolume });
@@ -336,6 +420,115 @@ export default function App() {
     ) => createPlan(trigger, [contribution]),
     [createPlan, getDirectionContribution],
   );
+
+  const clearBackchannelTimer = useCallback(() => {
+    if (backchannelTimerRef.current === null) return;
+    window.clearTimeout(backchannelTimerRef.current);
+    backchannelTimerRef.current = null;
+  }, []);
+
+  const preloadBackchannel = useCallback(() => {
+    if (backchannelAudioRef.current || backchannelLoadingRef.current) return;
+
+    const loading = fetchListeningBackchannel()
+      .then((audioData) => {
+        backchannelAudioRef.current = audioData;
+      })
+      .catch(() => {
+        // Voice input and visual reactions remain usable without the cue audio.
+      })
+      .finally(() => {
+        backchannelLoadingRef.current = null;
+      });
+    backchannelLoadingRef.current = loading;
+  }, []);
+
+  const handleVoiceEvent = useCallback(
+    (event: VoiceInputEvent) => {
+      switch (event.type) {
+        case 'speech_started': {
+          activeVoiceSegmentRef.current = event.segmentId;
+          setVoiceValidationError('');
+          voiceReactionIdRef.current += 1;
+          setListeningReaction({
+            id: voiceReactionIdRef.current,
+            kind: 'nod',
+            target: 'viewer',
+          });
+          clearBackchannelTimer();
+          const segmentId = event.segmentId;
+          backchannelTimerRef.current = window.setTimeout(() => {
+            backchannelTimerRef.current = null;
+            if (activeVoiceSegmentRef.current !== segmentId) return;
+            const audioData = backchannelAudioRef.current;
+            if (audioData) void playReaction(audioData);
+          }, 420);
+          return;
+        }
+        case 'speech_ended':
+          clearBackchannelTimer();
+          return;
+        case 'utterance_finalized': {
+          clearBackchannelTimer();
+          activeVoiceSegmentRef.current = null;
+          setListeningReaction(undefined);
+          const message = event.text.trim();
+          if (!message) {
+            setVoiceValidationError('音声を聞き取れませんでした。');
+            return;
+          }
+          if (message.length > MAX_VOICE_TEXT_LENGTH) {
+            setVoiceValidationError(
+              `音声入力は${MAX_VOICE_TEXT_LENGTH}文字以内で送信してください。`,
+            );
+            return;
+          }
+
+          setVoiceValidationError('');
+          cancelNonSpeechPlan();
+          interruptCurrentTurn('voice_interrupt');
+          const trigger: PerformerTrigger = {
+            kind: 'viewer_message',
+            text: message,
+          };
+          const plan = createPlanForTrigger(trigger);
+          beginReply();
+          if (!isMuted) void prepare();
+          void sendVoice(message, readCardContext(), acceptReply, plan);
+          return;
+        }
+        case 'recognition_stopped':
+        case 'recognition_failed':
+          clearBackchannelTimer();
+          activeVoiceSegmentRef.current = null;
+          setListeningReaction(undefined);
+          return;
+        case 'listening_started':
+        case 'interim_transcript_updated':
+          return;
+      }
+    },
+    [
+      acceptReply,
+      beginReply,
+      cancelNonSpeechPlan,
+      clearBackchannelTimer,
+      createPlanForTrigger,
+      interruptCurrentTurn,
+      isMuted,
+      playReaction,
+      prepare,
+      readCardContext,
+      sendVoice,
+    ],
+  );
+
+  useEffect(() => {
+    voiceEventHandlerRef.current = handleVoiceEvent;
+    return () => {
+      voiceEventHandlerRef.current = null;
+    };
+  }, [handleVoiceEvent]);
 
   const startAutonomous = useCallback(
     async (options: {
@@ -445,10 +638,28 @@ export default function App() {
     [getDirectionContribution, getRuntimeAutonomousDelay],
   );
 
+  const handleVoiceToggle = useCallback(async () => {
+    if (isVoiceInputEnabled) {
+      await stopVoiceInput();
+      return;
+    }
+
+    if (!(await startVoiceInput())) return;
+    void prepare();
+    preloadBackchannel();
+  }, [
+    isVoiceInputEnabled,
+    preloadBackchannel,
+    prepare,
+    startVoiceInput,
+    stopVoiceInput,
+  ]);
+
   useAutonomousTalk({
     cancelAutonomous,
     getNextAutonomousDelay,
     isBusy: isPerformerBusy,
+    isVoiceInputActive: isVoiceInputEnabled,
     isLoopEnabled: isAutonomousLoopEnabled,
     isMuted,
     isReady:
@@ -596,6 +807,7 @@ export default function App() {
           attentionTarget={performer.state.attention.target}
           emotion={displayEmotion}
           isExhibitionMode={isExhibitionMode}
+          listeningReaction={listeningReaction}
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
           performancePlan={activePlan ?? undefined}
@@ -627,11 +839,18 @@ export default function App() {
           <p className="status">
             {isMuted && status === 'idle'
               ? 'ミュート中です。テキスト会話は利用できます。'
-              : STATUS_LABELS[status]}
+              : conversationStatusLabel}
           </p>
-          {error && (
+          {conversationError && (
             <p className="conversation-error" role="alert">
-              {error}
+              {conversationError}
+            </p>
+          )}
+          {isVoiceInputEnabled && (
+            <p className="voice-input-hint">
+              {runtimeConfig.voiceTransport === 'remote'
+                ? 'PCM音声サービスを使用中です。ヘッドセットを推奨します。'
+                : 'ブラウザー音声認識を使用中です。ヘッドセットを推奨します。'}
             </p>
           )}
         </div>
@@ -650,6 +869,23 @@ export default function App() {
             type="text"
             value={input}
           />
+          <button
+            aria-label={
+              isVoiceInputEnabled ? '音声入力を停止する' : '音声入力を開始する'
+            }
+            aria-pressed={isVoiceInputEnabled}
+            className="voice-input-button"
+            disabled={!isVoiceInputSupported}
+            onClick={handleVoiceToggle}
+            title={
+              isVoiceInputSupported
+                ? 'マイク音声入力を切り替えます'
+                : 'この環境では音声入力を利用できません'
+            }
+            type="button"
+          >
+            {isVoiceInputEnabled ? '🛑 聞くのを止める' : '🎙 聞く'}
+          </button>
           <button disabled={!trimmedInput || isManualBusy} type="submit">
             Send
           </button>

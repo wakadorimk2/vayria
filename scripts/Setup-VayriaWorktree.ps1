@@ -322,8 +322,13 @@ function Ensure-ExhibitionEnvironment {
     '# Do not add secrets here. Shared server settings remain in .env.local.'
     'VITE_APP_MODE=exhibition'
     'VITE_API_BASE_URL=/'
+    'VITE_VOICE_INPUT_TRANSPORT=remote'
     'VAYRIA_BIND_HOST=0.0.0.0'
     "VAYRIA_PORT=$SelectedPort"
+    'VAYRIA_HTTPS=false'
+    'VAYRIA_HTTPS_CERT_FILE='
+    'VAYRIA_HTTPS_KEY_FILE='
+    'VAYRIA_STT_WS_URL=ws://127.0.0.1:8787/stream'
   )
 
   if ($PSCmdlet.ShouldProcess($envPath, "Create exhibition environment for port $SelectedPort")) {

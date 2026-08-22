@@ -40,6 +40,26 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 手動入力またはSession Resetでループを再開できます。
 ミュートとタブ非表示はループだけを一時停止し、会話の履歴、話題、演者状態、カード状態を保持します。
 
+## 音声入力
+
+会話欄の`🎙 聞く`を押すと、マイク入力を開始します。
+`local`モードは、利用可能な場合にブラウザーの`SpeechRecognition`を使用します。
+`exhibition`モードは、`AudioWorklet`で16 kHz、モノラル、PCM16へ変換し、
+同一originの`/api/voice-stream`へWebSocket送信します。
+
+ViteはPCMを解釈しません。ViteはPCMを`127.0.0.1`のPython STTサービスへ中継します。
+PythonサービスはWebRTC VADとfaster-whisperを実行します。
+確定した発話は、既存のLLMとTTSの経路へ渡します。
+
+音声認識は全二重です。Vayriaが話している間も入力を受け付けます。
+ユーザーの発話が確定すると、現在のLLM、TTS、音声再生を中断します。
+
+展示モードではHTTPSとPython STTサービスが必要です。
+音声入力を利用できない場合は、テキスト入力を使用してください。
+スピーカー使用時はVayriaの音声を認識する可能性があります。初回確認ではヘッドセットを推奨します。
+音声データは録音ファイルへ保存しません。音声内容をログへ出力しません。
+認識された最終文字列だけをchat APIへ渡します。
+
 Sessionはページ内だけの一時状態です。
 履歴、話題、直前の自律返答、演者状態、カードのターン状態を含みます。
 localモードの開発画面には`Session Reset`を表示します。
@@ -55,6 +75,8 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 - AivisSpeech と利用する音声合成モデル
 - 自分で利用権を持つ VRM ファイル
 - Chrome、Chromium 系ブラウザー、または iPad の Safari
+- 展示音声入力を使う場合は、Python 3.12 と `uv`
+- 展示HTTPSを使う場合は、`mkcert`
 
 ## セットアップ
 
@@ -115,7 +137,17 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    zonoko の一部スタイルでは、AivisSpeech が
    `AIVIS_INTONATION_SCALE` を無視する場合があります。
 
-6. worktreeごとに`.env.local`を作成して、APIを起動します。
+6. 展示音声入力用のPython環境を作成します。
+
+   ```powershell
+   Push-Location tools/stt
+   uv sync --group dev
+   Pop-Location
+   ```
+
+   Pythonサービスの設定と起動方法は [`tools/stt/README.md`](tools/stt/README.md) を参照してください。
+
+7. worktreeごとに`.env.local`を作成して、APIを起動します。
 
    Codexデスクトップアプリでは、新規チャットで`Worktree`と`Local environment`を選択すると、
    セットアップスクリプトがworktree作成時に実行されます。
@@ -262,17 +294,48 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 1. `.env.example` を `.env.local` へコピーし、API key と AivisSpeech の設定を記述します。
 2. worktreeのSetup scriptが`.env.exhibition.local`を生成したことを確認します。
    `.env.exhibition.example`の手動コピーは不要です。
-3. AivisSpeech を Windows PC で起動します。
-4. exhibition モードで Vite を起動します。
+3. Windows PCへ`mkcert`をインストールし、LANアドレスを含む証明書を作成します。
+
+   ```powershell
+   mkcert -install
+   New-Item -ItemType Directory -Force -Path 'C:\Users\<Windowsユーザー名>\.vayria\tls'
+   mkcert `
+     -cert-file 'C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-cert.pem' `
+     -key-file 'C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-key.pem' `
+     <Windows PCのLANアドレス> localhost 127.0.0.1
+   ```
+
+   `mkcert -CAROOT`が返すルートCAをiPadへインストールします。
+   iPadの「設定 > 一般 > 情報 > 証明書信頼設定」でルートCAを信頼します。
+
+4. `.env.exhibition.local`へ証明書とSTTサービスの設定を追加します。
+
+   ```dotenv
+   VITE_VOICE_INPUT_TRANSPORT=remote
+   VAYRIA_HTTPS=true
+   VAYRIA_HTTPS_CERT_FILE=C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-cert.pem
+   VAYRIA_HTTPS_KEY_FILE=C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-key.pem
+   VAYRIA_STT_WS_URL=ws://127.0.0.1:8787/stream
+   ```
+
+5. AivisSpeech とPython STTサービスを Windows PC で起動します。
+
+   ```powershell
+   Push-Location tools/stt
+   uv run python -m vayria_stt.server
+   Pop-Location
+   ```
+
+6. exhibition モードで Vite を起動します。
 
    ```powershell
    npm run dev:exhibition
    ```
 
-5. Vite が表示する `Network` URL を iPad で開きます。
+7. Vite が表示する `Network` URLを`https`でiPadから開きます。
 
    ```text
-   http://<Windows PC の LAN アドレス>:<worktreeに割り当てられたポート>/
+   https://<Windows PC の LAN アドレス>:<worktreeに割り当てられたポート>/
    ```
 
 iPad と Windows PC は同一 LAN に接続してください。Wi-Fi と Ethernet のどちらも使用できます。
@@ -285,7 +348,8 @@ Windows ファイアウォールは、プライベートネットワーク上の
 `VITE_API_BASE_URL=/` は現在のページと同じ接続先を使用します。別の HTTPS API を使用する場合だけ、`VITE_API_BASE_URL` を変更します。
 
 `public` モードは将来の公開用設定名です。公開 URL、公開中継、認証、永続セッション管理は今回の対象外です。
-`getUserMedia()` とカメラ背景も今回の対象外です。カメラを追加する場合は HTTPS または同等の Secure Context が必要です。
+展示音声入力は`getUserMedia()`を使用します。HTTPSページでマイク許可を与えてください。
+Pythonサービスは`127.0.0.1`だけで待ち受けます。iPadからPythonポートへ直接接続しません。
 
 `.env.local`、`public/avatar/*.vrm`、生成途中の motion asset は Git の追跡対象外です。
 `.env.exhibition` と `.env.exhibition.local` も Git の追跡対象外です。

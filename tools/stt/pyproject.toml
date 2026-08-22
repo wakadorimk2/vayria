@@ -1,0 +1,23 @@
+[project]
+name = "vayria-stt"
+version = "0.1.0"
+description = "Local PCM16 WebSocket speech service for Vayria"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "faster-whisper>=1.2.1,<2",
+  "numpy>=1.26,<3",
+  "webrtcvad-wheels>=2.0.14",
+  "websockets>=14,<16",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3,<9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.uv]
+package = false

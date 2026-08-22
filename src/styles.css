@@ -574,7 +574,8 @@ input {
 
 .reply,
 .status,
-.conversation-error {
+.conversation-error,
+.voice-input-hint {
   margin: 0;
 }
 
@@ -594,9 +595,14 @@ input {
   font-size: 0.85rem;
 }
 
+.voice-input-hint {
+  color: #b8b1a7;
+  font-size: 0.75rem;
+}
+
 .message-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 0.65rem;
   width: min(64rem, 100%);
   margin-inline: auto;
@@ -630,6 +636,16 @@ input {
   color: #18130f;
   font-weight: 750;
   cursor: pointer;
+}
+
+.message-form .voice-input-button {
+  min-width: 8.5rem;
+  background: #343b46;
+  color: #f4f2ed;
+}
+
+.message-form .voice-input-button[aria-pressed="true"] {
+  background: #bf6b59;
 }
 
 .message-form button:focus-visible {
@@ -675,6 +691,23 @@ input {
 }
 
 @media (max-width: 720px) {
+  .message-form {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .message-form input {
+    grid-column: 1 / -1;
+  }
+
+  .message-form .voice-input-button {
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  .message-form button[type="submit"] {
+    grid-column: 2;
+  }
+
   .brain-card-float {
     --brain-drop-wave-left-near: clamp(-12px, -1.4vw, -6px);
     --brain-drop-wave-right-near: clamp(6px, 1.4vw, 12px);
