@@ -16,6 +16,7 @@
     "src/performer/profile.ts",
     "src/performer/types.ts",
     "scripts/card-preview-api.test.ts",
+    "scripts/local-api-capture.test.ts",
     "scripts/card-reactions.test.ts",
     "scripts/performer-runtime.test.ts"
   ]

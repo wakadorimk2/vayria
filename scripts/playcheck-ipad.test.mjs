@@ -91,8 +91,14 @@ test('iPad startup creates a run with the configured playcheck root', async () =
   assert.equal(startRunOptions.baseUrl, 'http://192.168.1.20:5187/');
   assert.equal(startRunOptions.localRoot, 'custom-playcheck-root');
   assert.equal(openedQrPath, createRun().qrPath);
+  assert.match(output.lines.join(''), /Playcheck run: pc-20260822-abcdef12/);
+  assert.match(
+    output.lines.join(''),
+    /QR page: playcheck-results\/local\/launch\/pc-20260822-abcdef12\.html/,
+  );
   assert.match(output.lines.join(''), /Network URL 2: http:\/\/10\.0\.0\.20:5187\//);
   assert.match(output.lines.join(''), /npm run playcheck -- score --run-id pc-20260822-abcdef12/);
+  assert.match(output.lines.join(''), /Ctrl\+CでViteを安全に停止します/);
 
   await session.server.close();
   assert.equal(closed, true);
