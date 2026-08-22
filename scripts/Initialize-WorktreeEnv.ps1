@@ -9,6 +9,8 @@ param(
 
   [string]$SecretFile = (Join-Path $env:USERPROFILE '.vayria\secrets.env'),
 
+  [string]$HttpsConfigFile = (Join-Path $env:USERPROFILE '.vayria\https.env'),
+
   [string]$AivisBaseUrl = 'http://127.0.0.1:10101',
 
   [ValidateSet('local', 'exhibition', 'public')]
@@ -30,6 +32,18 @@ if (-not (Test-Path -LiteralPath $resolvedSecretFile -PathType Leaf)) {
   throw "The external secret file does not exist: $resolvedSecretFile"
 }
 
+$resolvedHttpsConfigFile = ''
+if (-not [string]::IsNullOrWhiteSpace($HttpsConfigFile)) {
+  if (-not [IO.Path]::IsPathRooted($HttpsConfigFile)) {
+    throw 'HttpsConfigFile must be an absolute path.'
+  }
+
+  $candidateHttpsConfigFile = [IO.Path]::GetFullPath($HttpsConfigFile)
+  if (Test-Path -LiteralPath $candidateHttpsConfigFile -PathType Leaf) {
+    $resolvedHttpsConfigFile = $candidateHttpsConfigFile
+  }
+}
+
 if ((Test-Path -LiteralPath $envPath) -and -not $Force) {
   throw "The target .env.local already exists. Use -Force only after inspecting it: $envPath"
 }
@@ -38,6 +52,7 @@ $lines = @(
   '# This file contains no API key. The key is read from VAYRIA_SECRET_FILE.'
   'OPENAI_API_KEY='
   "VAYRIA_SECRET_FILE=$resolvedSecretFile"
+  "VAYRIA_HTTPS_CONFIG_FILE=$resolvedHttpsConfigFile"
   "AIVIS_BASE_URL=$AivisBaseUrl"
   'AIVIS_SPEED_SCALE=1.15'
   'AIVIS_PITCH_SCALE=0'
@@ -53,5 +68,8 @@ if ($PSCmdlet.ShouldProcess($envPath, 'Create worktree .env.local without an API
   Set-Content -LiteralPath $envPath -Value $lines -Encoding utf8
   Write-Output "Created $envPath"
   Write-Output "Referenced external secret file $resolvedSecretFile"
+  if ($resolvedHttpsConfigFile) {
+    Write-Output "Referenced shared HTTPS config file $resolvedHttpsConfigFile"
+  }
   Write-Output "Configured Vayria port $Port"
 }

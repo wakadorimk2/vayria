@@ -18,6 +18,10 @@ import {
   type ChatCardContext,
 } from './conversation/useConversation';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
+import {
+  CARD_INTERACTION_ATTENTION_DURATION_MS,
+  shouldReactToCardInteraction,
+} from './cards/cardReactions';
 import { useWildcardDirection } from './cards/wildcardDirection';
 import { usePerformerRuntime } from './performer/usePerformerRuntime';
 import type {
@@ -168,6 +172,9 @@ export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
+  const [cardAttentionTarget, setCardAttentionTarget] = useState<
+    'game' | null
+  >(null);
   const [audioControl, setAudioControl] = useState(readAudioControlState);
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>({ topic: null, topicTurns: 0 });
@@ -200,6 +207,7 @@ export default function App() {
   const [stageMotionPort, setStageMotionPort] =
     useState<VrmStageHandle | null>(null);
   const nonSpeechTimerRef = useRef<number | null>(null);
+  const cardAttentionTimerRef = useRef<number | null>(null);
   const sessionGenerationRef = useRef(0);
   const {
     isAudioUnlocked,
@@ -380,6 +388,12 @@ export default function App() {
       nonSpeechTimerRef.current = null;
     }
 
+    if (cardAttentionTimerRef.current !== null) {
+      window.clearTimeout(cardAttentionTimerRef.current);
+      cardAttentionTimerRef.current = null;
+    }
+    setCardAttentionTarget(null);
+
     resetConversation();
     resetRuntime();
     resetTurn();
@@ -391,6 +405,25 @@ export default function App() {
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
   }, [resetConversation, resetRuntime, resetTurn, stopVoiceInput]);
+
+  const handleCardInteraction = useCallback(() => {
+    if (!isExhibitionMode) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+    if (!shouldReactToCardInteraction()) return;
+
+    setCardAttentionTarget('game');
+    if (cardAttentionTimerRef.current !== null) {
+      window.clearTimeout(cardAttentionTimerRef.current);
+    }
+    const timerId = window.setTimeout(() => {
+      if (cardAttentionTimerRef.current !== timerId) return;
+      cardAttentionTimerRef.current = null;
+      setCardAttentionTarget(null);
+    }, CARD_INTERACTION_ATTENTION_DURATION_MS);
+    cardAttentionTimerRef.current = timerId;
+  }, [isExhibitionMode]);
 
   useEffect(() => {
     const serialized = JSON.stringify({ volume, lastAudibleVolume });
@@ -425,6 +458,9 @@ export default function App() {
     return () => {
       if (nonSpeechTimerRef.current !== null) {
         window.clearTimeout(nonSpeechTimerRef.current);
+      }
+      if (cardAttentionTimerRef.current !== null) {
+        window.clearTimeout(cardAttentionTimerRef.current);
       }
     };
   }, []);
@@ -864,7 +900,11 @@ export default function App() {
 
       <section className="avatar-area" aria-label="VRM character">
         <VrmStage
-          attentionTarget={performer.state.attention.target}
+          attentionTarget={
+            activePlan !== null
+              ? performer.state.attention.target
+              : cardAttentionTarget ?? performer.state.attention.target
+          }
           emotion={displayEmotion}
           isExhibitionMode={isExhibitionMode}
           listeningReaction={listeningReaction}
@@ -884,7 +924,8 @@ export default function App() {
         )}
         <CardGamePrototype
           game={cardGame}
-          isInteractionLocked={isPerformerBusy}
+          isResetLocked={isPerformerBusy}
+          onCardInteraction={handleCardInteraction}
           onCardInserted={handleCardInserted}
           onSessionReset={resetSession}
           onSelectionActiveChange={setIsCardSelectionActive}
@@ -897,17 +938,19 @@ export default function App() {
       >
         <div className="conversation-copy" aria-live="polite">
           {reply && <p className="reply">{reply}</p>}
-          <p className="status">
-            {isMuted && status === 'idle'
-              ? 'ミュート中です。テキスト会話は利用できます。'
-              : conversationStatusLabel}
-          </p>
+          {(!isExhibitionMode || !reply) && (
+            <p className="status">
+              {isMuted && status === 'idle'
+                ? 'ミュート中です。テキスト会話は利用できます。'
+                : conversationStatusLabel}
+            </p>
+          )}
           {conversationError && (
             <p className="conversation-error" role="alert">
               {conversationError}
             </p>
           )}
-          {isVoiceInputEnabled && (
+          {isVoiceInputEnabled && !isExhibitionMode && (
             <p className="voice-input-hint">
               {runtimeConfig.voiceTransport === 'remote'
                 ? 'PCM音声サービスを使用中です。ヘッドセットを推奨します。'

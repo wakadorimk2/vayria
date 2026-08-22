@@ -55,6 +55,18 @@ export const CARD_REACTION_VISIBLE_FIELDS = [
 
 const CARD_PREVIEW_EFFECT_DURATION_MS = 30_000;
 
+export const CARD_INTERACTION_ATTENTION_CHANCE = 0.35;
+export const CARD_INTERACTION_ATTENTION_DURATION_MS = 900;
+
+export function shouldReactToCardInteraction(random = Math.random): boolean {
+  const value = random();
+  return (
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value < CARD_INTERACTION_ATTENTION_CHANCE
+  );
+}
+
 export const CARD_BEHAVIORS: Readonly<
   Record<string, PerformanceBehavior>
 > = {
