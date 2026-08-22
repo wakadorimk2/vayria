@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import re
+from time import perf_counter
 import unicodedata
 from collections.abc import Iterable
 from typing import Protocol
@@ -12,6 +13,9 @@ LOG_PROB_THRESHOLD = -1.0
 COMPRESSION_RATIO_THRESHOLD = 2.4
 HALLUCINATION_ONLY_PHRASES = frozenset({"ご視聴ありがとうございました"})
 TRANSCRIPT_STRIP_CHARACTERS = " \t\r\n\u3000。、．.!！?？…"
+STT_MODEL_VALUES = ("tiny", "base", "small")
+STT_DEVICE_VALUES = ("auto", "cuda", "cpu")
+STT_COMPUTE_TYPE_VALUES = ("auto", "float16", "int8")
 
 
 class Transcriber(Protocol):
@@ -24,6 +28,19 @@ class TranscriptionResult:
     raw_text: str
     text: str
     filter_reason: str | None
+
+
+@dataclass(frozen=True)
+class SttRuntimeInfo:
+    requestedModel: str
+    requestedDevice: str
+    requestedComputeType: str
+    effectiveModel: str
+    effectiveDevice: str
+    effectiveComputeType: str
+    fallbackUsed: bool
+    fallbackReason: str | None
+    modelLoadMs: int | None
 
 
 def _normalized_for_hallucination_check(text: str) -> str:
@@ -69,21 +86,153 @@ def _filter_transcription_segments(segments: Iterable[object]) -> str:
 @dataclass
 class FasterWhisperTranscriber:
     model_name: str = "small"
-    device: str = "cpu"
-    compute_type: str = "int8"
+    device: str = "auto"
+    compute_type: str = "auto"
+    fallback_model: str = "tiny"
+    fallback_device: str = "cpu"
+    fallback_compute_type: str = "int8"
 
     def __post_init__(self) -> None:
         self._model = None
+        self._prepared = False
+        self._effective_model = self.model_name
+        self._effective_device, self._effective_compute_type = (
+            self._resolve_device_and_compute_type(self.device, self.compute_type)
+        )
+        self._fallback_used = False
+        self._fallback_reason: str | None = None
+        self._model_load_ms: int | None = None
+
+        if self.model_name not in STT_MODEL_VALUES:
+            raise ValueError(f"unsupported STT model: {self.model_name}")
+        if self.device not in STT_DEVICE_VALUES:
+            raise ValueError(f"unsupported STT device: {self.device}")
+        if self.compute_type not in STT_COMPUTE_TYPE_VALUES:
+            raise ValueError(f"unsupported STT compute type: {self.compute_type}")
+        if self.fallback_model not in STT_MODEL_VALUES:
+            raise ValueError(f"unsupported STT fallback model: {self.fallback_model}")
+        if self.fallback_device not in ("cuda", "cpu"):
+            raise ValueError(f"unsupported STT fallback device: {self.fallback_device}")
+        if self.fallback_compute_type not in STT_COMPUTE_TYPE_VALUES:
+            raise ValueError(
+                f"unsupported STT fallback compute type: {self.fallback_compute_type}"
+            )
+
+    @staticmethod
+    def _resolve_device_and_compute_type(
+        device: str,
+        compute_type: str,
+    ) -> tuple[str, str]:
+        effective_device = "cuda" if device == "auto" else device
+        if compute_type != "auto":
+            return effective_device, compute_type
+        return effective_device, "float16" if effective_device == "cuda" else "int8"
+
+    def _load_model(self, model_name: str, device: str, compute_type: str):
+        from faster_whisper import WhisperModel
+
+        model = WhisperModel(
+            model_name,
+            device=device,
+            compute_type=compute_type,
+        )
+        return model, device, compute_type
+
+    def prepare(self) -> dict[str, object]:
+        """Load the selected model once and record the actual loaded profile."""
+        if self._prepared and self._model is not None:
+            return self.runtime_info()
+
+        started = perf_counter()
+        try:
+            primary_device, primary_compute_type = (
+                self._resolve_device_and_compute_type(self.device, self.compute_type)
+            )
+            model, device, compute_type = self._load_model(
+                self.model_name,
+                primary_device,
+                primary_compute_type,
+            )
+            self._model = model
+            self._effective_model = self.model_name
+            self._effective_device = device
+            self._effective_compute_type = compute_type
+            self._fallback_used = False
+            self._fallback_reason = None
+        except Exception as primary_error:
+            self._model = None
+            self._fallback_used = True
+            self._fallback_reason = (
+                str(primary_error) or primary_error.__class__.__name__
+            )[:500]
+            try:
+                fallback_device, fallback_compute_type = (
+                    self._resolve_device_and_compute_type(
+                        self.fallback_device,
+                        self.fallback_compute_type,
+                    )
+                )
+                model, device, compute_type = self._load_model(
+                    self.fallback_model,
+                    fallback_device,
+                    fallback_compute_type,
+                )
+            except Exception as fallback_error:
+                self._model = None
+                self._model_load_ms = max(0, round((perf_counter() - started) * 1_000))
+                raise RuntimeError(
+                    "STT model load failed for primary and fallback profiles: "
+                    f"primary={primary_error}; fallback={fallback_error}"
+                ) from fallback_error
+            self._model = model
+            self._effective_model = self.fallback_model
+            self._effective_device = device
+            self._effective_compute_type = compute_type
+
+        self._model_load_ms = max(0, round((perf_counter() - started) * 1_000))
+        self._prepared = True
+        return self.runtime_info()
+
+    def warm_up(self, language: str = "ja") -> None:
+        """Run one short inference so the first user utterance avoids model setup."""
+        model = self._get_model()
+        import numpy as np
+
+        audio = np.zeros(8_000, dtype=np.float32)
+        try:
+            segments, _info = model.transcribe(
+                audio,
+                language=language,
+                beam_size=1,
+                temperature=0.0,
+                compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
+                log_prob_threshold=LOG_PROB_THRESHOLD,
+                no_speech_threshold=NO_SPEECH_THRESHOLD,
+                condition_on_previous_text=False,
+                vad_filter=False,
+            )
+            next(iter(segments), None)
+        finally:
+            del audio
+
+    def runtime_info(self) -> dict[str, object]:
+        return asdict(
+            SttRuntimeInfo(
+                requestedModel=self.model_name,
+                requestedDevice=self.device,
+                requestedComputeType=self.compute_type,
+                effectiveModel=self._effective_model,
+                effectiveDevice=self._effective_device,
+                effectiveComputeType=self._effective_compute_type,
+                fallbackUsed=self._fallback_used,
+                fallbackReason=self._fallback_reason,
+                modelLoadMs=self._model_load_ms,
+            )
+        )
 
     def _get_model(self):
         if self._model is None:
-            from faster_whisper import WhisperModel
-
-            self._model = WhisperModel(
-                self.model_name,
-                device=self.device,
-                compute_type=self.compute_type,
-            )
+            self.prepare()
         return self._model
 
     def transcribe_pcm16_with_diagnostics(

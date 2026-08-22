@@ -3,6 +3,7 @@ import { apiUrl } from '../runtimeConfig';
 import {
   createEmptySummary,
   type AudioLabMode,
+  type AudioEndpointMs,
   type ExhibitionAudioPreset,
   type VoiceInputDiagnostic,
   type VoiceLabRecord,
@@ -15,6 +16,7 @@ export interface UseVoiceLabOptions {
   enabled: boolean;
   mode: AudioLabMode;
   preset: ExhibitionAudioPreset;
+  audioEndpointMs: AudioEndpointMs;
   ttsPlaying: boolean;
 }
 
@@ -26,6 +28,7 @@ function createDisabledSnapshot(): VoiceLabSnapshot {
     latestRecord: null,
     latestTranscript: '',
     latestError: null,
+    sttRuntime: null,
   };
 }
 
@@ -65,6 +68,7 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
         enabled: true,
         mode: optionsRef.current.mode,
         preset: optionsRef.current.preset,
+        audioEndpointMs: optionsRef.current.audioEndpointMs,
         onRecord: (record) => {
           setSnapshot(nextRecorder.getSnapshot());
           postVoiceLabRecord(record);
@@ -90,6 +94,13 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
     recorder.setMode(options.mode);
     setSnapshot(recorder.getSnapshot());
   }, [options.enabled, options.mode]);
+
+  useEffect(() => {
+    const recorder = recorderRef.current;
+    if (!recorder || !options.enabled) return;
+    recorder.setAudioEndpoint(options.audioEndpointMs);
+    setSnapshot(recorder.getSnapshot());
+  }, [options.audioEndpointMs, options.enabled]);
 
   useEffect(() => {
     const recorder = recorderRef.current;
@@ -122,6 +133,7 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
         timestamp: new Date().toISOString(),
         sessionId: current.sessionId,
         preset: optionsRef.current.preset,
+        audioEndpointMs: optionsRef.current.audioEndpointMs,
         summary: current.summary,
       });
     }

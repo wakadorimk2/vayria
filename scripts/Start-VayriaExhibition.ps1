@@ -2,6 +2,24 @@
 param(
   [string]$WorktreePath = (Get-Location).Path,
 
+  [ValidateSet('tiny', 'base', 'small')]
+  [string]$SttModel = 'small',
+
+  [ValidateSet('auto', 'cuda', 'cpu')]
+  [string]$SttDevice = 'auto',
+
+  [ValidateSet('auto', 'float16', 'int8')]
+  [string]$SttComputeType = 'auto',
+
+  [ValidateSet('tiny', 'base', 'small')]
+  [string]$SttFallbackModel = 'tiny',
+
+  [ValidateSet('cpu', 'cuda')]
+  [string]$SttFallbackDevice = 'cpu',
+
+  [ValidateSet('auto', 'float16', 'int8')]
+  [string]$SttFallbackComputeType = 'int8',
+
   [switch]$SttWindow,
 
   [string]$SttPidFile
@@ -212,6 +230,18 @@ if ($SttWindow) {
       $sttHost
       '--port'
       $sttPort
+      '--model'
+      $SttModel
+      '--device'
+      $SttDevice
+      '--compute-type'
+      $SttComputeType
+      '--fallback-model'
+      $SttFallbackModel
+      '--fallback-device'
+      $SttFallbackDevice
+      '--fallback-compute-type'
+      $SttFallbackComputeType
     )
     $pythonProcess = Start-Process `
       -FilePath $sttPythonFile `
@@ -280,6 +310,18 @@ try {
       '-SttWindow'
       '-SttPidFile'
       $sttPidFile
+      '-SttModel'
+      $SttModel
+      '-SttDevice'
+      $SttDevice
+      '-SttComputeType'
+      $SttComputeType
+      '-SttFallbackModel'
+      $SttFallbackModel
+      '-SttFallbackDevice'
+      $SttFallbackDevice
+      '-SttFallbackComputeType'
+      $SttFallbackComputeType
     )
 
     Write-Output "Starting Python STT in a separate PowerShell window on $sttHost`:$sttPort."

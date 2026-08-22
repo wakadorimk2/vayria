@@ -53,6 +53,51 @@ def transcribe_with_segments(segments: list[FakeSegment]) -> tuple[str, FakeWhis
     ), model
 
 
+def test_auto_profile_falls_back_to_tiny_cpu_and_records_reason(monkeypatch) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_load(self, model_name: str, device: str, compute_type: str):
+        calls.append((model_name, device, compute_type))
+        if device == "cuda":
+            raise RuntimeError("CUDA unavailable")
+        return FakeWhisperModel([]), device, compute_type
+
+    monkeypatch.setattr(FasterWhisperTranscriber, "_load_model", fake_load)
+    provider = FasterWhisperTranscriber(
+        model_name="small",
+        device="auto",
+        compute_type="auto",
+        fallback_model="tiny",
+        fallback_device="cpu",
+        fallback_compute_type="int8",
+    )
+
+    runtime = provider.prepare()
+
+    assert calls == [("small", "cuda", "float16"), ("tiny", "cpu", "int8")]
+    assert runtime["effectiveModel"] == "tiny"
+    assert runtime["effectiveDevice"] == "cpu"
+    assert runtime["effectiveComputeType"] == "int8"
+    assert runtime["fallbackUsed"] is True
+    assert runtime["fallbackReason"] == "CUDA unavailable"
+    assert isinstance(runtime["modelLoadMs"], int)
+
+
+def test_warm_up_uses_the_effective_model(monkeypatch) -> None:
+    model = FakeWhisperModel([])
+    provider = FasterWhisperTranscriber()
+    monkeypatch.setattr(
+        provider,
+        "_load_model",
+        lambda model_name, device, compute_type: (model, "cpu", "int8"),
+    )
+
+    provider.prepare()
+    provider.warm_up("ja")
+
+    assert model.options["language"] == "ja"
+
+
 def test_faster_whisper_receives_explicit_hallucination_guards() -> None:
     _text, model = transcribe_with_segments([FakeSegment("こんにちは")])
 

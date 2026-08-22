@@ -5,6 +5,7 @@ import {
   VAD_THRESHOLD_MIN,
   clampVadThreshold,
 } from './audioLab.js';
+import type { AudioEndpointMs } from './audioLab.js';
 
 export const VAD_NOISE_FLOOR_SCORE = 0.005;
 export const VAD_PRE_ROLL_CHUNK_COUNT = 1;
@@ -36,6 +37,14 @@ export interface RmsVadChunkResult {
   events: RmsVadEvent[];
 }
 
+export interface RmsVadOptions {
+  hangoverChunkCount?: number;
+}
+
+export function getVadHangoverChunkCount(endpointMs: AudioEndpointMs): number {
+  return Math.max(1, Math.round(endpointMs / PCM_CHUNK_DURATION_MS));
+}
+
 function readPcm16Sample(view: DataView, offset: number): number {
   return view.getInt16(offset, true) / 32_768;
 }
@@ -59,6 +68,7 @@ type DetectorState = 'idle' | 'candidate' | 'speech';
 
 export class RmsVad {
   private threshold: number;
+  private readonly hangoverChunkCount: number;
   private candidateNoiseFloor = VAD_NOISE_FLOOR_SCORE;
   private state: DetectorState = 'idle';
   private readonly recentChunks: ArrayBuffer[] = [];
@@ -69,8 +79,11 @@ export class RmsVad {
   private speechBelowThresholdCount = 0;
   private speechChunkCount = 0;
 
-  constructor(threshold = DEFAULT_VAD_THRESHOLD) {
+  constructor(threshold = DEFAULT_VAD_THRESHOLD, options: RmsVadOptions = {}) {
     this.threshold = clampVadThreshold(threshold);
+    this.hangoverChunkCount = Number.isFinite(options.hangoverChunkCount)
+      ? Math.max(1, Math.floor(options.hangoverChunkCount!))
+      : VAD_HANGOVER_CHUNK_COUNT;
   }
 
   getThreshold(): number {
@@ -165,7 +178,7 @@ export class RmsVad {
         this.speechBelowThresholdCount = 0;
       }
 
-      if (this.speechBelowThresholdCount >= VAD_HANGOVER_CHUNK_COUNT) {
+      if (this.speechBelowThresholdCount >= this.hangoverChunkCount) {
         events.push({ type: 'speech_ended', at });
         this.state = 'idle';
         this.speechBelowThresholdCount = 0;

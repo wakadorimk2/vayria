@@ -10,8 +10,11 @@ export const AUDIO_LAB_MODES = [
 export type AudioLabMode = (typeof AUDIO_LAB_MODES)[number];
 
 export const DEFAULT_AUDIO_INPUT_MODE: AudioLabMode = 'baseline';
-export const DEFAULT_AUDIO_LAB_MODE: AudioLabMode = 'exhibition-mix';
+export const DEFAULT_AUDIO_LAB_MODE: AudioLabMode = 'processed';
 export const DEFAULT_VAD_THRESHOLD = 0.02;
+export const AUDIO_ENDPOINT_VALUES = [400, 600] as const;
+export type AudioEndpointMs = (typeof AUDIO_ENDPOINT_VALUES)[number];
+export const DEFAULT_AUDIO_ENDPOINT_MS: AudioEndpointMs = 600;
 export const EXHIBITION_AUDIO_PRESETS = [
   'off',
   'mild',
@@ -21,6 +24,12 @@ export const EXHIBITION_AUDIO_PRESETS = [
 export type ExhibitionAudioPreset = (typeof EXHIBITION_AUDIO_PRESETS)[number];
 
 export const DEFAULT_EXHIBITION_AUDIO_PRESET: ExhibitionAudioPreset = 'mild';
+export const STT_MODEL_VALUES = ['tiny', 'base', 'small'] as const;
+export type SttModel = (typeof STT_MODEL_VALUES)[number];
+export const STT_DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
+export type SttDevice = (typeof STT_DEVICE_VALUES)[number];
+export const STT_COMPUTE_TYPE_VALUES = ['auto', 'float16', 'int8'] as const;
+export type SttComputeType = (typeof STT_COMPUTE_TYPE_VALUES)[number];
 export const VAD_THRESHOLD_MIN = 0.005;
 export const VAD_THRESHOLD_MAX = 0.2;
 export const VAD_THRESHOLD_STEP = 0.005;
@@ -150,6 +159,16 @@ export type VoiceInputDiagnostic =
       reason?: string;
     }
   | {
+      type: 'stt_runtime';
+      at: number;
+      runtime: SttRuntimeInfo;
+    }
+  | {
+      type: 'stt_queued';
+      segmentId: string;
+      at: number;
+    }
+  | {
       type: 'stt_started';
       segmentId: string;
       at: number;
@@ -162,6 +181,43 @@ export type VoiceInputDiagnostic =
       acceptedText: string;
       filterReason?: string;
     };
+
+export interface SttRuntimeInfo {
+  requestedModel: SttModel;
+  requestedDevice: SttDevice;
+  requestedComputeType: SttComputeType;
+  effectiveModel: string;
+  effectiveDevice: string;
+  effectiveComputeType: string;
+  fallbackUsed: boolean;
+  fallbackReason: string | null;
+  modelLoadMs: number | null;
+}
+
+export function isSttRuntimeInfo(value: unknown): value is SttRuntimeInfo {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    (STT_MODEL_VALUES as readonly string[]).includes(
+      record.requestedModel as string,
+    ) &&
+    (STT_DEVICE_VALUES as readonly string[]).includes(
+      record.requestedDevice as string,
+    ) &&
+    (STT_COMPUTE_TYPE_VALUES as readonly string[]).includes(
+      record.requestedComputeType as string,
+    ) &&
+    typeof record.effectiveModel === 'string' &&
+    typeof record.effectiveDevice === 'string' &&
+    typeof record.effectiveComputeType === 'string' &&
+    typeof record.fallbackUsed === 'boolean' &&
+    (record.fallbackReason === null || typeof record.fallbackReason === 'string') &&
+    (record.modelLoadMs === null ||
+      (typeof record.modelLoadMs === 'number' &&
+        Number.isFinite(record.modelLoadMs) &&
+        record.modelLoadMs >= 0))
+  );
+}
 
 export function isAudioLabMode(value: unknown): value is AudioLabMode {
   return (
@@ -176,6 +232,28 @@ export function isExhibitionAudioPreset(
   return (
     typeof value === 'string' &&
     (EXHIBITION_AUDIO_PRESETS as readonly string[]).includes(value)
+  );
+}
+
+export function isAudioEndpointMs(value: unknown): value is AudioEndpointMs {
+  return value === 400 || value === 600;
+}
+
+function parseAudioEndpointMs(value: unknown): AudioEndpointMs | null {
+  if (isAudioEndpointMs(value)) return value;
+  if (typeof value !== 'string') return null;
+  const parsed = Number(value.trim());
+  return isAudioEndpointMs(parsed) ? parsed : null;
+}
+
+export function resolveAudioEndpointMs(
+  queryValue: unknown,
+  environmentValue: unknown,
+): AudioEndpointMs {
+  return (
+    parseAudioEndpointMs(queryValue) ??
+    parseAudioEndpointMs(environmentValue) ??
+    DEFAULT_AUDIO_ENDPOINT_MS
   );
 }
 
@@ -275,6 +353,10 @@ export interface VoiceLabModeSummary {
   bargeInConfirmedCount: number;
   bargeInRestoredCount: number;
   bargeInTimeoutCount: number;
+  averageSttQueueWaitMs?: number | null;
+  averageSttProcessingMs?: number | null;
+  averageEndpointToResultLatencyMs?: number | null;
+  averageSpeechToResultLatencyMs?: number | null;
 }
 
 export interface VoiceLabSessionSummary extends VoiceLabModeSummary {
@@ -287,6 +369,7 @@ export interface VoiceLabSessionStartedRecord {
   sessionId: string;
   mode: AudioLabMode;
   preset: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
 }
 
 export interface VoiceLabModeChangedRecord {
@@ -295,6 +378,7 @@ export interface VoiceLabModeChangedRecord {
   sessionId: string;
   mode: AudioLabMode;
   preset: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
 }
 
 export interface VoiceLabUtteranceRecord {
@@ -303,6 +387,7 @@ export interface VoiceLabUtteranceRecord {
   sessionId: string;
   mode: AudioLabMode;
   preset: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
   segmentId: string | null;
   speechStartAt: string | null;
   speechEndAt: string | null;
@@ -322,6 +407,22 @@ export interface VoiceLabUtteranceRecord {
   mediaTrackSettings: AudioLabMediaSettings | null;
   knownHallucinationPhrase: string | null;
   error: string | null;
+  sttQueuedAt?: string | null;
+  sttObservedAt?: string | null;
+  sttQueueWaitMs?: number | null;
+  sttProcessingMs?: number | null;
+  endpointToResultLatencyMs?: number | null;
+  speechToResultLatencyMs?: number | null;
+}
+
+export interface VoiceLabSttRuntimeRecord {
+  kind: 'stt_runtime';
+  timestamp: string;
+  sessionId: string;
+  mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
+  runtime: SttRuntimeInfo;
 }
 
 export interface VoiceLabVadRejectedRecord {
@@ -330,6 +431,7 @@ export interface VoiceLabVadRejectedRecord {
   sessionId: string;
   mode: AudioLabMode;
   preset: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
   speechStartAt: string | null;
   speechEndAt: string;
   audioDurationMs: number;
@@ -349,6 +451,7 @@ export interface VoiceLabBargeInRecord {
   sessionId: string;
   mode: AudioLabMode;
   preset: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
   action: BargeInAction;
   state: BargeInState;
   ttsPlaying: boolean;
@@ -361,6 +464,7 @@ export interface VoiceLabErrorRecord {
   sessionId: string;
   mode: AudioLabMode;
   preset: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
   error: string;
   segmentId: string | null;
 }
@@ -370,6 +474,7 @@ export interface VoiceLabSessionSummaryRecord {
   timestamp: string;
   sessionId: string;
   preset: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
   summary: VoiceLabSessionSummary;
 }
 
@@ -380,6 +485,7 @@ export type VoiceLabRecord =
   | VoiceLabVadRejectedRecord
   | VoiceLabBargeInRecord
   | VoiceLabErrorRecord
+  | VoiceLabSttRuntimeRecord
   | VoiceLabSessionSummaryRecord;
 
 export interface VoiceLabSnapshot {
@@ -389,6 +495,7 @@ export interface VoiceLabSnapshot {
   latestRecord: VoiceLabRecord | null;
   latestTranscript: string;
   latestError: string | null;
+  sttRuntime: SttRuntimeInfo | null;
 }
 
 export function createEmptyModeSummary(): VoiceLabModeSummary {
@@ -405,6 +512,10 @@ export function createEmptyModeSummary(): VoiceLabModeSummary {
     bargeInConfirmedCount: 0,
     bargeInRestoredCount: 0,
     bargeInTimeoutCount: 0,
+    averageSttQueueWaitMs: null,
+    averageSttProcessingMs: null,
+    averageEndpointToResultLatencyMs: null,
+    averageSpeechToResultLatencyMs: null,
   };
 }
 
@@ -496,7 +607,10 @@ export function isVoiceInputDiagnostic(
       Number.isFinite(record.at)
     );
   }
-  if (record.type === 'stt_started') {
+  if (record.type === 'stt_runtime') {
+    return isSttRuntimeInfo(record.runtime) && Number.isFinite(record.at);
+  }
+  if (record.type === 'stt_queued' || record.type === 'stt_started') {
     return (
       typeof record.segmentId === 'string' && Number.isFinite(record.at)
     );
@@ -533,6 +647,7 @@ export function isVoiceLabRecord(value: unknown): value is VoiceLabRecord {
     'vad_rejected',
     'barge_in',
     'error',
+    'stt_runtime',
     'session_summary',
   ].includes(record.kind);
 }

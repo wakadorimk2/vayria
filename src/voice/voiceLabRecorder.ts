@@ -1,6 +1,7 @@
 import type {
   VoiceInputDiagnostic,
   AudioLabMode,
+  SttRuntimeInfo,
   VoiceLabRecord,
   VoiceLabSessionSummary,
   VoiceLabSnapshot,
@@ -8,11 +9,13 @@ import type {
 } from './audioLab.js';
 import {
   createEmptySummary,
+  DEFAULT_AUDIO_ENDPOINT_MS,
   DEFAULT_EXHIBITION_AUDIO_PRESET,
   findKnownHallucinationPhrase,
   millisecondsBetween,
   timestampFromMilliseconds,
   type AudioLabMediaSettings,
+  type AudioEndpointMs,
   type ExhibitionAudioPreset,
 } from './audioLab.js';
 import type { VoiceInputEvent } from './voiceInput.js';
@@ -23,6 +26,8 @@ interface ActiveUtterance {
   speechStartAt: string;
   speechEndAt: string | null;
   sttStartedAt: string | null;
+  sttQueuedAt: string | null;
+  sttObservedAt: string | null;
   rawText: string;
   acceptedText: string;
   maxVadScore: number | null;
@@ -36,12 +41,14 @@ interface ActiveUtterance {
 interface PendingSttObservation {
   rawText: string;
   acceptedText: string;
+  at: string;
 }
 
 export interface VoiceLabRecorderOptions {
   enabled: boolean;
   mode: AudioLabMode;
   preset?: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
   sessionId?: string;
   onRecord?: (record: VoiceLabRecord) => void;
 }
@@ -73,6 +80,7 @@ function emptySnapshot(): VoiceLabSnapshot {
     latestRecord: null,
     latestTranscript: '',
     latestError: null,
+    sttRuntime: null,
   };
 }
 
@@ -82,6 +90,8 @@ export class VoiceLabRecorder {
   private readonly sessionId: string | null;
   private currentMode: AudioLabMode;
   private readonly currentPreset: ExhibitionAudioPreset;
+  private currentAudioEndpointMs: AudioEndpointMs;
+  private currentSttRuntime: SttRuntimeInfo | null = null;
   private currentTtsPlaying = false;
   private currentMediaSettings: AudioLabMediaSettings | null = null;
   private started = false;
@@ -112,6 +122,8 @@ export class VoiceLabRecorder {
     this.enabled = options.enabled;
     this.currentMode = options.mode;
     this.currentPreset = options.preset ?? DEFAULT_EXHIBITION_AUDIO_PRESET;
+    this.currentAudioEndpointMs =
+      options.audioEndpointMs ?? DEFAULT_AUDIO_ENDPOINT_MS;
     this.sessionId = options.enabled
       ? options.sessionId ?? createSessionId()
       : null;
@@ -127,6 +139,7 @@ export class VoiceLabRecorder {
       sessionId: this.sessionId,
       mode: this.currentMode,
       preset: this.currentPreset,
+      audioEndpointMs: this.currentAudioEndpointMs,
     });
   }
 
@@ -144,6 +157,7 @@ export class VoiceLabRecorder {
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
       preset: this.currentPreset,
+      audioEndpointMs: this.currentAudioEndpointMs,
       summary: cloneSummary(this.summary),
     });
     this.started = false;
@@ -161,7 +175,12 @@ export class VoiceLabRecorder {
       sessionId: this.sessionId,
       mode,
       preset: this.currentPreset,
+      audioEndpointMs: this.currentAudioEndpointMs,
     });
+  }
+
+  setAudioEndpoint(audioEndpointMs: AudioEndpointMs): void {
+    this.currentAudioEndpointMs = audioEndpointMs;
   }
 
   setTtsPlaying(isPlaying: boolean): void {
@@ -178,6 +197,27 @@ export class VoiceLabRecorder {
       case 'media_settings':
         this.currentMediaSettings = diagnostic.settings;
         return;
+      case 'stt_runtime': {
+        this.currentSttRuntime = diagnostic.runtime;
+        if (!this.started || !this.sessionId) return;
+        this.appendRecord({
+          kind: 'stt_runtime',
+          timestamp: timestampFromMilliseconds(diagnostic.at),
+          sessionId: this.sessionId,
+          mode: this.currentMode,
+          preset: this.currentPreset,
+          audioEndpointMs: this.currentAudioEndpointMs,
+          runtime: diagnostic.runtime,
+        });
+        return;
+      }
+      case 'stt_queued': {
+        const active = this.activeUtterances.get(diagnostic.segmentId);
+        if (active) {
+          active.sttQueuedAt = timestampFromMilliseconds(diagnostic.at);
+        }
+        return;
+      }
       case 'stt_started': {
         const active = this.activeUtterances.get(diagnostic.segmentId);
         if (active) active.sttStartedAt = timestampFromMilliseconds(diagnostic.at);
@@ -187,11 +227,13 @@ export class VoiceLabRecorder {
         this.pendingSttObservations.set(diagnostic.segmentId, {
           rawText: diagnostic.rawText,
           acceptedText: diagnostic.acceptedText,
+          at: timestampFromMilliseconds(diagnostic.at),
         });
         const active = this.activeUtterances.get(diagnostic.segmentId);
         if (active) {
           active.rawText = diagnostic.rawText;
           active.acceptedText = diagnostic.acceptedText;
+          active.sttObservedAt = timestampFromMilliseconds(diagnostic.at);
         }
         this.latestTranscript = diagnostic.acceptedText;
         return;
@@ -203,6 +245,7 @@ export class VoiceLabRecorder {
           sessionId: this.sessionId!,
           mode: this.currentMode,
           preset: this.currentPreset,
+          audioEndpointMs: this.currentAudioEndpointMs,
           action: diagnostic.action,
           state: diagnostic.state,
           ttsPlaying: diagnostic.ttsPlaying,
@@ -252,6 +295,8 @@ export class VoiceLabRecorder {
           speechStartAt: timestampFromMilliseconds(event.at),
           speechEndAt: null,
           sttStartedAt: null,
+          sttQueuedAt: null,
+          sttObservedAt: null,
           rawText: this.pendingSttObservations.get(event.segmentId)?.rawText ?? '',
           acceptedText:
             this.pendingSttObservations.get(event.segmentId)?.acceptedText ?? '',
@@ -299,6 +344,7 @@ export class VoiceLabRecorder {
           sessionId: this.sessionId!,
           mode: this.currentMode,
           preset: this.currentPreset,
+          audioEndpointMs: this.currentAudioEndpointMs,
           error: event.code,
           segmentId: null,
         });
@@ -318,6 +364,7 @@ export class VoiceLabRecorder {
             sessionId: this.sessionId!,
             mode: active.mode,
             preset: this.currentPreset,
+            audioEndpointMs: this.currentAudioEndpointMs,
             error: 'recognition-stopped-before-result',
             segmentId: active.segmentId,
           });
@@ -339,6 +386,7 @@ export class VoiceLabRecorder {
       latestRecord: this.latestRecord,
       latestTranscript: this.latestTranscript,
       latestError: this.latestError,
+      sttRuntime: this.currentSttRuntime,
     };
   }
 
@@ -351,6 +399,8 @@ export class VoiceLabRecorder {
       speechStartAt: '',
       speechEndAt: null,
       sttStartedAt: null,
+      sttQueuedAt: null,
+      sttObservedAt: null,
       rawText: '',
       acceptedText: '',
       maxVadScore: null,
@@ -373,7 +423,24 @@ export class VoiceLabRecorder {
     const speechEndAt = active.speechEndAt;
     const sttStartedAt =
       active.sttStartedAt ?? speechEndAt ?? speechStartAt;
+    const sttObservedAt = active.sttObservedAt ?? observation?.at ?? null;
     const sttLatencyMs = millisecondsBetween(sttStartedAt, timestamp);
+    const sttQueueWaitMs = millisecondsBetween(
+      active.sttQueuedAt,
+      active.sttStartedAt,
+    );
+    const sttProcessingMs = millisecondsBetween(
+      active.sttStartedAt,
+      sttObservedAt,
+    );
+    const endpointToResultLatencyMs = millisecondsBetween(
+      speechEndAt,
+      timestamp,
+    );
+    const speechToResultLatencyMs = millisecondsBetween(
+      speechStartAt,
+      timestamp,
+    );
     const rejectReason = !recognizedText
       ? knownHallucinationPhrase
         ? 'known-hallucination-filtered'
@@ -385,6 +452,7 @@ export class VoiceLabRecorder {
       sessionId: this.sessionId!,
       mode: active.mode,
       preset: this.currentPreset,
+      audioEndpointMs: this.currentAudioEndpointMs,
       segmentId: event.segmentId,
       speechStartAt,
       speechEndAt,
@@ -408,6 +476,12 @@ export class VoiceLabRecorder {
       mediaTrackSettings: active.mediaTrackSettings,
       knownHallucinationPhrase,
       error: null,
+      sttQueuedAt: active.sttQueuedAt,
+      sttObservedAt,
+      sttQueueWaitMs,
+      sttProcessingMs,
+      endpointToResultLatencyMs,
+      speechToResultLatencyMs,
     };
 
     this.appendRecord(record);
@@ -425,6 +499,7 @@ export class VoiceLabRecorder {
       sessionId: this.sessionId,
       mode: this.currentMode,
       preset: this.currentPreset,
+      audioEndpointMs: this.currentAudioEndpointMs,
       speechStartAt: null,
       speechEndAt: timestampFromMilliseconds(diagnostic.at),
       audioDurationMs: Math.max(0, Math.round(diagnostic.candidateDurationMs)),
@@ -478,6 +553,54 @@ export class VoiceLabRecorder {
       );
       this.summary.averageSttLatencyMs =
         overall.count > 0 ? overall.totalMs / overall.count : null;
+    }
+    this.updatePhaseLatencySummaries();
+  }
+
+  private updatePhaseLatencySummaries(): void {
+    const utterances = this.records.filter(
+      (record): record is VoiceLabUtteranceRecord =>
+        record.kind === 'utterance',
+    );
+    const update = (
+      target: VoiceLabSessionSummary['byMode']['baseline'] | VoiceLabSessionSummary,
+      records: VoiceLabUtteranceRecord[],
+    ) => {
+      const average = (
+        selector: (record: VoiceLabUtteranceRecord) => number | null | undefined,
+      ): number | null => {
+        const values = records
+          .map(selector)
+          .filter((value): value is number => typeof value === 'number');
+        return values.length
+          ? values.reduce((total, value) => total + value, 0) / values.length
+          : null;
+      };
+      target.averageSttQueueWaitMs = average(
+        (record) => record.sttQueueWaitMs,
+      );
+      target.averageSttProcessingMs = average(
+        (record) => record.sttProcessingMs,
+      );
+      target.averageEndpointToResultLatencyMs = average(
+        (record) => record.endpointToResultLatencyMs,
+      );
+      target.averageSpeechToResultLatencyMs = average(
+        (record) => record.speechToResultLatencyMs,
+      );
+    };
+
+    update(this.summary, utterances);
+    for (const mode of [
+      'baseline',
+      'processed',
+      'processed-vad',
+      'exhibition-mix',
+    ] as const) {
+      update(
+        this.summary.byMode[mode],
+        utterances.filter((record) => record.mode === mode),
+      );
     }
   }
 

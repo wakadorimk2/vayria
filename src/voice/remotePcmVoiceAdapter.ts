@@ -11,18 +11,25 @@ import {
 import type { VoiceInputEvent } from './voiceInput.js';
 import {
   AUDIO_PROCESSING_CONSTRAINTS,
+  DEFAULT_AUDIO_ENDPOINT_MS,
   DEFAULT_AUDIO_INPUT_MODE,
   DEFAULT_EXHIBITION_AUDIO_PRESET,
   DEFAULT_VAD_THRESHOLD,
   getExhibitionAudioPresetConfig,
+  isSttRuntimeInfo,
   sanitizeMediaTrackSettings,
   type AudioLabMediaSettings,
   type AudioLabMode,
+  type AudioEndpointMs,
   type ExhibitionAudioPreset,
   type VoiceInputDiagnostic,
 } from './audioLab.js';
 import { AdaptiveRmsVad } from './adaptiveRmsVad.js';
-import { RmsVad, calculatePcm16Rms } from './rmsVad.js';
+import {
+  getVadHangoverChunkCount,
+  RmsVad,
+  calculatePcm16Rms,
+} from './rmsVad.js';
 
 const SOCKET_OPEN_TIMEOUT_MS = 8_000;
 const STOP_GRACE_PERIOD_MS = 250;
@@ -32,6 +39,7 @@ interface RemotePcmVoiceAdapterOptions extends VoiceInputAdapterOptions {
   webSocketUrl?: string;
   audioMode?: AudioLabMode;
   audioPreset?: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
   vadThreshold?: number;
   diagnostics?: boolean;
 }
@@ -48,6 +56,7 @@ interface VoiceStartMessage {
   channels: number;
   format: 'pcm_s16le';
   chunkMs: number;
+  endSilenceMs?: AudioEndpointMs;
   diagnostics?: boolean;
 }
 
@@ -183,7 +192,10 @@ function isVoiceInputDiagnostic(value: unknown): value is VoiceInputDiagnostic {
   if (typeof record.type !== 'string' || typeof record.at !== 'number') {
     return false;
   }
-  if (record.type === 'stt_started') {
+  if (record.type === 'stt_runtime') {
+    return isSttRuntimeInfo(record.runtime) && Number.isFinite(record.at);
+  }
+  if (record.type === 'stt_queued' || record.type === 'stt_started') {
     return (
       typeof record.segmentId === 'string' && Number.isFinite(record.at)
     );
@@ -251,16 +263,24 @@ export function createRemotePcmVoiceAdapter(
   const AudioContextConstructor = readAudioContextConstructor();
   const audioMode = options.audioMode ?? DEFAULT_AUDIO_INPUT_MODE;
   const audioPreset = options.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET;
+  const audioEndpointMs = options.audioEndpointMs ?? DEFAULT_AUDIO_ENDPOINT_MS;
   const presetConfig = getExhibitionAudioPresetConfig(audioPreset);
   const requestedAudioConstraints = readAudioConstraints(audioMode, audioPreset);
+  const usesSelectableEndpoint =
+    audioMode === 'processed' || audioMode === 'processed-vad';
+  const endpointMs = usesSelectableEndpoint ? audioEndpointMs : 600;
+  const hangoverChunkCount = getVadHangoverChunkCount(endpointMs);
   const rmsVad =
     audioMode === 'processed-vad'
-      ? new RmsVad(options.vadThreshold ?? DEFAULT_VAD_THRESHOLD)
+      ? new RmsVad(options.vadThreshold ?? DEFAULT_VAD_THRESHOLD, {
+          hangoverChunkCount,
+        })
       : null;
   const adaptiveRmsVad =
     audioMode === 'exhibition-mix' && presetConfig.browserGateEnabled
       ? new AdaptiveRmsVad(options.vadThreshold ?? presetConfig.defaultVadThreshold, {
           noiseFloorMultiplier: presetConfig.noiseFloorMultiplier,
+          hangoverChunkCount: getVadHangoverChunkCount(600),
         })
       : null;
   const activeVad = rmsVad ?? adaptiveRmsVad;
@@ -420,6 +440,7 @@ export function createRemotePcmVoiceAdapter(
           channels: PCM_CHANNEL_COUNT,
           format: 'pcm_s16le',
           chunkMs: PCM_CHUNK_DURATION_MS,
+          ...(usesSelectableEndpoint ? { endSilenceMs: endpointMs } : {}),
           ...(options.diagnostics ? { diagnostics: true } : {}),
         } satisfies VoiceStartMessage),
       );

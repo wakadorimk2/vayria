@@ -7,7 +7,11 @@ import {
   VAD_THRESHOLD_MIN,
   clampVadThreshold,
 } from './audioLab.js';
-import { calculatePcm16Rms, RmsVad, type RmsVadChunkResult } from './rmsVad.js';
+import {
+  calculatePcm16Rms,
+  RmsVad,
+  type RmsVadChunkResult,
+} from './rmsVad.js';
 
 export interface AdaptiveRmsVadChunkResult extends RmsVadChunkResult {
   noiseFloor: number;
@@ -17,6 +21,7 @@ export interface AdaptiveRmsVadChunkResult extends RmsVadChunkResult {
 
 export interface AdaptiveRmsVadOptions {
   noiseFloorMultiplier?: number;
+  hangoverChunkCount?: number;
 }
 
 export class AdaptiveRmsVad {
@@ -34,7 +39,9 @@ export class AdaptiveRmsVad {
       ? Math.max(1, options.noiseFloorMultiplier!)
       : ADAPTIVE_NOISE_FLOOR_MULTIPLIER;
     this.vadThreshold = clampVadThreshold(vadThreshold);
-    this.vad = new RmsVad(this.getEffectiveThreshold());
+    this.vad = new RmsVad(this.getEffectiveThreshold(), {
+      hangoverChunkCount: options.hangoverChunkCount,
+    });
   }
 
   getThreshold(): number {

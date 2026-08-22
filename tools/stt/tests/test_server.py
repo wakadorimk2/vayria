@@ -4,17 +4,22 @@ import asyncio
 import json
 from contextlib import suppress
 
+import pytest
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
 from vayria_stt.server import (
+    DEFAULT_END_SILENCE_MS,
+    END_SILENCE_MS_VALUES,
     SUPPORTED_CHUNK_MS,
     SUPPORTED_FORMAT,
+    _handle_detector_event,
     _parse_start,
     _transcription_worker,
     handle_connection,
 )
 from vayria_stt.transcriber import TranscriptionResult
+from vayria_stt.vad import DetectorEvent
 
 
 class FakeTranscriber:
@@ -31,6 +36,21 @@ class DiagnosticTranscriber:
         language: str,
     ) -> TranscriptionResult:
         return TranscriptionResult("raw text", "accepted text", "test-filter")
+
+
+class RuntimeTranscriber(FakeTranscriber):
+    def runtime_info(self) -> dict[str, object]:
+        return {
+            "requestedModel": "small",
+            "requestedDevice": "auto",
+            "requestedComputeType": "auto",
+            "effectiveModel": "tiny",
+            "effectiveDevice": "cpu",
+            "effectiveComputeType": "int8",
+            "fallbackUsed": True,
+            "fallbackReason": "CUDA unavailable",
+            "modelLoadMs": 123,
+        }
 
 
 class FakeConnection:
@@ -54,6 +74,22 @@ def test_start_message_can_enable_diagnostics() -> None:
         }
     )
     assert config.diagnostics is True
+    assert config.end_silence_ms == DEFAULT_END_SILENCE_MS
+
+
+def test_start_message_accepts_only_supported_endpoint_values() -> None:
+    base = {
+        "type": "start",
+        "language": "ja-JP",
+        "sampleRate": 16_000,
+        "channels": 1,
+        "format": SUPPORTED_FORMAT,
+        "chunkMs": SUPPORTED_CHUNK_MS,
+    }
+    for value in END_SILENCE_MS_VALUES:
+        assert _parse_start({**base, "endSilenceMs": value}).end_silence_ms == value
+    with pytest.raises(Exception):
+        _parse_start({**base, "endSilenceMs": 500})
 
 
 def test_diagnostic_worker_emits_raw_and_filtered_transcript() -> None:
@@ -88,6 +124,24 @@ def test_diagnostic_worker_emits_raw_and_filtered_transcript() -> None:
     asyncio.run(scenario())
 
 
+def test_detector_event_emits_queue_diagnostic_before_queue_insert() -> None:
+    async def scenario() -> None:
+        connection = FakeConnection()
+        queue: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue()
+        await _handle_detector_event(
+            connection,
+            queue,
+            DetectorEvent("utterance_finalized", "segment-queued", b"pcm"),
+            diagnostics=True,
+        )
+        payload = json.loads(connection.messages[0])
+        assert payload["type"] == "stt_queued"
+        assert payload["segmentId"] == "segment-queued"
+        assert await queue.get() == ("segment-queued", b"pcm")
+
+    asyncio.run(scenario())
+
+
 def test_websocket_start_binary_stop_wire() -> None:
     async def scenario() -> None:
         async with serve(
@@ -114,6 +168,42 @@ def test_websocket_start_binary_stop_wire() -> None:
                 )
                 assert json.loads(await client.recv())["type"] == "listening_started"
                 await client.send(b"\x00" * 6_400)
+                await client.send(json.dumps({"type": "stop"}))
+                assert json.loads(await client.recv())["type"] == "recognition_stopped"
+
+    asyncio.run(scenario())
+
+
+def test_diagnostic_start_reports_runtime_profile() -> None:
+    async def scenario() -> None:
+        async with serve(
+            lambda connection: handle_connection(
+                connection,
+                transcriber=RuntimeTranscriber(),
+            ),
+            "127.0.0.1",
+            0,
+        ) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}/stream") as client:
+                await client.send(
+                    json.dumps(
+                        {
+                            "type": "start",
+                            "language": "ja-JP",
+                            "sampleRate": 16_000,
+                            "channels": 1,
+                            "format": "pcm_s16le",
+                            "chunkMs": 200,
+                            "diagnostics": True,
+                        }
+                    )
+                )
+                runtime = json.loads(await client.recv())
+                listening = json.loads(await client.recv())
+                assert runtime["type"] == "stt_runtime"
+                assert runtime["runtime"]["effectiveDevice"] == "cpu"
+                assert listening["type"] == "listening_started"
                 await client.send(json.dumps({"type": "stop"}))
                 assert json.loads(await client.recv())["type"] == "recognition_stopped"
 

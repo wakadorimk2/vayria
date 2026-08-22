@@ -2,8 +2,10 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
   AUDIO_LAB_MODES,
+  isAudioEndpointMs,
   isAudioLabMode,
   isExhibitionAudioPreset,
+  isSttRuntimeInfo,
   isVoiceLabRecord,
   type VoiceLabRecord,
 } from '../src/voice/audioLab.js';
@@ -26,11 +28,25 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
   new Map([
     [
       'session_started',
-      new Set(['kind', 'timestamp', 'sessionId', 'mode', 'preset']),
+      new Set([
+        'kind',
+        'timestamp',
+        'sessionId',
+        'mode',
+        'preset',
+        'audioEndpointMs',
+      ]),
     ],
     [
       'mode_changed',
-      new Set(['kind', 'timestamp', 'sessionId', 'mode', 'preset']),
+      new Set([
+        'kind',
+        'timestamp',
+        'sessionId',
+        'mode',
+        'preset',
+        'audioEndpointMs',
+      ]),
     ],
     [
       'utterance',
@@ -40,6 +56,7 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
         'sessionId',
         'mode',
         'preset',
+        'audioEndpointMs',
         'segmentId',
         'speechStartAt',
         'speechEndAt',
@@ -59,6 +76,12 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
         'mediaTrackSettings',
         'knownHallucinationPhrase',
         'error',
+        'sttQueuedAt',
+        'sttObservedAt',
+        'sttQueueWaitMs',
+        'sttProcessingMs',
+        'endpointToResultLatencyMs',
+        'speechToResultLatencyMs',
       ]),
     ],
     [
@@ -69,6 +92,7 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
         'sessionId',
         'mode',
         'preset',
+        'audioEndpointMs',
         'speechStartAt',
         'speechEndAt',
         'audioDurationMs',
@@ -90,6 +114,7 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
         'sessionId',
         'mode',
         'preset',
+        'audioEndpointMs',
         'action',
         'state',
         'ttsPlaying',
@@ -104,13 +129,33 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
         'sessionId',
         'mode',
         'preset',
+        'audioEndpointMs',
         'error',
         'segmentId',
       ]),
     ],
     [
+      'stt_runtime',
+      new Set([
+        'kind',
+        'timestamp',
+        'sessionId',
+        'mode',
+        'preset',
+        'audioEndpointMs',
+        'runtime',
+      ]),
+    ],
+    [
       'session_summary',
-      new Set(['kind', 'timestamp', 'sessionId', 'preset', 'summary']),
+      new Set([
+        'kind',
+        'timestamp',
+        'sessionId',
+        'preset',
+        'audioEndpointMs',
+        'summary',
+      ]),
     ],
   ]);
 
@@ -154,8 +199,18 @@ function validateVoiceLabRecordShape(record: VoiceLabRecord): boolean {
     return false;
   }
   if (!isExhibitionAudioPreset(record.preset)) return false;
+  if (
+    'audioEndpointMs' in record &&
+    record.audioEndpointMs !== undefined &&
+    !isAudioEndpointMs(record.audioEndpointMs)
+  ) {
+    return false;
+  }
   if (record.kind === 'utterance' || record.kind === 'vad_rejected') {
     if (!validateMediaSettings(record.mediaTrackSettings)) return false;
+  }
+  if (record.kind === 'stt_runtime' && !isSttRuntimeInfo(record.runtime)) {
+    return false;
   }
   if (record.kind === 'session_summary' && !validateSummary(record.summary)) {
     return false;

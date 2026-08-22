@@ -3,13 +3,16 @@ import { createBrowserSpeechRecognitionAdapter } from './browserSpeechRecognitio
 import { createRemotePcmVoiceAdapter } from './remotePcmVoiceAdapter';
 import type { VoiceInputAdapter } from './voiceAdapter';
 import {
+  DEFAULT_AUDIO_ENDPOINT_MS,
   DEFAULT_AUDIO_INPUT_MODE,
   DEFAULT_EXHIBITION_AUDIO_PRESET,
   DEFAULT_VAD_THRESHOLD,
   getExhibitionAudioPresetConfig,
   type AudioLabMediaSettings,
   type AudioLabMode,
+  type AudioEndpointMs,
   type ExhibitionAudioPreset,
+  type SttRuntimeInfo,
   type VoiceInputDiagnostic,
 } from './audioLab.js';
 import {
@@ -26,6 +29,7 @@ export interface UseVoiceInputOptions {
   transport?: VoiceInputTransport;
   audioMode?: AudioLabMode;
   audioPreset?: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
   vadThreshold?: number;
   ttsPlaying?: boolean;
   onEvent?: (event: VoiceInputEvent) => void;
@@ -59,6 +63,7 @@ function isFatalVoiceError(code: string | null): boolean {
 export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const audioMode = options.audioMode ?? DEFAULT_AUDIO_INPUT_MODE;
   const audioPreset = options.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET;
+  const audioEndpointMs = options.audioEndpointMs ?? DEFAULT_AUDIO_ENDPOINT_MS;
   const vadThreshold =
     options.vadThreshold ??
     getExhibitionAudioPresetConfig(audioPreset).defaultVadThreshold ??
@@ -83,6 +88,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const [isSttProcessing, setIsSttProcessing] = useState(false);
   const [mediaSettings, setMediaSettings] =
     useState<AudioLabMediaSettings | null>(null);
+  const [sttRuntime, setSttRuntime] = useState<SttRuntimeInfo | null>(null);
 
   useEffect(() => {
     optionsRef.current = options;
@@ -101,6 +107,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       setEffectiveThreshold(null);
       setLastDiagnostic(null);
       setMediaSettings(null);
+      setSttRuntime(null);
     });
 
     const controller = controllerRef.current ?? createVoiceInputController();
@@ -148,6 +155,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
           case 'media_settings':
             setMediaSettings(diagnostic.settings);
             break;
+          case 'stt_runtime':
+            setSttRuntime(diagnostic.runtime);
+            break;
           case 'audio_level':
             setAudioLevel(diagnostic.audioLevel);
             setVadScore(diagnostic.vadScore);
@@ -177,6 +187,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
             audioMode,
             audioPreset:
               optionsRef.current.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET,
+            audioEndpointMs,
             vadThreshold:
               optionsRef.current.vadThreshold ??
               getExhibitionAudioPresetConfig(
@@ -203,7 +214,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       adapter.dispose();
       adapterRef.current = null;
     };
-  }, [audioMode, audioPreset]);
+  }, [audioMode, audioPreset, audioEndpointMs]);
 
   useEffect(() => {
     adapterRef.current?.setVadThreshold?.(vadThreshold);
@@ -238,6 +249,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     isVadSpeech,
     isSttProcessing,
     mediaSettings,
+    sttRuntime,
     phase: snapshot.phase,
     start,
     stop,

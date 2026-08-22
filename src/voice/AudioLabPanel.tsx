@@ -1,10 +1,13 @@
 import type {
+  AudioEndpointMs,
   AudioLabMediaSettings,
   AudioLabMode,
   ExhibitionAudioPreset,
+  SttRuntimeInfo,
   VoiceLabSnapshot,
 } from './audioLab.js';
 import {
+  AUDIO_ENDPOINT_VALUES,
   VAD_THRESHOLD_MAX,
   VAD_THRESHOLD_MIN,
   VAD_THRESHOLD_STEP,
@@ -27,7 +30,9 @@ const PRESET_LABELS: Record<ExhibitionAudioPreset, string> = {
 interface AudioLabPanelProps {
   mode: AudioLabMode;
   preset: ExhibitionAudioPreset;
+  audioEndpointMs: AudioEndpointMs;
   onModeChange: (mode: AudioLabMode) => void;
+  onAudioEndpointChange: (endpointMs: number) => void;
   onVoiceToggle: () => void;
   vadThreshold: number;
   noiseFloor: number | null;
@@ -42,6 +47,7 @@ interface AudioLabPanelProps {
   audioLevel: number | null;
   vadScore: number | null;
   mediaSettings: AudioLabMediaSettings | null;
+  sttRuntime: SttRuntimeInfo | null;
   snapshot: VoiceLabSnapshot;
   onExport: () => void;
 }
@@ -65,7 +71,9 @@ function latestUtterance(snapshot: VoiceLabSnapshot) {
 export function AudioLabPanel({
   mode,
   preset,
+  audioEndpointMs,
   onModeChange,
+  onAudioEndpointChange,
   onVoiceToggle,
   vadThreshold,
   noiseFloor,
@@ -80,6 +88,7 @@ export function AudioLabPanel({
   audioLevel,
   vadScore,
   mediaSettings,
+  sttRuntime,
   snapshot,
   onExport,
 }: AudioLabPanelProps) {
@@ -121,9 +130,31 @@ export function AudioLabPanel({
             {isMicActive
               ? '音声入力を停止するとModeを変更できます。'
               : mode === 'exhibition-mix'
-                ? 'Audio Labの初期ModeはExhibition Mixです。'
-                : 'Mode Aは既存経路です。'}
+                ? 'Exhibition MixはDebug限定の実験Modeです。'
+                : '通常展示の既定ModeはProcessedです。'}
           </p>
+
+          <label className="audio-lab-panel__field" htmlFor="audio-lab-endpoint">
+            <span>Endpoint silence</span>
+            <select
+              disabled={
+                isMicActive ||
+                mode === 'baseline' ||
+                mode === 'exhibition-mix'
+              }
+              id="audio-lab-endpoint"
+              onChange={(event) =>
+                onAudioEndpointChange(Number(event.target.value))
+              }
+              value={audioEndpointMs}
+            >
+              {AUDIO_ENDPOINT_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {value} ms
+                </option>
+              ))}
+            </select>
+          </label>
 
           <label className="audio-lab-panel__field" htmlFor="audio-lab-vad-threshold">
             <span>VAD threshold</span>
@@ -217,7 +248,12 @@ export function AudioLabPanel({
             <p>{utterance?.recognizedText || snapshot.latestTranscript || '—'}</p>
             {utterance && (
               <p className="audio-lab-panel__hint">
-                {MODE_LABELS[utterance.mode]} / latency {formatLatency(utterance.sttLatencyMs)} /{' '}
+                {MODE_LABELS[utterance.mode]} / endpoint{' '}
+                {formatLatency(utterance.endpointToResultLatencyMs ?? null)} / STT{' '}
+                {formatLatency(utterance.sttLatencyMs)} / total{' '}
+                {formatLatency(utterance.speechToResultLatencyMs ?? null)} / queue{' '}
+                {formatLatency(utterance.sttQueueWaitMs ?? null)} / process{' '}
+                {formatLatency(utterance.sttProcessingMs ?? null)} /{' '}
                 {utterance.vadAccepted === null
                   ? 'VAD n/a'
                   : utterance.vadAccepted
@@ -233,9 +269,20 @@ export function AudioLabPanel({
           </div>
 
           <div className="audio-lab-panel__section">
+            <h2>STT runtime</h2>
+            <pre>
+              {sttRuntime ? JSON.stringify(sttRuntime, null, 2) : 'Unavailable'}
+            </pre>
+          </div>
+
+          <div className="audio-lab-panel__section">
             <h2>Session summary</h2>
             <p className="audio-lab-panel__hint">
-              {snapshot.sessionId ?? 'No session'} / average STT latency {formatLatency(summary.averageSttLatencyMs)}
+              {snapshot.sessionId ?? 'No session'} / average endpoint{' '}
+              {formatLatency(summary.averageEndpointToResultLatencyMs ?? null)} / average queue{' '}
+              {formatLatency(summary.averageSttQueueWaitMs ?? null)} / average process{' '}
+              {formatLatency(summary.averageSttProcessingMs ?? null)} / average STT{' '}
+              {formatLatency(summary.averageSttLatencyMs ?? null)}
             </p>
             <table>
               <thead>
@@ -248,7 +295,10 @@ export function AudioLabPanel({
                   <th>Noise-like</th>
                   <th>Known</th>
                   <th>TTS overlap</th>
-                  <th>Avg latency</th>
+                  <th>Avg endpoint</th>
+                  <th>Avg queue</th>
+                  <th>Avg process</th>
+                  <th>Avg STT</th>
                   <th>Barge-in</th>
                 </tr>
               </thead>
@@ -265,7 +315,18 @@ export function AudioLabPanel({
                       <td>{modeSummary.noiseLikeSttCount}</td>
                       <td>{modeSummary.knownHallucinationCount}</td>
                       <td>{modeSummary.ttsOverlapCount}</td>
-                      <td>{formatLatency(modeSummary.averageSttLatencyMs)}</td>
+                      <td>
+                        {formatLatency(
+                          modeSummary.averageEndpointToResultLatencyMs ?? null,
+                        )}
+                      </td>
+                      <td>
+                        {formatLatency(modeSummary.averageSttQueueWaitMs ?? null)}
+                      </td>
+                      <td>
+                        {formatLatency(modeSummary.averageSttProcessingMs ?? null)}
+                      </td>
+                      <td>{formatLatency(modeSummary.averageSttLatencyMs ?? null)}</td>
                       <td>
                         {modeSummary.bargeInConfirmedCount}/
                         {modeSummary.bargeInTriggeredCount}

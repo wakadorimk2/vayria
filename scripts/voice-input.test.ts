@@ -26,6 +26,8 @@ import {
   selectListeningBackchannelIndex,
 } from '../src/voice/backchannelPolicy.js';
 import {
+  DEFAULT_AUDIO_ENDPOINT_MS,
+  AUDIO_ENDPOINT_VALUES,
   clampVadThreshold,
   DEFAULT_AUDIO_INPUT_MODE,
   DEFAULT_AUDIO_LAB_MODE,
@@ -33,11 +35,13 @@ import {
   getExhibitionAudioPresetConfig,
   findKnownHallucinationPhrase,
   resolveInitialAudioLabMode,
+  resolveAudioEndpointMs,
   resolveExhibitionAudioPreset,
   sanitizeMediaTrackSettings,
   type VoiceLabRecord,
 } from '../src/voice/audioLab.js';
 import {
+  getVadHangoverChunkCount,
   RmsVad,
   calculatePcm16Rms,
 } from '../src/voice/rmsVad.js';
@@ -437,6 +441,22 @@ test('RMS VAD rejects low-level noise and preserves a short utterance', () => {
   assert.equal(clampVadThreshold(1), 0.2);
 });
 
+test('RMS VAD maps the selectable endpoint to a shorter hangover', () => {
+  assert.deepEqual(AUDIO_ENDPOINT_VALUES, [400, 600]);
+  assert.equal(DEFAULT_AUDIO_ENDPOINT_MS, 600);
+  assert.equal(getVadHangoverChunkCount(400), 2);
+  assert.equal(getVadHangoverChunkCount(600), 3);
+
+  const vad = new RmsVad(0.02, {
+    hangoverChunkCount: getVadHangoverChunkCount(400),
+  });
+  vad.process(makePcmChunk(0.08), 100);
+  vad.process(makePcmChunk(0.01), 300);
+  assert.deepEqual(vad.process(makePcmChunk(0.01), 500).events, [
+    { type: 'speech_ended', at: 500 },
+  ]);
+});
+
 test('adaptive RMS VAD updates noise floor only while idle and accepts short speech', () => {
   const adaptive = new AdaptiveRmsVad(0.005);
   assert.equal(adaptive.getNoiseFloor(), 0.005);
@@ -587,14 +607,22 @@ test('Audio Lab normalizes known hallucinations and anonymizes track settings', 
   );
 });
 
-test('Audio Lab defaults to Mode D only when the debug flag is enabled', () => {
+test('Audio Lab defaults to Processed while retaining Mode D for debug selection', () => {
   assert.equal(DEFAULT_AUDIO_INPUT_MODE, 'baseline');
-  assert.equal(DEFAULT_AUDIO_LAB_MODE, 'exhibition-mix');
+  assert.equal(DEFAULT_AUDIO_LAB_MODE, 'processed');
   assert.equal(DEFAULT_EXHIBITION_AUDIO_PRESET, 'mild');
-  assert.equal(resolveInitialAudioLabMode(true), 'exhibition-mix');
+  assert.equal(resolveInitialAudioLabMode(true), 'processed');
   assert.equal(resolveInitialAudioLabMode(false), 'baseline');
-  assert.equal(resolveInitialAudioLabMode(false, true), 'exhibition-mix');
+  assert.equal(resolveInitialAudioLabMode(false, true), 'processed');
   assert.equal(resolveInitialAudioLabMode(false, false), 'baseline');
+});
+
+test('Audio endpoint resolves query over environment and defaults to 600ms', () => {
+  assert.equal(resolveAudioEndpointMs(null, null), 600);
+  assert.equal(resolveAudioEndpointMs(null, '400'), 400);
+  assert.equal(resolveAudioEndpointMs('600', '400'), 600);
+  assert.equal(resolveAudioEndpointMs('invalid', '400'), 400);
+  assert.equal(resolveAudioEndpointMs('invalid', 'invalid'), 600);
 });
 
 test('exhibition audio presets resolve query over environment and expose gate settings', () => {
@@ -655,6 +683,11 @@ test('Voice Lab recorder measures latency, known errors, TTS overlap, and summar
     at: 1_000,
   });
   recorder.handleDiagnostic({
+    type: 'stt_queued',
+    segmentId: 'segment-1',
+    at: 1_100,
+  });
+  recorder.handleDiagnostic({
     type: 'stt_started',
     segmentId: 'segment-1',
     at: 1_200,
@@ -687,11 +720,22 @@ test('Voice Lab recorder measures latency, known errors, TTS overlap, and summar
   assert.equal(utterance.rawRecognizedText, 'ご視聴ありがとうございました。');
   assert.equal(utterance.knownHallucinationPhrase, 'ご視聴ありがとうございました');
   assert.equal(utterance.sttLatencyMs, 200);
+  assert.equal(utterance.sttQueuedAt, '1970-01-01T00:00:01.100Z');
+  assert.equal(utterance.sttObservedAt, '1970-01-01T00:00:01.400Z');
+  assert.equal(utterance.sttQueueWaitMs, 100);
+  assert.equal(utterance.sttProcessingMs, 200);
+  assert.equal(utterance.endpointToResultLatencyMs, 100);
+  assert.equal(utterance.speechToResultLatencyMs, 400);
+  assert.equal(utterance.audioEndpointMs, 600);
   assert.equal(utterance.audioDurationMs, 300);
   assert.equal(utterance.ttsPlayingDuringUtterance, true);
   assert.equal(snapshot.summary.knownHallucinationCount, 1);
   assert.equal(snapshot.summary.ttsOverlapCount, 1);
   assert.equal(snapshot.summary.averageSttLatencyMs, 200);
+  assert.equal(snapshot.summary.averageSttQueueWaitMs, 100);
+  assert.equal(snapshot.summary.averageSttProcessingMs, 200);
+  assert.equal(snapshot.summary.averageEndpointToResultLatencyMs, 100);
+  assert.equal(snapshot.summary.averageSpeechToResultLatencyMs, 400);
   assert.equal(records.at(-1)?.kind, 'session_summary');
   assert.equal(records[0]?.preset, 'mild');
 });
@@ -819,10 +863,31 @@ test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifie
       sessionId: 'vl-store-session',
       mode: 'baseline' as const,
       preset: 'mild' as const,
+      audioEndpointMs: 600 as const,
     };
     assert.deepEqual(readVoiceLabRecord({ record }), record);
     await appendVoiceLabRecord(root, record);
     assert.deepEqual(await readVoiceLabRecords(root, record.sessionId), [record]);
+    const runtimeRecord = {
+      kind: 'stt_runtime' as const,
+      timestamp: '2026-08-22T00:00:00.000Z',
+      sessionId: 'vl-store-session',
+      mode: 'processed' as const,
+      preset: 'mild' as const,
+      audioEndpointMs: 600 as const,
+      runtime: {
+        requestedModel: 'small' as const,
+        requestedDevice: 'auto' as const,
+        requestedComputeType: 'auto' as const,
+        effectiveModel: 'small',
+        effectiveDevice: 'cuda',
+        effectiveComputeType: 'float16',
+        fallbackUsed: false,
+        fallbackReason: null,
+        modelLoadMs: 842,
+      },
+    };
+    assert.deepEqual(readVoiceLabRecord(runtimeRecord), runtimeRecord);
     assert.throws(
       () => readVoiceLabRecord({ ...record, sessionId: '../escape' }),
       /session ID is invalid/,

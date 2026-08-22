@@ -44,8 +44,10 @@ import {
   clampVadThreshold,
   DEFAULT_VAD_THRESHOLD,
   getExhibitionAudioPresetConfig,
+  isAudioEndpointMs,
   isAudioLabMode,
   resolveInitialAudioLabMode,
+  type AudioEndpointMs,
   type AudioLabMode,
   type BargeInState,
 } from './voice/audioLab.js';
@@ -270,16 +272,21 @@ export default function App() {
       getExhibitionAudioPresetConfig(runtimeConfig.audioPreset)
         .defaultVadThreshold ?? DEFAULT_VAD_THRESHOLD,
   );
+  const [audioEndpointMs, setAudioEndpointMs] = useState<AudioEndpointMs>(
+    runtimeConfig.audioEndpointMs,
+  );
   const ttsPlaying = isSpeaking || isReactionPlaying;
   const voiceLab = useVoiceLab({
     enabled: runtimeConfig.audioLabEnabled,
     mode: audioLabMode,
     preset: runtimeConfig.audioPreset,
+    audioEndpointMs,
     ttsPlaying,
   });
   const voiceInput = useVoiceInput({
     audioMode: audioLabMode,
     audioPreset: runtimeConfig.audioPreset,
+    audioEndpointMs,
     language: 'ja-JP',
     ttsPlaying,
     onDiagnostic: voiceLab.handleDiagnostic,
@@ -309,6 +316,14 @@ export default function App() {
   const handleVadThresholdChange = useCallback((nextThreshold: number) => {
     setVadThreshold(clampVadThreshold(nextThreshold));
   }, []);
+
+  const handleAudioEndpointChange = useCallback(
+    (nextEndpoint: number) => {
+      if (isVoiceInputEnabled || !isAudioEndpointMs(nextEndpoint)) return;
+      setAudioEndpointMs(nextEndpoint);
+    },
+    [isVoiceInputEnabled],
+  );
   const playbackCoordinator = useMemo(
     () =>
       new PerformancePlaybackCoordinator({
@@ -1299,6 +1314,7 @@ export default function App() {
       {runtimeConfig.audioLabEnabled && (
         <AudioLabPanel
           audioLevel={voiceInput.audioLevel}
+          audioEndpointMs={audioEndpointMs}
           bargeInState={bargeInState}
           effectiveThreshold={voiceInput.effectiveThreshold}
           isMicActive={isVoiceInputEnabled}
@@ -1306,9 +1322,11 @@ export default function App() {
           isSttProcessing={voiceInput.isSttProcessing}
           isVadSpeech={voiceInput.isVadSpeech}
           mediaSettings={voiceInput.mediaSettings}
+          sttRuntime={voiceInput.sttRuntime}
           mode={audioLabMode}
           preset={runtimeConfig.audioPreset}
           onExport={voiceLab.downloadJsonl}
+          onAudioEndpointChange={handleAudioEndpointChange}
           onModeChange={handleAudioLabModeChange}
           onVoiceToggle={handleVoiceToggle}
           onVadThresholdChange={handleVadThresholdChange}

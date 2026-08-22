@@ -1,6 +1,8 @@
 import { readPlaycheckRunId } from './playcheck';
 import {
+  resolveAudioEndpointMs,
   resolveExhibitionAudioPreset,
+  type AudioEndpointMs,
   type ExhibitionAudioPreset,
 } from './voice/audioLab.js';
 
@@ -75,6 +77,14 @@ function readAudioPreset(search: string): ExhibitionAudioPreset {
   );
 }
 
+function readAudioEndpoint(search: string): AudioEndpointMs {
+  const queryValue = new URLSearchParams(search).get('audioEndpoint');
+  return resolveAudioEndpointMs(
+    queryValue,
+    import.meta.env.VITE_AUDIO_ENDPOINT_MS,
+  );
+}
+
 const browserSearch =
   typeof window === 'undefined' ? '' : window.location.search;
 
@@ -82,6 +92,7 @@ export const runtimeConfig = Object.freeze({
   apiBaseUrl: readApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
   audioLabEnabled: readAudioLabEnabled(browserSearch),
   audioPreset: readAudioPreset(browserSearch),
+  audioEndpointMs: readAudioEndpoint(browserSearch),
   mode,
   voiceTransport: readVoiceInputTransport(
     import.meta.env.VITE_VOICE_INPUT_TRANSPORT,

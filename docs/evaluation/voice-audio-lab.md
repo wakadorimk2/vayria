@@ -35,9 +35,10 @@ Audio Labは、同じ端末、同じマイク、同じ発話条件で音声入�
 
 HTTPS証明書とexhibitionの起動方法は、ルートのREADMEを参照してください。
 Audio Labは開発ビルドでだけ有効です。
-`?audioLab=1`で開くAudio Labの初期Modeは`Exhibition Mix`です。
-通常の`exhibition`起動も`Exhibition Mix`です。
+`?audioLab=1`で開くAudio Labの初期Modeは`Processed`です。
+通常の`exhibition`起動も`Processed`です。
 通常の`local`と`public`起動は`Baseline`です。
+`Exhibition Mix`はAudio Labでだけ選べる実験Modeです。
 
 ## Exhibition Audio Preset
 
@@ -65,6 +66,35 @@ URLを変更した後は、ページを再読み込みしてください。
 不正な起動時設定は`mild`へ戻ります。
 通常展示にはPreset操作UIを表示しません。
 Audio Labでは現在のPresetを読み取り専用で確認できます。
+
+## EndpointとSTT profile
+
+Mode B/Cの無音終了は`600ms`が既定値です。
+比較用に`400ms`を選べます。
+
+```text
+?audioEndpoint=400
+?audioEndpoint=600
+```
+
+環境変数は`VITE_AUDIO_ENDPOINT_MS=400|600`です。
+優先順位は`URL query > VITE_AUDIO_ENDPOINT_MS > 600ms`です。
+URLまたは環境変数を変更した後は、ページを再読み込みしてください。
+Audio Labのendpoint selectorはマイク停止中だけ有効です。
+Mode AとMode Dはendpoint selectorの対象外です。
+Mode Dは既存の`600ms`を使います。
+
+Python STTの展示用既定profileは次です。
+
+```text
+primary: small / CUDA / float16
+fallback: tiny / CPU / int8
+```
+
+起動時にモデルをロードしてwarm-upします。
+CUDAの実ロードに失敗した場合だけfallbackします。
+実効model、device、compute type、fallback理由、model load時間をAudio LabとJSONLへ記録します。
+比較用profileは`tiny`、`base`、`small`と`CUDA`、`CPU`の組み合わせです。
 
 Presetの役割は次です。
 
@@ -94,17 +124,18 @@ Mode変更は、マイク入力中はできません。
 VAD thresholdは、音声入力中も変更できます。
 初期値は`0.02`です。
 UIの範囲は`0.005`から`0.2`です。
-比較を始めるときは、まず初期Modeの`Exhibition Mix`を確認します。
+比較を始めるときは、まず初期Modeの`Processed`を確認します。
 既存経路との比較では、マイクを停止してから`Baseline`を選びます。
 
 - `Baseline`: 既存の経路を使用します。localの既定値は`SpeechRecognition`または`webkitSpeechRecognition`です。exhibitionで既存のRemote PCM設定を使う場合は、既存のPython STT経路を使用します。
-- `Processed`: Remote PCMへ接続し、`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。
-- `Processed + VAD`: ProcessedにRMSベースのブラウザー側VADを追加します。200msチャンクを使います。既存のPython WebRTC VADと600ms無音終了処理も残します。
-- `Exhibition Mix`: Presetに応じた標準AEC・NS・AGC、適応型RMSゲート、既存のPython WebRTC VAD、barge-in、TTS duckingを組み合わせます。Mode DはRemote PCM経路を使います。
+- `Processed`: Remote PCMへ接続し、`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。Python WebRTC VADを使います。
+- `Processed + VAD`: ProcessedにRMSベースのブラウザー側VADを追加します。200msチャンクを使います。endpointが`600ms`なら3チャンク、`400ms`なら2チャンクでspeechを終了します。Python WebRTC VADも残します。
+- `Exhibition Mix`: Presetに応じた標準AEC・NS・AGC、適応型RMSゲート、既存のPython WebRTC VAD、barge-in、TTS duckingを組み合わせます。Mode DはRemote PCM経路を使い、endpointは既存の`600ms`です。
 
 ## Mode Dの確認ポイント
 
-Mode Dは展示環境向けの組み合わせです。
+Mode Dは展示環境向けの実験的な組み合わせです。
+通常展示の既定Modeではありません。
 
 1. Presetに応じて`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。
 2. SafariまたはOSが返した実値をMediaTrack settingsへ記録します。
@@ -135,9 +166,29 @@ Mode B/C/DでPython STTサービスが停止している場合、音声サービ
 Mode AのWeb Speech経路は、ブラウザーやOSの音声認識サービス差を含みます。
 Mode AとMode B/CのSTTエンジンが異なる場合、マイク前処理だけの比較にはなりません。
 
+## 低遅延の比較指標
+
+JSONLの発話レコードには次の時刻と時間を保存します。
+
+- `sttQueuedAt`
+- `sttStartedAt`
+- `sttObservedAt`
+- `sttResultAt`
+- `sttQueueWaitMs`
+- `sttProcessingMs`
+- `sttLatencyMs`
+- `endpointToResultLatencyMs`
+- `speechToResultLatencyMs`
+
+`sttLatencyMs`は従来どおり、STT開始から最終結果までです。
+今回の主な比較対象は、発話終了から最終STTまでの`endpointToResultLatencyMs`です。
+展示用のstretch targetは`700ms以下`です。
+quality profileまたはCPU fallbackが超えても、失敗とは判定しません。
+
 ## 固定して試す10ケース
 
-次のケースを、同じ順番でMode A、B、C、Dへ適用します。
+次のケースを、同じ順番でMode B/Cのendpoint `600ms`、Mode B/Cのendpoint `400ms`へ適用します。
+必要な場合だけMode AとDebug限定のMode Dを追加します。
 
 1. 端末の近くから普通の声で話す
 2. 端末から50cm程度離れて話す
@@ -170,7 +221,7 @@ Audio Labには入力デバイス選択UIを追加していません。
 会場で測る場合は、次の順で確認します。
 
 1. 会場の通常音量を再現します。
-2. Mode A、B、C、Dで同じ発話文を話します。
+2. Mode B/Cのendpoint `600ms`と`400ms`で同じ発話文を話します。
 3. TTS再生中の無言と割り込みを各Modeで試します。
 4. Export JSONLで候補数、reject数、latency、barge-inを保存します。
 5. Mode Dのnoise floorとeffective thresholdをケースごとに比較します。
@@ -192,6 +243,10 @@ Audio Labは次を表示します。
 - 要求済み、対応可能、適用済みのMediaTrack settings
 - 最新発話と最新エラー
 - Mode別summary
+- endpoint設定
+- 実効STT model、device、compute type
+- fallback状態とmodel load時間
+- 最新発話のqueue wait、processing、endpoint-to-result、total latency
 
 Mode AのWeb Speech経路では、マイクレベルとMediaTrack settingsを取得しません。
 パネルの`Unavailable`は、その経路では値を測れないという意味です。
@@ -209,7 +264,7 @@ playcheck-results/local/voice-lab/<sessionId>/events.jsonl
 ```
 
 音声データは保存しません。
-JSONLには、発話時刻、speech区間、STT時刻、latency、raw transcript、会話へ渡したtranscript、VAD判定、reject理由、TTS重複、匿名化済みsettings、エラーを保存します。
+JSONLには、発話時刻、speech区間、endpoint、STT時刻、phase別latency、raw transcript、会話へ渡したtranscript、VAD判定、reject理由、TTS重複、匿名化済みsettings、STT runtime、エラーを保存します。
 raw transcriptは調査ログだけに保存し、会話本文へは渡しません。
 既知の誤認識メトリクスは次の3語を数えます。
 
@@ -227,6 +282,7 @@ npm run test:voice
 npm run typecheck
 npm run lint
 npm run build
+npm run test:worktree-setup
 Push-Location tools/stt
 uv run --no-cache pytest
 Pop-Location
