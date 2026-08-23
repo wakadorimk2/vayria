@@ -221,6 +221,8 @@ export class VoiceLabRecorder {
       case 'media_settings':
         this.currentMediaSettings = diagnostic.settings;
         return;
+      case 'capture_health':
+        return;
       case 'stt_runtime': {
         this.currentSttRuntime = diagnostic.runtime;
         if (!this.started || !this.sessionId) return;

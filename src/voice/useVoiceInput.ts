@@ -13,6 +13,7 @@ import {
   type AudioEndpointMs,
   type ExhibitionAudioPreset,
   type SttRuntimeInfo,
+  type VoiceCaptureHealth,
   type VoiceInputDiagnostic,
 } from './audioLab.js';
 import {
@@ -44,6 +45,11 @@ function isFatalVoiceError(code: string | null): boolean {
     code === 'audio-capture' ||
     code === 'insecure-context' ||
     code === 'audio-worklet-unsupported' ||
+    code === 'audio-capture-unsupported' ||
+    code === 'audio-capture-silent' ||
+    code === 'audio-capture-muted' ||
+    code === 'audio-capture-ended' ||
+    code === 'audio-context-timeout' ||
     code === 'voice-transport-unavailable' ||
     code === 'voice-transport-closed' ||
     code === 'voice-transport-timeout' ||
@@ -89,6 +95,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const [mediaSettings, setMediaSettings] =
     useState<AudioLabMediaSettings | null>(null);
   const [sttRuntime, setSttRuntime] = useState<SttRuntimeInfo | null>(null);
+  const [captureHealth, setCaptureHealth] =
+    useState<VoiceCaptureHealth | null>(null);
 
   useEffect(() => {
     optionsRef.current = options;
@@ -108,6 +116,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       setLastDiagnostic(null);
       setMediaSettings(null);
       setSttRuntime(null);
+      setCaptureHealth(null);
     });
 
     const controller = controllerRef.current ?? createVoiceInputController();
@@ -154,6 +163,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         switch (diagnostic.type) {
           case 'media_settings':
             setMediaSettings(diagnostic.settings);
+            break;
+          case 'capture_health':
+            setCaptureHealth(diagnostic.health);
             break;
           case 'stt_runtime':
             setSttRuntime(diagnostic.runtime);
@@ -227,9 +239,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const start = useCallback(async () => {
     const adapter = adapterRef.current;
     if (!adapter) return false;
-    const started = await adapter.start();
-    if (started) setIsEnabled(true);
-    return started;
+    return adapter.start();
   }, []);
 
   const stop = useCallback(async () => {
@@ -250,6 +260,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     isSttProcessing,
     mediaSettings,
     sttRuntime,
+    captureHealth,
     phase: snapshot.phase,
     start,
     stop,

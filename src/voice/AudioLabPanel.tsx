@@ -4,6 +4,7 @@ import type {
   AudioLabMode,
   ExhibitionAudioPreset,
   SttRuntimeInfo,
+  VoiceCaptureHealth,
   VoiceLabSnapshot,
 } from './audioLab.js';
 import {
@@ -48,6 +49,7 @@ interface AudioLabPanelProps {
   vadScore: number | null;
   mediaSettings: AudioLabMediaSettings | null;
   sttRuntime: SttRuntimeInfo | null;
+  captureHealth: VoiceCaptureHealth | null;
   snapshot: VoiceLabSnapshot;
   onExport: () => void;
 }
@@ -101,6 +103,7 @@ export function AudioLabPanel({
   vadScore,
   mediaSettings,
   sttRuntime,
+  captureHealth,
   snapshot,
   onExport,
 }: AudioLabPanelProps) {
@@ -250,6 +253,15 @@ export function AudioLabPanel({
               </dd>
             </div>
           </dl>
+
+          <div className="audio-lab-panel__section">
+            <h2>Capture health</h2>
+            <pre>
+              {captureHealth
+                ? JSON.stringify(captureHealth, null, 2)
+                : 'Unavailable'}
+            </pre>
+          </div>
 
           <div className="audio-lab-panel__section">
             <h2>Applied MediaTrack settings</h2>
