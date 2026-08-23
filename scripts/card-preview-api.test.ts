@@ -319,6 +319,7 @@ test('voice reply prompt asks for short concrete grounding', () => {
   assert.match(VOICE_REPLY_INSTRUCTION, /moves slightly sideways/);
   assert.match(VOICE_REPLY_INSTRUCTION, /do not treat the announcement or agreement as progress/);
   assert.match(VOICE_REPLY_INSTRUCTION, /directly asks you to perform an action/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /Do not claim to have seen, checked, changed, or completed an external-world action/);
   assert.match(VOICE_REPLY_INSTRUCTION, /perform the first small step now/);
   assert.match(VOICE_REPLY_INSTRUCTION, /ask one concrete question that names the missing item/);
   assert.match(VOICE_REPLY_INSTRUCTION, /Do not invent meeting-style purpose, agenda, decisions, owners, or schedules/);

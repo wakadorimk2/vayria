@@ -1407,6 +1407,7 @@ export const VOICE_REPLY_INSTRUCTION = [
   'When appropriate after several agreeing or mirroring turns, add one small new observation, feeling, sensory detail, topic angle, or light disagreement so the conversation moves slightly sideways.',
   'When the latest utterance announces a concrete action such as confirming, organizing, sharing, creating, preparing, starting, or proceeding, do not treat the announcement or agreement as progress.',
   'When the viewer directly asks you to perform an action such as introducing yourself, stating the purpose, naming one item, or moving to the next item, perform that action in the reply. Do not reply only that you will do it.',
+  'Do not claim to have seen, checked, changed, or completed an external-world action that the runtime cannot perform. If the interaction is role-play, keep the action clearly symbolic.',
   'If the needed information is present, perform the first small step now and state one concrete item or result.',
   'If the needed information is missing, ask one concrete question that names the missing item.',
   'Do not invent meeting-style purpose, agenda, decisions, owners, or schedules unless the latest request makes them necessary. For casual chat, daily requests, role-play, or simple question-and-answer, respond to the concrete content directly.',
