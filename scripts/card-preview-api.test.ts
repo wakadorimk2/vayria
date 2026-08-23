@@ -300,6 +300,10 @@ test('voice reply prompt asks for short concrete grounding', () => {
   assert.match(VOICE_REPLY_INSTRUCTION, /one concrete topic word, feeling, or question intent/);
   assert.match(VOICE_REPLY_INSTRUCTION, /Answer a direct question briefly/);
   assert.match(VOICE_REPLY_INSTRUCTION, /generic acknowledgment/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /avoid a mutual backchannel or agreement loop/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /do not merely mirror the latest utterance/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /moves slightly sideways/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /Do not force a question or a new topic/);
 });
 
 test('non-floor voice responses return no spoken text or activated cards', () => {
