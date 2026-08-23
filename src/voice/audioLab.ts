@@ -52,7 +52,7 @@ export const VAD_THRESHOLD_STEP = 0.005;
 export const ADAPTIVE_NOISE_FLOOR_INITIAL = 0.005;
 export const ADAPTIVE_NOISE_FLOOR_ALPHA = 0.05;
 export const ADAPTIVE_NOISE_FLOOR_MULTIPLIER = 2.5;
-export const BARGE_IN_DUCK_GAIN = 0.12;
+export const BARGE_IN_DUCK_GAIN = 0.25;
 export const BARGE_IN_GAIN_RAMP_MS = 20;
 export const BARGE_IN_TIMEOUT_MS = 2_500;
 

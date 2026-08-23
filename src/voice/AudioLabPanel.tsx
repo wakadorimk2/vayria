@@ -211,7 +211,7 @@ export function AudioLabPanel({
               <span>VAD score (RMS)</span>
               <span>{formatScore(vadScore)}</span>
             </div>
-            {mode === 'exhibition-mix' && (
+            {(mode === 'processed' || mode === 'exhibition-mix') && (
               <>
                 <div className="audio-lab-panel__meter-heading">
                   <span>Adaptive noise floor</span>
