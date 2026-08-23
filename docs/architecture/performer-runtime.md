@@ -66,6 +66,7 @@ The current source mapping is:
 | Voice floor state and pending context | `src/conversation/floorController.ts` |
 | Committed semantic dialogue history | `src/conversation/semanticDialogueHistory.ts` |
 | Autonomous topic and latest viewer intent | `src/conversation/autonomousContext.ts`, `src/App.tsx` |
+| Latest completed self utterance | `src/conversation/useConversation.ts`, `server/localApi.ts` |
 | Live program context | `src/conversation/programContext.ts`, `src/App.tsx`, `src/conversation/useConversation.ts` |
 | LLM-facing self-state projection | `src/performer/runtime.ts`, `src/performer/usePerformerRuntime.ts` |
 | Voice interaction timeline | `src/conversation/interactionTimeline.ts`, `src/voice/voiceLabRecorder.ts` |
@@ -234,6 +235,11 @@ viewer-directed card-impression segment whose objective is to notice the change
 in impression before and after a card change. This context tells the director
 who controls the next card action; it does not add raw input or internal card
 state to history.
+They also receive the latest completed Vayria spoken line as a bounded,
+session-only continuity anchor. The line is updated after successful playback
+for manual, voice, and autonomous speech. It helps the director retain the
+topic or interest expressed in that line without treating the line as a new
+user turn or event-log content.
 The projection is prompt context only. It is not added to semantic history or
 structured event records.
 

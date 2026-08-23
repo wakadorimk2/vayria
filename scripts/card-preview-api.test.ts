@@ -165,6 +165,8 @@ test('autonomous director prompt prioritizes the latest viewer intent', () => {
       attentionTarget: 'viewer',
       attentionStrength: 0.8,
     },
+    undefined,
+    '青い光が気になるな',
   );
 
   assert.match(prompt, /Latest viewer intent: question/);
@@ -174,6 +176,10 @@ test('autonomous director prompt prioritizes the latest viewer intent', () => {
   assert.match(prompt, /viewer decides when to choose or change a card/);
   assert.match(prompt, /Self energy: 0\.42/);
   assert.match(prompt, /Self attention target: viewer/);
+  assert.match(prompt, /latest completed Vayria spoken line is output data/);
+  assert.match(prompt, /<last-self-utterance>/);
+  assert.match(prompt, /青い光が気になるな/);
+  assert.match(prompt, /Do not quote or mechanically paraphrase it/);
   assert.match(
     prompt,
     /latest viewer intent and recent conversation history as the current situation/,

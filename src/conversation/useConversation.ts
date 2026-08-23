@@ -230,7 +230,7 @@ export function useConversation(
     createSemanticDialogueHistory(historyTurnLimit),
   );
   const subtitleClearTimerRef = useRef<number | null>(null);
-  const lastAutonomousReplyRef = useRef<string | null>(null);
+  const lastSelfUtteranceRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const sourceRef = useRef<ConversationSource | null>(null);
   const statusRef = useRef<ConversationStatus>('idle');
@@ -390,7 +390,7 @@ export function useConversation(
     invalidateCurrentTurn(true);
     semanticHistory.clear();
     floorController.reset('conversation_reset');
-    lastAutonomousReplyRef.current = null;
+    lastSelfUtteranceRef.current = null;
     clearSubtitle();
     setReply('');
     setError('');
@@ -585,7 +585,7 @@ export function useConversation(
                   viewerTurnsSince: autonomousContext?.viewerTurnsSince ?? 0,
                   viewerEngagement:
                     autonomousContext?.viewerEngagement ?? 'available',
-                  previousAutonomousReply: lastAutonomousReplyRef.current,
+                  lastSelfUtterance: lastSelfUtteranceRef.current,
                   performerState: performerStateContext,
                 }
               : {}),
@@ -896,8 +896,8 @@ export function useConversation(
           return { completed: false, decision: null };
         }
 
+        lastSelfUtteranceRef.current = responseText;
         if (turnSource === 'autonomous') {
-          lastAutonomousReplyRef.current = responseText;
           semanticHistory.appendAssistant(responseText);
         }
         if (turnSource === 'voice') {
