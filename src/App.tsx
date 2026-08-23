@@ -891,7 +891,6 @@ export default function App() {
       switch (event.type) {
         case 'speech_started': {
           clearSubtitle();
-          cancelNonSpeechPlan();
           // Speech detection is only a candidate. Final text decides turn handoff.
           const isBargeInCandidate = ttsPlaying;
           if (isBargeInCandidate) {
