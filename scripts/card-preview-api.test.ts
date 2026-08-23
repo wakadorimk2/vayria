@@ -377,3 +377,37 @@ test('non-floor voice responses return no spoken text or activated cards', () =>
     },
   );
 });
+
+test('content-bearing take_floor responses cannot be generic backchannels', () => {
+  assert.throws(
+    () =>
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'take_floor',
+          backchannelCue: 'none',
+          text: 'うん',
+          emotion: 'neutral',
+          activatedCards: [],
+        }),
+        [],
+        null,
+        '今日は雨だった',
+      ),
+    /must contain a concrete reaction/,
+  );
+  assert.equal(
+    parseVoiceAssistantResponse(
+      JSON.stringify({
+        voiceAction: 'take_floor',
+        backchannelCue: 'none',
+        text: 'うん',
+        emotion: 'neutral',
+        activatedCards: [],
+      }),
+      [],
+      null,
+      'それ、好き？',
+    ).text,
+    'うん',
+  );
+});

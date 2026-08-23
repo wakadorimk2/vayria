@@ -29,6 +29,8 @@ import {
 import {
   classifyViewerMessageFastPath,
   isContentBearingVoiceMessage,
+  isDefiniteBackchannelMessage,
+  isDefiniteQuestionMessage,
 } from '../src/performer/runtime.js';
 import {
   appendPlaycheckRecord,
@@ -1040,6 +1042,16 @@ function parseAssistantResponse(
         'Content-bearing voice responses must use take_floor.',
       );
     }
+    if (
+      voiceAction === 'take_floor' &&
+      isContentBearingVoiceMessage(message ?? '') &&
+      isDefiniteBackchannelMessage(text) &&
+      !isDefiniteQuestionMessage(message ?? '')
+    ) {
+      throw new VoicePolicyContractError(
+        'Content-bearing voice take_floor responses must contain a concrete reaction, not only a backchannel.',
+      );
+    }
   } else if (mode === 'autonomous') {
     if (!isAutonomousAction(record.action)) {
       throw new CardContractError(
@@ -1659,7 +1671,7 @@ async function generateReply(
   const response = parseAssistantResponse(
     await requestReply(
       mode === 'voice'
-        ? 'Your previous attempt violated the voice action or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text and empty activatedCards for listen or backchannel. Use non-empty text for take_floor and include the forced current card when one exists.'
+        ? 'Your previous attempt violated the voice action or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text and empty activatedCards for listen or backchannel. For content-bearing input, take_floor text must contain a concrete reaction and must not be only a generic acknowledgment. Use non-empty text for take_floor and include the forced current card when one exists.'
         : 'Your previous attempt violated the card contract. Follow the current brain-card subset and forced-card requirements exactly.',
     ),
     mode,
