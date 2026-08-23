@@ -942,7 +942,11 @@ export default function App() {
           const message = event.text.trim();
           const candidateSegmentId = activeBargeInSegmentRef.current;
           activeBargeInSegmentRef.current = null;
-          const acceptedForBargeIn = isConfirmedBargeInTranscript(message);
+          const isSpeakingCandidate = candidateSegmentId === event.segmentId;
+          const acceptedForBargeIn = isConfirmedBargeInTranscript(message, {
+            characterIdentity: characterIdentityRef.current,
+            requireConversationalCue: isSpeakingCandidate,
+          });
           const bargeInTransition = dispatchBargeIn({
             type: 'transcript_finalized',
             accepted: acceptedForBargeIn,

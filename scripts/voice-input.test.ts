@@ -976,6 +976,37 @@ test('barge-in confirmation accepts only content-bearing transcripts', () => {
   assert.equal(isConfirmedBargeInTranscript('あ'.repeat(1_001)), false);
 });
 
+test('barge-in during Vayria speech requires a conversational cue', () => {
+  const speakingOptions = { requireConversationalCue: true } as const;
+
+  assert.equal(
+    isConfirmedBargeInTranscript('今日は雨だった', speakingOptions),
+    false,
+  );
+  assert.equal(
+    isConfirmedBargeInTranscript('ヴェイリア…', speakingOptions),
+    true,
+  );
+  assert.equal(
+    isConfirmedBargeInTranscript('ベイリア、聞こえる？', speakingOptions),
+    true,
+  );
+  assert.equal(
+    isConfirmedBargeInTranscript('ヴェイリアはどう思う？', speakingOptions),
+    true,
+  );
+  assert.equal(
+    isConfirmedBargeInTranscript('ヴェイリアX', speakingOptions),
+    false,
+  );
+  assert.equal(isConfirmedBargeInTranscript('待って', speakingOptions), true);
+  assert.equal(isConfirmedBargeInTranscript('いや、それ違う', speakingOptions), true);
+  assert.equal(
+    isConfirmedBargeInTranscript('ご視聴ありがとうございました', speakingOptions),
+    false,
+  );
+});
+
 test('busy-turn interruption requires a content-bearing finalized transcript', () => {
   assert.equal(shouldInterruptBusyTurn(false, true, false), false);
   assert.equal(shouldInterruptBusyTurn(false, false, true), false);
