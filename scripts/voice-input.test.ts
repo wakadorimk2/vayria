@@ -48,6 +48,11 @@ import {
 } from '../src/voice/rmsVad.js';
 import { AdaptiveRmsVad } from '../src/voice/adaptiveRmsVad.js';
 import { reduceBargeIn } from '../src/voice/bargeIn.js';
+import {
+  FIRST_PCM_FRAME_TIMEOUT_MS,
+  createRemotePcmVoiceAdapter,
+  isPcm16Chunk,
+} from '../src/voice/remotePcmVoiceAdapter.js';
 import { VoiceLabRecorder } from '../src/voice/voiceLabRecorder.js';
 import {
   appendVoiceLabRecord,
@@ -190,6 +195,270 @@ function makePcmChunk(amplitude: number): ArrayBuffer {
     view.setInt16(offset, sample, true);
   }
   return pcm;
+}
+
+class FakeRemoteAudioNode extends EventTarget {
+  connect(node: unknown) {
+    return node;
+  }
+
+  disconnect() {}
+}
+
+class FakeRemoteGainNode extends FakeRemoteAudioNode {
+  gain = { value: 1 };
+}
+
+class FakeRemoteScriptProcessor extends FakeRemoteAudioNode {
+  static instances: FakeRemoteScriptProcessor[] = [];
+
+  onaudioprocess: ((event: AudioProcessingEvent) => void) | null = null;
+
+  constructor() {
+    super();
+    FakeRemoteScriptProcessor.instances.push(this);
+  }
+
+  emit(channels: Float32Array[]) {
+    const inputBuffer = {
+      numberOfChannels: channels.length,
+      getChannelData(channelIndex: number) {
+        return channels[channelIndex] ?? new Float32Array();
+      },
+    };
+    this.onaudioprocess?.({ inputBuffer } as AudioProcessingEvent);
+  }
+}
+
+class FakeRemoteTrack extends EventTarget {
+  muted = false;
+  readyState: MediaStreamTrackState = 'live';
+
+  getSettings() {
+    return {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: false,
+      sampleRate: 48_000,
+      channelCount: 1,
+    };
+  }
+
+  stop() {
+    this.readyState = 'ended';
+  }
+}
+
+class FakeRemoteStream {
+  constructor(private readonly track: FakeRemoteTrack) {}
+
+  getAudioTracks() {
+    return [this.track];
+  }
+
+  getTracks() {
+    return [this.track];
+  }
+}
+
+class FakeRemoteAudioContext extends EventTarget {
+  static instances: FakeRemoteAudioContext[] = [];
+
+  readonly sampleRate = 48_000;
+  readonly destination = {};
+  readonly audioWorklet = {
+    addModule: async () => undefined,
+  };
+  state: AudioContextState = 'running';
+
+  constructor() {
+    super();
+    FakeRemoteAudioContext.instances.push(this);
+  }
+
+  async resume() {
+    this.state = 'running';
+  }
+
+  async close() {
+    this.state = 'closed';
+  }
+
+  createMediaStreamSource() {
+    return new FakeRemoteAudioNode() as unknown as MediaStreamAudioSourceNode;
+  }
+
+  createGain() {
+    return new FakeRemoteGainNode() as unknown as GainNode;
+  }
+
+  createScriptProcessor() {
+    return new FakeRemoteScriptProcessor() as unknown as ScriptProcessorNode;
+  }
+}
+
+class FakeRemoteAudioWorkletNode extends FakeRemoteAudioNode {
+  static instances: FakeRemoteAudioWorkletNode[] = [];
+
+  readonly port = {
+    onmessage: null as ((event: MessageEvent<unknown>) => void) | null,
+    close() {},
+  };
+
+  constructor() {
+    super();
+    FakeRemoteAudioWorkletNode.instances.push(this);
+  }
+
+  emit(data: ArrayBuffer) {
+    this.port.onmessage?.({ data } as MessageEvent<unknown>);
+  }
+}
+
+class FakeRemoteWebSocket extends EventTarget {
+  static readonly OPEN = 1;
+  static readonly CONNECTING = 0;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  static instances: FakeRemoteWebSocket[] = [];
+
+  readonly sent: unknown[] = [];
+  binaryType = '';
+  bufferedAmount = 0;
+  readyState = FakeRemoteWebSocket.CONNECTING;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+
+  constructor(public readonly url: string) {
+    super();
+    FakeRemoteWebSocket.instances.push(this);
+    queueMicrotask(() => {
+      if (this.readyState !== FakeRemoteWebSocket.CONNECTING) return;
+      this.readyState = FakeRemoteWebSocket.OPEN;
+      this.dispatchEvent(new Event('open'));
+      this.onopen?.();
+    });
+  }
+
+  send(data: unknown) {
+    this.sent.push(data);
+    if (typeof data !== 'string') return;
+    const parsed = JSON.parse(data) as { type?: string };
+    if (parsed.type !== 'start') return;
+    queueMicrotask(() => {
+      this.onmessage?.({
+        data: JSON.stringify({ type: 'listening_started', at: Date.now() }),
+      } as MessageEvent<unknown>);
+    });
+  }
+
+  close() {
+    if (this.readyState === FakeRemoteWebSocket.CLOSED) return;
+    this.readyState = FakeRemoteWebSocket.CLOSED;
+    this.onclose?.();
+    this.dispatchEvent(new Event('close'));
+  }
+}
+
+class FakeRemoteWindow extends EventTarget {
+  isSecureContext = true;
+  readonly location = { href: 'https://vayria.test/' };
+  readonly AudioContext = FakeRemoteAudioContext;
+
+  constructor(private readonly timerScale: number) {
+    super();
+  }
+
+  setTimeout(
+    callback: (...args: unknown[]) => void,
+    timeout = 0,
+  ): ReturnType<typeof globalThis.setTimeout> {
+    return globalThis.setTimeout(callback, timeout * this.timerScale);
+  }
+
+  clearTimeout(timerId: ReturnType<typeof globalThis.setTimeout>) {
+    globalThis.clearTimeout(timerId);
+  }
+}
+
+function installRemoteBrowserEnvironment(options: { timerScale?: number } = {}) {
+  const previous = new Map<string, PropertyDescriptor | undefined>();
+  const setGlobal = (name: string, value: unknown) => {
+    previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value,
+    });
+  };
+
+  FakeRemoteAudioContext.instances = [];
+  FakeRemoteAudioWorkletNode.instances = [];
+  FakeRemoteScriptProcessor.instances = [];
+  FakeRemoteWebSocket.instances = [];
+  const tracks: FakeRemoteTrack[] = [];
+  let getUserMediaCalls = 0;
+  const fakeDocument = new EventTarget() as EventTarget & { hidden: boolean };
+  fakeDocument.hidden = false;
+  const fakeWindow = new FakeRemoteWindow(options.timerScale ?? 1);
+  const fakeNavigator = {
+    mediaDevices: {
+      async getUserMedia() {
+        getUserMediaCalls += 1;
+        const track = new FakeRemoteTrack();
+        tracks.push(track);
+        return new FakeRemoteStream(track) as unknown as MediaStream;
+      },
+      getSupportedConstraints() {
+        return {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        };
+      },
+    },
+  };
+
+  setGlobal('window', fakeWindow);
+  setGlobal('document', fakeDocument);
+  setGlobal('navigator', fakeNavigator);
+  setGlobal('WebSocket', FakeRemoteWebSocket);
+  setGlobal('AudioWorkletNode', FakeRemoteAudioWorkletNode);
+
+  return {
+    fakeDocument,
+    fakeWindow,
+    tracks,
+    get getUserMediaCalls() {
+      return getUserMediaCalls;
+    },
+    worklets: FakeRemoteAudioWorkletNode.instances,
+    scripts: FakeRemoteScriptProcessor.instances,
+    sockets: FakeRemoteWebSocket.instances,
+    restore() {
+      for (const [name, descriptor] of previous) {
+        if (descriptor) {
+          Object.defineProperty(globalThis, name, descriptor);
+        } else {
+          delete (globalThis as unknown as Record<string, unknown>)[name];
+        }
+      }
+    },
+  };
+}
+
+async function waitForRemoteCondition(
+  predicate: () => boolean,
+  timeoutMs = 2_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('Remote test condition timed out.');
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
 }
 
 test('voice input transitions through listening and finalized states', () => {
@@ -346,6 +615,164 @@ test('browser adapter restarts after end and reports permission errors', async (
     adapter.dispose();
   } finally {
     restoreWindow();
+  }
+});
+
+test('remote PCM adapter validates the first AudioWorklet frame before activation', async () => {
+  const environment = installRemoteBrowserEnvironment();
+  try {
+    const events: Array<{ type: string; code?: string }> = [];
+    const health: Array<{ engine: string | null; status: string; pcmFrameCount: number }> = [];
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'baseline',
+      diagnostics: true,
+      onEvent: (event) => events.push(event),
+      onDiagnostic: (diagnostic) => {
+        if (diagnostic.type !== 'capture_health') return;
+        health.push({
+          engine: diagnostic.health.engine,
+          status: diagnostic.health.status,
+          pcmFrameCount: diagnostic.health.pcmFrameCount,
+        });
+      },
+    });
+
+    const startPromise = adapter.start();
+    await waitForRemoteCondition(() => environment.worklets.length === 1);
+    environment.worklets[0]!.emit(makePcmChunk(0.1));
+
+    assert.equal(await startPromise, true);
+    assert.equal(isPcm16Chunk(makePcmChunk(0)), true);
+    assert.equal(isPcm16Chunk(new ArrayBuffer(1)), false);
+    assert.equal(health.at(-1)?.engine, 'audio-worklet');
+    assert.equal(health.at(-1)?.status, 'ready');
+    assert.equal(health.at(-1)?.pcmFrameCount, 1);
+    assert.ok(events.some((event) => event.type === 'listening_started'));
+    assert.ok(environment.sockets[0]?.sent.some((value) => value instanceof ArrayBuffer));
+
+    await adapter.stop();
+    adapter.dispose();
+  } finally {
+    environment.restore();
+  }
+});
+
+test('remote PCM adapter falls back to ScriptProcessor when AudioWorklet stays silent', async () => {
+  const environment = installRemoteBrowserEnvironment({ timerScale: 0.01 });
+  try {
+    const events: Array<{ type: string; code?: string }> = [];
+    const health: Array<{ engine: string | null; status: string }> = [];
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'baseline',
+      onEvent: (event) => events.push(event),
+      onDiagnostic: (diagnostic) => {
+        if (diagnostic.type !== 'capture_health') return;
+        health.push({
+          engine: diagnostic.health.engine,
+          status: diagnostic.health.status,
+        });
+      },
+    });
+
+    const startPromise = adapter.start();
+    await waitForRemoteCondition(
+      () => environment.scripts.length === 1,
+      FIRST_PCM_FRAME_TIMEOUT_MS * 2,
+    );
+    environment.scripts[0]!.emit([new Float32Array(12_000).fill(0.1)]);
+
+    assert.equal(await startPromise, true);
+    assert.equal(health.at(-1)?.engine, 'script-processor');
+    assert.equal(health.at(-1)?.status, 'ready');
+    assert.ok(events.some((event) => event.type === 'listening_started'));
+    assert.ok(environment.sockets[0]?.sent.some((value) => value instanceof ArrayBuffer));
+
+    await adapter.stop();
+    adapter.dispose();
+  } finally {
+    environment.restore();
+  }
+});
+
+test('remote PCM adapter reports silent capture when neither engine emits a frame', async () => {
+  const environment = installRemoteBrowserEnvironment({ timerScale: 0.01 });
+  try {
+    const events: Array<{ type: string; code?: string }> = [];
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'baseline',
+      onEvent: (event) => events.push(event),
+    });
+
+    assert.equal(await adapter.start(), false);
+    assert.equal(events.at(-1)?.type, 'recognition_failed');
+    assert.equal(events.at(-1)?.code, 'audio-capture-silent');
+    await adapter.stop();
+  } finally {
+    environment.restore();
+  }
+});
+
+test('remote PCM adapter retries transient startup silence once before reporting failure', async () => {
+  const environment = installRemoteBrowserEnvironment({ timerScale: 0.01 });
+  try {
+    const events: Array<{ type: string; code?: string }> = [];
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'baseline',
+      onEvent: (event) => events.push(event),
+    });
+
+    const startPromise = adapter.start();
+    await waitForRemoteCondition(() => environment.worklets.length === 1);
+    await waitForRemoteCondition(() => environment.worklets.length === 2);
+    environment.worklets[1]!.emit(makePcmChunk(0.1));
+
+    assert.equal(await startPromise, true);
+    assert.equal(environment.getUserMediaCalls, 2);
+    assert.equal(events.filter((event) => event.type === 'recognition_failed').length, 0);
+    assert.equal(
+      events.filter((event) => event.type === 'listening_started').length,
+      1,
+    );
+    await adapter.stop();
+  } finally {
+    environment.restore();
+  }
+});
+
+test('remote PCM adapter reconnects once after a muted track and ignores duplicate recovery signals', async () => {
+  const environment = installRemoteBrowserEnvironment({ timerScale: 0.01 });
+  try {
+    const events: Array<{ type: string; code?: string }> = [];
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'baseline',
+      onEvent: (event) => events.push(event),
+    });
+
+    const startPromise = adapter.start();
+    await waitForRemoteCondition(() => environment.worklets.length === 1);
+    environment.worklets[0]!.emit(makePcmChunk(0.1));
+    assert.equal(await startPromise, true);
+
+    const firstTrack = environment.tracks[0]!;
+    firstTrack.muted = true;
+    firstTrack.dispatchEvent(new Event('mute'));
+    firstTrack.dispatchEvent(new Event('mute'));
+    await waitForRemoteCondition(
+      () => environment.getUserMediaCalls === 2 && environment.worklets.length === 2,
+    );
+    environment.worklets[1]!.emit(makePcmChunk(0.1));
+    await waitForRemoteCondition(
+      () => events.filter((event) => event.type === 'listening_started').length === 2,
+    );
+
+    assert.equal(environment.getUserMediaCalls, 2);
+    assert.equal(
+      events.filter((event) => event.type === 'listening_started').length,
+      2,
+    );
+    await adapter.stop();
+  } finally {
+    environment.restore();
   }
 });
 

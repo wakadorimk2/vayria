@@ -92,10 +92,19 @@ function getVoiceErrorMessage(code: string | null): string {
       return 'マイクの権限がありません。ブラウザーの設定を確認してください。';
     case 'audio-capture':
       return 'マイクを利用できません。接続とブラウザーの設定を確認してください。';
+    case 'audio-capture-silent':
+      return 'マイク音声フレームを取得できません。ホーム画面版を再試行するか、Safariタブで開いてください。';
+    case 'audio-capture-muted':
+      return 'iPadOSがマイク音声を停止しました。音声入力を再試行してください。';
+    case 'audio-capture-ended':
+      return 'マイク捕捉が終了しました。音声入力を再試行してください。';
     case 'insecure-context':
       return '音声入力にはHTTPS接続が必要です。VayriaをHTTPSで開いてください。';
     case 'audio-worklet-unsupported':
+    case 'audio-capture-unsupported':
       return 'このブラウザーはPCM音声入力に対応していません。テキスト入力を利用してください。';
+    case 'audio-context-timeout':
+      return '音声エンジンの起動がタイムアウトしました。ホーム画面版を再試行するか、Safariタブで開いてください。';
     case 'voice-transport-unavailable':
     case 'voice-transport-closed':
     case 'voice-transport-timeout':
@@ -1440,6 +1449,7 @@ export default function App() {
           isSttProcessing={voiceInput.isSttProcessing}
           isVadSpeech={voiceInput.isVadSpeech}
           mediaSettings={voiceInput.mediaSettings}
+          captureHealth={voiceInput.captureHealth}
           sttRuntime={voiceInput.sttRuntime}
           mode={audioLabMode}
           preset={runtimeConfig.audioPreset}
