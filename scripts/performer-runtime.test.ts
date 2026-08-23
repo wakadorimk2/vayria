@@ -86,7 +86,13 @@ test('performer state context exposes bounded self state for the director', () =
       phase: 'speaking',
       energy: 1.4,
       emotion: { value: 'joy', activation: 0.75, updatedAt: 100 },
-      attention: { target: 'viewer', strength: 0.8, updatedAt: 100 },
+      attention: {
+        target: 'viewer',
+        strength: 0.8,
+        updatedAt: 100,
+        position: null,
+        confidence: 0,
+      },
     }),
   );
 
