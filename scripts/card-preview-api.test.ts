@@ -452,6 +452,22 @@ test('action commitments must move to concrete content', () => {
       ),
     /Action commitments must lead to concrete content/,
   );
+  assert.throws(
+    () =>
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'take_floor',
+          backchannelCue: 'none',
+          text: 'では',
+          emotion: 'neutral',
+          activatedCards: [],
+        }),
+        [],
+        null,
+        '了解...まずアジェンダ案を作成しましょう。',
+      ),
+    /Action commitments must lead to concrete content/,
+  );
   assert.equal(
     parseVoiceAssistantResponse(
       JSON.stringify({
