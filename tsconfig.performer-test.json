@@ -19,11 +19,13 @@
     "src/conversation/floorController.ts",
     "src/conversation/interactionTimeline.ts",
     "src/conversation/semanticDialogueHistory.ts",
+    "src/conversation/autonomousContext.ts",
     "scripts/card-preview-api.test.ts",
     "scripts/local-api-capture.test.ts",
     "scripts/card-reactions.test.ts",
     "scripts/performer-runtime.test.ts",
     "scripts/conversation-floor.test.ts",
-    "scripts/character-identity.test.ts"
+    "scripts/character-identity.test.ts",
+    "scripts/autonomous-context.test.ts"
   ]
 }

@@ -22,6 +22,10 @@ import {
   resolveSelfName,
   type CharacterIdentity,
 } from '../src/character/identity.js';
+import {
+  isViewerIntent,
+  type ViewerIntent,
+} from '../src/conversation/autonomousContext.js';
 import { cardPool } from '../src/cards/cardPool.js';
 import type { WildcardCardData } from '../src/cards/cardTypes.js';
 import { CARD_REACTION_PROFILES } from '../src/cards/cardReactions.js';
@@ -87,6 +91,7 @@ const BRAIN_CARD_COUNT = 5;
 const MAX_ACTIVATED_CARDS = 3;
 const MAX_TOPIC_LENGTH = 120;
 const MAX_TOPIC_TURNS = 100;
+const MAX_VIEWER_TURNS_SINCE = 100;
 const MAX_EVENT_TURN_ID_LENGTH = 128;
 const MAX_EVENT_REASON_LENGTH = 120;
 const AUTONOMOUS_ACTIONS = ['continue', 'new_topic', 'silence'] as const;
@@ -165,6 +170,8 @@ interface ChatRequestPayload {
   forcedCardId: string | null;
   topic: string | null;
   topicTurns: number;
+  viewerIntent: ViewerIntent | null;
+  viewerTurnsSince: number;
   previousAutonomousReply: string | null;
   performanceContext: PerformanceContextPayload;
 }
@@ -676,6 +683,8 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'forcedCardId',
     'topic',
     'topicTurns',
+    'viewerIntent',
+    'viewerTurnsSince',
     'previousAutonomousReply',
     'performanceContext',
   ]);
@@ -839,6 +848,37 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   const topicTurns =
     typeof topicTurnsValue === 'number' ? topicTurnsValue : 0;
 
+  const viewerIntentValue = record.viewerIntent;
+  if (
+    viewerIntentValue !== undefined &&
+    viewerIntentValue !== null &&
+    !isViewerIntent(viewerIntentValue)
+  ) {
+    throw new RequestError(
+      'viewerIntent must be a known intent or null.',
+      400,
+    );
+  }
+  const viewerIntent =
+    viewerIntentValue === null || viewerIntentValue === undefined
+      ? null
+      : viewerIntentValue;
+
+  const viewerTurnsSinceValue = record.viewerTurnsSince;
+  if (
+    viewerTurnsSinceValue !== undefined &&
+    (typeof viewerTurnsSinceValue !== 'number' ||
+      !Number.isSafeInteger(viewerTurnsSinceValue) ||
+      viewerTurnsSinceValue < 0)
+  ) {
+    throw new RequestError(
+      'viewerTurnsSince must be a non-negative safe integer.',
+      400,
+    );
+  }
+  const viewerTurnsSince =
+    typeof viewerTurnsSinceValue === 'number' ? viewerTurnsSinceValue : 0;
+
   const performanceContextValue = record.performanceContext;
   let performanceContext: PerformanceContextPayload = {
     callbackTendency: 0,
@@ -897,16 +937,25 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
 
   if (
     mode === 'autonomous' &&
-    (topicValue === undefined || topicTurnsValue === undefined)
+    (topicValue === undefined ||
+      topicTurnsValue === undefined ||
+      viewerIntentValue === undefined ||
+      viewerTurnsSinceValue === undefined)
   ) {
     throw new RequestError(
-      'autonomous requests must contain topic and topicTurns.',
+      'autonomous requests must contain topic, topicTurns, viewerIntent, and viewerTurnsSince.',
       400,
     );
   }
   if (topicTurns > MAX_TOPIC_TURNS) {
     throw new RequestError(
       `topicTurns must be ${MAX_TOPIC_TURNS} or fewer.`,
+      400,
+    );
+  }
+  if (viewerTurnsSince > MAX_VIEWER_TURNS_SINCE) {
+    throw new RequestError(
+      `viewerTurnsSince must be ${MAX_VIEWER_TURNS_SINCE} or fewer.`,
       400,
     );
   }
@@ -920,6 +969,8 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     forcedCardId,
     topic,
     topicTurns,
+    viewerIntent,
+    viewerTurnsSince,
     previousAutonomousReply,
     performanceContext,
   };
@@ -1561,6 +1612,8 @@ async function generateInteractiveResponse(
     null,
     0,
     null,
+    0,
+    null,
     performanceContext,
     characterIdentity,
   );
@@ -1569,6 +1622,29 @@ async function generateInteractiveResponse(
     interactionAction: 'take_floor',
     backchannelCue: 'none',
   };
+}
+
+export function buildAutonomousDirectorInstruction(
+  topic: string | null,
+  topicTurns: number,
+  viewerIntent: ViewerIntent | null,
+  viewerTurnsSince: number,
+): string {
+  return [
+    `Current topic: ${topic ?? '(none)'}`,
+    `Current topic spoken-turn count: ${topicTurns}`,
+    `Latest viewer intent: ${viewerIntent ?? '(none)'}`,
+    `Autonomous turns since latest viewer input: ${viewerTurnsSince}`,
+    'When autonomous turns since latest viewer input is 0, treat the latest viewer intent and recent conversation history as the current situation.',
+    'When the latest viewer intent is direct_address, call, question, request, or action_commitment, give that latest viewer turn priority over the previous autonomous topic.',
+    'When the latest viewer intent is backchannel or unfinished, silence is acceptable. Do not force a new topic.',
+    'Do not mention this state metadata in the spoken reply.',
+    'Choose exactly one action for this autonomous candidate.',
+    'continue means speak while staying with the current topic.',
+    'new_topic means speak about a different topic and return a short topic label.',
+    'silence means deliberately say nothing: text must be empty, emotion must be neutral, and activatedCards must be empty.',
+    'For continue and new_topic, return a non-empty short topic label and spoken text.',
+  ].join('\n');
 }
 
 async function generateReply(
@@ -1580,6 +1656,8 @@ async function generateReply(
   forcedCardId: string | null,
   topic: string | null,
   topicTurns: number,
+  viewerIntent: ViewerIntent | null,
+  viewerTurnsSince: number,
   previousAutonomousReply: string | null,
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
@@ -1683,15 +1761,12 @@ async function generateReply(
       : 'Reply in the same language as the user. Usually use one short Japanese sentence of about 20 to 40 characters with no Markdown. When a card strongly affects the speaking form, allow one short second sentence for an interruption, self-correction, private aside, or unfinished thought. Keep the reply to at most two short sentences.';
   const autonomousDirectorInstruction =
     mode === 'autonomous'
-      ? [
-          `Current topic: ${topic ?? '(none)'}`,
-          `Current topic spoken-turn count: ${topicTurns}`,
-          'Choose exactly one action for this autonomous candidate.',
-          'continue means speak while staying with the current topic.',
-          'new_topic means speak about a different topic and return a short topic label.',
-          'silence means deliberately say nothing: text must be empty, emotion must be neutral, and activatedCards must be empty.',
-          'For continue and new_topic, return a non-empty short topic label and spoken text.',
-        ].join('\n')
+      ? buildAutonomousDirectorInstruction(
+          topic,
+          topicTurns,
+          viewerIntent,
+          viewerTurnsSince,
+        )
       : '';
   const previousAutonomousReplyInstruction =
     mode === 'autonomous'
@@ -2369,6 +2444,8 @@ async function handleRequest(
         forcedCardId,
         topic,
         topicTurns,
+        viewerIntent,
+        viewerTurnsSince,
         previousAutonomousReply,
         performanceContext,
       } = readChatRequest(payload);
@@ -2412,6 +2489,8 @@ async function handleRequest(
           forcedCardId,
           topic,
           topicTurns,
+          viewerIntent,
+          viewerTurnsSince,
           previousAutonomousReply,
           performanceContext,
           characterIdentity,

@@ -20,6 +20,8 @@ import {
   createSemanticDialogueHistory,
   DEFAULT_HISTORY_TURN_LIMIT,
 } from './semanticDialogueHistory';
+import type { AutonomousContext } from './autonomousContext';
+export type { AutonomousContext } from './autonomousContext';
 import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
   ConversationActionDecision,
@@ -45,11 +47,6 @@ export const AUTONOMOUS_ACTIONS = [
 ] as const;
 
 export type AutonomousAction = (typeof AUTONOMOUS_ACTIONS)[number];
-
-export interface AutonomousContext {
-  topic: string | null;
-  topicTurns: number;
-}
 
 export interface AutonomousDecision {
   action: AutonomousAction;
@@ -559,6 +556,8 @@ export function useConversation(
               ? {
                   topic: autonomousContext?.topic ?? null,
                   topicTurns: autonomousContext?.topicTurns ?? 0,
+                  viewerIntent: autonomousContext?.viewerIntent ?? null,
+                  viewerTurnsSince: autonomousContext?.viewerTurnsSince ?? 0,
                   previousAutonomousReply: lastAutonomousReplyRef.current,
                 }
               : {}),

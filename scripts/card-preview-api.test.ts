@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildAutonomousDirectorInstruction,
   buildCharacterIdentitySystemPrompt,
   buildCardPreviewSystemPrompt,
   buildVoiceInteractionPolicySystemPrompt,
@@ -99,6 +100,24 @@ test('card preview prompt uses behavior state without motion asset details', () 
   assert.match(prompt, /Behavior gesture intention: inspect/);
   assert.equal(prompt.includes('card-chicken'), false);
   assert.equal(prompt.includes('.vrma'), false);
+});
+
+test('autonomous director prompt prioritizes the latest viewer intent', () => {
+  const prompt = buildAutonomousDirectorInstruction(
+    '朝ごはん',
+    3,
+    'question',
+    0,
+  );
+
+  assert.match(prompt, /Latest viewer intent: question/);
+  assert.match(prompt, /Autonomous turns since latest viewer input: 0/);
+  assert.match(
+    prompt,
+    /latest viewer intent and recent conversation history as the current situation/,
+  );
+  assert.match(prompt, /give that latest viewer turn priority/);
+  assert.match(prompt, /backchannel or unfinished, silence is acceptable/);
 });
 
 test('voice assistant response accepts only compatible action and cue pairs', () => {

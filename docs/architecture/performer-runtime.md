@@ -65,6 +65,7 @@ The current source mapping is:
 | React state bridge | `src/performer/usePerformerRuntime.ts` |
 | Voice floor state and pending context | `src/conversation/floorController.ts` |
 | Committed semantic dialogue history | `src/conversation/semanticDialogueHistory.ts` |
+| Autonomous topic and latest viewer intent | `src/conversation/autonomousContext.ts`, `src/App.tsx` |
 | Voice interaction timeline | `src/conversation/interactionTimeline.ts`, `src/voice/voiceLabRecorder.ts` |
 | WildCard direction | `src/cards/wildcardDirection.ts` |
 | Request and playback execution | `src/conversation/useConversation.ts` |
@@ -174,8 +175,12 @@ It does not own emotion state.
 ### Session loop and reset
 
 The application keeps one in-memory session while the page remains open.
-The session contains conversation history, autonomous topic context, the last
-autonomous reply, Performer State, and per-turn card state.
+The session contains conversation history, autonomous topic context, the latest
+structured viewer intent, the age of that intent, the last autonomous reply,
+Performer State, and per-turn card state.
+
+The viewer intent is derived from the latest input and does not store its raw
+text. The age counts completed non-silent autonomous turns since that input.
 
 The loop starts after the avatar and audio are ready.
 It schedules the initial four-second delay, then schedules the next delay after
@@ -210,8 +215,9 @@ The Performer Runtime does not receive a generic `SessionState` type.
 
 The resolver calculates it for each `PerformancePlan`.
 
-Topic is conversation-owned in v0.1.
-`App.tsx` and `useConversation` keep `AutonomousContext`, `topic`, and `topicTurns`.
+Topic and viewer intent are conversation-owned in v0.1.
+`App.tsx` and `useConversation` keep `AutonomousContext`, `topic`, `topicTurns`,
+`viewerIntent`, and `viewerTurnsSince`.
 Moving topic into the Runtime is a v0.2 decision.
 
 ### Performer Profile
