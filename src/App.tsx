@@ -34,7 +34,6 @@ import { runtimeConfig } from './runtimeConfig';
 import { fetchListeningBackchannels } from './voice/backchannel';
 import type { ListeningBackchannelAudio } from './voice/backchannelPolicy';
 import {
-  scheduleListeningBackchannel,
   selectListeningBackchannelIndex,
 } from './voice/backchannelPolicy';
 import { useVoiceInput } from './voice/useVoiceInput';
@@ -267,14 +266,12 @@ export default function App() {
     null,
   );
   const voiceReactionIdRef = useRef(0);
-  const activeVoiceSegmentRef = useRef<string | null>(null);
   const activeBargeInSegmentRef = useRef<string | null>(null);
   const backchannelAudioRef = useRef<ListeningBackchannelAudio[]>([]);
   const backchannelVariantIndexRef = useRef<
     Record<Exclude<VoiceBackchannelCue, 'none'>, number | null>
   >({ un: null, uun: null });
   const backchannelLoadingRef = useRef<Promise<void> | null>(null);
-  const backchannelTimerRef = useRef<number | null>(null);
   const bargeInTimerRef = useRef<number | null>(null);
   const bargeInStateRef = useRef<BargeInState>('idle');
   const [bargeInState, setBargeInState] = useState<BargeInState>('idle');
@@ -734,13 +731,8 @@ export default function App() {
     }
     stopReaction();
     stageRef.current?.stopReactionMotion();
-    activeVoiceSegmentRef.current = null;
     setListeningReaction(undefined);
     backchannelVariantIndexRef.current = { un: null, uun: null };
-    if (backchannelTimerRef.current !== null) {
-      window.clearTimeout(backchannelTimerRef.current);
-      backchannelTimerRef.current = null;
-    }
 
     if (nonSpeechTimerRef.current !== null) {
       window.clearTimeout(nonSpeechTimerRef.current);
@@ -857,12 +849,6 @@ export default function App() {
     [createPlan, getDirectionContribution],
   );
 
-  const clearBackchannelTimer = useCallback(() => {
-    if (backchannelTimerRef.current === null) return;
-    window.clearTimeout(backchannelTimerRef.current);
-    backchannelTimerRef.current = null;
-  }, []);
-
   const preloadBackchannel = useCallback(() => {
     if (backchannelAudioRef.current.length > 0 || backchannelLoadingRef.current) {
       return;
@@ -898,7 +884,6 @@ export default function App() {
           } else {
             activeBargeInSegmentRef.current = null;
           }
-          activeVoiceSegmentRef.current = event.segmentId;
           stopReaction();
           stageRef.current?.stopReactionMotion();
           setVoiceValidationError('');
@@ -912,46 +897,13 @@ export default function App() {
             kind: 'nod',
             target: 'viewer',
           });
-          clearBackchannelTimer();
-          if (isBargeInCandidate) return;
-          const segmentId = event.segmentId;
-          const delayMs = scheduleListeningBackchannel();
-          if (delayMs === null) return;
-          backchannelTimerRef.current = window.setTimeout(() => {
-            backchannelTimerRef.current = null;
-            if (activeVoiceSegmentRef.current !== segmentId) return;
-            const audioData = backchannelAudioRef.current.filter(
-              (audio) => audio.cue === 'un',
-            );
-            const variantIndex = selectListeningBackchannelIndex(
-              audioData.length,
-              backchannelVariantIndexRef.current.un,
-            );
-            if (variantIndex === null) return;
-            const selectedAudio = audioData[variantIndex];
-            if (!selectedAudio) return;
-            void playReaction(selectedAudio.audioData).then((played) => {
-              if (played) {
-                backchannelVariantIndexRef.current.un = variantIndex;
-                handleInteractionTimelineEvent({
-                  kind: 'backchannel_played',
-                  at: Date.now(),
-                  cue: 'un',
-                  channel: 'local_preloaded',
-                });
-              }
-            });
-          }, delayMs);
           return;
         }
         case 'speech_ended':
-          clearBackchannelTimer();
           return;
         case 'utterance_finalized': {
-          clearBackchannelTimer();
           stopReaction();
           stageRef.current?.stopReactionMotion();
-          activeVoiceSegmentRef.current = null;
           setListeningReaction(undefined);
           const message = event.text.trim();
           const candidateSegmentId = activeBargeInSegmentRef.current;
@@ -1022,7 +974,6 @@ export default function App() {
         }
         case 'recognition_stopped':
         case 'recognition_failed':
-          clearBackchannelTimer();
           dispatchBargeIn({
             type:
               event.type === 'recognition_stopped'
@@ -1032,7 +983,6 @@ export default function App() {
           activeBargeInSegmentRef.current = null;
           stopReaction();
           stageRef.current?.stopReactionMotion();
-          activeVoiceSegmentRef.current = null;
           setListeningReaction(undefined);
           return;
         case 'listening_started':
@@ -1044,7 +994,6 @@ export default function App() {
       beginReply,
       cancelActiveCardReactionPlan,
       cancelNonSpeechPlan,
-      clearBackchannelTimer,
       clearSubtitle,
       createPlanForTrigger,
       dispatchBargeIn,
@@ -1052,14 +1001,12 @@ export default function App() {
       interruptCurrentTurn,
       isBusy,
       isMuted,
-      playReaction,
       prepare,
       recordVoiceSignal,
       readCardContext,
       sendVoice,
       ttsPlaying,
       stopReaction,
-      handleInteractionTimelineEvent,
     ],
   );
 

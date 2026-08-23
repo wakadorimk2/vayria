@@ -16,13 +16,9 @@ import {
   encodePcm16,
 } from '../src/voice/pcm16.js';
 import {
-  LISTENING_BACKCHANNEL_MAX_DELAY_MS,
-  LISTENING_BACKCHANNEL_MIN_DELAY_MS,
-  LISTENING_BACKCHANNEL_PROBABILITY,
   LISTENING_BACKCHANNEL_PROFILES,
   collectSuccessfulBackchannelAudio,
   type ListeningBackchannelAudio,
-  scheduleListeningBackchannel,
   selectListeningBackchannelIndex,
 } from '../src/voice/backchannelPolicy.js';
 import {
@@ -813,33 +809,6 @@ test('listening backchannel provides three TTS profiles', () => {
     { rateScale: 1, intonationScale: 1 },
     { rateScale: 0.94, intonationScale: 1.16 },
   ]);
-});
-
-test('listening backchannel schedules only within the configured probability and delay', () => {
-  assert.equal(
-    scheduleListeningBackchannel(() => LISTENING_BACKCHANNEL_PROBABILITY),
-    null,
-  );
-  assert.equal(
-    scheduleListeningBackchannel(
-      (() => {
-        const values = [LISTENING_BACKCHANNEL_PROBABILITY - 0.01, 0];
-        let index = 0;
-        return () => values[index++] ?? 0;
-      })(),
-    ),
-    LISTENING_BACKCHANNEL_MIN_DELAY_MS,
-  );
-  assert.equal(
-    scheduleListeningBackchannel(
-      (() => {
-        const values = [LISTENING_BACKCHANNEL_PROBABILITY - 0.01, 0.999999];
-        let index = 0;
-        return () => values[index++] ?? 0;
-      })(),
-    ),
-    LISTENING_BACKCHANNEL_MAX_DELAY_MS,
-  );
 });
 
 test('listening backchannel selection avoids immediate repetition', () => {

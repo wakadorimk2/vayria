@@ -17,33 +17,12 @@ export interface ListeningBackchannelAudio {
   audioData: ArrayBuffer;
 }
 
-export const LISTENING_BACKCHANNEL_PROBABILITY = 0.5;
-export const LISTENING_BACKCHANNEL_MIN_DELAY_MS = 900;
-export const LISTENING_BACKCHANNEL_MAX_DELAY_MS = 1_400;
-
 export type RandomSource = () => number;
 
 function normalizeRandom(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
   if (value >= 1) return 0.999_999_999;
   return value;
-}
-
-export function scheduleListeningBackchannel(
-  random: RandomSource = Math.random,
-): number | null {
-  if (normalizeRandom(random()) >= LISTENING_BACKCHANNEL_PROBABILITY) {
-    return null;
-  }
-
-  const delayRange =
-    LISTENING_BACKCHANNEL_MAX_DELAY_MS -
-    LISTENING_BACKCHANNEL_MIN_DELAY_MS +
-    1;
-  return (
-    LISTENING_BACKCHANNEL_MIN_DELAY_MS +
-    Math.floor(normalizeRandom(random()) * delayRange)
-  );
 }
 
 export function selectListeningBackchannelIndex(
