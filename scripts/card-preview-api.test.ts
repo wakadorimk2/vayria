@@ -525,6 +525,22 @@ test('action commitments must move to concrete content', () => {
       ),
     /Content-bearing voice responses must use take_floor/,
   );
+  assert.throws(
+    () =>
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'react_nonverbally',
+          backchannelCue: 'none',
+          text: '',
+          emotion: 'neutral',
+          activatedCards: [],
+        }),
+        [],
+        null,
+        '今どういう意味？',
+      ),
+    /Content-bearing voice responses must use take_floor/,
+  );
   assert.equal(
     parseVoiceAssistantResponse(
       JSON.stringify({
