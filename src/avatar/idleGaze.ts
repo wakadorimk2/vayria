@@ -147,6 +147,15 @@ export class IdleGazeController {
     }
   }
 
+  getNeutralTarget(target: Vector3): Vector3 {
+    if (this.hasNeutralTarget) {
+      target.copy(this.neutralTarget);
+    } else {
+      target.set(0, 0, 0);
+    }
+    return target;
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.reset();

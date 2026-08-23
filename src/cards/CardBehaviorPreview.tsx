@@ -6,6 +6,7 @@ import type {
   PerformanceBehavior,
   PerformancePlan,
   PerformanceResult,
+  Attention,
 } from '../performer/types';
 import { PerformancePlaybackCoordinator } from '../performer/performancePlayback';
 import { usePerformerRuntime } from '../performer/usePerformerRuntime';
@@ -310,6 +311,13 @@ export function CardBehaviorPreview() {
     [play, stageMotionPortAdapter, stop],
   );
   const performer = usePerformerRuntime();
+  const readAttention = useCallback((): Attention => {
+    return {
+      ...performer.state.attention,
+      position: null,
+      confidence: 0,
+    };
+  }, [performer.state.attention]);
   const {
     completePlan,
     createPlan,
@@ -449,7 +457,7 @@ export function CardBehaviorPreview() {
         >
           <div className="card-behavior-preview__stage">
             <VrmStage
-              attentionTarget={performer.state.attention.target}
+              attentionReader={readAttention}
               emotion={displayEmotion}
               motionScale={prefersReducedMotion ? 0 : 1}
               mouthOpen={mouthOpen}

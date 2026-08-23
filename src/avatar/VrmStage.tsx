@@ -25,6 +25,14 @@ import {
 import { BlinkController } from './BlinkController';
 import { EmotionExpressionController } from './EmotionExpressionController';
 import { IdleGazeController } from './idleGaze';
+import {
+  mapCameraAttentionToHeadBias,
+  mapCameraAttentionToViewerTarget,
+} from './attentionTarget';
+import { AttentionEngagementController } from '../attention/attentionEngagementController';
+import { AttentionVisualSmoother } from '../attention/attentionVisualSmoother';
+import { AttentionStateController } from '../attention/attentionStateController';
+import { CameraTrackingController } from '../attention/cameraTrackingController';
 import { applyBasePose, IdleController } from './idleMotion';
 import { frameAvatar } from './cameraPreset';
 import { setupStageLighting } from './stageLighting';
@@ -36,7 +44,10 @@ import {
   STAGE_PRESET,
 } from './stagePreset';
 import type { Emotion } from '../character/emotion';
-import type { PerformancePlan } from '../performer/types';
+import type {
+  AttentionReader,
+  PerformancePlan,
+} from '../performer/types';
 import type { ListeningReactionCue } from '../voice/voiceInput';
 
 const MODEL_URL = `${import.meta.env.BASE_URL}avatar/model.vrm`;
@@ -125,7 +136,7 @@ interface AvatarPerformanceState {
 }
 
 interface VrmStageProps {
-  attentionTarget?: 'viewer' | 'chat' | 'game' | 'none';
+  attentionReader: AttentionReader;
   emotion: Emotion;
   isExhibitionMode?: boolean;
   listeningReaction?: ListeningReactionCue;
@@ -156,7 +167,7 @@ type LoadState = 'loading' | 'ready' | 'missing' | 'error';
 export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
   function VrmStage(
     {
-      attentionTarget = 'none',
+      attentionReader,
       emotion,
       isExhibitionMode = false,
       listeningReaction,
@@ -173,7 +184,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const mouthOpenRef = useRef(mouthOpen);
     const emotionRef = useRef(emotion);
-    const attentionTargetRef = useRef(attentionTarget);
+    const attentionReaderRef = useRef(attentionReader);
     const listeningReactionRef = useRef(listeningReaction);
     const listeningReactionIdRef = useRef<number | null>(
       listeningReaction?.id ?? null,
@@ -210,8 +221,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     }, [emotion]);
 
     useEffect(() => {
-      attentionTargetRef.current = attentionTarget;
-    }, [attentionTarget]);
+      attentionReaderRef.current = attentionReader;
+    }, [attentionReader]);
 
     useEffect(() => {
       const nextId = listeningReaction?.id ?? null;
@@ -637,6 +648,18 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       let mouthExpression: string | null = null;
       let idleController: IdleController | null = null;
       let idleGazeController: IdleGazeController | null = null;
+      const attentionStateController = new AttentionStateController();
+      const cameraTrackingController = new CameraTrackingController();
+      const attentionVisualSmoother = new AttentionVisualSmoother();
+      const attentionEngagementController =
+        new AttentionEngagementController();
+      const viewerCameraForward = new Vector3();
+      const viewerCameraRight = new Vector3();
+      const viewerCameraUp = new Vector3();
+      const lookAtWorldPosition = new Vector3();
+      const thinkingGazeTarget = new Vector3();
+      const viewerGazeTarget = new Vector3();
+      let gazeModelHeight = 1;
       let blinkController: BlinkController | null = null;
       let emotionController: EmotionExpressionController | null = null;
       let appliedEmotion: Emotion | null = null;
@@ -694,6 +717,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             VRMUtils.rotateVRM0(vrm);
             const initialBounds = new Box3().setFromObject(vrm.scene);
             const center = initialBounds.getCenter(new Vector3());
+            gazeModelHeight = Math.max(initialBounds.getSize(new Vector3()).y, 0.1);
             vrm.scene.position.set(-center.x, -initialBounds.min.y, -center.z);
             scene.add(vrm.scene);
             loadedVrm = vrm;
@@ -702,7 +726,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             idleController = new IdleController(vrm);
             idleGazeController = new IdleGazeController(
               vrm,
-              initialBounds.getSize(new Vector3()).y,
+              gazeModelHeight,
             );
             motionPlayerRef.current = new MotionPlayer(vrm.scene);
             blinkController = new BlinkController(vrm);
@@ -781,17 +805,81 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           const listeningReactionState = listeningReactionRef.current;
           const hasPerformanceState =
             performanceState !== null || plan !== null;
+          const attention = attentionReaderRef.current();
+          const thinking =
+            listeningReactionState?.kind === 'thinking' ||
+            (performanceState?.phase === 'pre_reaction' &&
+              activePerformancePlan?.intent === 'speak');
+          const viewerEngaged =
+            listeningReactionState?.target === 'viewer' ||
+            (hasPerformanceState &&
+              activePerformancePlan?.preReaction?.gaze?.target === 'viewer' &&
+              !thinking);
+          const cameraEnabled =
+            attention.position !== null || attention.confidence > 0;
+          const cameraTracking = cameraTrackingController.update({
+            now: performance.now(),
+            enabled: cameraEnabled,
+            snapshot: {
+              position: attention.position,
+              confidence: attention.confidence,
+              updatedAt: attention.updatedAt,
+            },
+          });
+          const attentionFrame = attentionStateController.update({
+            now: performance.now(),
+            attention,
+            explicitTargetActive:
+              attention.target === 'game' ||
+              (hasPerformanceState && attention.target === 'chat'),
+            viewerEngaged,
+            thinking,
+            cameraEnabled,
+            cameraTracking,
+          });
+          const attentionEngagement = attentionEngagementController.update(
+            delta,
+            {
+              state: attentionFrame.state,
+              viewerEngaged,
+              hasCameraPosition: attentionFrame.position !== null,
+            },
+          );
+          const visualAttention = attentionVisualSmoother.update(delta, {
+            eyePosition:
+              attentionFrame.state === 'AttendViewer'
+                ? attentionFrame.position
+                : null,
+            headPosition:
+              attentionFrame.state === 'AttendViewer'
+                ? attentionFrame.headPosition
+                : null,
+          });
+          let cameraHeadYawBias = 0;
+          let cameraHeadPitchBias = 0;
+          if (
+            attentionFrame.state === 'AttendViewer' &&
+            visualAttention.headPosition
+          ) {
+            const headBias = mapCameraAttentionToHeadBias(
+              visualAttention.headPosition,
+              camera.fov,
+              camera.aspect,
+              attentionEngagement,
+            );
+            cameraHeadYawBias = headBias.yawDegrees;
+            cameraHeadPitchBias = headBias.pitchDegrees;
+          }
           const safeMotionScale = Math.max(
             0,
             Math.min(motionScaleRef.current, 1),
           );
-          const gazeTarget =
-            listeningReactionState?.target ??
-            preReaction?.gaze?.target ??
-            attentionTargetRef.current;
+          const gazeTarget = attentionFrame.target;
           const gazeYawBias =
             gazeTarget === 'viewer'
-              ? 0.6
+              ? loadedVrm.lookAt
+                ? 0
+                : 0.6
               : gazeTarget === 'chat'
                 ? -0.45
                 : gazeTarget === 'game'
@@ -820,19 +908,54 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           const motionPlayer = motionPlayerRef.current;
           idleController?.removeOverlay();
           motionPlayer?.update(delta);
+          loadedVrm.scene.updateMatrixWorld(true);
           const playbackState = motionPlayer?.playbackState ?? 'idle';
           const hasActiveBodyMotion =
             playbackState === 'entering' ||
             playbackState === 'playing' ||
             playbackState === 'exiting';
-          const performanceGazeTarget =
-            hasPerformanceState && gazeTarget !== 'none'
-              ? camera.position
-              : null;
+          let performanceGazeTarget: Vector3 | null = null;
+          if (attentionFrame.state === 'Thinking') {
+            idleGazeController?.getNeutralTarget(thinkingGazeTarget);
+            thinkingGazeTarget.x += gazeModelHeight * 0.035;
+            thinkingGazeTarget.y += gazeModelHeight * 0.018;
+            performanceGazeTarget = thinkingGazeTarget;
+          } else if (attentionFrame.state === 'AttendViewer') {
+            if (visualAttention.eyePosition && loadedVrm.lookAt) {
+              camera.updateMatrixWorld(true);
+              loadedVrm.lookAt.getLookAtWorldPosition(lookAtWorldPosition);
+              camera.getWorldDirection(viewerCameraForward);
+              viewerCameraRight
+                .setFromMatrixColumn(camera.matrixWorld, 0)
+                .normalize();
+              viewerCameraUp
+                .setFromMatrixColumn(camera.matrixWorld, 1)
+                .normalize();
+              performanceGazeTarget = mapCameraAttentionToViewerTarget(
+                {
+                  position: camera.position,
+                  forward: viewerCameraForward,
+                  right: viewerCameraRight,
+                  up: viewerCameraUp,
+                },
+                lookAtWorldPosition,
+                visualAttention.eyePosition,
+                camera.fov,
+                camera.aspect,
+                viewerGazeTarget,
+              );
+            } else if (viewerEngaged) {
+              performanceGazeTarget = camera.position;
+            }
+          } else if (attentionFrame.state === 'AttendTarget') {
+            performanceGazeTarget = camera.position;
+          }
           const idleGazeFrame = idleGazeController?.update(
             delta,
             camera.position,
-            !hasActiveBodyMotion && !hasPerformanceState,
+            !hasActiveBodyMotion &&
+              !hasPerformanceState &&
+              attentionFrame.state === 'Idle',
             performanceGazeTarget,
           );
           idleController?.setEnabled(true);
@@ -840,15 +963,19 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             idleController?.updateOverlay(
               delta,
               idleMotionWeight,
-              headYawBias + (idleGazeFrame?.fallbackHeadYawBias ?? 0),
-              listeningNodDegrees,
+              headYawBias +
+                cameraHeadYawBias +
+                (idleGazeFrame?.fallbackHeadYawBias ?? 0),
+              listeningNodDegrees + cameraHeadPitchBias,
             );
           } else {
             idleController?.update(
               delta,
               idleMotionWeight,
-              headYawBias + (idleGazeFrame?.fallbackHeadYawBias ?? 0),
-              listeningNodDegrees,
+              headYawBias +
+                cameraHeadYawBias +
+                (idleGazeFrame?.fallbackHeadYawBias ?? 0),
+              listeningNodDegrees + cameraHeadPitchBias,
             );
           }
           if (emotionController && appliedEmotion !== emotionRef.current) {
@@ -898,6 +1025,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         resizeObserver.disconnect();
         blinkController?.dispose();
         emotionController?.dispose();
+        attentionEngagementController.reset();
         idleController?.dispose();
         idleGazeController?.dispose();
         blinkController = null;
