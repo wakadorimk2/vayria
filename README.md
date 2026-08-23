@@ -85,6 +85,7 @@ URLの変更後はページを再読み込みしてください。
 `VITE_AUDIO_ENDPOINT_MS=400|600`でも起動時の既定値を変更できます。
 優先順位は`URL query > VITE_AUDIO_ENDPOINT_MS > 600ms`です。
 Mode DはAudio Labでだけ選べる実験Modeです。
+Mode D（Exhibition Mix）の実効endpointは`400ms`です。
 
 展示用STTは`small / CUDA / float16`を優先します。
 ロードに失敗した場合は`tiny / CPU / int8`へfallbackします。

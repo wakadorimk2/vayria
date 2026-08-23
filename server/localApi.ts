@@ -28,8 +28,7 @@ import {
 } from '../src/performer/types.js';
 import {
   classifyViewerMessageFastPath,
-  isDefiniteBackchannelMessage,
-  isDefiniteUnfinishedMessage,
+  isContentBearingVoiceMessage,
 } from '../src/performer/runtime.js';
 import {
   appendPlaycheckRecord,
@@ -210,18 +209,7 @@ class CardContractError extends Error {}
 class VoicePolicyContractError extends CardContractError {}
 class ConversationPolicyContractError extends Error {}
 
-function normalizeVoiceMessage(message: string): string {
-  return message.normalize('NFKC').replace(/\s+/gu, '').trim();
-}
-
-export function isContentBearingVoiceMessage(message: string): boolean {
-  const normalized = normalizeVoiceMessage(message);
-  return Boolean(
-    normalized &&
-      !isDefiniteBackchannelMessage(normalized) &&
-      !isDefiniteUnfinishedMessage(normalized),
-  );
-}
+export { isContentBearingVoiceMessage } from '../src/performer/runtime.js';
 
 export function normalizeConversationActionDecision(
   message: string,

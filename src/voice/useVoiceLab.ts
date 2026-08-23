@@ -11,6 +11,7 @@ import {
 } from './audioLab.js';
 import { VoiceLabRecorder } from './voiceLabRecorder.js';
 import type { VoiceInputEvent } from './voiceInput.js';
+import type { InteractionTimelineEvent } from '../conversation/interactionTimeline.js';
 
 export interface UseVoiceLabOptions {
   enabled: boolean;
@@ -47,6 +48,7 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
   snapshot: VoiceLabSnapshot;
   handleDiagnostic: (diagnostic: VoiceInputDiagnostic) => void;
   handleVoiceEvent: (event: VoiceInputEvent) => void;
+  handleInteractionTimelineEvent: (event: InteractionTimelineEvent) => void;
   downloadJsonl: () => void;
 } {
   const recorderRef = useRef<VoiceLabRecorder | null>(null);
@@ -123,6 +125,16 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
     setSnapshot(recorder.getSnapshot());
   }, []);
 
+  const handleInteractionTimelineEvent = useCallback(
+    (event: InteractionTimelineEvent) => {
+      const recorder = recorderRef.current;
+      if (!recorder) return;
+      recorder.recordInteractionTimelineEvent(event);
+      setSnapshot(recorder.getSnapshot());
+    },
+    [],
+  );
+
   const downloadJsonl = useCallback(() => {
     const current = recorderRef.current?.getSnapshot() ?? snapshot;
     if (!current.sessionId) return;
@@ -150,5 +162,11 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
     URL.revokeObjectURL(url);
   }, [snapshot]);
 
-  return { snapshot, handleDiagnostic, handleVoiceEvent, downloadJsonl };
+  return {
+    snapshot,
+    handleDiagnostic,
+    handleVoiceEvent,
+    handleInteractionTimelineEvent,
+    downloadJsonl,
+  };
 }

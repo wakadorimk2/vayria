@@ -21,6 +21,7 @@ import {
   type VoiceLabModeSummary,
 } from './audioLab.js';
 import type { VoiceInputEvent } from './voiceInput.js';
+import type { InteractionTimelineEvent } from '../conversation/interactionTimeline.js';
 
 interface ActiveUtterance {
   mode: AudioLabMode;
@@ -399,6 +400,19 @@ export class VoiceLabRecorder {
       case 'listening_started':
         return;
     }
+  }
+
+  recordInteractionTimelineEvent(event: InteractionTimelineEvent): void {
+    if (!this.enabled || !this.sessionId) return;
+    this.appendRecord({
+      kind: 'interaction_timeline',
+      timestamp: timestampFromMilliseconds(event.at),
+      sessionId: this.sessionId,
+      mode: this.currentMode,
+      preset: this.currentPreset,
+      audioEndpointMs: this.currentAudioEndpointMs,
+      event,
+    });
   }
 
   getSnapshot(): VoiceLabSnapshot {

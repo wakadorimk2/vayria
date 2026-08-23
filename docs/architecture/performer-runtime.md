@@ -63,6 +63,9 @@ The current source mapping is:
 | Performer state and policy | `src/performer/types.ts`, `src/performer/profile.ts` |
 | Baseline intent and plan resolver | `src/performer/runtime.ts` |
 | React state bridge | `src/performer/usePerformerRuntime.ts` |
+| Voice floor state and pending context | `src/conversation/floorController.ts` |
+| Committed semantic dialogue history | `src/conversation/semanticDialogueHistory.ts` |
+| Voice interaction timeline | `src/conversation/interactionTimeline.ts`, `src/voice/voiceLabRecorder.ts` |
 | WildCard direction | `src/cards/wildcardDirection.ts` |
 | Request and playback execution | `src/conversation/useConversation.ts` |
 | Autonomous timer and environment checks | `src/conversation/useAutonomousTalk.ts` |
@@ -81,6 +84,47 @@ Provider requests carry the same turn ID through `X-Performer-Turn-Id`.
 The local API also accepts the legacy `X-Wildcard-Turn-Id` header.
 The Vite local API accepts development events at `/api/events` and logs provider concurrency.
 The exhibition stress test uses the same chat and TTS endpoints with deterministic input.
+
+### Floor-aware voice boundary
+
+Voice input uses a separate floor boundary.
+
+```text
+VAD / ASR
+    ↓
+TurnSignal
+    ↓
+FloorController
+    ├─ listen
+    ├─ backchannel
+    └─ take_floor
+         ├─ PerformancePlan
+         ├─ SemanticDialogueHistory
+         └─ InteractionTimeline
+```
+
+VAD reports whether audio is present.
+`TurnSignal` normalizes speech start, speech end, final transcript, and recognition failure.
+`FloorController` decides which state can affect semantic history.
+The controller does not access VAD, the LLM provider, or TTS.
+
+`listen` stores an uncommitted fragment in `PendingUserFloor`.
+`backchannel` produces a local reaction and does not create a semantic message.
+Pending fragments do not enter the LLM request or `SemanticDialogueHistory` in v1.
+`take_floor` commits only the latest finalized transcript and discards pending fragments.
+The discard is recorded in `InteractionTimeline`.
+
+`SemanticDialogueHistory` is bounded to five entries and at most ten role messages.
+`InteractionTimeline` records turn signals, floor actions, floor ownership, local backchannels, TTS channel events, and barge-in metadata including candidate and confirmed states.
+Timeline records do not contain transcript or reply text.
+The Voice Lab keeps detailed local diagnostic records separately.
+
+The current floor controller uses a ten-second pending-fragment TTL, a four-fragment limit, and the existing 1,000-character voice limit.
+It does not add an automatic topic classifier.
+
+This boundary follows the same separation used by speech-dialogue and CG-agent systems: signal processing, dialogue action, and multimodal performance remain separate responsibilities. The Nitech Speech and Language Project describes speech dialogue, situation understanding, dialogue strategy, error handling, and CG-agent interaction as related but distinct parts of the system. See [Research](https://www.slp.nitech.ac.jp/research/) and [CG agents and avatars](https://www.slp.nitech.ac.jp/avatar/).
+
+VAP-based turn-taking, LLM streaming, interrupt policy, and hold-floor behavior remain future extensions. The current implementation records the relevant timeline boundary without adding those dependencies.
 
 ## 2. Core boundary
 

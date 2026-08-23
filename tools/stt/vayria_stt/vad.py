@@ -90,6 +90,9 @@ class PcmUtteranceDetector:
 
     def reset(self) -> None:
         self._pending.clear()
+        self._reset_segment_state()
+
+    def _reset_segment_state(self) -> None:
         self._candidate_frames.clear()
         self._speech_streak = 0
         self._silence_streak = 0
@@ -137,7 +140,7 @@ class PcmUtteranceDetector:
             self._silence_streak = 0
             if self._active_frame_count >= self._max_utterance_frame_count:
                 events = self._finish_active_segment()
-                self.reset()
+                self._reset_segment_state()
                 return events
             return []
 
@@ -146,7 +149,7 @@ class PcmUtteranceDetector:
         if self._silence_streak < self._end_silence_frame_count:
             return []
         events = self._finish_active_segment()
-        self.reset()
+        self._reset_segment_state()
         return events
 
     def _finish_active_segment(self) -> list[DetectorEvent]:
