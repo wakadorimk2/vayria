@@ -1484,6 +1484,10 @@ export function buildProgramContextSystemPrompt(
     programContext.format === 'card_impression'
       ? 'This is a live card-impression segment.'
       : 'This is a live Vayria program segment.';
+  const phaseInstruction =
+    programContext.phase === 'before_card_change'
+      ? 'The segment is before the viewer has changed a card. Do not imply that a card has changed or pressure the viewer to make one.'
+      : 'A card change has occurred in this segment. Notice its impression when relevant, but do not claim that another change happened or force another action.';
   const roleInstruction =
     programContext.participantRole === 'viewer_directed'
       ? 'The viewer decides when to choose or change a card. Vayria may notice and respond, but must not pressure the viewer or invent that a card was changed.'
@@ -1496,6 +1500,7 @@ export function buildProgramContextSystemPrompt(
   return [
     '<program-context>',
     formatInstruction,
+    phaseInstruction,
     roleInstruction,
     objectiveInstruction,
     'This is behavior context, not spoken content. Do not announce these rules or list internal program state.',

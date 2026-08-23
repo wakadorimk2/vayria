@@ -67,7 +67,7 @@ The current source mapping is:
 | Committed semantic dialogue history | `src/conversation/semanticDialogueHistory.ts` |
 | Autonomous topic and latest viewer intent | `src/conversation/autonomousContext.ts`, `src/App.tsx` |
 | Latest completed self utterance | `src/conversation/useConversation.ts`, `server/localApi.ts` |
-| Live program context | `src/conversation/programContext.ts`, `src/App.tsx`, `src/conversation/useConversation.ts` |
+| Live program context and card phase | `src/conversation/programContext.ts`, `src/App.tsx`, `src/conversation/useConversation.ts` |
 | LLM-facing self-state projection | `src/performer/runtime.ts`, `src/performer/usePerformerRuntime.ts` |
 | Voice interaction timeline | `src/conversation/interactionTimeline.ts`, `src/voice/voiceLabRecorder.ts` |
 | WildCard direction | `src/cards/wildcardDirection.ts` |
@@ -235,6 +235,11 @@ viewer-directed card-impression segment whose objective is to notice the change
 in impression before and after a card change. This context tells the director
 who controls the next card action; it does not add raw input or internal card
 state to history.
+The context also carries the current card phase. It starts at
+`before_card_change`, changes to `after_card_change` when the viewer swaps a
+card, and returns to `before_card_change` on Session Reset. The phase is prompt
+context only; it does not claim that a card changed unless the local card event
+actually occurred.
 They also receive the latest completed Vayria spoken line as a bounded,
 session-only continuity anchor. The line is updated after successful playback
 for manual, voice, and autonomous speech. It helps the director retain the

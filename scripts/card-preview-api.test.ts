@@ -20,6 +20,10 @@ import {
   readConversationEvent,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
+import {
+  DEFAULT_PROGRAM_CONTEXT,
+  isProgramContext,
+} from '../src/conversation/programContext.js';
 
 const VALID_CONTEXT = {
   callbackTendency: 0.25,
@@ -140,7 +144,11 @@ test('card preview prompt uses behavior state without motion asset details', () 
 test('program context keeps the card segment viewer-directed', () => {
   const prompt = buildProgramContextSystemPrompt();
 
+  assert.equal(DEFAULT_PROGRAM_CONTEXT.phase, 'before_card_change');
+  assert.equal(isProgramContext(DEFAULT_PROGRAM_CONTEXT), true);
   assert.match(prompt, /live card-impression segment/);
+  assert.match(prompt, /before the viewer has changed a card/);
+  assert.match(prompt, /Do not imply that a card has changed/);
   assert.match(prompt, /viewer decides when to choose or change a card/);
   assert.match(
     prompt,
@@ -148,6 +156,17 @@ test('program context keeps the card segment viewer-directed', () => {
   );
   assert.match(prompt, /impression changes before and after a card change/);
   assert.match(prompt, /behavior context, not spoken content/);
+});
+
+test('program context changes its card phase instruction after a swap', () => {
+  const prompt = buildProgramContextSystemPrompt({
+    ...DEFAULT_PROGRAM_CONTEXT,
+    phase: 'after_card_change',
+  });
+
+  assert.match(prompt, /A card change has occurred in this segment/);
+  assert.match(prompt, /Notice its impression when relevant/);
+  assert.match(prompt, /do not claim that another change happened/);
 });
 
 test('autonomous director prompt prioritizes the latest viewer intent', () => {

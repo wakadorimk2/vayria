@@ -28,7 +28,10 @@ import {
   type AutonomousContext,
   type ChatCardContext,
 } from './conversation/useConversation';
-import { DEFAULT_PROGRAM_CONTEXT } from './conversation/programContext';
+import {
+  DEFAULT_PROGRAM_CONTEXT,
+  type ProgramPhase,
+} from './conversation/programContext';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
 import {
   CARD_INTERACTION_ATTENTION_DURATION_MS,
@@ -212,6 +215,13 @@ export default function App() {
   const [audioControl, setAudioControl] = useState(readAudioControlState);
   const [characterIdentity, setCharacterIdentity] = useState(
     readCharacterIdentity,
+  );
+  const [programPhase, setProgramPhase] = useState<ProgramPhase>(
+    DEFAULT_PROGRAM_CONTEXT.phase,
+  );
+  const programContext = useMemo(
+    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase }),
+    [programPhase],
   );
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>(INITIAL_AUTONOMOUS_CONTEXT);
@@ -598,7 +608,7 @@ export default function App() {
     isExhibitionMode,
     isMuted,
     characterIdentity,
-    programContext: DEFAULT_PROGRAM_CONTEXT,
+    programContext,
     getPerformerStateContext,
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
@@ -788,6 +798,7 @@ export default function App() {
     setActivePlan(null);
     setActiveEmotionCue(null);
     setAutonomousContext(INITIAL_AUTONOMOUS_CONTEXT);
+    setProgramPhase(DEFAULT_PROGRAM_CONTEXT.phase);
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
@@ -797,6 +808,7 @@ export default function App() {
     resetConversation,
     resetRuntime,
     resetTurn,
+    setProgramPhase,
     setDucked,
     stopReaction,
     stopVoiceInput,
@@ -1179,6 +1191,7 @@ export default function App() {
 
   const handleCardInserted = useCallback(
     (result: CardSwapResult) => {
+      setProgramPhase('after_card_change');
       const trigger: PerformerTrigger = {
         kind: 'external_stimulus',
         semanticCue: `something_changed:${result.insertedCardId}`,
@@ -1200,6 +1213,7 @@ export default function App() {
       isAutonomousLoopEnabled,
       isBusy,
       isMuted,
+      setProgramPhase,
       startAutonomous,
     ],
   );
