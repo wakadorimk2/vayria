@@ -66,6 +66,7 @@ export interface PerformanceContextPayload {
 interface ConversationOptions {
   historyLimit?: number;
   isMuted?: boolean;
+  isExhibitionMode?: boolean;
   onPerformanceCue?: (
     planId: string,
     cue: { emotion: Emotion; intensity: number },
@@ -86,6 +87,7 @@ interface ProcessTurnResult {
 
 const DEFAULT_HISTORY_LIMIT = 6;
 const MAX_HISTORY_LIMIT = 10;
+const SUBTITLE_HOLD_MS = 1_500;
 const ACTIVE_STATUSES: ConversationStatus[] = [
   'thinking',
   'synthesizing',
@@ -193,12 +195,15 @@ export function useConversation(
 ) {
   const historyLimit = normalizeHistoryLimit(options.historyLimit);
   const isMuted = options.isMuted ?? false;
+  const isExhibitionMode = options.isExhibitionMode ?? false;
   const [reply, setReply] = useState('');
+  const [isSubtitleVisible, setIsSubtitleVisible] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState<ConversationStatus>('idle');
   const [source, setSource] = useState<ConversationSource | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
+  const subtitleClearTimerRef = useRef<number | null>(null);
   const historyRef = useRef<ConversationHistoryItem[]>([]);
   const lastAutonomousReplyRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
@@ -269,6 +274,32 @@ export function useConversation(
     abortControllerRef.current = null;
   }, []);
 
+  const clearSubtitleTimer = useCallback(() => {
+    if (subtitleClearTimerRef.current === null) return;
+    window.clearTimeout(subtitleClearTimerRef.current);
+    subtitleClearTimerRef.current = null;
+  }, []);
+
+  const clearSubtitle = useCallback(() => {
+    clearSubtitleTimer();
+    setIsSubtitleVisible(false);
+  }, [clearSubtitleTimer]);
+
+  const scheduleSubtitleClear = useCallback(
+    (generation: number) => {
+      if (!isExhibitionMode) return;
+      clearSubtitleTimer();
+      const timerId = window.setTimeout(() => {
+        if (subtitleClearTimerRef.current !== timerId) return;
+        subtitleClearTimerRef.current = null;
+        if (generation !== generationRef.current) return;
+        setIsSubtitleVisible(false);
+      }, SUBTITLE_HOLD_MS);
+      subtitleClearTimerRef.current = timerId;
+    },
+    [clearSubtitleTimer, isExhibitionMode],
+  );
+
   const invalidateCurrentTurn = useCallback(
     (stopPlayback: boolean) => {
       generationRef.current += 1;
@@ -284,29 +315,42 @@ export function useConversation(
       const plan = activePlanRef.current;
       if (plan) emitResult(plan, 'interrupted');
       invalidateCurrentTurn(true);
+      clearSubtitle();
       setError('');
       setConversationState('idle', null);
     },
-    [emitResult, invalidateCurrentTurn, setConversationState],
+    [clearSubtitle, emitResult, invalidateCurrentTurn, setConversationState],
   );
 
   const cancelAutonomous = useCallback(() => {
     if (sourceRef.current !== 'autonomous') return;
     finishActivePlanAsCancelled();
     invalidateCurrentTurn(true);
+    clearSubtitle();
     setError('');
     setConversationState('idle', null);
-  }, [finishActivePlanAsCancelled, invalidateCurrentTurn, setConversationState]);
+  }, [
+    clearSubtitle,
+    finishActivePlanAsCancelled,
+    invalidateCurrentTurn,
+    setConversationState,
+  ]);
 
   const resetConversation = useCallback(() => {
     finishActivePlanAsCancelled();
     invalidateCurrentTurn(true);
     historyRef.current = [];
     lastAutonomousReplyRef.current = null;
+    clearSubtitle();
     setReply('');
     setError('');
     setConversationState('idle', null);
-  }, [finishActivePlanAsCancelled, invalidateCurrentTurn, setConversationState]);
+  }, [
+    clearSubtitle,
+    finishActivePlanAsCancelled,
+    invalidateCurrentTurn,
+    setConversationState,
+  ]);
 
   const appendHistory = useCallback(
     (items: ConversationHistoryItem[]) => {
@@ -357,6 +401,8 @@ export function useConversation(
           invalidateCurrentTurn(true);
         }
       }
+
+      clearSubtitle();
 
       const pendingPlan =
         turnSource === 'voice' ? createInteractionReactionPlan(plan) : plan;
@@ -576,6 +622,10 @@ export function useConversation(
         }
 
         setReply(responseText);
+        if (isExhibitionMode) {
+          clearSubtitleTimer();
+          setIsSubtitleVisible(true);
+        }
         onPerformanceCueRef.current?.(executionPlan.planId, {
           emotion: responseEmotion,
           intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
@@ -590,6 +640,7 @@ export function useConversation(
         }
 
         if (isMutedRef.current) {
+          clearSubtitle();
           setConversationState('idle', null);
           emitResult(executionPlan, 'cancelled', {
             emotionCue: {
@@ -697,6 +748,10 @@ export function useConversation(
               setConversationState('speaking', turnSource);
             }
           },
+          onSpeechEnd: () => {
+            if (generation !== generationRef.current) return;
+            scheduleSubtitleClear(generation);
+          },
         });
         if (generation !== generationRef.current) {
           emitResult(executionPlan, 'interrupted');
@@ -754,6 +809,7 @@ export function useConversation(
           return { completed: false, decision: null };
         }
         if (isAbortError(caughtError)) {
+          clearSubtitle();
           setConversationState('idle', null);
           emitResult(executionPlan, 'cancelled');
           emitTerminalEvent('turn_aborted', { reason: 'aborted' });
@@ -765,6 +821,7 @@ export function useConversation(
           };
         }
 
+        clearSubtitle();
         setError(
           caughtError instanceof Error
             ? caughtError.message
@@ -785,10 +842,14 @@ export function useConversation(
     },
     [
       appendHistory,
+      clearSubtitle,
+      clearSubtitleTimer,
       emitResult,
       finishActivePlanAsCancelled,
       invalidateCurrentTurn,
+      isExhibitionMode,
       playback,
+      scheduleSubtitleClear,
       setConversationState,
     ],
   );
@@ -868,10 +929,12 @@ export function useConversation(
     ) {
       finishActivePlanAsCancelled();
       invalidateCurrentTurn(true);
+      clearSubtitle();
       setConversationState('idle', null);
     }
   }, [
     cancelAutonomous,
+    clearSubtitle,
     finishActivePlanAsCancelled,
     invalidateCurrentTurn,
     isMuted,
@@ -882,19 +945,22 @@ export function useConversation(
     return () => {
       generationRef.current += 1;
       abortFetch();
+      clearSubtitleTimer();
       activePlanRef.current = null;
     };
-  }, [abortFetch]);
+  }, [abortFetch, clearSubtitleTimer]);
 
   const isBusy = ACTIVE_STATUSES.includes(status);
 
   return {
     cancelAutonomous,
+    clearSubtitle,
     error,
     isBusy,
     interruptCurrentTurn,
     isManualBusy: isBusy && INTERACTIVE_SOURCES.includes(source ?? 'manual'),
     reply,
+    isSubtitleVisible,
     resetConversation,
     sendAutonomous,
     sendManual,
