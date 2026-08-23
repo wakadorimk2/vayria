@@ -10,6 +10,7 @@ import {
   DEFAULT_SPEECH_MOTION_ASSET_ID,
   getEffectIntensity,
   getNextAutonomousDelay,
+  isContentBearingVoiceMessage,
   reducePerformanceResult,
   resolvePerformancePlan,
   schedulePerformancePlan,
@@ -171,6 +172,18 @@ test('conversation fast path receives phatic speech without a spoken reply', () 
   assert.deepEqual(
     classifyViewerMessageFastPath('あー'),
     { action: 'silence', backchannelCue: 'none' },
+  );
+});
+
+test('conversation fast path uses a nonverbal reaction for low-information content', () => {
+  assert.deepEqual(
+    classifyViewerMessageFastPath('まあ、そんな感じ'),
+    { action: 'react_nonverbally', backchannelCue: 'none' },
+  );
+  assert.equal(isContentBearingVoiceMessage('まあ、そんな感じ'), false);
+  assert.deepEqual(
+    classifyViewerMessageFastPath('まあ、そんな感じだけど'),
+    { action: 'listen', backchannelCue: 'none' },
   );
 });
 

@@ -296,6 +296,7 @@ test('voice content classifier separates topics from phatic and unfinished speec
   assert.equal(isContentBearingVoiceMessage('えっと…'), false);
   assert.equal(isContentBearingVoiceMessage('うん'), false);
   assert.equal(isContentBearingVoiceMessage('あー'), false);
+  assert.equal(isContentBearingVoiceMessage('まあ、そんな感じ'), false);
   assert.equal(isContentBearingVoiceMessage('今日は雨だったけど…'), false);
 });
 
@@ -327,6 +328,13 @@ test('common policy safety net keeps ambiguous decisions for the LLM', () => {
       backchannelCue: 'none',
     }),
     { action: 'take_floor', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    normalizeVoiceInteractionDecision('まあ、そんな感じ', {
+      action: 'take_floor',
+      backchannelCue: 'none',
+    }),
+    { action: 'react_nonverbally', backchannelCue: 'none' },
   );
 });
 

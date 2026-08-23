@@ -45,6 +45,10 @@ const PHATIC_ONLY_MESSAGES = new Set([
   'ね',
   'あ',
 ]);
+const NONVERBAL_ACKNOWLEDGEMENT_MESSAGES = new Set([
+  'まあ、そんな感じ',
+  'そんな感じ',
+]);
 const PARTICIPATION_ONLY_MESSAGES = new Set(['ねえ', 'ちょっと']);
 const UNFINISHED_ENDING =
   /(?:けど|けれど|けれども|ですが|なので|だから|から|ので|し|っていうか|というか|なんていうか)$/u;
@@ -110,6 +114,19 @@ export function isDefiniteBackchannelMessage(message: string): boolean {
   return PHATIC_ONLY_MESSAGES.has(withoutTerminalPunctuation);
 }
 
+export function isDefiniteNonverbalAcknowledgementMessage(
+  message: string,
+): boolean {
+  const normalized = normalizeConversationText(message);
+  if (!normalized || isDefiniteQuestionMessage(normalized)) return false;
+  if (ELLIPSIS_ENDING.test(normalized)) return false;
+  const withoutTerminalPunctuation = normalized.replace(
+    TERMINAL_PUNCTUATION,
+    '',
+  );
+  return NONVERBAL_ACKNOWLEDGEMENT_MESSAGES.has(withoutTerminalPunctuation);
+}
+
 export function isDefiniteParticipationMessage(message: string): boolean {
   const normalized = normalizeConversationText(message);
   if (!normalized || isDefiniteQuestionMessage(normalized)) return false;
@@ -126,6 +143,7 @@ export function isContentBearingVoiceMessage(message: string): boolean {
   return Boolean(
     normalized &&
       !isDefiniteBackchannelMessage(normalized) &&
+      !isDefiniteNonverbalAcknowledgementMessage(normalized) &&
       !isDefiniteUnfinishedMessage(normalized),
   );
 }
@@ -172,6 +190,9 @@ export function classifyViewerMessageFastPath(
   }
   if (isDefiniteParticipationMessage(message)) {
     return createActionDecision('take_floor');
+  }
+  if (isDefiniteNonverbalAcknowledgementMessage(message)) {
+    return createActionDecision('react_nonverbally');
   }
   if (isDefiniteBackchannelMessage(message)) {
     return createActionDecision('silence');

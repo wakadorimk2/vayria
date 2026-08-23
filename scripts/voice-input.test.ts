@@ -966,6 +966,7 @@ test('barge-in confirmation accepts only content-bearing transcripts', () => {
   assert.equal(isConfirmedBargeInTranscript('待って'), true);
   assert.equal(isConfirmedBargeInTranscript('うん'), false);
   assert.equal(isConfirmedBargeInTranscript('はい'), false);
+  assert.equal(isConfirmedBargeInTranscript('まあ、そんな感じ'), false);
   assert.equal(
     isConfirmedBargeInTranscript('ご視聴ありがとうございました'),
     false,
