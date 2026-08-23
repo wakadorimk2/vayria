@@ -955,6 +955,8 @@ test('adaptive RMS VAD rejects a low-level candidate after two noise-floor chunk
 
 test('barge-in confirmation accepts only content-bearing transcripts', () => {
   assert.equal(isConfirmedBargeInTranscript('今日は雨だった'), true);
+  assert.equal(isConfirmedBargeInTranscript('いや'), true);
+  assert.equal(isConfirmedBargeInTranscript('待って'), true);
   assert.equal(isConfirmedBargeInTranscript('うん'), false);
   assert.equal(isConfirmedBargeInTranscript('はい'), false);
   assert.equal(

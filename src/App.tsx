@@ -560,7 +560,6 @@ export default function App() {
 
   const {
     cancelAutonomous,
-    clearSubtitle,
     error,
     interruptCurrentTurn,
     isBusy,
@@ -873,7 +872,6 @@ export default function App() {
       recordVoiceSignal(event);
       switch (event.type) {
         case 'speech_started': {
-          clearSubtitle();
           // Speech detection is only a candidate. Final text decides turn handoff.
           const isBargeInCandidate = ttsPlaying;
           if (isBargeInCandidate) {
@@ -881,8 +879,6 @@ export default function App() {
           } else {
             activeBargeInSegmentRef.current = null;
           }
-          stopReaction();
-          stageRef.current?.stopReactionMotion();
           setVoiceValidationError('');
           dispatchBargeIn({
             type: 'speech_started',
@@ -987,7 +983,6 @@ export default function App() {
       beginReply,
       cancelActiveCardReactionPlan,
       cancelNonSpeechPlan,
-      clearSubtitle,
       createPlanForTrigger,
       dispatchBargeIn,
       handleReplyAccepted,
