@@ -43,6 +43,7 @@ import {
   isConfirmedBargeInTranscript,
   isRejectedBargeInCandidate,
   reduceBargeIn,
+  shouldInterruptBusyTurn,
   type BargeInEvent,
 } from './voice/bargeIn';
 import {
@@ -663,6 +664,10 @@ export default function App() {
       voiceLab,
     ],
   );
+  const latestDispatchBargeInRef = useRef(dispatchBargeIn);
+  useEffect(() => {
+    latestDispatchBargeInRef.current = dispatchBargeIn;
+  }, [dispatchBargeIn]);
 
   useEffect(() => {
     if (bargeInTimeoutToken === 0) return;
@@ -670,18 +675,17 @@ export default function App() {
   }, [bargeInTimeoutToken, dispatchBargeIn]);
 
   useEffect(() => {
-    if (audioLabMode === 'exhibition-mix' && ttsPlaying) return;
+    if (ttsPlaying) return;
     if (bargeInStateRef.current !== 'candidate') return;
     dispatchBargeIn({ type: 'tts_stopped' });
-  }, [audioLabMode, dispatchBargeIn, ttsPlaying]);
+  }, [dispatchBargeIn, ttsPlaying]);
 
   useEffect(() => {
-    if (audioLabMode === 'exhibition-mix') return;
     clearBargeInTimer();
     activeBargeInSegmentRef.current = null;
     if (bargeInStateRef.current === 'idle') return;
-    dispatchBargeIn({ type: 'reset' });
-  }, [audioLabMode, clearBargeInTimer, dispatchBargeIn]);
+    latestDispatchBargeInRef.current({ type: 'reset' });
+  }, [audioLabMode, clearBargeInTimer]);
 
   useEffect(() => {
     return () => {
@@ -888,13 +892,10 @@ export default function App() {
         case 'speech_started': {
           clearSubtitle();
           cancelNonSpeechPlan();
-          const isBargeInCandidate =
-            audioLabMode === 'exhibition-mix' && ttsPlaying;
+          // Speech detection is only a candidate. Final text decides turn handoff.
+          const isBargeInCandidate = ttsPlaying;
           if (isBargeInCandidate) {
             activeBargeInSegmentRef.current = event.segmentId;
-          } else if (isBusy || activePlanRef.current !== null) {
-            activeBargeInSegmentRef.current = null;
-            interruptCurrentTurn('voice_interrupt');
           } else {
             activeBargeInSegmentRef.current = null;
           }
@@ -902,12 +903,10 @@ export default function App() {
           stopReaction();
           stageRef.current?.stopReactionMotion();
           setVoiceValidationError('');
-          if (audioLabMode === 'exhibition-mix') {
-            dispatchBargeIn({
-              type: 'speech_started',
-              ttsPlaying,
-            });
-          }
+          dispatchBargeIn({
+            type: 'speech_started',
+            ttsPlaying,
+          });
           voiceReactionIdRef.current += 1;
           setListeningReaction({
             id: voiceReactionIdRef.current,
@@ -959,13 +958,10 @@ export default function App() {
           const candidateSegmentId = activeBargeInSegmentRef.current;
           activeBargeInSegmentRef.current = null;
           const acceptedForBargeIn = isConfirmedBargeInTranscript(message);
-          const bargeInTransition =
-            audioLabMode === 'exhibition-mix'
-              ? dispatchBargeIn({
-                  type: 'transcript_finalized',
-                  accepted: acceptedForBargeIn,
-              })
-              : null;
+          const bargeInTransition = dispatchBargeIn({
+            type: 'transcript_finalized',
+            accepted: acceptedForBargeIn,
+          });
           if (
             isRejectedBargeInCandidate(
               candidateSegmentId,
@@ -995,7 +991,13 @@ export default function App() {
           if (confirmedBargeIn) {
             interruptCurrentTurn('voice_barge_in');
             dispatchBargeIn({ type: 'reset' });
-          } else if (isBusy || activePlanRef.current !== null) {
+          } else if (
+            shouldInterruptBusyTurn(
+              acceptedForBargeIn,
+              isBusy,
+              activePlanRef.current !== null,
+            )
+          ) {
             interruptCurrentTurn('voice_interrupt');
           }
           const trigger: PerformerTrigger = {
@@ -1022,14 +1024,12 @@ export default function App() {
         case 'recognition_stopped':
         case 'recognition_failed':
           clearBackchannelTimer();
-          if (audioLabMode === 'exhibition-mix') {
-            dispatchBargeIn({
-              type:
-                event.type === 'recognition_stopped'
-                  ? 'recognition_stopped'
-                  : 'recognition_failed',
-            });
-          }
+          dispatchBargeIn({
+            type:
+              event.type === 'recognition_stopped'
+                ? 'recognition_stopped'
+                : 'recognition_failed',
+          });
           activeBargeInSegmentRef.current = null;
           stopReaction();
           stageRef.current?.stopReactionMotion();
@@ -1053,7 +1053,6 @@ export default function App() {
       interruptCurrentTurn,
       isBusy,
       isMuted,
-      audioLabMode,
       playReaction,
       prepare,
       recordVoiceSignal,

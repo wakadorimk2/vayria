@@ -38,6 +38,14 @@ export function isConfirmedBargeInTranscript(text: string): boolean {
   );
 }
 
+export function shouldInterruptBusyTurn(
+  acceptedTranscript: boolean,
+  isBusy: boolean,
+  hasActivePlan: boolean,
+): boolean {
+  return acceptedTranscript && (isBusy || hasActivePlan);
+}
+
 export function isRejectedBargeInCandidate(
   candidateSegmentId: string | null,
   segmentId: string,
@@ -89,7 +97,7 @@ export function reduceBargeIn(
       return state === 'candidate' ? restore('timeout') : { state, effects: [] };
     case 'tts_stopped':
       return state === 'candidate'
-        ? restore('tts-stopped')
+        ? { state, effects: ['restore'], reason: 'tts-stopped' }
         : { state, effects: [] };
     case 'reset':
       if (state === 'candidate') {

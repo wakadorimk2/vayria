@@ -154,14 +154,19 @@ speech終了はthreshold未満3チャンクです。
 candidate rejectはnoise floor未満2チャンクです。
 ゲートはPCMの音量を加工しません。
 
-Mode DでTTS再生中にspeech startを検出すると、`barge_in_candidate`へ遷移します。
+全ModeでTTS再生中にspeech startを検出すると、`barge_in_candidate`へ遷移します。
 候補中は、TTS音量だけを20msで約`0.12`へ下げます。
 空transcript、既知誤認識、純粋な相槌は候補を破棄し、TTS音量を復元します。
 内容のある確定発話だけが`confirmed_barge_in`へ進み、現在の会話ターンを停止します。
 STTエラー、停止、2.5秒timeoutでもTTS音量を復元します。
-Mode A/B/Cではこのbarge-in状態機械を使いません。
+TTSが先に終了した場合も、音量だけを復元して候補を確定文字列まで保持します。
+TTS非再生中も、speech startだけでは現在の会話ターンを停止しません。
+候補なしの忙しい状態では、内容のある確定文字列だけが現在の会話ターンを停止します。
+純粋な相槌または未完発話は、汎用の`voice_interrupt`を発生させません。
+Mode Dだけは、これに加えてブラウザー側の適応RMSゲートを使います。
 
-Mode Dのログにはnoise floor、effective threshold、最大VAD score、barge-in状態を保存します。
+全Modeのログにはbarge-in状態を保存します。
+Mode Dのログにはnoise floor、effective threshold、最大VAD scoreも保存します。
 raw audioは保存しません。
 
 Mode B/C/DでPython STTサービスが停止している場合、音声サービス接続エラーを表示します。

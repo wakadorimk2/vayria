@@ -53,6 +53,7 @@ import {
   isConfirmedBargeInTranscript,
   isRejectedBargeInCandidate,
   reduceBargeIn,
+  shouldInterruptBusyTurn,
 } from '../src/voice/bargeIn.js';
 import { createInteractionTimeline } from '../src/conversation/interactionTimeline.js';
 import {
@@ -995,6 +996,14 @@ test('barge-in confirmation accepts only content-bearing transcripts', () => {
   assert.equal(isConfirmedBargeInTranscript('あ'.repeat(1_001)), false);
 });
 
+test('busy-turn interruption requires a content-bearing finalized transcript', () => {
+  assert.equal(shouldInterruptBusyTurn(false, true, false), false);
+  assert.equal(shouldInterruptBusyTurn(false, false, true), false);
+  assert.equal(shouldInterruptBusyTurn(true, true, false), true);
+  assert.equal(shouldInterruptBusyTurn(true, false, true), true);
+  assert.equal(shouldInterruptBusyTurn(true, false, false), false);
+});
+
 test('barge-in reducer separates candidate ducking from confirmed interruption', () => {
   assert.deepEqual(
     reduceBargeIn('idle', { type: 'speech_started', ttsPlaying: false }),
@@ -1069,6 +1078,33 @@ test('barge-in reducer separates candidate ducking from confirmed interruption',
       state: 'candidate',
       effects: ['duck'],
       reason: 'barge-in-candidate',
+    },
+  );
+});
+
+test('barge-in keeps a candidate after TTS stops until final text arrives', () => {
+  const candidate = reduceBargeIn('idle', {
+    type: 'speech_started',
+    ttsPlaying: true,
+  });
+  const ttsStopped = reduceBargeIn(candidate.state, {
+    type: 'tts_stopped',
+  });
+
+  assert.deepEqual(ttsStopped, {
+    state: 'candidate',
+    effects: ['restore'],
+    reason: 'tts-stopped',
+  });
+  assert.deepEqual(
+    reduceBargeIn(ttsStopped.state, {
+      type: 'transcript_finalized',
+      accepted: true,
+    }),
+    {
+      state: 'confirmed',
+      effects: ['interrupt', 'restore'],
+      reason: 'confirmed-barge-in',
     },
   );
 });
