@@ -420,9 +420,17 @@ test('content-bearing take_floor responses cannot be generic backchannels', () =
 test('action commitments must move to concrete content', () => {
   assert.equal(isActionCommitmentMessage('目的と決定事項を整理します'), true);
   assert.equal(isActionCommitmentMessage('まずアジェンダ案を作成しましょう'), true);
+  assert.equal(
+    isActionCommitmentMessage('了解...まずアジェンダ案を作成しましょう。'),
+    true,
+  );
   assert.equal(isActionCommitmentMessage('今日は雨だった'), false);
   assert.equal(isMetaOnlyActionResponse('ええ、その方向で進めましょう'), true);
   assert.equal(isMetaOnlyActionResponse('お願いします'), true);
+  assert.equal(
+    isMetaOnlyActionResponse('了解...まずアジェンダ案を作成しましょう。'),
+    true,
+  );
   assert.equal(isMetaOnlyActionResponse('目的は会議の成功です'), false);
   assert.equal(isMetaOnlyActionResponse('目的は会議の成功です。整理します'), false);
   assert.equal(isMetaOnlyActionResponse('何を目的にしますか？'), false);

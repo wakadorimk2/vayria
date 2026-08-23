@@ -52,7 +52,7 @@ const ACTION_COMMITMENT_STEM =
   /(?:確認|整理|共有|作成|準備|開始|始め|進め|まとめ|説明|紹介|提示|検討|検証|実行|対応|話し|答え|決め|選び|見せ|聞き|調べ|考え|続け|取り組み)/u;
 const ACTION_COMMITMENT_ENDING =
   /(?:していきましょう|していきます|しましょう|します|ましょう|ます)(?:ね|よ)?$/u;
-const ACTION_COMMITMENT_PATTERN = new RegExp(
+const ACTION_COMMITMENT_CLAUSE_PATTERN = new RegExp(
   `^[^。．.!！?？]{0,72}${ACTION_COMMITMENT_STEM.source}[^。．.!！?？]{0,32}${ACTION_COMMITMENT_ENDING.source}[。．.!！?？]?$`,
   'u',
 );
@@ -61,6 +61,10 @@ const META_ONLY_GENERIC_RESPONSE_PATTERN =
 
 function normalizeConversationText(message: string): string {
   return message.normalize('NFKC').replace(/\s+/gu, '').trim();
+}
+
+function splitConversationClauses(message: string): string[] {
+  return message.split(/[。．.!！?？…、,，]+/u).filter(Boolean);
 }
 
 function createActionDecision(
@@ -108,15 +112,23 @@ export function isContentBearingVoiceMessage(message: string): boolean {
 export function isActionCommitmentMessage(message: string): boolean {
   const normalized = normalizeConversationText(message);
   if (!normalized || isDefiniteQuestionMessage(normalized)) return false;
-  return ACTION_COMMITMENT_PATTERN.test(normalized);
+  return splitConversationClauses(normalized).some((clause) =>
+    ACTION_COMMITMENT_CLAUSE_PATTERN.test(clause),
+  );
 }
 
 export function isMetaOnlyActionResponse(message: string): boolean {
   const normalized = normalizeConversationText(message);
   if (!normalized || isDefiniteQuestionMessage(normalized)) return false;
-  return (
-    META_ONLY_GENERIC_RESPONSE_PATTERN.test(normalized) ||
-    ACTION_COMMITMENT_PATTERN.test(normalized)
+  const clauses = splitConversationClauses(normalized);
+  return Boolean(
+    clauses.length > 0 &&
+      clauses.every(
+        (clause) =>
+          META_ONLY_GENERIC_RESPONSE_PATTERN.test(clause) ||
+          ACTION_COMMITMENT_CLAUSE_PATTERN.test(clause) ||
+          isDefiniteBackchannelMessage(clause),
+      ),
   );
 }
 
