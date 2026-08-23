@@ -891,12 +891,8 @@ export default function App() {
             type: 'speech_started',
             ttsPlaying,
           });
-          voiceReactionIdRef.current += 1;
-          setListeningReaction({
-            id: voiceReactionIdRef.current,
-            kind: 'nod',
-            target: 'viewer',
-          });
+          // A speech start is still only an acoustic candidate. Do not show a
+          // participation cue until the finalized turn selects a reaction.
           return;
         }
         case 'speech_ended':
