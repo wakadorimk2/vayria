@@ -397,11 +397,8 @@ export default function App() {
         return;
       }
 
-      setListeningReaction({
-        id: reactionId,
-        kind: 'nod',
-        target: 'viewer',
-      });
+      // The spoken backchannel is already the response. Do not add a second
+      // nod for the same short acknowledgement.
       const cue = decision.backchannelCue === 'uun' ? 'uun' : 'un';
       const playCue = () => {
         if (voiceReactionIdRef.current !== reactionId) return;
