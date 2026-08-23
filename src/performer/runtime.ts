@@ -12,6 +12,7 @@ import type {
   PerformanceResult,
   PerformerProfile,
   PerformerState,
+  PerformerStateContext,
   PerformerTrigger,
 } from './types.js';
 
@@ -50,6 +51,24 @@ const NONVERBAL_ACKNOWLEDGEMENT_MESSAGES = new Set([
   'そんな感じ',
 ]);
 const PARTICIPATION_ONLY_MESSAGES = new Set(['ねえ', 'ちょっと']);
+const CONVERSATION_CLOSING_MESSAGES = new Set([
+  'ここで終わりにします',
+  'ここで終わりにしよう',
+  'ここで終わりにしましょう',
+  'ここで終わり',
+  '終わりにします',
+  '終わりにしよう',
+  '終わりにしましょう',
+  '会話を終わりにします',
+  '会話を終わりにしよう',
+  '今日はこの辺で',
+  '今日はここまで',
+  'そろそろ終わりにします',
+  'またね',
+  'じゃあね',
+  'さようなら',
+  'おやすみ',
+]);
 const UNFINISHED_ENDING =
   /(?:けど|けれど|けれども|ですが|なので|だから|から|ので|し|っていうか|というか|なんていうか)$/u;
 const TERMINAL_PUNCTUATION = /[。．.!！?？、,，…\s]+$/u;
@@ -62,6 +81,10 @@ const ACTION_COMMITMENT_CLAUSE_PATTERN = new RegExp(
   `^[^。．.!！?？]{0,72}${ACTION_COMMITMENT_STEM.source}[^。．.!！?？]{0,32}${ACTION_COMMITMENT_ENDING.source}[。．.!！?？]?$`,
   'u',
 );
+const CONVERSATION_CLOSING_PREFIX =
+  /^(?:(?:[^、,]{1,16})[、,])?(?:ここで|今日は|そろそろ|会話(?:を)?|お話(?:を)?|この辺で|このへんで)/u;
+const CONVERSATION_CLOSING_ENDING =
+  /(?:終わり(?:に(?:し|する|します|しよう|しましょう)?)?|おしまい|またね|じゃあね|さようなら|おやすみ)(?:ね|よ)?$/u;
 const DIRECT_ACTION_REQUEST_STEM =
   /(?:自己紹介|紹介|目的|アジェンダ|設定画面|次の項目|一つ|整理|共有|作成|準備|開始|始め|進め|まとめ|説明|提示|検討|検証|実行|対応|話し|答え|決め|選び|見せ|聞き|調べ|考え|続け|取り組み)/u;
 const DIRECT_ACTION_REQUEST_ENDING =
@@ -136,6 +159,23 @@ export function isDefiniteParticipationMessage(message: string): boolean {
     '',
   );
   return PARTICIPATION_ONLY_MESSAGES.has(withoutTerminalPunctuation);
+}
+
+export function isDefiniteConversationClosingMessage(message: string): boolean {
+  const normalized = normalizeConversationText(message);
+  if (!normalized || isDefiniteQuestionMessage(normalized)) return false;
+  const withoutTerminalPunctuation = normalized.replace(
+    TERMINAL_PUNCTUATION,
+    '',
+  );
+  if (CONVERSATION_CLOSING_MESSAGES.has(withoutTerminalPunctuation)) {
+    return true;
+  }
+  return (
+    withoutTerminalPunctuation.length <= 48 &&
+    CONVERSATION_CLOSING_PREFIX.test(withoutTerminalPunctuation) &&
+    CONVERSATION_CLOSING_ENDING.test(withoutTerminalPunctuation)
+  );
 }
 
 export function isContentBearingVoiceMessage(message: string): boolean {
@@ -271,6 +311,19 @@ export function createInitialPerformerState(
     },
     lastSpeechAt: null,
     lastViewerMessageAt: null,
+  };
+}
+
+export function createPerformerStateContext(
+  state: PerformerState,
+): PerformerStateContext {
+  return {
+    phase: state.phase,
+    energy: clamp(state.energy),
+    emotion: normalizeEmotion(state.emotion.value),
+    emotionActivation: clamp(state.emotion.activation),
+    attentionTarget: state.attention.target,
+    attentionStrength: clamp(state.attention.strength),
   };
 }
 

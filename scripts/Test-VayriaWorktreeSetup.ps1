@@ -247,6 +247,7 @@ try {
 
   $portOne = [int](Get-EnvironmentValue -Path $worktreeOneEnv -Name 'VAYRIA_PORT')
   $portTwo = [int](Get-EnvironmentValue -Path $worktreeTwoEnv -Name 'VAYRIA_PORT')
+  $expectedExhibitionPort = 5187
   if ($portOne -lt 5188 -or $portOne -gt 5210) {
     throw "The first allocated port is outside the worker range: $portOne"
   }
@@ -257,11 +258,9 @@ try {
   $exhibitionCases = @(
     @{
       EnvPath = Join-Path $worktreeOne '.env.exhibition.local'
-      Port    = $portOne
     }
     @{
       EnvPath = Join-Path $worktreeTwo '.env.exhibition.local'
-      Port    = $portTwo
     }
   )
   foreach ($case in $exhibitionCases) {
@@ -280,7 +279,7 @@ try {
     if ((Get-EnvironmentValue -Path $case.EnvPath -Name 'VAYRIA_BIND_HOST') -ne '0.0.0.0') {
       throw "The generated exhibition environment has an unexpected bind host: $($case.EnvPath)"
     }
-    if ([int](Get-EnvironmentValue -Path $case.EnvPath -Name 'VAYRIA_PORT') -ne $case.Port) {
+    if ([int](Get-EnvironmentValue -Path $case.EnvPath -Name 'VAYRIA_PORT') -ne $expectedExhibitionPort) {
       throw "The generated exhibition environment has an unexpected port: $($case.EnvPath)"
     }
   }
@@ -311,6 +310,12 @@ try {
     }
   }
 
+  $worktreeOneExhibitionEnv = Join-Path $worktreeOne '.env.exhibition.local'
+  $exhibitionContent = Get-Content -Raw -LiteralPath $worktreeOneExhibitionEnv
+  Set-Content `
+    -LiteralPath $worktreeOneExhibitionEnv `
+    -Value ($exhibitionContent -replace 'VAYRIA_PORT=\d+', 'VAYRIA_PORT=5199') `
+    -Encoding utf8
   $hashBeforeRerun = (Get-FileHash -LiteralPath $worktreeOneEnv -Algorithm SHA256).Hash
   $avatarHashBeforeRerun = (Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash
   Invoke-SetupScript -Worktree $worktreeOne -ExternalSecretFile $secretFile -ExternalHttpsConfigFile $httpsConfigFile -AvatarSourcePath $avatarSourceFile
@@ -320,6 +325,9 @@ try {
   }
   if ((Get-FileHash -LiteralPath $worktreeOneAvatar -Algorithm SHA256).Hash -ne $avatarHashBeforeRerun) {
     throw 'Setup changed an already synchronized VRM.'
+  }
+  if ([int](Get-EnvironmentValue -Path $worktreeOneExhibitionEnv -Name 'VAYRIA_PORT') -ne $expectedExhibitionPort) {
+    throw 'Setup did not restore the generated exhibition environment to port 5187.'
   }
 
   $missingAvatarSource = Join-Path $avatarSourceDirectory 'missing.vrm'
@@ -360,6 +368,9 @@ try {
     $portThree = [int](Get-EnvironmentValue -Path $worktreeThreeEnv -Name 'VAYRIA_PORT')
     if ($portThree -le $listenerPort) {
       throw "The setup did not skip the TCP-used port ${listenerPort}: $portThree"
+    }
+    if ([int](Get-EnvironmentValue -Path (Join-Path $worktreeThree '.env.exhibition.local') -Name 'VAYRIA_PORT') -ne $expectedExhibitionPort) {
+      throw 'The third generated exhibition environment did not use port 5187.'
     }
   }
   finally {
@@ -418,6 +429,12 @@ try {
   $parallelPortTwo = [int](Get-EnvironmentValue -Path $worktreeSixEnv -Name 'VAYRIA_PORT')
   if ($parallelPortOne -eq $parallelPortTwo) {
     throw "Concurrent setup allocated the same port: $parallelPortOne"
+  }
+  foreach ($worktree in @($worktreeFive, $worktreeSix)) {
+    $exhibitionPath = Join-Path $worktree '.env.exhibition.local'
+    if ([int](Get-EnvironmentValue -Path $exhibitionPath -Name 'VAYRIA_PORT') -ne $expectedExhibitionPort) {
+      throw "The concurrent generated exhibition environment did not use port 5187: $exhibitionPath"
+    }
   }
 
   foreach ($envPath in @($worktreeThreeEnv, $worktreeFiveEnv, $worktreeSixEnv)) {

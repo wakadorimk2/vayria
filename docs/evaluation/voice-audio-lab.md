@@ -128,7 +128,7 @@ UIの範囲は`0.005`から`0.2`です。
 既存経路との比較では、マイクを停止してから`Baseline`を選びます。
 
 - `Baseline`: 既存の経路を使用します。localの既定値は`SpeechRecognition`または`webkitSpeechRecognition`です。exhibitionで既存のRemote PCM設定を使う場合は、既存のPython STT経路を使用します。
-- `Processed`: Remote PCMへ接続し、`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。Python WebRTC VADを使います。
+- `Processed`: Remote PCMへ接続し、`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。Python WebRTC VADを使います。既定の`mild`または`aggressive`では、適応RMSゲートも使います。`off`ではブラウザー側ゲートを使いません。
 - `Processed + VAD`: ProcessedにRMSベースのブラウザー側VADを追加します。200msチャンクを使います。endpointが`600ms`なら3チャンク、`400ms`なら2チャンクでspeechを終了します。Python WebRTC VADも残します。
 - `Exhibition Mix`: Presetに応じた標準AEC・NS・AGC、適応型RMSゲート、既存のPython WebRTC VAD、barge-in、TTS duckingを組み合わせます。Mode DはRemote PCM経路を使い、endpointは`400ms`です。ブラウザー側RMSゲートも200msチャンク2個でspeechを終了します。
 
@@ -139,7 +139,7 @@ Mode Dは展示環境向けの実験的な組み合わせです。
 
 1. Presetに応じて`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。
 2. SafariまたはOSが返した実値をMediaTrack settingsへ記録します。
-3. `mild`と`aggressive`では、AudioWorkletの200ms PCMチャンクで適応型RMSゲートを実行します。`off`ではゲートを実行しません。
+3. `mild`と`aggressive`では、AudioWorkletの200ms PCMチャンクで適応型RMSゲートを実行します。`Processed`と`Exhibition Mix`の両方で使います。`off`ではゲートを実行しません。
 4. ゲートを通過した元のPCMだけをPython WebRTC VADへ送ります。
 5. Python側のfaster-whisperへ音声を送ります。
 
@@ -165,10 +165,10 @@ speech startだけでは、遅延中の非発話反応もキャンセルしま�
 speech startだけでは、音声の聞き手相槌を再生せず、頷きも表示しません。確定発話後の会話行動が`backchannel`を選んだ場合だけ、音声相槌を再生します。同じ相槌を頷きで重ねません。
 候補なしの忙しい状態では、内容のある確定文字列だけが現在の会話ターンを停止します。
 純粋な相槌または未完発話は、汎用の`voice_interrupt`を発生させません。
-Mode Dだけは、これに加えてブラウザー側の適応RMSゲートを使います。
+`Processed`とMode Dは、ブラウザー側の適応RMSゲートを使います。`Processed + VAD`は固定RMSゲートを使います。
 
 全Modeのログにはbarge-in状態を保存します。
-Mode Dのログにはnoise floor、effective threshold、最大VAD scoreも保存します。
+`Processed`とMode Dのログにはnoise floor、effective threshold、最大VAD scoreも保存します。
 raw audioは保存しません。
 
 Mode B/C/DでPython STTサービスが停止している場合、音声サービス接続エラーを表示します。
@@ -309,7 +309,7 @@ Audio Labには入力デバイス選択UIを追加していません。
 2. Mode B/Cのendpoint `600ms`と`400ms`で同じ発話文を話します。
 3. TTS再生中の無言と割り込みを各Modeで試します。
 4. Export JSONLで候補数、reject数、latency、barge-inを保存します。
-5. Mode Dのnoise floorとeffective thresholdをケースごとに比較します。
+5. `Processed`とMode Dのnoise floorとeffective thresholdをケースごとに比較します。
 
 Mode Dでも、同じ音量と同じ距離の競合話者は分離できません。
 適応RMSゲートは方向を判定しません。
@@ -337,7 +337,7 @@ Mode AのWeb Speech経路では、マイクレベルとMediaTrack settingsを取
 パネルの`Unavailable`は、その経路では値を測れないという意味です。
 Mode B/C/Dでsettingsが空の場合も、ブラウザーまたはiPadOSが値を返さなかった可能性があります。
 settingsは`getSettings()`で得た値を使います。
-Mode Dでは、適応noise floor、effective threshold、barge-in state、TTS ducking状態も表示します。
+`Processed`とMode Dでは、適応noise floor、effective threshold、barge-in state、TTS ducking状態も表示します。
 `noiseSuppression`または`autoGainControl`が未適用でも、ブラウザーまたはiPadOSの制約です。Mode Dの起動失敗とは解釈しません。
 `deviceId`と`groupId`は保存しません。
 

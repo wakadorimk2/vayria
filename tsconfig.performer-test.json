@@ -12,16 +12,23 @@
   "include": [
     "server/localApi.ts",
     "src/character/emotion.ts",
+    "src/character/identity.ts",
     "src/performer/runtime.ts",
     "src/performer/profile.ts",
     "src/performer/types.ts",
     "src/conversation/floorController.ts",
     "src/conversation/interactionTimeline.ts",
     "src/conversation/semanticDialogueHistory.ts",
+    "src/conversation/autonomousContext.ts",
+    "src/conversation/useAutonomousTalk.ts",
+    "src/conversation/programContext.ts",
     "scripts/card-preview-api.test.ts",
     "scripts/local-api-capture.test.ts",
     "scripts/card-reactions.test.ts",
     "scripts/performer-runtime.test.ts",
-    "scripts/conversation-floor.test.ts"
+    "scripts/conversation-floor.test.ts",
+    "scripts/character-identity.test.ts",
+    "scripts/autonomous-context.test.ts",
+    "scripts/autonomous-talk.test.ts"
   ]
 }

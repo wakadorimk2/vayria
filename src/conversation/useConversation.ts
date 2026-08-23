@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
+import {
+  DEFAULT_CHARACTER_IDENTITY,
+  type CharacterIdentity,
+} from '../character/identity';
 import { createConversationEventEmitter } from './conversationEvents';
 import { apiUrl } from '../runtimeConfig';
 import {
@@ -16,11 +20,18 @@ import {
   createSemanticDialogueHistory,
   DEFAULT_HISTORY_TURN_LIMIT,
 } from './semanticDialogueHistory';
+import type { AutonomousContext } from './autonomousContext';
+export type { AutonomousContext } from './autonomousContext';
+import {
+  DEFAULT_PROGRAM_CONTEXT,
+  type ProgramContext,
+} from './programContext';
 import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
   ConversationActionDecision,
   PerformancePlan,
   PerformanceResult,
+  PerformerStateContext,
 } from '../performer/types';
 import { isConversationActionDecision } from '../performer/types';
 import type { VoiceInputEvent } from '../voice/voiceInput';
@@ -41,11 +52,6 @@ export const AUTONOMOUS_ACTIONS = [
 ] as const;
 
 export type AutonomousAction = (typeof AUTONOMOUS_ACTIONS)[number];
-
-export interface AutonomousContext {
-  topic: string | null;
-  topicTurns: number;
-}
 
 export interface AutonomousDecision {
   action: AutonomousAction;
@@ -77,6 +83,9 @@ interface ConversationOptions {
   historyTurnLimit?: number;
   isMuted?: boolean;
   isExhibitionMode?: boolean;
+  characterIdentity?: CharacterIdentity;
+  programContext?: ProgramContext;
+  getPerformerStateContext?: () => PerformerStateContext;
   onPerformanceCue?: (
     planId: string,
     cue: { emotion: Emotion; intensity: number },
@@ -221,7 +230,7 @@ export function useConversation(
     createSemanticDialogueHistory(historyTurnLimit),
   );
   const subtitleClearTimerRef = useRef<number | null>(null);
-  const lastAutonomousReplyRef = useRef<string | null>(null);
+  const lastSelfUtteranceRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const sourceRef = useRef<ConversationSource | null>(null);
   const statusRef = useRef<ConversationStatus>('idle');
@@ -233,6 +242,13 @@ export function useConversation(
   const onPerformancePlanRef = useRef(options.onPerformancePlan);
   const onPerformanceResultRef = useRef(options.onPerformanceResult);
   const onInteractionActionRef = useRef(options.onInteractionAction);
+  const characterIdentityRef = useRef(
+    options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY,
+  );
+  const programContextRef = useRef(
+    options.programContext ?? DEFAULT_PROGRAM_CONTEXT,
+  );
+  const getPerformerStateContextRef = useRef(options.getPerformerStateContext);
 
   useEffect(() => {
     onPerformanceCueRef.current = options.onPerformanceCue;
@@ -248,6 +264,20 @@ export function useConversation(
     options.onInteractionTimelineEvent,
     timeline,
   ]);
+
+  useEffect(() => {
+    characterIdentityRef.current =
+      options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY;
+  }, [options.characterIdentity]);
+
+  useEffect(() => {
+    programContextRef.current =
+      options.programContext ?? DEFAULT_PROGRAM_CONTEXT;
+  }, [options.programContext]);
+
+  useEffect(() => {
+    getPerformerStateContextRef.current = options.getPerformerStateContext;
+  }, [options.getPerformerStateContext]);
 
   const setConversationState = useCallback(
     (nextStatus: ConversationStatus, nextSource: ConversationSource | null) => {
@@ -360,7 +390,7 @@ export function useConversation(
     invalidateCurrentTurn(true);
     semanticHistory.clear();
     floorController.reset('conversation_reset');
-    lastAutonomousReplyRef.current = null;
+    lastSelfUtteranceRef.current = null;
     clearSubtitle();
     setReply('');
     setError('');
@@ -398,9 +428,13 @@ export function useConversation(
       autonomousContext: AutonomousContext | null,
       plan: PerformancePlan,
       voiceMetadata?: VoiceTurnMetadata,
+      characterIdentityOverride?: CharacterIdentity,
+      programContextOverride?: ProgramContext,
     ): Promise<ProcessTurnResult> => {
       const eventEmitter = createConversationEventEmitter(turnSource);
       const messageForRequest = message;
+      const programContextForRequest =
+        programContextOverride ?? programContextRef.current;
       let terminalEventEmitted = false;
       const emitTerminalEvent = (
         event: 'turn_completed' | 'turn_aborted' | 'turn_failed',
@@ -497,6 +531,10 @@ export function useConversation(
       let motionStartedAt: number | undefined;
       let speechStartedAt: number | undefined;
       let interactionDecision: ConversationActionDecision | null = null;
+      const performerStateContext =
+        turnSource === 'autonomous'
+          ? getPerformerStateContextRef.current?.() ?? null
+          : null;
 
       try {
         if (turnSource !== 'voice') {
@@ -533,6 +571,9 @@ export function useConversation(
               ? {}
               : { message: messageForRequest }),
             history: semanticHistory.toMessages(),
+            characterIdentity:
+              characterIdentityOverride ?? characterIdentityRef.current,
+            programContext: programContextForRequest,
             ...cardContext,
             performanceContext: plan.speech?.llmContext ?? {
               callbackTendency: 0,
@@ -543,7 +584,12 @@ export function useConversation(
               ? {
                   topic: autonomousContext?.topic ?? null,
                   topicTurns: autonomousContext?.topicTurns ?? 0,
-                  previousAutonomousReply: lastAutonomousReplyRef.current,
+                  viewerIntent: autonomousContext?.viewerIntent ?? null,
+                  viewerTurnsSince: autonomousContext?.viewerTurnsSince ?? 0,
+                  viewerEngagement:
+                    autonomousContext?.viewerEngagement ?? 'available',
+                  lastSelfUtterance: lastSelfUtteranceRef.current,
+                  performerState: performerStateContext,
                 }
               : {}),
           }),
@@ -853,8 +899,8 @@ export function useConversation(
           return { completed: false, decision: null };
         }
 
+        lastSelfUtteranceRef.current = responseText;
         if (turnSource === 'autonomous') {
-          lastAutonomousReplyRef.current = responseText;
           semanticHistory.appendAssistant(responseText);
         }
         if (turnSource === 'voice') {
@@ -963,6 +1009,8 @@ export function useConversation(
       cardContext: ChatCardContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
       plan: PerformancePlan,
+      characterIdentityOverride?: CharacterIdentity,
+      programContextOverride?: ProgramContext,
     ) =>
       (
         await processTurn(
@@ -972,6 +1020,9 @@ export function useConversation(
           onReplyAccepted,
           null,
           plan,
+          undefined,
+          characterIdentityOverride,
+          programContextOverride,
         )
       ).completed,
     [processTurn],
@@ -984,6 +1035,8 @@ export function useConversation(
       onReplyAccepted: (activatedCardIds: string[]) => void,
       plan: PerformancePlan,
       voiceMetadata?: VoiceTurnMetadata,
+      characterIdentityOverride?: CharacterIdentity,
+      programContextOverride?: ProgramContext,
     ) =>
       (
         await processTurn(
@@ -994,6 +1047,8 @@ export function useConversation(
           null,
           plan,
           voiceMetadata,
+          characterIdentityOverride,
+          programContextOverride,
         )
       ).completed,
     [processTurn],
@@ -1005,6 +1060,7 @@ export function useConversation(
       autonomousContext: AutonomousContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
       plan: PerformancePlan,
+      programContextOverride?: ProgramContext,
     ) => {
       const result = await processTurn(
         'autonomous',
@@ -1013,6 +1069,9 @@ export function useConversation(
         onReplyAccepted,
         autonomousContext,
         plan,
+        undefined,
+        undefined,
+        programContextOverride,
       );
       return result.completed ? result.decision : null;
     },

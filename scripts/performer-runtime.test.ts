@@ -7,6 +7,7 @@ import {
   classifyViewerMessageFastPath,
   createActionIntent,
   createInitialPerformerState,
+  createPerformerStateContext,
   DEFAULT_SPEECH_MOTION_ASSET_ID,
   getEffectIntensity,
   getNextAutonomousDelay,
@@ -78,6 +79,26 @@ function createState(overrides: Partial<PerformerState> = {}): PerformerState {
     ...overrides,
   };
 }
+
+test('performer state context exposes bounded self state for the director', () => {
+  const context = createPerformerStateContext(
+    createState({
+      phase: 'speaking',
+      energy: 1.4,
+      emotion: { value: 'joy', activation: 0.75, updatedAt: 100 },
+      attention: { target: 'viewer', strength: 0.8, updatedAt: 100 },
+    }),
+  );
+
+  assert.deepEqual(context, {
+    phase: 'speaking',
+    energy: 1,
+    emotion: 'joy',
+    emotionActivation: 0.75,
+    attentionTarget: 'viewer',
+    attentionStrength: 0.8,
+  });
+});
 
 function createModifiers(
   overrides: Partial<DirectionModifiers> = {},

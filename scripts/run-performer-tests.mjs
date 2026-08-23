@@ -11,6 +11,15 @@ const testFiles = [
   resolve(
     'node_modules/.tmp/performer-test/scripts/conversation-floor.test.js',
   ),
+  resolve(
+    'node_modules/.tmp/performer-test/scripts/character-identity.test.js',
+  ),
+  resolve(
+    'node_modules/.tmp/performer-test/scripts/autonomous-context.test.js',
+  ),
+  resolve(
+    'node_modules/.tmp/performer-test/scripts/autonomous-talk.test.js',
+  ),
 ];
 const result = spawnSync(process.execPath, ['--test', ...testFiles], {
   stdio: 'inherit',

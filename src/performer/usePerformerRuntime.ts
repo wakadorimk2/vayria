@@ -7,6 +7,7 @@ import {
   aggregateDirectionContributions,
   createActionIntent,
   createInitialPerformerState,
+  createPerformerStateContext,
   decayPerformerState,
   getNextAutonomousDelay as getDelay,
   reducePerformanceResult,
@@ -114,6 +115,11 @@ export function usePerformerRuntime(
     [updateState],
   );
 
+  const getPerformerStateContext = useCallback(
+    () => createPerformerStateContext(stateRef.current),
+    [],
+  );
+
   const cancelPlan = useCallback(
     (planId: string, completedAt = Date.now()) => {
       if (activePlanIdRef.current !== planId) return false;
@@ -153,6 +159,7 @@ export function usePerformerRuntime(
     completePlan,
     cancelPlan,
     getNextAutonomousDelay,
+    getPerformerStateContext,
     resetRuntime,
     setPhase,
   };

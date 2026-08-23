@@ -11,13 +11,29 @@ import { useCameraAttention } from './attention/useCameraAttention';
 import { useAudioLipSync } from './audio/useAudioLipSync';
 import { CardGamePrototype } from './cards/CardGamePrototype';
 import { useCardGamePrototype } from './cards/useCardGamePrototype';
+import {
+  addCharacterAlias,
+  parseExplicitAliasInstruction,
+  readCharacterIdentity,
+  writeCharacterIdentity,
+  type CharacterIdentity,
+} from './character/identity';
 import { useAutonomousTalk } from './conversation/useAutonomousTalk';
+import {
+  advanceAutonomousContext,
+  INITIAL_AUTONOMOUS_CONTEXT,
+  recordViewerIntent,
+} from './conversation/autonomousContext';
 import {
   useConversation,
   type AutonomousContext,
-  type AutonomousDecision,
   type ChatCardContext,
 } from './conversation/useConversation';
+import {
+  DEFAULT_PROGRAM_CONTEXT,
+  type ProgramContext,
+  type ProgramPhase,
+} from './conversation/programContext';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
 import {
   CARD_INTERACTION_ATTENTION_DURATION_MS,
@@ -219,21 +235,6 @@ function readAudioControlState(): AudioControlState {
   return createDefaultAudioControlState();
 }
 
-function advanceAutonomousContext(
-  current: AutonomousContext,
-  decision: AutonomousDecision,
-): AutonomousContext {
-  if (decision.action === 'silence') return current;
-
-  return {
-    topic: decision.topic,
-    topicTurns:
-      decision.action === 'new_topic' || current.topic === null
-        ? 1
-        : current.topicTurns + 1,
-  };
-}
-
 export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
@@ -242,8 +243,18 @@ export default function App() {
     'game' | null
   >(null);
   const [audioControl, setAudioControl] = useState(readAudioControlState);
+  const [characterIdentity, setCharacterIdentity] = useState(
+    readCharacterIdentity,
+  );
+  const [programPhase, setProgramPhase] = useState<ProgramPhase>(
+    DEFAULT_PROGRAM_CONTEXT.phase,
+  );
+  const programContext = useMemo(
+    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase }),
+    [programPhase],
+  );
   const [autonomousContext, setAutonomousContext] =
-    useState<AutonomousContext>({ topic: null, topicTurns: 0 });
+    useState<AutonomousContext>(INITIAL_AUTONOMOUS_CONTEXT);
   const [isAutonomousLoopEnabled, setIsAutonomousLoopEnabled] =
     useState(true);
   const [sessionGeneration, setSessionGeneration] = useState(0);
@@ -264,6 +275,7 @@ export default function App() {
     completePlan,
     createPlan,
     getNextAutonomousDelay: getRuntimeAutonomousDelay,
+    getPerformerStateContext,
     resetRuntime,
     setPhase,
   } = performer;
@@ -283,6 +295,10 @@ export default function App() {
     position: null,
     confidence: 0,
   });
+  const characterIdentityRef = useRef<CharacterIdentity>(characterIdentity);
+  useEffect(() => {
+    characterIdentityRef.current = characterIdentity;
+  }, [characterIdentity]);
   const cardReactionPlanIdsRef = useRef(new Set<string>());
   const pendingActivatedCardIdsRef = useRef(new Map<string, string[]>());
   const stageRef = useRef<VrmStageHandle>(null);
@@ -377,7 +393,9 @@ export default function App() {
   const {
     errorCode: voiceInputErrorCode,
     isEnabled: isVoiceInputEnabled,
+    isSttProcessing,
     isSupported: isVoiceInputSupported,
+    isVadSpeech,
     phase: voiceInputPhase,
     start: startVoiceInput,
     stop: stopVoiceInput,
@@ -648,12 +666,30 @@ export default function App() {
     historyTurnLimit: 5,
     isExhibitionMode,
     isMuted,
+    characterIdentity,
+    programContext,
+    getPerformerStateContext,
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
     onPerformanceResult: handlePerformanceResult,
     onInteractionAction: handleInteractionAction,
     onInteractionTimelineEvent: handleInteractionTimelineEvent,
   });
+
+  const rememberExplicitAlias = useCallback((message: string) => {
+    const currentIdentity = characterIdentityRef.current;
+    const alias = parseExplicitAliasInstruction(message);
+    if (!alias) return currentIdentity;
+
+    const nextIdentity = addCharacterAlias(currentIdentity, alias);
+    if (!nextIdentity || !writeCharacterIdentity(nextIdentity)) {
+      return currentIdentity;
+    }
+
+    characterIdentityRef.current = nextIdentity;
+    setCharacterIdentity(nextIdentity);
+    return nextIdentity;
+  }, []);
 
   const clearBargeInTimer = useCallback(() => {
     if (bargeInTimerRef.current === null) return;
@@ -864,7 +900,8 @@ export default function App() {
     activePlanRef.current = null;
     setActivePlan(null);
     setActiveEmotionCue(null);
-    setAutonomousContext({ topic: null, topicTurns: 0 });
+    setAutonomousContext(INITIAL_AUTONOMOUS_CONTEXT);
+    setProgramPhase(DEFAULT_PROGRAM_CONTEXT.phase);
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
@@ -874,6 +911,7 @@ export default function App() {
     resetConversation,
     resetRuntime,
     resetTurn,
+    setProgramPhase,
     setDucked,
     stopReaction,
     stopVoiceInput,
@@ -1012,7 +1050,11 @@ export default function App() {
           const message = event.text.trim();
           const candidateSegmentId = activeBargeInSegmentRef.current;
           activeBargeInSegmentRef.current = null;
-          const acceptedForBargeIn = isConfirmedBargeInTranscript(message);
+          const isSpeakingCandidate = candidateSegmentId === event.segmentId;
+          const acceptedForBargeIn = isConfirmedBargeInTranscript(message, {
+            characterIdentity: characterIdentityRef.current,
+            requireConversationalCue: isSpeakingCandidate,
+          });
           const bargeInTransition = dispatchBargeIn({
             type: 'transcript_finalized',
             accepted: acceptedForBargeIn,
@@ -1041,6 +1083,10 @@ export default function App() {
           setVoiceValidationError('');
           cancelNonSpeechPlan();
           cancelActiveCardReactionPlan();
+          const identityForRequest = rememberExplicitAlias(message);
+          setAutonomousContext((current) =>
+            recordViewerIntent(current, message, identityForRequest),
+          );
           const confirmedBargeIn =
             bargeInTransition?.effects.includes('interrupt') ?? false;
           if (confirmedBargeIn) {
@@ -1073,6 +1119,7 @@ export default function App() {
             handleReplyAccepted,
             plan,
             { segmentId: event.segmentId, at: event.at, asrConfidence: null },
+            identityForRequest,
           );
           return;
         }
@@ -1107,6 +1154,7 @@ export default function App() {
       prepare,
       recordVoiceSignal,
       readCardContext,
+      rememberExplicitAlias,
       sendVoice,
       ttsPlaying,
       stopReaction,
@@ -1124,6 +1172,7 @@ export default function App() {
     async (options: {
       cardContextOverride?: ChatCardContext;
       contribution?: ReturnType<typeof getDirectionContribution>;
+      programContextOverride?: ProgramContext;
       trigger?: PerformerTrigger;
     } = {}) => {
       const expectedSessionGeneration = sessionGeneration;
@@ -1217,6 +1266,7 @@ export default function App() {
         autonomousContext,
         handleReplyAccepted,
         plan,
+        options.programContextOverride,
       );
       if (!decision || !isCurrentSession()) return false;
       setAutonomousContext((current) =>
@@ -1246,6 +1296,7 @@ export default function App() {
 
   const handleCardInserted = useCallback(
     (result: CardSwapResult) => {
+      setProgramPhase('after_card_change');
       const trigger: PerformerTrigger = {
         kind: 'external_stimulus',
         semanticCue: `something_changed:${result.insertedCardId}`,
@@ -1259,6 +1310,10 @@ export default function App() {
           forcedCardId: result.forcedCardId,
         },
         contribution,
+        programContextOverride: {
+          ...programContext,
+          phase: 'after_card_change',
+        },
         trigger,
       });
     },
@@ -1267,6 +1322,8 @@ export default function App() {
       isAutonomousLoopEnabled,
       isBusy,
       isMuted,
+      programContext,
+      setProgramPhase,
       startAutonomous,
     ],
   );
@@ -1300,8 +1357,9 @@ export default function App() {
     cancelAutonomous,
     getNextAutonomousDelay,
     isBusy: isPerformerBusy,
-    isVoiceInputActive: isVoiceInputEnabled,
+    isVoiceActivityActive: isVadSpeech || isSttProcessing,
     isLoopEnabled: isAutonomousLoopEnabled,
+    isWaitingForViewer: autonomousContext.viewerEngagement === 'settled',
     isMuted,
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
@@ -1322,13 +1380,23 @@ export default function App() {
       kind: 'viewer_message',
       text: trimmedInput,
     };
+    const identityForRequest = rememberExplicitAlias(trimmedInput);
+    setAutonomousContext((current) =>
+      recordViewerIntent(current, trimmedInput, identityForRequest),
+    );
     const plan = createPlanForTrigger(trigger);
     if (!plan.actionDecision || plan.actionDecision.action === 'take_floor') {
       beginReply();
     }
     if (!isMuted) void prepare();
     setInput('');
-    void sendManual(trimmedInput, readCardContext(), handleReplyAccepted, plan);
+    void sendManual(
+      trimmedInput,
+      readCardContext(),
+      handleReplyAccepted,
+      plan,
+      identityForRequest,
+    );
   };
 
   const handleMuteToggle = () => {

@@ -29,13 +29,25 @@ LLMが返す`activatedCards`は、現在の脳内カードだけに制限しま�
 - `new_topic`: 新しい話題へ移ります。
 - `silence`: 本文と音声を生成せず、次の候補を待ちます。
 
-`topic`と`topicTurns`はブラウザー内の一時状態です。ページを閉じると破棄します。
+`topic`、`topicTurns`、最新の視聴者意図はブラウザー内の一時状態です。ページを閉じると破棄します。
+自律発話には、現在のPerformer Stateから取得したphase、energy、emotion、attentionの限定コンテキストも渡します。
+このコンテキストは発話履歴やイベントログへ保存しません。
+自律発話には、直前に再生完了したVayriaの発話も限定コンテキストとして渡します。手動・音声応答の直後も、直前の発話に表れた話題や関心を継続するために使用します。
+この発話はセッション内だけで保持し、会話履歴とは別の重複防止用状態として扱います。
+チャット要求には、現在のカード印象企画、視聴者主導の進行、カード変更前後の印象を見る目的を、限定されたProgram Contextとして渡します。
+Program Contextは、セッション開始時のカード変更前と、視聴者がカードを交換した後の現在位置も保持します。
+カード交換直後の自律要求には、React stateの反映を待たずに`after_card_change`を明示して渡します。
+これは発話履歴へ保存せず、内部ルールやカード一覧を読み上げるためには使いません。
+会話を明示的に終えた場合は視聴者の再参加を待ち、相槌や未完発話だけでは自律発話を再開しません。
 手札から交換したカードがある場合、`silence`は受理せず、カードが反映される発話を再生成します。
 交換直後の自律発話では、交換カードを強く反映します。通常の自律発話では、
 脳内カードは弱い内部状態として扱い、`activatedCards`が空のまま発話する場合があります。
 直前の自律発話と同じ目立つ表現、比喩、文型、テンションは自然に避けます。
 
-発話、沈黙、非発話反応が完了すると、次の自律発話を予約します。
+発話、沈黙、非発話反応が完了すると、通常は次の自律発話を予約します。
+明示的な終了後は、この予約を止めます。
+マイク接続中も、視聴者のVAD発話中またはSTT処理中でなければ、自律候補を予約します。
+Vayriaの発話中は、既存のbusy制御で新しい自律候補を開始しません。
 通信失敗が発生すると、自律発話ループを停止します。
 手動入力またはSession Resetでループを再開できます。
 ミュートとタブ非表示はループだけを一時停止し、会話の履歴、話題、演者状態、カード状態を保持します。
@@ -95,7 +107,7 @@ Mode D（Exhibition Mix）の実効endpointは`400ms`です。
 実際のmodel、device、compute type、fallback理由、model load時間はAudio LabとJSONLへ記録します。
 
 Sessionはページ内だけの一時状態です。
-履歴、話題、直前の自律返答、演者状態、カードのターン状態を含みます。
+履歴、話題、直前のVayria発話、演者状態、カードのターン状態を含みます。
 localモードの開発画面には`Session Reset`を表示します。
 Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻します。
 既存の`Reset Turn`はカードのターン状態だけを戻します。
@@ -205,9 +217,10 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
    Setup scriptはAPIを起動しません。
    ActionがworktreeごとのAPIを起動します。
-   `main`は`5187`を使用します。
+   local開発では、`main`は`5187`を使用します。
    worker worktreeは`5188`から`5210`の空きポートを自動で使用します。
    Setup scriptはworktreeごとの`.env.exhibition.local`も自動で生成します。
+   実機用の`.env.exhibition.local`は、worktreeに関係なく`5187`を使用します。
    `.env.exhibition.example`を毎回コピーする必要はありません。
    既存の`.env.local`は上書きしません。
    `.env.local`には実キーを保存しません。
@@ -237,8 +250,9 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
    既存の`.env.local`は、`-Force`を指定しない限り上書きしません。
 
-   `main`は`5187`を使用します。
+   local開発では、`main`は`5187`を使用します。
    各worker worktreeは`5188`から`5210`の未使用ポートを使用します。
+   実機用のexhibition起動は、常に`5187`を使用します。
 
 7. VRMの正本をGitリポジトリの外へ保存します。
 
@@ -409,12 +423,13 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 7. Vite が表示する `Network` URLを`https`でiPadから開きます。
 
    ```text
-   https://<Windows PC の LAN アドレス>:<worktreeに割り当てられたポート>/
+   https://<Windows PC の LAN アドレス>:5187/
    ```
 
 iPad と Windows PC は同一 LAN に接続してください。Wi-Fi と Ethernet のどちらも使用できます。
 LAN アドレスはソースへ記述しません。起動時に表示された URL を使用します。
-`main` worktreeは`5187`、worker worktreeは`5188`から`5210`の割り当てポートを使用します。
+実機用のexhibition設定は、worktreeに関係なく`5187`を使用します。
+通常のlocal開発だけが、worker worktreeごとに`5188`から`5210`のポートを使用します。
 
 ### 展示中の受動ログとOwner観察
 
@@ -475,7 +490,7 @@ Ownerも、メモと理由へ発話本文、履歴、API key、個人情報を�
 `playcheckRunId`がある既存のPlaycheckイベントは、従来のraw保存を優先します。
 `public`モードのユーザー入力は今回実装しません。
 
-Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187`から`5210`の受信を一度だけ許可してください。
+Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187`の受信を一度だけ許可してください。
 インターネットへポート転送は設定しないでください。
 
 `VITE_API_BASE_URL=/` は現在のページと同じ接続先を使用します。別の HTTPS API を使用する場合だけ、`VITE_API_BASE_URL` を変更します。

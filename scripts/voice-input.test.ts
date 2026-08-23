@@ -24,6 +24,7 @@ import {
 import {
   DEFAULT_AUDIO_ENDPOINT_MS,
   AUDIO_ENDPOINT_VALUES,
+  BARGE_IN_DUCK_GAIN,
   calculatePerMinuteRate,
   clampVadThreshold,
   DEFAULT_AUDIO_INPUT_MODE,
@@ -668,6 +669,65 @@ test('remote PCM adapter validates the first AudioWorklet frame before activatio
   }
 });
 
+test('processed remote adapter gates low-level noise but forwards speech-level audio', async () => {
+  const environment = installRemoteBrowserEnvironment();
+  try {
+    const diagnostics: Array<{
+      type: string;
+      noiseFloor?: number | null;
+      effectiveThreshold?: number | null;
+    }> = [];
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'processed',
+      audioPreset: 'mild',
+      diagnostics: true,
+      onEvent: () => undefined,
+      onDiagnostic: (diagnostic) => {
+        diagnostics.push({
+          type: diagnostic.type,
+          ...(diagnostic.type === 'audio_level'
+            ? {
+                noiseFloor: diagnostic.noiseFloor,
+                effectiveThreshold: diagnostic.effectiveThreshold,
+              }
+            : {}),
+        });
+      },
+    });
+
+    const startPromise = adapter.start();
+    await waitForRemoteCondition(() => environment.worklets.length === 1);
+    environment.worklets[0]!.emit(makePcmChunk(0.01));
+
+    assert.equal(await startPromise, true);
+    const socket = environment.sockets[0];
+    const hasBinaryFrame = () =>
+      socket?.sent.some((value) => value instanceof ArrayBuffer) ?? false;
+    assert.equal(hasBinaryFrame(), false);
+
+    environment.worklets[0]!.emit(makePcmChunk(0.01));
+    environment.worklets[0]!.emit(makePcmChunk(0));
+    environment.worklets[0]!.emit(makePcmChunk(0));
+    assert.equal(hasBinaryFrame(), false);
+
+    environment.worklets[0]!.emit(makePcmChunk(0.08));
+    assert.equal(hasBinaryFrame(), true);
+    assert.ok(
+      diagnostics.some(
+        (diagnostic) =>
+          diagnostic.type === 'audio_level' &&
+          diagnostic.noiseFloor !== null &&
+          diagnostic.effectiveThreshold !== null,
+      ),
+    );
+
+    await adapter.stop();
+    adapter.dispose();
+  } finally {
+    environment.restore();
+  }
+});
+
 test('remote PCM adapter falls back to ScriptProcessor when AudioWorklet stays silent', async () => {
   const environment = installRemoteBrowserEnvironment({ timerScale: 0.01 });
   try {
@@ -962,6 +1022,7 @@ test('adaptive RMS VAD rejects a low-level candidate after two noise-floor chunk
 
 test('barge-in confirmation accepts only content-bearing transcripts', () => {
   assert.equal(isConfirmedBargeInTranscript('今日は雨だった'), true);
+  assert.equal(isConfirmedBargeInTranscript('ヴェイリア'), true);
   assert.equal(isConfirmedBargeInTranscript('いや'), true);
   assert.equal(isConfirmedBargeInTranscript('待って'), true);
   assert.equal(isConfirmedBargeInTranscript('うん'), false);
@@ -973,6 +1034,37 @@ test('barge-in confirmation accepts only content-bearing transcripts', () => {
   );
   assert.equal(isConfirmedBargeInTranscript(''), false);
   assert.equal(isConfirmedBargeInTranscript('あ'.repeat(1_001)), false);
+});
+
+test('barge-in during Vayria speech requires a conversational cue', () => {
+  const speakingOptions = { requireConversationalCue: true } as const;
+
+  assert.equal(
+    isConfirmedBargeInTranscript('今日は雨だった', speakingOptions),
+    false,
+  );
+  assert.equal(
+    isConfirmedBargeInTranscript('ヴェイリア…', speakingOptions),
+    true,
+  );
+  assert.equal(
+    isConfirmedBargeInTranscript('ベイリア、聞こえる？', speakingOptions),
+    true,
+  );
+  assert.equal(
+    isConfirmedBargeInTranscript('ヴェイリアはどう思う？', speakingOptions),
+    true,
+  );
+  assert.equal(
+    isConfirmedBargeInTranscript('ヴェイリアX', speakingOptions),
+    false,
+  );
+  assert.equal(isConfirmedBargeInTranscript('待って', speakingOptions), true);
+  assert.equal(isConfirmedBargeInTranscript('いや、それ違う', speakingOptions), true);
+  assert.equal(
+    isConfirmedBargeInTranscript('ご視聴ありがとうございました', speakingOptions),
+    false,
+  );
 });
 
 test('busy-turn interruption requires a content-bearing finalized transcript', () => {
@@ -1166,6 +1258,7 @@ test('Audio Lab normalizes known hallucinations and anonymizes track settings', 
 test('Audio Lab defaults to Processed while retaining Mode D for debug selection', () => {
   assert.equal(DEFAULT_AUDIO_INPUT_MODE, 'baseline');
   assert.equal(DEFAULT_AUDIO_LAB_MODE, 'processed');
+  assert.equal(BARGE_IN_DUCK_GAIN, 0.25);
   assert.equal(DEFAULT_EXHIBITION_AUDIO_PRESET, 'mild');
   assert.equal(resolveInitialAudioLabMode(true), 'processed');
   assert.equal(resolveInitialAudioLabMode(false), 'baseline');
