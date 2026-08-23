@@ -429,9 +429,12 @@ export function useConversation(
       plan: PerformancePlan,
       voiceMetadata?: VoiceTurnMetadata,
       characterIdentityOverride?: CharacterIdentity,
+      programContextOverride?: ProgramContext,
     ): Promise<ProcessTurnResult> => {
       const eventEmitter = createConversationEventEmitter(turnSource);
       const messageForRequest = message;
+      const programContextForRequest =
+        programContextOverride ?? programContextRef.current;
       let terminalEventEmitted = false;
       const emitTerminalEvent = (
         event: 'turn_completed' | 'turn_aborted' | 'turn_failed',
@@ -570,7 +573,7 @@ export function useConversation(
             history: semanticHistory.toMessages(),
             characterIdentity:
               characterIdentityOverride ?? characterIdentityRef.current,
-            programContext: programContextRef.current,
+            programContext: programContextForRequest,
             ...cardContext,
             performanceContext: plan.speech?.llmContext ?? {
               callbackTendency: 0,
@@ -1007,6 +1010,7 @@ export function useConversation(
       onReplyAccepted: (activatedCardIds: string[]) => void,
       plan: PerformancePlan,
       characterIdentityOverride?: CharacterIdentity,
+      programContextOverride?: ProgramContext,
     ) =>
       (
         await processTurn(
@@ -1018,6 +1022,7 @@ export function useConversation(
           plan,
           undefined,
           characterIdentityOverride,
+          programContextOverride,
         )
       ).completed,
     [processTurn],
@@ -1031,6 +1036,7 @@ export function useConversation(
       plan: PerformancePlan,
       voiceMetadata?: VoiceTurnMetadata,
       characterIdentityOverride?: CharacterIdentity,
+      programContextOverride?: ProgramContext,
     ) =>
       (
         await processTurn(
@@ -1042,6 +1048,7 @@ export function useConversation(
           plan,
           voiceMetadata,
           characterIdentityOverride,
+          programContextOverride,
         )
       ).completed,
     [processTurn],
@@ -1053,6 +1060,7 @@ export function useConversation(
       autonomousContext: AutonomousContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
       plan: PerformancePlan,
+      programContextOverride?: ProgramContext,
     ) => {
       const result = await processTurn(
         'autonomous',
@@ -1061,6 +1069,9 @@ export function useConversation(
         onReplyAccepted,
         autonomousContext,
         plan,
+        undefined,
+        undefined,
+        programContextOverride,
       );
       return result.completed ? result.decision : null;
     },

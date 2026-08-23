@@ -239,7 +239,10 @@ The context also carries the current card phase. It starts at
 `before_card_change`, changes to `after_card_change` when the viewer swaps a
 card, and returns to `before_card_change` on Session Reset. The phase is prompt
 context only; it does not claim that a card changed unless the local card event
-actually occurred.
+actually occurred. The autonomous request started by the card event carries
+the `after_card_change` context explicitly. It does not wait for the React
+state bridge to publish the next render, so the first card reaction cannot use
+the stale phase from the previous render.
 They also receive the latest completed Vayria spoken line as a bounded,
 session-only continuity anchor. The line is updated after successful playback
 for manual, voice, and autonomous speech. It helps the director retain the

@@ -30,6 +30,7 @@ import {
 } from './conversation/useConversation';
 import {
   DEFAULT_PROGRAM_CONTEXT,
+  type ProgramContext,
   type ProgramPhase,
 } from './conversation/programContext';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
@@ -1069,6 +1070,7 @@ export default function App() {
     async (options: {
       cardContextOverride?: ChatCardContext;
       contribution?: ReturnType<typeof getDirectionContribution>;
+      programContextOverride?: ProgramContext;
       trigger?: PerformerTrigger;
     } = {}) => {
       const expectedSessionGeneration = sessionGeneration;
@@ -1162,6 +1164,7 @@ export default function App() {
         autonomousContext,
         handleReplyAccepted,
         plan,
+        options.programContextOverride,
       );
       if (!decision || !isCurrentSession()) return false;
       setAutonomousContext((current) =>
@@ -1205,6 +1208,10 @@ export default function App() {
           forcedCardId: result.forcedCardId,
         },
         contribution,
+        programContextOverride: {
+          ...programContext,
+          phase: 'after_card_change',
+        },
         trigger,
       });
     },
@@ -1213,6 +1220,7 @@ export default function App() {
       isAutonomousLoopEnabled,
       isBusy,
       isMuted,
+      programContext,
       setProgramPhase,
       startAutonomous,
     ],
