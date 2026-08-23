@@ -65,6 +65,10 @@ The current source mapping is:
 | React state bridge | `src/performer/usePerformerRuntime.ts` |
 | Voice floor state and pending context | `src/conversation/floorController.ts` |
 | Committed semantic dialogue history | `src/conversation/semanticDialogueHistory.ts` |
+| Autonomous topic and latest viewer intent | `src/conversation/autonomousContext.ts`, `src/App.tsx` |
+| Latest completed self utterance | `src/conversation/useConversation.ts`, `server/localApi.ts` |
+| Live program context | `src/conversation/programContext.ts`, `src/App.tsx`, `src/conversation/useConversation.ts` |
+| LLM-facing self-state projection | `src/performer/runtime.ts`, `src/performer/usePerformerRuntime.ts` |
 | Voice interaction timeline | `src/conversation/interactionTimeline.ts`, `src/voice/voiceLabRecorder.ts` |
 | WildCard direction | `src/cards/wildcardDirection.ts` |
 | Request and playback execution | `src/conversation/useConversation.ts` |
@@ -174,8 +178,15 @@ It does not own emotion state.
 ### Session loop and reset
 
 The application keeps one in-memory session while the page remains open.
-The session contains conversation history, autonomous topic context, the last
-autonomous reply, Performer State, and per-turn card state.
+The session contains conversation history, autonomous topic context, the latest
+structured viewer intent, the age of that intent, the viewer engagement state,
+the last autonomous reply, Performer State, and per-turn card state.
+
+The viewer intent is derived from the latest input and does not store its raw
+text. The age counts completed non-silent autonomous turns since that input.
+Explicit conversation-closing input sets viewer engagement to `settled`.
+The autonomous timer waits in that state until substantive viewer input returns
+the state to `available`. Backchannels and unfinished fragments do not reopen it.
 
 The loop starts after the avatar and audio are ready.
 It schedules the initial four-second delay, then schedules the next delay after
@@ -210,9 +221,27 @@ The Performer Runtime does not receive a generic `SessionState` type.
 
 The resolver calculates it for each `PerformancePlan`.
 
-Topic is conversation-owned in v0.1.
-`App.tsx` and `useConversation` keep `AutonomousContext`, `topic`, and `topicTurns`.
+Topic and viewer intent are conversation-owned in v0.1.
+`App.tsx` and `useConversation` keep `AutonomousContext`, `topic`, `topicTurns`,
+`viewerIntent`, `viewerTurnsSince`, and `viewerEngagement`.
 Moving topic into the Runtime is a v0.2 decision.
+
+Autonomous chat requests also receive a bounded `PerformerStateContext`
+projection at request time. It contains phase, energy, emotion, and attention.
+They receive `viewerEngagement` so the director can preserve the settled wait
+state in its decision context.
+They also receive a bounded `ProgramContext`. The current program is a
+viewer-directed card-impression segment whose objective is to notice the change
+in impression before and after a card change. This context tells the director
+who controls the next card action; it does not add raw input or internal card
+state to history.
+They also receive the latest completed Vayria spoken line as a bounded,
+session-only continuity anchor. The line is updated after successful playback
+for manual, voice, and autonomous speech. It helps the director retain the
+topic or interest expressed in that line without treating the line as a new
+user turn or event-log content.
+The projection is prompt context only. It is not added to semantic history or
+structured event records.
 
 ### Performer Profile
 

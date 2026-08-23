@@ -1,6 +1,16 @@
 import type { BargeInState } from './audioLab.js';
 import { findKnownHallucinationPhrase } from './audioLab.js';
-import { isContentBearingVoiceMessage } from '../performer/runtime.js';
+import {
+  isContentBearingVoiceMessage,
+  isDefiniteParticipationMessage,
+  isDefiniteQuestionMessage,
+  isDirectActionRequestMessage,
+} from '../performer/runtime.js';
+import {
+  DEFAULT_CHARACTER_IDENTITY,
+  resolveSelfName,
+  type CharacterIdentity,
+} from '../character/identity.js';
 import { MAX_VOICE_TEXT_LENGTH } from './voiceInput.js';
 
 export type BargeInEvent =
@@ -20,6 +30,14 @@ export interface BargeInTransition {
   reason?: string;
 }
 
+export interface BargeInTranscriptOptions {
+  characterIdentity?: CharacterIdentity;
+  requireConversationalCue?: boolean;
+}
+
+const HIGH_CONFIDENCE_INTERRUPTION_PATTERN =
+  /^(?:待って|ちょっと待って|いや|違う|やめて|止めて|聞いて|ねえ|ねぇ)(?:[、,，:：\s]|$)/u;
+
 function restore(reason: string): BargeInTransition {
   return {
     state: 'restored',
@@ -28,14 +46,40 @@ function restore(reason: string): BargeInTransition {
   };
 }
 
-export function isConfirmedBargeInTranscript(text: string): boolean {
-  const normalized = text.normalize('NFKC').trim();
+function isHighConfidenceBargeInCue(
+  text: string,
+  characterIdentity: CharacterIdentity,
+): boolean {
   return Boolean(
-    normalized &&
-      normalized.length <= MAX_VOICE_TEXT_LENGTH &&
-      findKnownHallucinationPhrase(normalized) === null &&
-      isContentBearingVoiceMessage(normalized),
+    resolveSelfName(text, characterIdentity).role !== 'none' ||
+      isDefiniteQuestionMessage(text) ||
+      isDirectActionRequestMessage(text) ||
+      isDefiniteParticipationMessage(text) ||
+      HIGH_CONFIDENCE_INTERRUPTION_PATTERN.test(text),
   );
+}
+
+export function isConfirmedBargeInTranscript(
+  text: string,
+  options: BargeInTranscriptOptions = {},
+): boolean {
+  const normalized = text.normalize('NFKC').trim();
+  if (
+    !normalized ||
+    normalized.length > MAX_VOICE_TEXT_LENGTH ||
+    findKnownHallucinationPhrase(normalized) !== null
+  ) {
+    return false;
+  }
+
+  if (options.requireConversationalCue) {
+    return isHighConfidenceBargeInCue(
+      normalized,
+      options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY,
+    );
+  }
+
+  return isContentBearingVoiceMessage(normalized);
 }
 
 export function shouldInterruptBusyTurn(

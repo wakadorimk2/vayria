@@ -19,11 +19,16 @@ import {
 } from './character/identity';
 import { useAutonomousTalk } from './conversation/useAutonomousTalk';
 import {
+  advanceAutonomousContext,
+  INITIAL_AUTONOMOUS_CONTEXT,
+  recordViewerIntent,
+} from './conversation/autonomousContext';
+import {
   useConversation,
   type AutonomousContext,
-  type AutonomousDecision,
   type ChatCardContext,
 } from './conversation/useConversation';
+import { DEFAULT_PROGRAM_CONTEXT } from './conversation/programContext';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
 import {
   CARD_INTERACTION_ATTENTION_DURATION_MS,
@@ -197,21 +202,6 @@ function readAudioControlState(): AudioControlState {
   return createDefaultAudioControlState();
 }
 
-function advanceAutonomousContext(
-  current: AutonomousContext,
-  decision: AutonomousDecision,
-): AutonomousContext {
-  if (decision.action === 'silence') return current;
-
-  return {
-    topic: decision.topic,
-    topicTurns:
-      decision.action === 'new_topic' || current.topic === null
-        ? 1
-        : current.topicTurns + 1,
-  };
-}
-
 export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
@@ -224,7 +214,7 @@ export default function App() {
     readCharacterIdentity,
   );
   const [autonomousContext, setAutonomousContext] =
-    useState<AutonomousContext>({ topic: null, topicTurns: 0 });
+    useState<AutonomousContext>(INITIAL_AUTONOMOUS_CONTEXT);
   const [isAutonomousLoopEnabled, setIsAutonomousLoopEnabled] =
     useState(true);
   const [sessionGeneration, setSessionGeneration] = useState(0);
@@ -238,6 +228,7 @@ export default function App() {
     completePlan,
     createPlan,
     getNextAutonomousDelay: getRuntimeAutonomousDelay,
+    getPerformerStateContext,
     resetRuntime,
     setPhase,
   } = performer;
@@ -607,6 +598,8 @@ export default function App() {
     isExhibitionMode,
     isMuted,
     characterIdentity,
+    programContext: DEFAULT_PROGRAM_CONTEXT,
+    getPerformerStateContext,
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
     onPerformanceResult: handlePerformanceResult,
@@ -794,7 +787,7 @@ export default function App() {
     activePlanRef.current = null;
     setActivePlan(null);
     setActiveEmotionCue(null);
-    setAutonomousContext({ topic: null, topicTurns: 0 });
+    setAutonomousContext(INITIAL_AUTONOMOUS_CONTEXT);
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
@@ -942,7 +935,11 @@ export default function App() {
           const message = event.text.trim();
           const candidateSegmentId = activeBargeInSegmentRef.current;
           activeBargeInSegmentRef.current = null;
-          const acceptedForBargeIn = isConfirmedBargeInTranscript(message);
+          const isSpeakingCandidate = candidateSegmentId === event.segmentId;
+          const acceptedForBargeIn = isConfirmedBargeInTranscript(message, {
+            characterIdentity: characterIdentityRef.current,
+            requireConversationalCue: isSpeakingCandidate,
+          });
           const bargeInTransition = dispatchBargeIn({
             type: 'transcript_finalized',
             accepted: acceptedForBargeIn,
@@ -972,6 +969,9 @@ export default function App() {
           cancelNonSpeechPlan();
           cancelActiveCardReactionPlan();
           const identityForRequest = rememberExplicitAlias(message);
+          setAutonomousContext((current) =>
+            recordViewerIntent(current, message, identityForRequest),
+          );
           const confirmedBargeIn =
             bargeInTransition?.effects.includes('interrupt') ?? false;
           if (confirmedBargeIn) {
@@ -1235,6 +1235,7 @@ export default function App() {
     isBusy: isPerformerBusy,
     isVoiceInputActive: isVoiceInputEnabled,
     isLoopEnabled: isAutonomousLoopEnabled,
+    isWaitingForViewer: autonomousContext.viewerEngagement === 'settled',
     isMuted,
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
@@ -1256,6 +1257,9 @@ export default function App() {
       text: trimmedInput,
     };
     const identityForRequest = rememberExplicitAlias(trimmedInput);
+    setAutonomousContext((current) =>
+      recordViewerIntent(current, trimmedInput, identityForRequest),
+    );
     const plan = createPlanForTrigger(trigger);
     if (!plan.actionDecision || plan.actionDecision.action === 'take_floor') {
       beginReply();

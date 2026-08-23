@@ -10,6 +10,7 @@ interface UseAutonomousTalkOptions {
   isBusy: boolean;
   isVoiceInputActive: boolean;
   isLoopEnabled: boolean;
+  isWaitingForViewer: boolean;
   isMuted: boolean;
   isReady: boolean;
   sessionGeneration: number;
@@ -22,6 +23,7 @@ export function useAutonomousTalk({
   isBusy,
   isVoiceInputActive,
   isLoopEnabled,
+  isWaitingForViewer,
   isMuted,
   isReady,
   sessionGeneration,
@@ -60,6 +62,10 @@ export function useAutonomousTalk({
       cancelAutonomous();
       return;
     }
+    if (isWaitingForViewer) {
+      cancelAutonomous();
+      return;
+    }
     if (
       !isLoopEnabled ||
       isVoiceInputActive ||
@@ -91,6 +97,7 @@ export function useAutonomousTalk({
     isBusy,
     isVoiceInputActive,
     isLoopEnabled,
+    isWaitingForViewer,
     isMuted,
     isReady,
     isVisible,

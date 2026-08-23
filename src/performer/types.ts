@@ -63,18 +63,23 @@ export function isConversationActionDecision(
   );
 }
 
-export type AttentionTarget = 'viewer' | 'chat' | 'game' | 'none';
+export const ATTENTION_TARGETS = ['viewer', 'chat', 'game', 'none'] as const;
+
+export type AttentionTarget = (typeof ATTENTION_TARGETS)[number];
 
 export type ExternalStimulusMetadata = Readonly<Record<string, string>>;
 
-export type PerformerPhase =
-  | 'idle'
-  | 'scheduled'
-  | 'waiting'
-  | 'synthesizing'
-  | 'speaking'
-  | 'cooldown'
-  | 'error';
+export const PERFORMER_PHASES = [
+  'idle',
+  'scheduled',
+  'waiting',
+  'synthesizing',
+  'speaking',
+  'cooldown',
+  'error',
+] as const;
+
+export type PerformerPhase = (typeof PERFORMER_PHASES)[number];
 
 export type PerformerTrigger =
   | {
@@ -110,6 +115,15 @@ export interface PerformerState {
   };
   lastSpeechAt: number | null;
   lastViewerMessageAt: number | null;
+}
+
+export interface PerformerStateContext {
+  phase: PerformerPhase;
+  energy: number;
+  emotion: Emotion;
+  emotionActivation: number;
+  attentionTarget: AttentionTarget;
+  attentionStrength: number;
 }
 
 export interface PerformerProfile {

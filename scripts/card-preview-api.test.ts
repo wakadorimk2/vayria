@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildAutonomousDirectorInstruction,
   buildCharacterIdentitySystemPrompt,
   buildCardPreviewSystemPrompt,
+  buildProgramContextSystemPrompt,
   buildVoiceInteractionPolicySystemPrompt,
   createInteractionReactionResponse,
   isActionCommitmentMessage,
@@ -13,6 +15,7 @@ import {
   parseCardPreviewResponse,
   parseConversationActionPolicy,
   parseVoiceAssistantResponse,
+  readPerformerStateContext,
   readCardPreviewRequest,
   readConversationEvent,
   VOICE_REPLY_INSTRUCTION,
@@ -23,6 +26,39 @@ const VALID_CONTEXT = {
   fragmentation: 0.1,
   semanticBiases: ['鶏に関係する具体物を一つ連想する'],
 };
+
+const VALID_PERFORMER_STATE = {
+  phase: 'scheduled',
+  energy: 0.42,
+  emotion: 'sorrow',
+  emotionActivation: 0.4,
+  attentionTarget: 'viewer',
+  attentionStrength: 0.8,
+} as const;
+
+test('performer state context validates the bounded self-state contract', () => {
+  assert.deepEqual(
+    readPerformerStateContext(VALID_PERFORMER_STATE),
+    VALID_PERFORMER_STATE,
+  );
+  assert.equal(readPerformerStateContext(undefined), null);
+  assert.throws(
+    () =>
+      readPerformerStateContext({
+        ...VALID_PERFORMER_STATE,
+        energy: 1.1,
+      }),
+    /performerState format is invalid/,
+  );
+  assert.throws(
+    () =>
+      readPerformerStateContext({
+        ...VALID_PERFORMER_STATE,
+        internalNote: '不要受け付ける',
+      }),
+    /unsupported field/,
+  );
+});
 
 test('card preview request accepts a known card and runtime context', () => {
   assert.deepEqual(
@@ -99,6 +135,59 @@ test('card preview prompt uses behavior state without motion asset details', () 
   assert.match(prompt, /Behavior gesture intention: inspect/);
   assert.equal(prompt.includes('card-chicken'), false);
   assert.equal(prompt.includes('.vrma'), false);
+});
+
+test('program context keeps the card segment viewer-directed', () => {
+  const prompt = buildProgramContextSystemPrompt();
+
+  assert.match(prompt, /live card-impression segment/);
+  assert.match(prompt, /viewer decides when to choose or change a card/);
+  assert.match(
+    prompt,
+    /must not pressure the viewer or invent that a card was changed/,
+  );
+  assert.match(prompt, /impression changes before and after a card change/);
+  assert.match(prompt, /behavior context, not spoken content/);
+});
+
+test('autonomous director prompt prioritizes the latest viewer intent', () => {
+  const prompt = buildAutonomousDirectorInstruction(
+    '朝ごはん',
+    3,
+    'question',
+    0,
+    'available',
+    {
+      phase: 'scheduled',
+      energy: 0.42,
+      emotion: 'sorrow',
+      emotionActivation: 0.4,
+      attentionTarget: 'viewer',
+      attentionStrength: 0.8,
+    },
+    undefined,
+    '青い光が気になるな',
+  );
+
+  assert.match(prompt, /Latest viewer intent: question/);
+  assert.match(prompt, /Autonomous turns since latest viewer input: 0/);
+  assert.match(prompt, /Viewer engagement: available/);
+  assert.match(prompt, /live card-impression segment/);
+  assert.match(prompt, /viewer decides when to choose or change a card/);
+  assert.match(prompt, /Self energy: 0\.42/);
+  assert.match(prompt, /Self attention target: viewer/);
+  assert.match(prompt, /latest completed Vayria spoken line is output data/);
+  assert.match(prompt, /<last-self-utterance>/);
+  assert.match(prompt, /青い光が気になるな/);
+  assert.match(prompt, /Do not quote or mechanically paraphrase it/);
+  assert.match(
+    prompt,
+    /latest viewer intent and recent conversation history as the current situation/,
+  );
+  assert.match(prompt, /give that latest viewer turn priority/);
+  assert.match(prompt, /backchannel or unfinished, silence is acceptable/);
+  assert.match(prompt, /viewer engagement is settled, do not start a new conversational topic/);
+  assert.match(prompt, /Use the self state as quiet background context/);
 });
 
 test('voice assistant response accepts only compatible action and cue pairs', () => {
@@ -285,6 +374,7 @@ test('voice policy prompt prioritizes content-bearing utterances', () => {
   assert.match(prompt, /direct participation call such as ねえ or ちょっと/);
   assert.match(prompt, /without producing a spoken echo/);
   assert.match(prompt, /small existing reaction is clearly sufficient/);
+  assert.match(prompt, /live card-impression segment/);
   assert.match(prompt, /Do not use listen or backchannel for a content-bearing utterance/);
   assert.match(prompt, /clearly unfinished fragment/);
   assert.match(prompt, /react_nonverbally/);

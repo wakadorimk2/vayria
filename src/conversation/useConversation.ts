@@ -20,11 +20,18 @@ import {
   createSemanticDialogueHistory,
   DEFAULT_HISTORY_TURN_LIMIT,
 } from './semanticDialogueHistory';
+import type { AutonomousContext } from './autonomousContext';
+export type { AutonomousContext } from './autonomousContext';
+import {
+  DEFAULT_PROGRAM_CONTEXT,
+  type ProgramContext,
+} from './programContext';
 import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
   ConversationActionDecision,
   PerformancePlan,
   PerformanceResult,
+  PerformerStateContext,
 } from '../performer/types';
 import { isConversationActionDecision } from '../performer/types';
 import type { VoiceInputEvent } from '../voice/voiceInput';
@@ -45,11 +52,6 @@ export const AUTONOMOUS_ACTIONS = [
 ] as const;
 
 export type AutonomousAction = (typeof AUTONOMOUS_ACTIONS)[number];
-
-export interface AutonomousContext {
-  topic: string | null;
-  topicTurns: number;
-}
 
 export interface AutonomousDecision {
   action: AutonomousAction;
@@ -82,6 +84,8 @@ interface ConversationOptions {
   isMuted?: boolean;
   isExhibitionMode?: boolean;
   characterIdentity?: CharacterIdentity;
+  programContext?: ProgramContext;
+  getPerformerStateContext?: () => PerformerStateContext;
   onPerformanceCue?: (
     planId: string,
     cue: { emotion: Emotion; intensity: number },
@@ -226,7 +230,7 @@ export function useConversation(
     createSemanticDialogueHistory(historyTurnLimit),
   );
   const subtitleClearTimerRef = useRef<number | null>(null);
-  const lastAutonomousReplyRef = useRef<string | null>(null);
+  const lastSelfUtteranceRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const sourceRef = useRef<ConversationSource | null>(null);
   const statusRef = useRef<ConversationStatus>('idle');
@@ -241,6 +245,10 @@ export function useConversation(
   const characterIdentityRef = useRef(
     options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY,
   );
+  const programContextRef = useRef(
+    options.programContext ?? DEFAULT_PROGRAM_CONTEXT,
+  );
+  const getPerformerStateContextRef = useRef(options.getPerformerStateContext);
 
   useEffect(() => {
     onPerformanceCueRef.current = options.onPerformanceCue;
@@ -261,6 +269,15 @@ export function useConversation(
     characterIdentityRef.current =
       options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY;
   }, [options.characterIdentity]);
+
+  useEffect(() => {
+    programContextRef.current =
+      options.programContext ?? DEFAULT_PROGRAM_CONTEXT;
+  }, [options.programContext]);
+
+  useEffect(() => {
+    getPerformerStateContextRef.current = options.getPerformerStateContext;
+  }, [options.getPerformerStateContext]);
 
   const setConversationState = useCallback(
     (nextStatus: ConversationStatus, nextSource: ConversationSource | null) => {
@@ -373,7 +390,7 @@ export function useConversation(
     invalidateCurrentTurn(true);
     semanticHistory.clear();
     floorController.reset('conversation_reset');
-    lastAutonomousReplyRef.current = null;
+    lastSelfUtteranceRef.current = null;
     clearSubtitle();
     setReply('');
     setError('');
@@ -511,6 +528,10 @@ export function useConversation(
       let motionStartedAt: number | undefined;
       let speechStartedAt: number | undefined;
       let interactionDecision: ConversationActionDecision | null = null;
+      const performerStateContext =
+        turnSource === 'autonomous'
+          ? getPerformerStateContextRef.current?.() ?? null
+          : null;
 
       try {
         if (turnSource !== 'voice') {
@@ -549,6 +570,7 @@ export function useConversation(
             history: semanticHistory.toMessages(),
             characterIdentity:
               characterIdentityOverride ?? characterIdentityRef.current,
+            programContext: programContextRef.current,
             ...cardContext,
             performanceContext: plan.speech?.llmContext ?? {
               callbackTendency: 0,
@@ -559,7 +581,12 @@ export function useConversation(
               ? {
                   topic: autonomousContext?.topic ?? null,
                   topicTurns: autonomousContext?.topicTurns ?? 0,
-                  previousAutonomousReply: lastAutonomousReplyRef.current,
+                  viewerIntent: autonomousContext?.viewerIntent ?? null,
+                  viewerTurnsSince: autonomousContext?.viewerTurnsSince ?? 0,
+                  viewerEngagement:
+                    autonomousContext?.viewerEngagement ?? 'available',
+                  lastSelfUtterance: lastSelfUtteranceRef.current,
+                  performerState: performerStateContext,
                 }
               : {}),
           }),
@@ -869,8 +896,8 @@ export function useConversation(
           return { completed: false, decision: null };
         }
 
+        lastSelfUtteranceRef.current = responseText;
         if (turnSource === 'autonomous') {
-          lastAutonomousReplyRef.current = responseText;
           semanticHistory.appendAssistant(responseText);
         }
         if (turnSource === 'voice') {
