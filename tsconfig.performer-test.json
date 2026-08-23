@@ -20,6 +20,7 @@
     "src/conversation/interactionTimeline.ts",
     "src/conversation/semanticDialogueHistory.ts",
     "src/conversation/autonomousContext.ts",
+    "src/conversation/programContext.ts",
     "scripts/card-preview-api.test.ts",
     "scripts/local-api-capture.test.ts",
     "scripts/card-reactions.test.ts",

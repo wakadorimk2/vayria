@@ -28,6 +28,7 @@ import {
   type AutonomousContext,
   type ChatCardContext,
 } from './conversation/useConversation';
+import { DEFAULT_PROGRAM_CONTEXT } from './conversation/programContext';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
 import {
   CARD_INTERACTION_ATTENTION_DURATION_MS,
@@ -597,6 +598,7 @@ export default function App() {
     isExhibitionMode,
     isMuted,
     characterIdentity,
+    programContext: DEFAULT_PROGRAM_CONTEXT,
     getPerformerStateContext,
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,

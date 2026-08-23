@@ -4,6 +4,7 @@ import {
   buildAutonomousDirectorInstruction,
   buildCharacterIdentitySystemPrompt,
   buildCardPreviewSystemPrompt,
+  buildProgramContextSystemPrompt,
   buildVoiceInteractionPolicySystemPrompt,
   createInteractionReactionResponse,
   isActionCommitmentMessage,
@@ -136,6 +137,19 @@ test('card preview prompt uses behavior state without motion asset details', () 
   assert.equal(prompt.includes('.vrma'), false);
 });
 
+test('program context keeps the card segment viewer-directed', () => {
+  const prompt = buildProgramContextSystemPrompt();
+
+  assert.match(prompt, /live card-impression segment/);
+  assert.match(prompt, /viewer decides when to choose or change a card/);
+  assert.match(
+    prompt,
+    /must not pressure the viewer or invent that a card was changed/,
+  );
+  assert.match(prompt, /impression changes before and after a card change/);
+  assert.match(prompt, /behavior context, not spoken content/);
+});
+
 test('autonomous director prompt prioritizes the latest viewer intent', () => {
   const prompt = buildAutonomousDirectorInstruction(
     '朝ごはん',
@@ -156,6 +170,8 @@ test('autonomous director prompt prioritizes the latest viewer intent', () => {
   assert.match(prompt, /Latest viewer intent: question/);
   assert.match(prompt, /Autonomous turns since latest viewer input: 0/);
   assert.match(prompt, /Viewer engagement: available/);
+  assert.match(prompt, /live card-impression segment/);
+  assert.match(prompt, /viewer decides when to choose or change a card/);
   assert.match(prompt, /Self energy: 0\.42/);
   assert.match(prompt, /Self attention target: viewer/);
   assert.match(
@@ -352,6 +368,7 @@ test('voice policy prompt prioritizes content-bearing utterances', () => {
   assert.match(prompt, /direct participation call such as ねえ or ちょっと/);
   assert.match(prompt, /without producing a spoken echo/);
   assert.match(prompt, /small existing reaction is clearly sufficient/);
+  assert.match(prompt, /live card-impression segment/);
   assert.match(prompt, /Do not use listen or backchannel for a content-bearing utterance/);
   assert.match(prompt, /clearly unfinished fragment/);
   assert.match(prompt, /react_nonverbally/);

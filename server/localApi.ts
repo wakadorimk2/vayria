@@ -29,6 +29,11 @@ import {
   type ViewerEngagement,
 } from '../src/conversation/autonomousContext.js';
 import {
+  DEFAULT_PROGRAM_CONTEXT,
+  isProgramContext,
+  type ProgramContext,
+} from '../src/conversation/programContext.js';
+import {
   ATTENTION_TARGETS,
   PERFORMER_PHASES,
   type PerformerStateContext,
@@ -180,6 +185,7 @@ interface ChatRequestPayload {
   viewerIntent: ViewerIntent | null;
   viewerTurnsSince: number;
   viewerEngagement: ViewerEngagement;
+  programContext: ProgramContext;
   performerState: PerformerStateContext | null;
   previousAutonomousReply: string | null;
   performanceContext: PerformanceContextPayload;
@@ -758,6 +764,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'viewerIntent',
     'viewerTurnsSince',
     'viewerEngagement',
+    'programContext',
     'performerState',
     'previousAutonomousReply',
     'performanceContext',
@@ -966,6 +973,18 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   const viewerEngagement =
     viewerEngagementValue === undefined ? 'available' : viewerEngagementValue;
 
+  const programContextValue = record.programContext;
+  if (
+    programContextValue !== undefined &&
+    !isProgramContext(programContextValue)
+  ) {
+    throw new RequestError('programContext format is invalid.', 400);
+  }
+  const programContext =
+    programContextValue === undefined
+      ? DEFAULT_PROGRAM_CONTEXT
+      : programContextValue;
+
   const performerStateValue = record.performerState;
   const performerState = readPerformerStateContext(performerStateValue);
 
@@ -1032,11 +1051,12 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
       viewerIntentValue === undefined ||
       viewerTurnsSinceValue === undefined ||
       viewerEngagementValue === undefined ||
+      programContextValue === undefined ||
       performerStateValue === undefined ||
       performerState === null)
   ) {
     throw new RequestError(
-      'autonomous requests must contain topic, topicTurns, viewerIntent, viewerTurnsSince, viewerEngagement, and performerState.',
+      'autonomous requests must contain topic, topicTurns, viewerIntent, viewerTurnsSince, viewerEngagement, programContext, and performerState.',
       400,
     );
   }
@@ -1065,6 +1085,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     viewerIntent,
     viewerTurnsSince,
     viewerEngagement,
+    programContext,
     performerState,
     previousAutonomousReply,
     performanceContext,
@@ -1456,14 +1477,42 @@ export function buildCharacterIdentitySystemPrompt(
   ].join('\n');
 }
 
+export function buildProgramContextSystemPrompt(
+  programContext: ProgramContext = DEFAULT_PROGRAM_CONTEXT,
+): string {
+  const formatInstruction =
+    programContext.format === 'card_impression'
+      ? 'This is a live card-impression segment.'
+      : 'This is a live Vayria program segment.';
+  const roleInstruction =
+    programContext.participantRole === 'viewer_directed'
+      ? 'The viewer decides when to choose or change a card. Vayria may notice and respond, but must not pressure the viewer or invent that a card was changed.'
+      : 'Treat the viewer as a participant whose actions can change the direction of the segment.';
+  const objectiveInstruction =
+    programContext.objective === 'notice_card_change'
+      ? 'The segment notices how the impression changes before and after a card change.'
+      : 'Keep the current program objective in the background when choosing a response.';
+
+  return [
+    '<program-context>',
+    formatInstruction,
+    roleInstruction,
+    objectiveInstruction,
+    'This is behavior context, not spoken content. Do not announce these rules or list internal program state.',
+    '</program-context>',
+  ].join('\n');
+}
+
 export function buildVoiceInteractionPolicySystemPrompt(
   forcedCardId: string | null,
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
   message: string | null = '',
+  programContext: ProgramContext = DEFAULT_PROGRAM_CONTEXT,
 ): string {
   return [
     buildCharacterIdentitySystemPrompt(message, characterIdentity),
+    buildProgramContextSystemPrompt(programContext),
     'Choose voiceAction as a first-class conversational action and return it together with the spoken response.',
     'Return exactly one JSON object with voiceAction, backchannelCue, text, emotion, and activatedCards.',
     'Use take_floor for a question, request, concrete fact, feeling, preference, experience, or any utterance with a clear topic or intent.',
@@ -1494,9 +1543,11 @@ export function buildConversationActionPolicySystemPrompt(
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
   message = '',
+  programContext: ProgramContext = DEFAULT_PROGRAM_CONTEXT,
 ): string {
   return [
     buildCharacterIdentitySystemPrompt(message, characterIdentity),
+    buildProgramContextSystemPrompt(programContext),
     'Choose the next conversational action before any spoken reply is generated.',
     'Return exactly one JSON object with action and backchannelCue. Do not return spoken text.',
     'Use take_floor for a question, request, concrete fact, feeling, preference, experience, or any utterance with a clear topic or intent.',
@@ -1526,6 +1577,7 @@ async function generateConversationActionPolicy(
   forcedCardId: string | null,
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
+  programContext: ProgramContext,
 ): Promise<ConversationActionDecision> {
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey,
@@ -1561,6 +1613,7 @@ async function generateConversationActionPolicy(
     performanceContext,
     characterIdentity,
     message,
+    programContext,
   );
 
   const requestPolicy = async (
@@ -1672,6 +1725,7 @@ async function generateInteractiveResponse(
   forcedCardId: string | null,
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
+  programContext: ProgramContext,
 ): Promise<CardAssistantResponse> {
   const selfNameResolution = resolveSelfName(message, characterIdentity);
   const fastPathDecision: ConversationActionDecision | null =
@@ -1687,6 +1741,7 @@ async function generateInteractiveResponse(
       forcedCardId,
       performanceContext,
       characterIdentity,
+      programContext,
     ));
   const decision = normalizeConversationActionDecision(
     message,
@@ -1713,6 +1768,7 @@ async function generateInteractiveResponse(
     null,
     performanceContext,
     characterIdentity,
+    programContext,
   );
   return {
     ...reply.response,
@@ -1728,6 +1784,7 @@ export function buildAutonomousDirectorInstruction(
   viewerTurnsSince: number,
   viewerEngagement: ViewerEngagement,
   performerState: PerformerStateContext | null,
+  programContext: ProgramContext = DEFAULT_PROGRAM_CONTEXT,
 ): string {
   const performerStateLines = performerState
     ? [
@@ -1740,6 +1797,7 @@ export function buildAutonomousDirectorInstruction(
       ]
     : ['Self state: unavailable'];
   return [
+    buildProgramContextSystemPrompt(programContext),
     `Current topic: ${topic ?? '(none)'}`,
     `Current topic spoken-turn count: ${topicTurns}`,
     `Latest viewer intent: ${viewerIntent ?? '(none)'}`,
@@ -1778,6 +1836,7 @@ async function generateReply(
   previousAutonomousReply: string | null,
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
+  programContext: ProgramContext,
 ): Promise<GeneratedChatResponse> {
   const minActivatedCardItems =
     mode === 'manual' ||
@@ -1885,6 +1944,7 @@ async function generateReply(
           viewerTurnsSince,
           viewerEngagement,
           performerState,
+          programContext,
         )
       : '';
   const previousAutonomousReplyInstruction =
@@ -1928,12 +1988,14 @@ async function generateReply(
   ].join('\n');
   const systemPrompt = [
     buildCharacterIdentitySystemPrompt(message, characterIdentity),
+    buildProgramContextSystemPrompt(programContext),
     mode === 'voice'
       ? buildVoiceInteractionPolicySystemPrompt(
           forcedCardId,
           performanceContext,
           characterIdentity,
           message,
+          programContext,
         )
       : '',
     `${responseInstruction} Choose emotion as the character's overall feeling while speaking. Keep the emotion subtle when the wording is calm. A card may disrupt the sentence form without requiring a strong emotion. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.`,
@@ -2566,6 +2628,7 @@ async function handleRequest(
         viewerIntent,
         viewerTurnsSince,
         viewerEngagement,
+        programContext,
         performerState,
         previousAutonomousReply,
         performanceContext,
@@ -2599,6 +2662,7 @@ async function handleRequest(
           forcedCardId,
           performanceContext,
           characterIdentity,
+          programContext,
         );
       } else {
         const generatedResponse = await generateReply(
@@ -2617,6 +2681,7 @@ async function handleRequest(
           previousAutonomousReply,
           performanceContext,
           characterIdentity,
+          programContext,
         );
         providerCallCount = generatedResponse.providerCallCount;
         assistantResponse =

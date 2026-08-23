@@ -66,6 +66,7 @@ The current source mapping is:
 | Voice floor state and pending context | `src/conversation/floorController.ts` |
 | Committed semantic dialogue history | `src/conversation/semanticDialogueHistory.ts` |
 | Autonomous topic and latest viewer intent | `src/conversation/autonomousContext.ts`, `src/App.tsx` |
+| Live program context | `src/conversation/programContext.ts`, `src/App.tsx`, `src/conversation/useConversation.ts` |
 | LLM-facing self-state projection | `src/performer/runtime.ts`, `src/performer/usePerformerRuntime.ts` |
 | Voice interaction timeline | `src/conversation/interactionTimeline.ts`, `src/voice/voiceLabRecorder.ts` |
 | WildCard direction | `src/cards/wildcardDirection.ts` |
@@ -228,6 +229,11 @@ Autonomous chat requests also receive a bounded `PerformerStateContext`
 projection at request time. It contains phase, energy, emotion, and attention.
 They receive `viewerEngagement` so the director can preserve the settled wait
 state in its decision context.
+They also receive a bounded `ProgramContext`. The current program is a
+viewer-directed card-impression segment whose objective is to notice the change
+in impression before and after a card change. This context tells the director
+who controls the next card action; it does not add raw input or internal card
+state to history.
 The projection is prompt context only. It is not added to semantic history or
 structured event records.
 

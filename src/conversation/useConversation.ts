@@ -22,6 +22,10 @@ import {
 } from './semanticDialogueHistory';
 import type { AutonomousContext } from './autonomousContext';
 export type { AutonomousContext } from './autonomousContext';
+import {
+  DEFAULT_PROGRAM_CONTEXT,
+  type ProgramContext,
+} from './programContext';
 import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
   ConversationActionDecision,
@@ -80,6 +84,7 @@ interface ConversationOptions {
   isMuted?: boolean;
   isExhibitionMode?: boolean;
   characterIdentity?: CharacterIdentity;
+  programContext?: ProgramContext;
   getPerformerStateContext?: () => PerformerStateContext;
   onPerformanceCue?: (
     planId: string,
@@ -240,6 +245,9 @@ export function useConversation(
   const characterIdentityRef = useRef(
     options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY,
   );
+  const programContextRef = useRef(
+    options.programContext ?? DEFAULT_PROGRAM_CONTEXT,
+  );
   const getPerformerStateContextRef = useRef(options.getPerformerStateContext);
 
   useEffect(() => {
@@ -261,6 +269,11 @@ export function useConversation(
     characterIdentityRef.current =
       options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY;
   }, [options.characterIdentity]);
+
+  useEffect(() => {
+    programContextRef.current =
+      options.programContext ?? DEFAULT_PROGRAM_CONTEXT;
+  }, [options.programContext]);
 
   useEffect(() => {
     getPerformerStateContextRef.current = options.getPerformerStateContext;
@@ -557,6 +570,7 @@ export function useConversation(
             history: semanticHistory.toMessages(),
             characterIdentity:
               characterIdentityOverride ?? characterIdentityRef.current,
+            programContext: programContextRef.current,
             ...cardContext,
             performanceContext: plan.speech?.llmContext ?? {
               callbackTendency: 0,
