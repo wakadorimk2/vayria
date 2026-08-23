@@ -14,6 +14,7 @@ import {
   parseCardPreviewResponse,
   parseConversationActionPolicy,
   parseVoiceAssistantResponse,
+  readPerformerStateContext,
   readCardPreviewRequest,
   readConversationEvent,
   VOICE_REPLY_INSTRUCTION,
@@ -24,6 +25,39 @@ const VALID_CONTEXT = {
   fragmentation: 0.1,
   semanticBiases: ['鶏に関係する具体物を一つ連想する'],
 };
+
+const VALID_PERFORMER_STATE = {
+  phase: 'scheduled',
+  energy: 0.42,
+  emotion: 'sorrow',
+  emotionActivation: 0.4,
+  attentionTarget: 'viewer',
+  attentionStrength: 0.8,
+} as const;
+
+test('performer state context validates the bounded self-state contract', () => {
+  assert.deepEqual(
+    readPerformerStateContext(VALID_PERFORMER_STATE),
+    VALID_PERFORMER_STATE,
+  );
+  assert.equal(readPerformerStateContext(undefined), null);
+  assert.throws(
+    () =>
+      readPerformerStateContext({
+        ...VALID_PERFORMER_STATE,
+        energy: 1.1,
+      }),
+    /performerState format is invalid/,
+  );
+  assert.throws(
+    () =>
+      readPerformerStateContext({
+        ...VALID_PERFORMER_STATE,
+        internalNote: '不要受け付ける',
+      }),
+    /unsupported field/,
+  );
+});
 
 test('card preview request accepts a known card and runtime context', () => {
   assert.deepEqual(
@@ -108,16 +142,27 @@ test('autonomous director prompt prioritizes the latest viewer intent', () => {
     3,
     'question',
     0,
+    {
+      phase: 'scheduled',
+      energy: 0.42,
+      emotion: 'sorrow',
+      emotionActivation: 0.4,
+      attentionTarget: 'viewer',
+      attentionStrength: 0.8,
+    },
   );
 
   assert.match(prompt, /Latest viewer intent: question/);
   assert.match(prompt, /Autonomous turns since latest viewer input: 0/);
+  assert.match(prompt, /Self energy: 0\.42/);
+  assert.match(prompt, /Self attention target: viewer/);
   assert.match(
     prompt,
     /latest viewer intent and recent conversation history as the current situation/,
   );
   assert.match(prompt, /give that latest viewer turn priority/);
   assert.match(prompt, /backchannel or unfinished, silence is acceptable/);
+  assert.match(prompt, /Use the self state as quiet background context/);
 });
 
 test('voice assistant response accepts only compatible action and cue pairs', () => {

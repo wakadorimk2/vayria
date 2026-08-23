@@ -227,6 +227,7 @@ export default function App() {
     completePlan,
     createPlan,
     getNextAutonomousDelay: getRuntimeAutonomousDelay,
+    getPerformerStateContext,
     resetRuntime,
     setPhase,
   } = performer;
@@ -596,6 +597,7 @@ export default function App() {
     isExhibitionMode,
     isMuted,
     characterIdentity,
+    getPerformerStateContext,
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
     onPerformanceResult: handlePerformanceResult,

@@ -27,6 +27,7 @@ import type {
   ConversationActionDecision,
   PerformancePlan,
   PerformanceResult,
+  PerformerStateContext,
 } from '../performer/types';
 import { isConversationActionDecision } from '../performer/types';
 import type { VoiceInputEvent } from '../voice/voiceInput';
@@ -79,6 +80,7 @@ interface ConversationOptions {
   isMuted?: boolean;
   isExhibitionMode?: boolean;
   characterIdentity?: CharacterIdentity;
+  getPerformerStateContext?: () => PerformerStateContext;
   onPerformanceCue?: (
     planId: string,
     cue: { emotion: Emotion; intensity: number },
@@ -238,6 +240,7 @@ export function useConversation(
   const characterIdentityRef = useRef(
     options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY,
   );
+  const getPerformerStateContextRef = useRef(options.getPerformerStateContext);
 
   useEffect(() => {
     onPerformanceCueRef.current = options.onPerformanceCue;
@@ -258,6 +261,10 @@ export function useConversation(
     characterIdentityRef.current =
       options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY;
   }, [options.characterIdentity]);
+
+  useEffect(() => {
+    getPerformerStateContextRef.current = options.getPerformerStateContext;
+  }, [options.getPerformerStateContext]);
 
   const setConversationState = useCallback(
     (nextStatus: ConversationStatus, nextSource: ConversationSource | null) => {
@@ -508,6 +515,10 @@ export function useConversation(
       let motionStartedAt: number | undefined;
       let speechStartedAt: number | undefined;
       let interactionDecision: ConversationActionDecision | null = null;
+      const performerStateContext =
+        turnSource === 'autonomous'
+          ? getPerformerStateContextRef.current?.() ?? null
+          : null;
 
       try {
         if (turnSource !== 'voice') {
@@ -559,6 +570,7 @@ export function useConversation(
                   viewerIntent: autonomousContext?.viewerIntent ?? null,
                   viewerTurnsSince: autonomousContext?.viewerTurnsSince ?? 0,
                   previousAutonomousReply: lastAutonomousReplyRef.current,
+                  performerState: performerStateContext,
                 }
               : {}),
           }),

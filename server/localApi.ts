@@ -26,6 +26,11 @@ import {
   isViewerIntent,
   type ViewerIntent,
 } from '../src/conversation/autonomousContext.js';
+import {
+  ATTENTION_TARGETS,
+  PERFORMER_PHASES,
+  type PerformerStateContext,
+} from '../src/performer/types.js';
 import { cardPool } from '../src/cards/cardPool.js';
 import type { WildcardCardData } from '../src/cards/cardTypes.js';
 import { CARD_REACTION_PROFILES } from '../src/cards/cardReactions.js';
@@ -172,6 +177,7 @@ interface ChatRequestPayload {
   topicTurns: number;
   viewerIntent: ViewerIntent | null;
   viewerTurnsSince: number;
+  performerState: PerformerStateContext | null;
   previousAutonomousReply: string | null;
   performanceContext: PerformanceContextPayload;
 }
@@ -668,6 +674,69 @@ export function readCardPreviewRequest(
   };
 }
 
+export function readPerformerStateContext(
+  value: unknown,
+): PerformerStateContext | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new RequestError('performerState must be an object or null.', 400);
+  }
+
+  const record = value as Record<string, unknown>;
+  const allowedKeys = new Set([
+    'phase',
+    'energy',
+    'emotion',
+    'emotionActivation',
+    'attentionTarget',
+    'attentionStrength',
+  ]);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+    throw new RequestError(
+      'performerState contains an unsupported field.',
+      400,
+    );
+  }
+
+  const phase = record.phase;
+  const energy = record.energy;
+  const emotion = record.emotion;
+  const emotionActivation = record.emotionActivation;
+  const attentionTarget = record.attentionTarget;
+  const attentionStrength = record.attentionStrength;
+  if (
+    typeof phase !== 'string' ||
+    !(PERFORMER_PHASES as readonly string[]).includes(phase) ||
+    typeof energy !== 'number' ||
+    !Number.isFinite(energy) ||
+    energy < 0 ||
+    energy > 1 ||
+    typeof emotion !== 'string' ||
+    !(EMOTIONS as readonly string[]).includes(emotion) ||
+    typeof emotionActivation !== 'number' ||
+    !Number.isFinite(emotionActivation) ||
+    emotionActivation < 0 ||
+    emotionActivation > 1 ||
+    typeof attentionTarget !== 'string' ||
+    !(ATTENTION_TARGETS as readonly string[]).includes(attentionTarget) ||
+    typeof attentionStrength !== 'number' ||
+    !Number.isFinite(attentionStrength) ||
+    attentionStrength < 0 ||
+    attentionStrength > 1
+  ) {
+    throw new RequestError('performerState format is invalid.', 400);
+  }
+
+  return {
+    phase: phase as PerformerStateContext['phase'],
+    energy,
+    emotion: emotion as PerformerStateContext['emotion'],
+    emotionActivation,
+    attentionTarget: attentionTarget as PerformerStateContext['attentionTarget'],
+    attentionStrength,
+  };
+}
+
 function readChatRequest(payload: unknown): ChatRequestPayload {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new RequestError('Request body must be a JSON object.', 400);
@@ -685,6 +754,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'topicTurns',
     'viewerIntent',
     'viewerTurnsSince',
+    'performerState',
     'previousAutonomousReply',
     'performanceContext',
   ]);
@@ -879,6 +949,9 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   const viewerTurnsSince =
     typeof viewerTurnsSinceValue === 'number' ? viewerTurnsSinceValue : 0;
 
+  const performerStateValue = record.performerState;
+  const performerState = readPerformerStateContext(performerStateValue);
+
   const performanceContextValue = record.performanceContext;
   let performanceContext: PerformanceContextPayload = {
     callbackTendency: 0,
@@ -940,10 +1013,12 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     (topicValue === undefined ||
       topicTurnsValue === undefined ||
       viewerIntentValue === undefined ||
-      viewerTurnsSinceValue === undefined)
+      viewerTurnsSinceValue === undefined ||
+      performerStateValue === undefined ||
+      performerState === null)
   ) {
     throw new RequestError(
-      'autonomous requests must contain topic, topicTurns, viewerIntent, and viewerTurnsSince.',
+      'autonomous requests must contain topic, topicTurns, viewerIntent, viewerTurnsSince, and performerState.',
       400,
     );
   }
@@ -971,6 +1046,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     topicTurns,
     viewerIntent,
     viewerTurnsSince,
+    performerState,
     previousAutonomousReply,
     performanceContext,
   };
@@ -1614,6 +1690,7 @@ async function generateInteractiveResponse(
     null,
     0,
     null,
+    null,
     performanceContext,
     characterIdentity,
   );
@@ -1629,15 +1706,30 @@ export function buildAutonomousDirectorInstruction(
   topicTurns: number,
   viewerIntent: ViewerIntent | null,
   viewerTurnsSince: number,
+  performerState: PerformerStateContext | null,
 ): string {
+  const performerStateLines = performerState
+    ? [
+        `Self phase: ${performerState.phase}`,
+        `Self energy: ${performerState.energy.toFixed(2)}`,
+        `Self emotion: ${performerState.emotion}`,
+        `Self emotion activation: ${performerState.emotionActivation.toFixed(2)}`,
+        `Self attention target: ${performerState.attentionTarget}`,
+        `Self attention strength: ${performerState.attentionStrength.toFixed(2)}`,
+      ]
+    : ['Self state: unavailable'];
   return [
     `Current topic: ${topic ?? '(none)'}`,
     `Current topic spoken-turn count: ${topicTurns}`,
     `Latest viewer intent: ${viewerIntent ?? '(none)'}`,
     `Autonomous turns since latest viewer input: ${viewerTurnsSince}`,
+    ...performerStateLines,
     'When autonomous turns since latest viewer input is 0, treat the latest viewer intent and recent conversation history as the current situation.',
     'When the latest viewer intent is direct_address, call, question, request, or action_commitment, give that latest viewer turn priority over the previous autonomous topic.',
     'When the latest viewer intent is backchannel or unfinished, silence is acceptable. Do not force a new topic.',
+    'Use the self state as quiet background context when choosing speech length, emotional color, and whether to continue or stay silent.',
+    'When energy or attention is low, prefer a brief thought or silence. Do not force a lecture or a question.',
+    'When attention is directed at the viewer, let recent viewer history guide a small concrete callback when one is natural.',
     'Do not mention this state metadata in the spoken reply.',
     'Choose exactly one action for this autonomous candidate.',
     'continue means speak while staying with the current topic.',
@@ -1658,6 +1750,7 @@ async function generateReply(
   topicTurns: number,
   viewerIntent: ViewerIntent | null,
   viewerTurnsSince: number,
+  performerState: PerformerStateContext | null,
   previousAutonomousReply: string | null,
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
@@ -1766,6 +1859,7 @@ async function generateReply(
           topicTurns,
           viewerIntent,
           viewerTurnsSince,
+          performerState,
         )
       : '';
   const previousAutonomousReplyInstruction =
@@ -2446,6 +2540,7 @@ async function handleRequest(
         topicTurns,
         viewerIntent,
         viewerTurnsSince,
+        performerState,
         previousAutonomousReply,
         performanceContext,
       } = readChatRequest(payload);
@@ -2491,6 +2586,7 @@ async function handleRequest(
           topicTurns,
           viewerIntent,
           viewerTurnsSince,
+          performerState,
           previousAutonomousReply,
           performanceContext,
           characterIdentity,

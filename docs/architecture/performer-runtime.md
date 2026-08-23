@@ -66,6 +66,7 @@ The current source mapping is:
 | Voice floor state and pending context | `src/conversation/floorController.ts` |
 | Committed semantic dialogue history | `src/conversation/semanticDialogueHistory.ts` |
 | Autonomous topic and latest viewer intent | `src/conversation/autonomousContext.ts`, `src/App.tsx` |
+| LLM-facing self-state projection | `src/performer/runtime.ts`, `src/performer/usePerformerRuntime.ts` |
 | Voice interaction timeline | `src/conversation/interactionTimeline.ts`, `src/voice/voiceLabRecorder.ts` |
 | WildCard direction | `src/cards/wildcardDirection.ts` |
 | Request and playback execution | `src/conversation/useConversation.ts` |
@@ -219,6 +220,11 @@ Topic and viewer intent are conversation-owned in v0.1.
 `App.tsx` and `useConversation` keep `AutonomousContext`, `topic`, `topicTurns`,
 `viewerIntent`, and `viewerTurnsSince`.
 Moving topic into the Runtime is a v0.2 decision.
+
+Autonomous chat requests also receive a bounded `PerformerStateContext`
+projection at request time. It contains phase, energy, emotion, and attention.
+The projection is prompt context only. It is not added to semantic history or
+structured event records.
 
 ### Performer Profile
 

@@ -12,6 +12,7 @@ import type {
   PerformanceResult,
   PerformerProfile,
   PerformerState,
+  PerformerStateContext,
   PerformerTrigger,
 } from './types.js';
 
@@ -269,6 +270,19 @@ export function createInitialPerformerState(
     },
     lastSpeechAt: null,
     lastViewerMessageAt: null,
+  };
+}
+
+export function createPerformerStateContext(
+  state: PerformerState,
+): PerformerStateContext {
+  return {
+    phase: state.phase,
+    energy: clamp(state.energy),
+    emotion: normalizeEmotion(state.emotion.value),
+    emotionActivation: clamp(state.emotion.activation),
+    attentionTarget: state.attention.target,
+    attentionStrength: clamp(state.attention.strength),
   };
 }
 
