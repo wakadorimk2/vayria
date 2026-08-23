@@ -10,6 +10,13 @@ import { VrmStage, type VrmStageHandle } from './avatar/VrmStage';
 import { useAudioLipSync } from './audio/useAudioLipSync';
 import { CardGamePrototype } from './cards/CardGamePrototype';
 import { useCardGamePrototype } from './cards/useCardGamePrototype';
+import {
+  addCharacterAlias,
+  parseExplicitAliasInstruction,
+  readCharacterIdentity,
+  writeCharacterIdentity,
+  type CharacterIdentity,
+} from './character/identity';
 import { useAutonomousTalk } from './conversation/useAutonomousTalk';
 import {
   useConversation,
@@ -213,6 +220,9 @@ export default function App() {
     'game' | null
   >(null);
   const [audioControl, setAudioControl] = useState(readAudioControlState);
+  const [characterIdentity, setCharacterIdentity] = useState(
+    readCharacterIdentity,
+  );
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>({ topic: null, topicTurns: 0 });
   const [isAutonomousLoopEnabled, setIsAutonomousLoopEnabled] =
@@ -240,6 +250,10 @@ export default function App() {
     { emotion: NonNullable<PerformanceResult['emotionCue']>['emotion']; intensity: number } | null
   >(null);
   const activePlanRef = useRef<PerformancePlan | null>(null);
+  const characterIdentityRef = useRef<CharacterIdentity>(characterIdentity);
+  useEffect(() => {
+    characterIdentityRef.current = characterIdentity;
+  }, [characterIdentity]);
   const cardReactionPlanIdsRef = useRef(new Set<string>());
   const pendingActivatedCardIdsRef = useRef(new Map<string, string[]>());
   const stageRef = useRef<VrmStageHandle>(null);
@@ -592,12 +606,28 @@ export default function App() {
     historyTurnLimit: 5,
     isExhibitionMode,
     isMuted,
+    characterIdentity,
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
     onPerformanceResult: handlePerformanceResult,
     onInteractionAction: handleInteractionAction,
     onInteractionTimelineEvent: handleInteractionTimelineEvent,
   });
+
+  const rememberExplicitAlias = useCallback((message: string) => {
+    const currentIdentity = characterIdentityRef.current;
+    const alias = parseExplicitAliasInstruction(message);
+    if (!alias) return currentIdentity;
+
+    const nextIdentity = addCharacterAlias(currentIdentity, alias);
+    if (!nextIdentity || !writeCharacterIdentity(nextIdentity)) {
+      return currentIdentity;
+    }
+
+    characterIdentityRef.current = nextIdentity;
+    setCharacterIdentity(nextIdentity);
+    return nextIdentity;
+  }, []);
 
   const clearBargeInTimer = useCallback(() => {
     if (bargeInTimerRef.current === null) return;
@@ -941,6 +971,7 @@ export default function App() {
           setVoiceValidationError('');
           cancelNonSpeechPlan();
           cancelActiveCardReactionPlan();
+          const identityForRequest = rememberExplicitAlias(message);
           const confirmedBargeIn =
             bargeInTransition?.effects.includes('interrupt') ?? false;
           if (confirmedBargeIn) {
@@ -973,6 +1004,7 @@ export default function App() {
             handleReplyAccepted,
             plan,
             { segmentId: event.segmentId, at: event.at, asrConfidence: null },
+            identityForRequest,
           );
           return;
         }
@@ -1007,6 +1039,7 @@ export default function App() {
       prepare,
       recordVoiceSignal,
       readCardContext,
+      rememberExplicitAlias,
       sendVoice,
       ttsPlaying,
       stopReaction,
@@ -1222,13 +1255,20 @@ export default function App() {
       kind: 'viewer_message',
       text: trimmedInput,
     };
+    const identityForRequest = rememberExplicitAlias(trimmedInput);
     const plan = createPlanForTrigger(trigger);
     if (!plan.actionDecision || plan.actionDecision.action === 'take_floor') {
       beginReply();
     }
     if (!isMuted) void prepare();
     setInput('');
-    void sendManual(trimmedInput, readCardContext(), handleReplyAccepted, plan);
+    void sendManual(
+      trimmedInput,
+      readCardContext(),
+      handleReplyAccepted,
+      plan,
+      identityForRequest,
+    );
   };
 
   const handleMuteToggle = () => {

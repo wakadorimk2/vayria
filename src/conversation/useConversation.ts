@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
+import {
+  DEFAULT_CHARACTER_IDENTITY,
+  type CharacterIdentity,
+} from '../character/identity';
 import { createConversationEventEmitter } from './conversationEvents';
 import { apiUrl } from '../runtimeConfig';
 import {
@@ -77,6 +81,7 @@ interface ConversationOptions {
   historyTurnLimit?: number;
   isMuted?: boolean;
   isExhibitionMode?: boolean;
+  characterIdentity?: CharacterIdentity;
   onPerformanceCue?: (
     planId: string,
     cue: { emotion: Emotion; intensity: number },
@@ -233,6 +238,9 @@ export function useConversation(
   const onPerformancePlanRef = useRef(options.onPerformancePlan);
   const onPerformanceResultRef = useRef(options.onPerformanceResult);
   const onInteractionActionRef = useRef(options.onInteractionAction);
+  const characterIdentityRef = useRef(
+    options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY,
+  );
 
   useEffect(() => {
     onPerformanceCueRef.current = options.onPerformanceCue;
@@ -248,6 +256,11 @@ export function useConversation(
     options.onInteractionTimelineEvent,
     timeline,
   ]);
+
+  useEffect(() => {
+    characterIdentityRef.current =
+      options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY;
+  }, [options.characterIdentity]);
 
   const setConversationState = useCallback(
     (nextStatus: ConversationStatus, nextSource: ConversationSource | null) => {
@@ -398,6 +411,7 @@ export function useConversation(
       autonomousContext: AutonomousContext | null,
       plan: PerformancePlan,
       voiceMetadata?: VoiceTurnMetadata,
+      characterIdentityOverride?: CharacterIdentity,
     ): Promise<ProcessTurnResult> => {
       const eventEmitter = createConversationEventEmitter(turnSource);
       const messageForRequest = message;
@@ -533,6 +547,8 @@ export function useConversation(
               ? {}
               : { message: messageForRequest }),
             history: semanticHistory.toMessages(),
+            characterIdentity:
+              characterIdentityOverride ?? characterIdentityRef.current,
             ...cardContext,
             performanceContext: plan.speech?.llmContext ?? {
               callbackTendency: 0,
@@ -963,6 +979,7 @@ export function useConversation(
       cardContext: ChatCardContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
       plan: PerformancePlan,
+      characterIdentityOverride?: CharacterIdentity,
     ) =>
       (
         await processTurn(
@@ -972,6 +989,8 @@ export function useConversation(
           onReplyAccepted,
           null,
           plan,
+          undefined,
+          characterIdentityOverride,
         )
       ).completed,
     [processTurn],
@@ -984,6 +1003,7 @@ export function useConversation(
       onReplyAccepted: (activatedCardIds: string[]) => void,
       plan: PerformancePlan,
       voiceMetadata?: VoiceTurnMetadata,
+      characterIdentityOverride?: CharacterIdentity,
     ) =>
       (
         await processTurn(
@@ -994,6 +1014,7 @@ export function useConversation(
           null,
           plan,
           voiceMetadata,
+          characterIdentityOverride,
         )
       ).completed,
     [processTurn],

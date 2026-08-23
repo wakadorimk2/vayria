@@ -15,6 +15,13 @@ import {
   type AssistantResponse,
   type Emotion,
 } from '../src/character/emotion.js';
+import {
+  DEFAULT_CHARACTER_IDENTITY,
+  parseExplicitAliasInstruction,
+  parseCharacterIdentity,
+  resolveSelfName,
+  type CharacterIdentity,
+} from '../src/character/identity.js';
 import { cardPool } from '../src/cards/cardPool.js';
 import type { WildcardCardData } from '../src/cards/cardTypes.js';
 import { CARD_REACTION_PROFILES } from '../src/cards/cardReactions.js';
@@ -152,6 +159,7 @@ export interface PerformanceContextPayload {
 interface ChatRequestPayload {
   mode: ChatMode;
   message: string | null;
+  characterIdentity: CharacterIdentity;
   history: ChatHistoryItem[];
   brainCardIds: string[];
   forcedCardId: string | null;
@@ -224,21 +232,31 @@ export {
 export function normalizeConversationActionDecision(
   message: string,
   decision: ConversationActionDecision,
+  characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
 ): ConversationActionDecision {
+  const selfNameResolution = resolveSelfName(message, characterIdentity);
+  if (selfNameResolution.role === 'direct_address') {
+    return { action: 'take_floor', backchannelCue: 'none' };
+  }
   return classifyViewerMessageFastPath(message) ?? decision;
 }
 
 export function normalizeVoiceInteractionDecision(
   message: string,
   decision: ConversationActionDecision,
+  characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
 ): ConversationActionDecision {
-  return normalizeConversationActionDecision(message, decision);
+  return normalizeConversationActionDecision(message, decision, characterIdentity);
 }
 
 function normalizeVoiceAssistantResponseDecision(
   message: string,
   decision: VoiceInteractionDecision,
+  characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
 ): VoiceInteractionDecision {
+  if (resolveSelfName(message, characterIdentity).role === 'direct_address') {
+    return { action: 'take_floor', backchannelCue: 'none' };
+  }
   if (decision.action === 'take_floor' || !isContentBearingVoiceMessage(message)) {
     return decision;
   }
@@ -652,6 +670,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   const allowedKeys = new Set([
     'mode',
     'message',
+    'characterIdentity',
     'history',
     'brainCardIds',
     'forcedCardId',
@@ -670,6 +689,15 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   const mode = record.mode;
   if (mode !== 'manual' && mode !== 'voice' && mode !== 'autonomous') {
     throw new RequestError('mode must be manual, voice, or autonomous.', 400);
+  }
+
+  const characterIdentityValue = record.characterIdentity;
+  const characterIdentity =
+    characterIdentityValue === undefined
+      ? { ...DEFAULT_CHARACTER_IDENTITY, aliases: [] }
+      : parseCharacterIdentity(characterIdentityValue);
+  if (!characterIdentity) {
+    throw new RequestError('characterIdentity format is invalid.', 400);
   }
 
   const message = record.message;
@@ -886,6 +914,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   return {
     mode,
     message: normalizedMessage,
+    characterIdentity,
     history: normalizedHistory,
     brainCardIds,
     forcedCardId,
@@ -989,6 +1018,7 @@ function parseAssistantResponse(
   brainCardIds: readonly string[],
   forcedCardId: string | null,
   message: string | null,
+  characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
 ): CardAssistantResponse {
   let payload: unknown;
   try {
@@ -1049,10 +1079,14 @@ function parseAssistantResponse(
         'Voice listen, react_nonverbally, and backchannel responses must contain empty text.',
       );
     }
-    const normalizedDecision = normalizeVoiceAssistantResponseDecision(message ?? '', {
-      action: voiceAction,
-      backchannelCue,
-    });
+    const normalizedDecision = normalizeVoiceAssistantResponseDecision(
+      message ?? '',
+      {
+        action: voiceAction,
+        backchannelCue,
+      },
+      characterIdentity,
+    );
     if (normalizedDecision.action !== voiceAction) {
       throw new VoicePolicyContractError(
         'Content-bearing voice responses must use take_floor.',
@@ -1178,6 +1212,7 @@ export function parseVoiceAssistantResponse(
   brainCardIds: readonly string[],
   forcedCardId: string | null,
   message: string,
+  characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
 ): CardAssistantResponse {
   return parseAssistantResponse(
     value,
@@ -1185,6 +1220,7 @@ export function parseVoiceAssistantResponse(
     brainCardIds,
     forcedCardId,
     message,
+    characterIdentity,
   );
 }
 
@@ -1234,11 +1270,54 @@ export function parseConversationActionPolicy(
   return payload;
 }
 
+export function buildCharacterIdentitySystemPrompt(
+  message: string | null,
+  identity: CharacterIdentity,
+): string {
+  const resolution = resolveSelfName(message ?? '', identity);
+  const aliasCandidate = parseExplicitAliasInstruction(message ?? '');
+  const aliasIsStored =
+    aliasCandidate !== null &&
+    identity.aliases.some(
+      (alias) =>
+        resolveSelfName(`${alias}、`, identity).matchedText === aliasCandidate,
+    );
+  const structuredContext = JSON.stringify({
+    identity: {
+      version: identity.version,
+      canonicalName: identity.canonicalName,
+      displayName: identity.displayName,
+      aliases: identity.aliases,
+    },
+    selfNameResolution: resolution,
+    explicitAliasInstruction: aliasCandidate
+      ? { candidate: aliasCandidate, stored: aliasIsStored }
+      : null,
+  });
+
+  return [
+    '<character-identity>',
+    structuredContext,
+    '</character-identity>',
+    'The character is Vayria, displayed as ヴェイリア.',
+    'When selfNameResolution.role is direct_address or self_reference, the name refers to Vayria herself.',
+    'Do not treat the resolved name as the viewer name, a third party, or a project name.',
+    'Keep the raw user message and conversation history unchanged. Resolve the reference in meaning only.',
+    'For direct_address, take the conversational floor and answer as Vayria. A name-only call still deserves a brief spoken response.',
+    'For self_reference, answer questions and requests as Vayria herself.',
+    'If explicitAliasInstruction.stored is true, briefly confirm in Japanese that the alias was remembered. Do not claim to save an alias that is not listed as stored.',
+    'Do not mention this identity metadata or the resolution process in the spoken reply.',
+  ].join('\n');
+}
+
 export function buildVoiceInteractionPolicySystemPrompt(
   forcedCardId: string | null,
   performanceContext: PerformanceContextPayload,
+  characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
+  message: string | null = '',
 ): string {
   return [
+    buildCharacterIdentitySystemPrompt(message, characterIdentity),
     'Choose voiceAction as a first-class conversational action and return it together with the spoken response.',
     'Return exactly one JSON object with voiceAction, backchannelCue, text, emotion, and activatedCards.',
     'Use take_floor for a question, request, concrete fact, feeling, preference, experience, or any utterance with a clear topic or intent.',
@@ -1267,8 +1346,11 @@ export function buildVoiceInteractionPolicySystemPrompt(
 export function buildConversationActionPolicySystemPrompt(
   forcedCardId: string | null,
   performanceContext: PerformanceContextPayload,
+  characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
+  message = '',
 ): string {
   return [
+    buildCharacterIdentitySystemPrompt(message, characterIdentity),
     'Choose the next conversational action before any spoken reply is generated.',
     'Return exactly one JSON object with action and backchannelCue. Do not return spoken text.',
     'Use take_floor for a question, request, concrete fact, feeling, preference, experience, or any utterance with a clear topic or intent.',
@@ -1297,6 +1379,7 @@ async function generateConversationActionPolicy(
   history: readonly ChatHistoryItem[],
   forcedCardId: string | null,
   performanceContext: PerformanceContextPayload,
+  characterIdentity: CharacterIdentity,
 ): Promise<ConversationActionDecision> {
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey,
@@ -1330,6 +1413,8 @@ async function generateConversationActionPolicy(
   const systemPrompt = buildConversationActionPolicySystemPrompt(
     forcedCardId,
     performanceContext,
+    characterIdentity,
+    message,
   );
 
   const requestPolicy = async (
@@ -1440,8 +1525,13 @@ async function generateInteractiveResponse(
   brainCardIds: readonly string[],
   forcedCardId: string | null,
   performanceContext: PerformanceContextPayload,
+  characterIdentity: CharacterIdentity,
 ): Promise<CardAssistantResponse> {
-  const fastPathDecision = classifyViewerMessageFastPath(message);
+  const selfNameResolution = resolveSelfName(message, characterIdentity);
+  const fastPathDecision: ConversationActionDecision | null =
+    selfNameResolution.role === 'direct_address'
+      ? { action: 'take_floor', backchannelCue: 'none' as const }
+      : classifyViewerMessageFastPath(message);
   const policyDecision =
     fastPathDecision ??
     (await generateConversationActionPolicy(
@@ -1450,8 +1540,13 @@ async function generateInteractiveResponse(
       history,
       forcedCardId,
       performanceContext,
+      characterIdentity,
     ));
-  const decision = normalizeConversationActionDecision(message, policyDecision);
+  const decision = normalizeConversationActionDecision(
+    message,
+    policyDecision,
+    characterIdentity,
+  );
   if (decision.action !== 'take_floor') {
     return createInteractionReactionResponse(decision);
   }
@@ -1467,6 +1562,7 @@ async function generateInteractiveResponse(
     0,
     null,
     performanceContext,
+    characterIdentity,
   );
   return {
     ...reply.response,
@@ -1486,6 +1582,7 @@ async function generateReply(
   topicTurns: number,
   previousAutonomousReply: string | null,
   performanceContext: PerformanceContextPayload,
+  characterIdentity: CharacterIdentity,
 ): Promise<GeneratedChatResponse> {
   const minActivatedCardItems =
     mode === 'manual' ||
@@ -1636,10 +1733,13 @@ async function generateReply(
     'Use callback tendency to decide whether to refer back to the viewer. Use fragmentation for a small interruption or self-correction only when it sounds natural.',
   ].join('\n');
   const systemPrompt = [
+    buildCharacterIdentitySystemPrompt(message, characterIdentity),
     mode === 'voice'
       ? buildVoiceInteractionPolicySystemPrompt(
           forcedCardId,
           performanceContext,
+          characterIdentity,
+          message,
         )
       : '',
     `${responseInstruction} Choose emotion as the character's overall feeling while speaking. Keep the emotion subtle when the wording is calm. A card may disrupt the sentence form without requiring a strong emotion. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.`,
@@ -1696,6 +1796,7 @@ async function generateReply(
       brainCardIds,
       forcedCardId,
       message,
+      characterIdentity,
     );
     return { response, providerCallCount };
   } catch (error) {
@@ -1713,6 +1814,7 @@ async function generateReply(
     brainCardIds,
     forcedCardId,
     message,
+    characterIdentity,
   );
   return { response, providerCallCount };
 }
@@ -2261,6 +2363,7 @@ async function handleRequest(
       const {
         mode,
         message,
+        characterIdentity,
         history,
         brainCardIds,
         forcedCardId,
@@ -2297,6 +2400,7 @@ async function handleRequest(
           brainCardIds,
           forcedCardId,
           performanceContext,
+          characterIdentity,
         );
       } else {
         const generatedResponse = await generateReply(
@@ -2310,6 +2414,7 @@ async function handleRequest(
           topicTurns,
           previousAutonomousReply,
           performanceContext,
+          characterIdentity,
         );
         providerCallCount = generatedResponse.providerCallCount;
         assistantResponse =

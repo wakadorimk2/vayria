@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildCharacterIdentitySystemPrompt,
   buildCardPreviewSystemPrompt,
   buildVoiceInteractionPolicySystemPrompt,
   createInteractionReactionResponse,
@@ -290,6 +291,37 @@ test('voice policy prompt prioritizes content-bearing utterances', () => {
   assert.match(prompt, /wait is reserved for autonomous scheduling/);
 });
 
+test('identity context resolves direct calls and self-reference as Vayria', () => {
+  const prompt = buildCharacterIdentitySystemPrompt(
+    'ベイリア、聞こえる？',
+    {
+      version: 1,
+      canonicalName: 'Vayria',
+      displayName: 'ヴェイリア',
+      aliases: [],
+    },
+  );
+
+  assert.match(prompt, /"role":"direct_address"/);
+  assert.match(prompt, /The character is Vayria, displayed as ヴェイリア/);
+  assert.match(prompt, /Do not treat the resolved name as the viewer name/);
+  assert.match(prompt, /Keep the raw user message and conversation history unchanged/);
+});
+
+test('identity context confirms only an explicitly stored alias', () => {
+  const prompt = buildCharacterIdentitySystemPrompt(
+    'ベイリアとも呼んで',
+    {
+      version: 1,
+      canonicalName: 'Vayria',
+      displayName: 'ヴェイリア',
+      aliases: ['ベイリア'],
+    },
+  );
+
+  assert.match(prompt, /"stored":true/);
+});
+
 test('voice content classifier separates topics from phatic and unfinished speech', () => {
   assert.equal(isContentBearingVoiceMessage('今日は雨だった'), true);
   assert.equal(isContentBearingVoiceMessage('それどう思う？'), true);
@@ -328,6 +360,20 @@ test('common policy safety net keeps ambiguous decisions for the LLM', () => {
       backchannelCue: 'none',
     }),
     { action: 'take_floor', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    normalizeVoiceInteractionDecision('ベイリア', {
+      action: 'listen',
+      backchannelCue: 'none',
+    }),
+    { action: 'take_floor', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    normalizeVoiceInteractionDecision('プロジェクトVayriaX', {
+      action: 'listen',
+      backchannelCue: 'none',
+    }),
+    { action: 'listen', backchannelCue: 'none' },
   );
   assert.deepEqual(
     normalizeVoiceInteractionDecision('まあ、そんな感じ', {
