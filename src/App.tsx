@@ -337,7 +337,9 @@ export default function App() {
   const {
     errorCode: voiceInputErrorCode,
     isEnabled: isVoiceInputEnabled,
+    isSttProcessing,
     isSupported: isVoiceInputSupported,
+    isVadSpeech,
     phase: voiceInputPhase,
     start: startVoiceInput,
     stop: stopVoiceInput,
@@ -1255,7 +1257,7 @@ export default function App() {
     cancelAutonomous,
     getNextAutonomousDelay,
     isBusy: isPerformerBusy,
-    isVoiceInputActive: isVoiceInputEnabled,
+    isVoiceActivityActive: isVadSpeech || isSttProcessing,
     isLoopEnabled: isAutonomousLoopEnabled,
     isWaitingForViewer: autonomousContext.viewerEngagement === 'settled',
     isMuted,

@@ -20,6 +20,7 @@
     "src/conversation/interactionTimeline.ts",
     "src/conversation/semanticDialogueHistory.ts",
     "src/conversation/autonomousContext.ts",
+    "src/conversation/useAutonomousTalk.ts",
     "src/conversation/programContext.ts",
     "scripts/card-preview-api.test.ts",
     "scripts/local-api-capture.test.ts",
@@ -27,6 +28,7 @@
     "scripts/performer-runtime.test.ts",
     "scripts/conversation-floor.test.ts",
     "scripts/character-identity.test.ts",
-    "scripts/autonomous-context.test.ts"
+    "scripts/autonomous-context.test.ts",
+    "scripts/autonomous-talk.test.ts"
   ]
 }

@@ -8,7 +8,7 @@ interface UseAutonomousTalkOptions {
   cancelAutonomous: () => void;
   getNextAutonomousDelay: () => number;
   isBusy: boolean;
-  isVoiceInputActive: boolean;
+  isVoiceActivityActive: boolean;
   isLoopEnabled: boolean;
   isWaitingForViewer: boolean;
   isMuted: boolean;
@@ -17,11 +17,31 @@ interface UseAutonomousTalkOptions {
   onIdleTick: () => Promise<boolean>;
 }
 
+export function shouldScheduleAutonomousTalk(state: {
+  isBusy: boolean;
+  isVoiceActivityActive: boolean;
+  isLoopEnabled: boolean;
+  isWaitingForViewer: boolean;
+  isMuted: boolean;
+  isReady: boolean;
+  isVisible: boolean;
+}): boolean {
+  return (
+    !state.isMuted &&
+    !state.isWaitingForViewer &&
+    state.isLoopEnabled &&
+    !state.isVoiceActivityActive &&
+    state.isReady &&
+    state.isVisible &&
+    !state.isBusy
+  );
+}
+
 export function useAutonomousTalk({
   cancelAutonomous,
   getNextAutonomousDelay,
   isBusy,
-  isVoiceInputActive,
+  isVoiceActivityActive,
   isLoopEnabled,
   isWaitingForViewer,
   isMuted,
@@ -67,11 +87,15 @@ export function useAutonomousTalk({
       return;
     }
     if (
-      !isLoopEnabled ||
-      isVoiceInputActive ||
-      !isReady ||
-      !isVisible ||
-      isBusy
+      !shouldScheduleAutonomousTalk({
+        isBusy,
+        isVoiceActivityActive,
+        isLoopEnabled,
+        isWaitingForViewer,
+        isMuted,
+        isReady,
+        isVisible,
+      })
     ) {
       return;
     }
@@ -95,7 +119,7 @@ export function useAutonomousTalk({
   }, [
     cancelAutonomous,
     isBusy,
-    isVoiceInputActive,
+    isVoiceActivityActive,
     isLoopEnabled,
     isWaitingForViewer,
     isMuted,

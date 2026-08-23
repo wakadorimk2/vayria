@@ -190,7 +190,9 @@ the state to `available`. Backchannels and unfinished fragments do not reopen it
 
 The loop starts after the avatar and audio are ready.
 It schedules the initial four-second delay, then schedules the next delay after
-speech, silence, or a local non-speech plan completes.
+speech, silence, or a local non-speech plan completes. Microphone readiness alone
+does not stop the loop; viewer VAD speech and STT processing do. Active performer
+work still blocks a new autonomous candidate.
 
 A communication failure pauses the autonomous loop and preserves the session.
 Manual input can resume the loop.
