@@ -57,6 +57,12 @@ import {
 } from './voice/backchannelPolicy';
 import { useVoiceInput } from './voice/useVoiceInput';
 import { AudioLabPanel } from './voice/AudioLabPanel';
+import { RouterPanel } from './router/RouterPanel';
+import { useConversationRouter } from './router/useConversationRouter';
+import type {
+  RouterEffect,
+  RouterSignal,
+} from './router/routerTypes.js';
 import {
   isConfirmedBargeInTranscript,
   isRejectedBargeInCandidate,
@@ -173,6 +179,8 @@ type ExhibitionPresentationState = 'idle' | 'selecting' | 'reacting';
 
 const AUDIO_SETTINGS_STORAGE_KEY = 'vayria.audio-settings.v1';
 const LEGACY_AUDIO_SETTINGS_STORAGE_KEY = 'wildcard.audio-settings.v1';
+const ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY =
+  'vayria.router.audio-input-device.v1';
 const VOICE_NONVERBAL_REACTION_HOLD_MS = 650;
 
 interface AudioControlState {
@@ -233,6 +241,14 @@ function readAudioControlState(): AudioControlState {
   }
 
   return createDefaultAudioControlState();
+}
+
+function readRouterAudioInputDeviceId(): string {
+  try {
+    return localStorage.getItem(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY)?.trim() ?? '';
+  } catch {
+    return '';
+  }
 }
 
 export default function App() {
@@ -338,8 +354,12 @@ export default function App() {
   const voiceEventHandlerRef = useRef<((event: VoiceInputEvent) => void) | null>(
     null,
   );
+  const routerObserveSignalRef = useRef<
+    ((signal: RouterSignal) => unknown) | null
+  >(null);
   const voiceReactionIdRef = useRef(0);
   const activeBargeInSegmentRef = useRef<string | null>(null);
+  const routerBlockedSegmentRef = useRef<string | null>(null);
   const backchannelAudioRef = useRef<ListeningBackchannelAudio[]>([]);
   const backchannelVariantIndexRef = useRef<
     Record<Exclude<VoiceBackchannelCue, 'none'>, number | null>
@@ -364,13 +384,18 @@ export default function App() {
   const [audioEndpointMs, setAudioEndpointMs] = useState<AudioEndpointMs>(
     runtimeConfig.audioEndpointMs,
   );
+  const [routerAudioInputDeviceId, setRouterAudioInputDeviceId] = useState(
+    () => (runtimeConfig.routerEnabled ? readRouterAudioInputDeviceId() : ''),
+  );
   const effectiveAudioEndpointMs = getEffectiveAudioEndpointMs(
     audioLabMode,
     audioEndpointMs,
   );
   const ttsPlaying = isSpeaking || isReactionPlaying;
   const voiceLab = useVoiceLab({
-    enabled: runtimeConfig.audioLabEnabled,
+    // Router runs with derived-only logging. Voice Lab stores transcripts, so
+    // do not start its recorder in the closed-loop mode.
+    enabled: runtimeConfig.audioLabEnabled && !runtimeConfig.routerEnabled,
     mode: audioLabMode,
     preset: runtimeConfig.audioPreset,
     audioEndpointMs: effectiveAudioEndpointMs,
@@ -381,6 +406,7 @@ export default function App() {
     audioMode: audioLabMode,
     audioPreset: runtimeConfig.audioPreset,
     audioEndpointMs: effectiveAudioEndpointMs,
+    audioInputDeviceId: routerAudioInputDeviceId,
     language: 'ja-JP',
     ttsPlaying,
     onDiagnostic: voiceLab.handleDiagnostic,
@@ -432,6 +458,20 @@ export default function App() {
 
   const handleInteractionAction = useCallback(
     (decision: ConversationActionDecision) => {
+      if (
+        decision.action === 'listen' ||
+        decision.action === 'backchannel' ||
+        decision.action === 'react_nonverbally' ||
+        decision.action === 'take_floor'
+      ) {
+        routerObserveSignalRef.current?.({
+          type: 'interaction_action',
+          action: decision.action,
+          ...(decision.backchannelCue === 'un' || decision.backchannelCue === 'uun'
+            ? { backchannelCue: decision.backchannelCue }
+            : {}),
+        });
+      }
       if (decision.action === 'take_floor') return;
 
       stopReaction();
@@ -677,6 +717,47 @@ export default function App() {
     onInteractionTimelineEvent: handleInteractionTimelineEvent,
   });
 
+  const routerResetSessionRef = useRef<(() => void) | null>(null);
+  const handleRouterEffects = useCallback((effects: RouterEffect[]) => {
+    for (const effect of effects) {
+      switch (effect.type) {
+        case 'interrupt_vayria':
+          interruptCurrentTurn('router_control');
+          cancelAutonomous();
+          stopReaction();
+          stageRef.current?.stopReactionMotion();
+          break;
+        case 'set_autonomous_enabled':
+          setIsAutonomousLoopEnabled(effect.enabled);
+          break;
+        case 'set_gpt_input_gate':
+        case 'set_vayria_output_gate':
+          break;
+        case 'reset_vayria':
+          routerResetSessionRef.current?.();
+          break;
+      }
+    }
+  }, [cancelAutonomous, interruptCurrentTurn, stopReaction]);
+  const conversationRouter = useConversationRouter({
+    enabled: runtimeConfig.routerEnabled,
+    onEffects: handleRouterEffects,
+  });
+  const {
+    observe: observeRouterSignal,
+    dispatch: dispatchRouterCommand,
+    snapshot: routerSnapshot,
+  } = conversationRouter;
+
+  useEffect(() => {
+    routerObserveSignalRef.current = observeRouterSignal;
+    return () => {
+      if (routerObserveSignalRef.current === observeRouterSignal) {
+        routerObserveSignalRef.current = null;
+      }
+    };
+  }, [observeRouterSignal]);
+
   const rememberExplicitAlias = useCallback((message: string) => {
     const currentIdentity = characterIdentityRef.current;
     const alias = parseExplicitAliasInstruction(message);
@@ -872,6 +953,7 @@ export default function App() {
     stopVoiceInput();
     clearBargeInTimer();
     activeBargeInSegmentRef.current = null;
+    routerBlockedSegmentRef.current = null;
     if (bargeInStateRef.current !== 'idle') {
       dispatchBargeIn({ type: 'reset' });
     } else {
@@ -918,6 +1000,23 @@ export default function App() {
     stopVoiceInput,
   ]);
 
+  useEffect(() => {
+    routerResetSessionRef.current = resetSession;
+    return () => {
+      if (routerResetSessionRef.current === resetSession) {
+        routerResetSessionRef.current = null;
+      }
+    };
+  }, [resetSession]);
+
+  const handleSessionReset = useCallback(() => {
+    if (runtimeConfig.routerEnabled) {
+      dispatchRouterCommand({ type: 'reset' });
+      return;
+    }
+    resetSession();
+  }, [dispatchRouterCommand, resetSession]);
+
   const handleCardInteraction = useCallback(() => {
     if (!isExhibitionMode) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -952,6 +1051,22 @@ export default function App() {
   }, [lastAudibleVolume, volume]);
 
   useEffect(() => {
+    if (!runtimeConfig.routerEnabled) return;
+    try {
+      if (routerAudioInputDeviceId) {
+        localStorage.setItem(
+          ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY,
+          routerAudioInputDeviceId,
+        );
+      } else {
+        localStorage.removeItem(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY);
+      }
+    } catch {
+      // Remote PCM remains usable when local settings storage is unavailable.
+    }
+  }, [routerAudioInputDeviceId]);
+
+  useEffect(() => {
     if (status === 'idle' && activePlanRef.current !== null) return;
     const phase =
       status === 'thinking'
@@ -965,6 +1080,15 @@ export default function App() {
               : 'idle';
     setPhase(phase);
   }, [setPhase, status]);
+
+  useEffect(() => {
+    if (!runtimeConfig.routerEnabled) return;
+    observeRouterSignal({
+      type: 'vayria_status',
+      status,
+      voiceInputEnabled: isVoiceInputEnabled,
+    });
+  }, [isVoiceInputEnabled, observeRouterSignal, status]);
 
   useEffect(() => {
     return () => {
@@ -1023,6 +1147,53 @@ export default function App() {
 
   const handleVoiceEvent = useCallback(
     (event: VoiceInputEvent) => {
+      if (runtimeConfig.routerEnabled) {
+        if (event.type === 'speech_started') {
+          if (routerSnapshot.gptInputGate === 'closed') {
+            routerBlockedSegmentRef.current = event.segmentId;
+            observeRouterSignal({
+              type: 'gpt_audio',
+              event: 'speech_started',
+            }, event.at);
+            return;
+          }
+          observeRouterSignal(
+            { type: 'voice_input', event: 'speech_started' },
+            event.at,
+          );
+        } else if (
+          routerBlockedSegmentRef.current !== null &&
+          ('segmentId' in event
+            ? event.segmentId === routerBlockedSegmentRef.current
+            : true)
+        ) {
+          if (event.type === 'speech_ended' || event.type === 'utterance_finalized') {
+            observeRouterSignal(
+              { type: 'gpt_audio', event: 'speech_ended' },
+              event.at,
+            );
+            routerBlockedSegmentRef.current = null;
+          }
+          if (
+            event.type === 'speech_ended' ||
+            event.type === 'utterance_finalized' ||
+            event.type === 'interim_transcript_updated'
+          ) {
+            return;
+          }
+        } else if (
+          event.type === 'listening_started' ||
+          event.type === 'speech_ended' ||
+          event.type === 'utterance_finalized' ||
+          event.type === 'recognition_stopped' ||
+          event.type === 'recognition_failed'
+        ) {
+          observeRouterSignal(
+            { type: 'voice_input', event: event.type },
+            event.at,
+          );
+        }
+      }
       recordVoiceSignal(event);
       switch (event.type) {
         case 'speech_started': {
@@ -1056,6 +1227,15 @@ export default function App() {
             characterIdentity: characterIdentityRef.current,
             requireConversationalCue: isSpeakingCandidate,
           });
+          if (candidateSegmentId !== null) {
+            observeRouterSignal(
+              {
+                type: 'barge_in_decision',
+                accepted: acceptedForBargeIn,
+              },
+              event.at,
+            );
+          }
           const bargeInTransition = dispatchBargeIn({
             type: 'transcript_finalized',
             accepted: acceptedForBargeIn,
@@ -1148,6 +1328,7 @@ export default function App() {
                 : 'recognition_failed',
           });
           activeBargeInSegmentRef.current = null;
+          routerBlockedSegmentRef.current = null;
           stopReaction();
           stageRef.current?.stopReactionMotion();
           setListeningReaction(undefined);
@@ -1168,6 +1349,7 @@ export default function App() {
       interruptCurrentTurn,
       isBusy,
       isMuted,
+      observeRouterSignal,
       prepare,
       recordVoiceSignal,
       readCardContext,
@@ -1175,6 +1357,7 @@ export default function App() {
       sendVoice,
       ttsPlaying,
       stopReaction,
+      routerSnapshot.gptInputGate,
     ],
   );
 
@@ -1199,6 +1382,9 @@ export default function App() {
       if (
         !isCurrentSession() ||
         !isAutonomousLoopEnabled ||
+        (runtimeConfig.routerEnabled &&
+          (routerSnapshot.controlState !== 'idle' ||
+            routerSnapshot.vayriaOutputGate === 'closed')) ||
         isMuted ||
         isBusy ||
         Boolean(activePlanRef.current)
@@ -1306,6 +1492,8 @@ export default function App() {
       isMuted,
       prepare,
       readCardContext,
+      routerSnapshot.controlState,
+      routerSnapshot.vayriaOutputGate,
       sendAutonomous,
       sessionGeneration,
     ],
@@ -1387,7 +1575,19 @@ export default function App() {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!trimmedInput || isManualBusy) return;
-    setIsAutonomousLoopEnabled(true);
+    if (
+      runtimeConfig.routerEnabled &&
+      routerSnapshot.vayriaOutputGate === 'closed' &&
+      routerSnapshot.controlState !== 'human_override'
+    ) {
+      return;
+    }
+    if (
+      !runtimeConfig.routerEnabled ||
+      routerSnapshot.controlState !== 'human_override'
+    ) {
+      setIsAutonomousLoopEnabled(true);
+    }
     stopReaction();
     stageRef.current?.stopReactionMotion();
     if (source === 'autonomous') cancelAutonomous();
@@ -1613,7 +1813,7 @@ export default function App() {
           isResetLocked={isPerformerBusy}
           onCardInteraction={handleCardInteraction}
           onCardInserted={handleCardInserted}
-          onSessionReset={resetSession}
+          onSessionReset={handleSessionReset}
           onSelectionActiveChange={setIsCardSelectionActive}
         />
       </section>
@@ -1681,6 +1881,17 @@ export default function App() {
           </button>
         </form>
       </section>
+
+      {runtimeConfig.routerEnabled && (
+        <RouterPanel
+          isVoiceInputEnabled={isVoiceInputEnabled}
+          onCommand={dispatchRouterCommand}
+          onInputDeviceChange={setRouterAudioInputDeviceId}
+          onObserve={observeRouterSignal}
+          selectedInputDeviceId={routerAudioInputDeviceId}
+          snapshot={routerSnapshot}
+        />
+      )}
 
       {runtimeConfig.audioLabEnabled && (
         <AudioLabPanel

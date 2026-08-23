@@ -413,13 +413,15 @@ function installRemoteBrowserEnvironment(options: { timerScale?: number } = {}) 
   FakeRemoteWebSocket.instances = [];
   const tracks: FakeRemoteTrack[] = [];
   let getUserMediaCalls = 0;
+  let lastGetUserMediaConstraints: MediaStreamConstraints | null = null;
   const fakeDocument = new EventTarget() as EventTarget & { hidden: boolean };
   fakeDocument.hidden = false;
   const fakeWindow = new FakeRemoteWindow(options.timerScale ?? 1);
   const fakeNavigator = {
     mediaDevices: {
-      async getUserMedia() {
+      async getUserMedia(constraints?: MediaStreamConstraints) {
         getUserMediaCalls += 1;
+        lastGetUserMediaConstraints = constraints ?? null;
         const track = new FakeRemoteTrack();
         tracks.push(track);
         return new FakeRemoteStream(track) as unknown as MediaStream;
@@ -446,6 +448,9 @@ function installRemoteBrowserEnvironment(options: { timerScale?: number } = {}) 
     tracks,
     get getUserMediaCalls() {
       return getUserMediaCalls;
+    },
+    get lastGetUserMediaConstraints() {
+      return lastGetUserMediaConstraints;
     },
     worklets: FakeRemoteAudioWorkletNode.instances,
     scripts: FakeRemoteScriptProcessor.instances,
@@ -720,7 +725,33 @@ test('processed remote adapter gates low-level noise but forwards speech-level a
           diagnostic.effectiveThreshold !== null,
       ),
     );
+    await adapter.stop();
+    adapter.dispose();
+  } finally {
+    environment.restore();
+  }
+});
 
+test('remote PCM adapter selects the configured local input device', async () => {
+  const environment = installRemoteBrowserEnvironment();
+  try {
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'baseline',
+      audioInputDeviceId: 'local-device-only',
+      onEvent: () => undefined,
+    });
+    const startPromise = adapter.start();
+    await waitForRemoteCondition(() => environment.worklets.length === 1);
+    environment.worklets[0]!.emit(makePcmChunk(0.1));
+    assert.equal(await startPromise, true);
+
+    const audioConstraints = environment.lastGetUserMediaConstraints?.audio;
+    assert.deepEqual(
+      typeof audioConstraints === 'object' && audioConstraints !== null
+        ? (audioConstraints as MediaTrackConstraints).deviceId
+        : undefined,
+      { exact: 'local-device-only' },
+    );
     await adapter.stop();
     adapter.dispose();
   } finally {

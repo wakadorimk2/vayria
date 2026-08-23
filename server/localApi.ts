@@ -81,6 +81,10 @@ import {
   appendVoiceLabRecord,
   readVoiceLabRecord,
 } from './voiceLabStore.js';
+import {
+  appendRouterEvent,
+  readRouterEvent,
+} from './routerStore.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -95,6 +99,7 @@ const CARD_PREVIEW_PATH = '/api/card-preview';
 const TTS_PATH = '/api/tts';
 const EVENTS_PATH = '/api/events';
 const VOICE_LAB_EVENTS_PATH = '/api/voice-lab/events';
+const ROUTER_EVENTS_PATH = '/api/router/events';
 const DEFAULT_AIVIS_BASE_URL = 'http://127.0.0.1:10101';
 const AIVIS_CONNECTION_ERROR =
   'AivisSpeech Engine に接続できません。AivisSpeech を起動しているか確認してください。';
@@ -2544,6 +2549,24 @@ async function handleRequest(
       return;
     }
 
+    if (pathname === ROUTER_EVENTS_PATH) {
+      let event;
+      try {
+        event = readRouterEvent(payload);
+      } catch (error) {
+        throw new RequestError(
+          error instanceof Error ? error.message : 'Router event is invalid.',
+          400,
+        );
+      }
+      await appendRouterEvent(
+        config.playcheckRoot ?? 'playcheck-results/local',
+        event,
+      );
+      sendNoContent(response);
+      return;
+    }
+
     if (pathname === EVENTS_PATH) {
       const event = readConversationEvent(payload);
       if (
@@ -2896,7 +2919,8 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
           pathname !== CARD_PREVIEW_PATH &&
           pathname !== TTS_PATH &&
           pathname !== EVENTS_PATH &&
-          pathname !== VOICE_LAB_EVENTS_PATH
+          pathname !== VOICE_LAB_EVENTS_PATH &&
+          pathname !== ROUTER_EVENTS_PATH
         ) {
           next();
           return;

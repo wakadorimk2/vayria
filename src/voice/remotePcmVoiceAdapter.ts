@@ -51,6 +51,7 @@ const INITIAL_CAPTURE_RETRY_DELAY_MS = 100;
 
 interface RemotePcmVoiceAdapterOptions extends VoiceInputAdapterOptions {
   webSocketUrl?: string;
+  audioInputDeviceId?: string;
   audioMode?: AudioLabMode;
   audioPreset?: ExhibitionAudioPreset;
   audioEndpointMs?: AudioEndpointMs;
@@ -349,7 +350,12 @@ export function createRemotePcmVoiceAdapter(
   const audioPreset = options.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET;
   const audioEndpointMs = options.audioEndpointMs ?? DEFAULT_AUDIO_ENDPOINT_MS;
   const presetConfig = getExhibitionAudioPresetConfig(audioPreset);
-  const requestedAudioConstraints = readAudioConstraints(audioMode, audioPreset);
+  const baseAudioConstraints = readAudioConstraints(audioMode, audioPreset);
+  const audioInputDeviceId = options.audioInputDeviceId?.trim();
+  const requestedAudioConstraints: MediaTrackConstraints = {
+    ...baseAudioConstraints,
+    ...(audioInputDeviceId ? { deviceId: { exact: audioInputDeviceId } } : {}),
+  };
   const usesSelectableEndpoint =
     audioMode === 'processed' ||
     audioMode === 'processed-vad' ||
