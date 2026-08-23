@@ -7,6 +7,7 @@ import {
   type FormEvent,
 } from 'react';
 import { VrmStage, type VrmStageHandle } from './avatar/VrmStage';
+import { useCameraAttention } from './attention/useCameraAttention';
 import { useAudioLipSync } from './audio/useAudioLipSync';
 import { CardGamePrototype } from './cards/CardGamePrototype';
 import { useCardGamePrototype } from './cards/useCardGamePrototype';
@@ -25,7 +26,9 @@ import {
 import { useWildcardDirection } from './cards/wildcardDirection';
 import { usePerformerRuntime } from './performer/usePerformerRuntime';
 import type {
+  Attention,
   ConversationActionDecision,
+  AttentionReader,
   PerformancePlan,
   PerformanceResult,
   PerformerTrigger,
@@ -77,6 +80,32 @@ const STATUS_LABELS = {
   speaking: '話しています。',
   error: '処理を完了できませんでした。',
 } as const;
+
+function getCameraAttentionStatusMessage(
+  status: ReturnType<typeof useCameraAttention>['status'],
+  errorCode: ReturnType<typeof useCameraAttention>['errorCode'],
+): string {
+  if (status === 'starting') return '視線追従を準備しています…';
+  if (status === 'active') return '視線追従が有効です。';
+  if (status === 'disabled') {
+    return '動きの少ない表示では視線追従を停止します。';
+  }
+  switch (errorCode) {
+    case 'insecure-context':
+      return 'HTTPSで開くと視線追従を使えます。';
+    case 'unsupported':
+      return 'このブラウザーではカメラを使えません。';
+    case 'permission-denied':
+      return 'カメラの許可が必要です。もう一度お試しください。';
+    case 'camera-failed':
+      return 'カメラを開始できませんでした。もう一度お試しください。';
+    case 'model-failed':
+    case 'worker-failed':
+      return '視線追従を準備できませんでした。もう一度お試しください。';
+    default:
+      return '';
+  }
+}
 
 function getVoiceStatusLabel(
   isEnabled: boolean,
@@ -223,6 +252,13 @@ export default function App() {
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, resetTurn, zones } = cardGame;
   const performer = usePerformerRuntime();
+  const {
+    errorCode: cameraAttentionErrorCode,
+    readSnapshot: readCameraSnapshot,
+    start: startCameraAttention,
+    status: cameraAttentionStatus,
+    stop: stopCameraAttention,
+  } = useCameraAttention({ enabled: isExhibitionMode });
   const wildcardDirection = useWildcardDirection(zones);
   const {
     completePlan,
@@ -240,6 +276,13 @@ export default function App() {
     { emotion: NonNullable<PerformanceResult['emotionCue']>['emotion']; intensity: number } | null
   >(null);
   const activePlanRef = useRef<PerformancePlan | null>(null);
+  const logicalAttentionRef = useRef<Attention>({
+    target: 'none',
+    strength: 0,
+    updatedAt: 0,
+    position: null,
+    confidence: 0,
+  });
   const cardReactionPlanIdsRef = useRef(new Set<string>());
   const pendingActivatedCardIdsRef = useRef(new Map<string, string[]>());
   const stageRef = useRef<VrmStageHandle>(null);
@@ -262,6 +305,19 @@ export default function App() {
   } = useAudioLipSync(volume);
   const [listeningReaction, setListeningReaction] =
     useState<ListeningReactionCue | undefined>();
+  const readAttention: AttentionReader = useCallback(() => {
+    const logicalAttention = logicalAttentionRef.current;
+    const cameraSnapshot = readCameraSnapshot();
+    return {
+      ...logicalAttention,
+      position: cameraSnapshot.position,
+      confidence: cameraSnapshot.confidence,
+      updatedAt: Math.max(
+        logicalAttention.updatedAt,
+        cameraSnapshot.updatedAt,
+      ),
+    };
+  }, [readCameraSnapshot]);
   const [voiceValidationError, setVoiceValidationError] = useState('');
   const voiceEventHandlerRef = useRef<((event: VoiceInputEvent) => void) | null>(
     null,
@@ -719,6 +775,50 @@ export default function App() {
     Boolean(reply) && (!isExhibitionMode || isSubtitleVisible);
   const voiceError = getVoiceErrorMessage(voiceInputErrorCode);
   const conversationError = error || voiceValidationError || voiceError;
+  useEffect(() => {
+    const logicalAttentionTarget =
+      cardAttentionTarget ??
+      (activePlan !== null
+        ? activePlan.preReaction?.gaze?.target ??
+          performer.state.attention.target
+        : listeningReaction?.target ?? 'none');
+    logicalAttentionRef.current = {
+      ...performer.state.attention,
+      target: logicalAttentionTarget,
+      strength:
+        cardAttentionTarget !== null || listeningReaction
+          ? 1
+          : activePlan !== null
+            ? Math.max(0.72, performer.state.attention.strength)
+            : 0,
+      position: null,
+      confidence: 0,
+    };
+  }, [
+    activePlan,
+    cardAttentionTarget,
+    listeningReaction,
+    performer.state.attention,
+  ]);
+  const cameraAttentionStatusMessage = getCameraAttentionStatusMessage(
+    cameraAttentionStatus,
+    cameraAttentionErrorCode,
+  );
+  const cameraAttentionEnabled = cameraAttentionStatus === 'active';
+  const handleCameraAttentionToggle = useCallback(() => {
+    if (
+      cameraAttentionStatus === 'active' ||
+      cameraAttentionStatus === 'starting'
+    ) {
+      stopCameraAttention();
+      return;
+    }
+    void startCameraAttention();
+  }, [
+    cameraAttentionStatus,
+    startCameraAttention,
+    stopCameraAttention,
+  ]);
   const exhibitionAudioActionLabel = voiceError
     ? '音声とマイクを再試行'
     : '音声とマイクを有効化';
@@ -1306,7 +1406,7 @@ export default function App() {
       data-app-mode={runtimeConfig.mode}
       data-exhibition-state={exhibitionPresentationState}
     >
-      {shouldShowAudioUnlockControl && (
+      {(shouldShowAudioUnlockControl || isExhibitionMode) && (
         <header className="app-title">
           {!isExhibitionMode && <span>Vayria</span>}
           <div
@@ -1315,15 +1415,53 @@ export default function App() {
             role="group"
           >
             {isExhibitionMode ? (
-              <button
-                aria-label={`${exhibitionAudioActionLabel}する`}
-                className="audio-unlock-button"
-                onClick={handleExhibitionAudioUnlock}
-                title={`${exhibitionAudioActionLabel}します`}
-                type="button"
-              >
-                {exhibitionAudioActionLabel}
-              </button>
+              <>
+                {shouldShowAudioUnlockControl && (
+                  <button
+                    aria-label={`${exhibitionAudioActionLabel}する`}
+                    className="audio-unlock-button"
+                    onClick={handleExhibitionAudioUnlock}
+                    title={`${exhibitionAudioActionLabel}します`}
+                    type="button"
+                  >
+                    {exhibitionAudioActionLabel}
+                  </button>
+                )}
+                <div
+                  className="attention-controls"
+                  aria-label="視線追従コントロール"
+                  role="group"
+                >
+                  <button
+                    aria-label={
+                      cameraAttentionEnabled
+                        ? '視線追従を停止する'
+                        : '視線追従を有効化する'
+                    }
+                    aria-pressed={cameraAttentionEnabled}
+                    className="attention-button"
+                    onClick={handleCameraAttentionToggle}
+                    title={cameraAttentionStatusMessage || '視線追従を有効化します'}
+                    type="button"
+                  >
+                    {cameraAttentionStatus === 'starting'
+                      ? '視線追従を準備中…'
+                      : cameraAttentionEnabled
+                        ? '視線追従を停止'
+                        : '視線追従を有効化'}
+                  </button>
+                  {cameraAttentionStatusMessage &&
+                    cameraAttentionStatus !== 'idle' && (
+                      <span
+                        className="attention-status"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {cameraAttentionStatusMessage}
+                      </span>
+                    )}
+                </div>
+              </>
             ) : (
               <>
                 <button
@@ -1367,11 +1505,7 @@ export default function App() {
 
       <section className="avatar-area" aria-label="VRM character">
         <VrmStage
-          attentionTarget={
-            activePlan !== null
-              ? performer.state.attention.target
-              : cardAttentionTarget ?? performer.state.attention.target
-          }
+          attentionReader={readAttention}
           emotion={displayEmotion}
           isExhibitionMode={isExhibitionMode}
           listeningReaction={listeningReaction}

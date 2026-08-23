@@ -266,6 +266,8 @@ export function createInitialPerformerState(
       target: 'none',
       strength: 0,
       updatedAt: now,
+      position: null,
+      confidence: 0,
     },
     lastSpeechAt: null,
     lastViewerMessageAt: null,
@@ -316,6 +318,7 @@ export function decayPerformerState(
       updatedAt: now,
     },
     attention: {
+      ...state.attention,
       target: attentionStrength < 0.08 ? 'none' : state.attention.target,
       strength: attentionStrength,
       updatedAt: now,
@@ -332,7 +335,14 @@ function updateStateForTrigger(
     case 'viewer_message':
       return {
         ...state,
-        attention: { target: 'viewer', strength: 1, updatedAt: now },
+        attention: {
+          ...state.attention,
+          target: 'viewer',
+          strength: 1,
+          updatedAt: now,
+          position: null,
+          confidence: 0,
+        },
         lastViewerMessageAt: now,
       };
     case 'external_stimulus':
@@ -340,7 +350,14 @@ function updateStateForTrigger(
       return trigger.kind === 'memory_callback'
         ? {
             ...state,
-            attention: { target: 'chat', strength: 0.55, updatedAt: now },
+            attention: {
+              ...state.attention,
+              target: 'chat',
+              strength: 0.55,
+              updatedAt: now,
+              position: null,
+              confidence: 0,
+            },
           }
         : state;
     case 'idle_tick':

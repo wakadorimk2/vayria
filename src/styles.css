@@ -85,6 +85,43 @@ input {
   outline-offset: 2px;
 }
 
+.attention-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.attention-button {
+  min-height: 2rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #8ca3b6;
+  border-radius: 999px;
+  background: rgb(28 39 49 / 88%);
+  color: #dce9f2;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.attention-button:hover,
+.attention-button:focus-visible {
+  background: #40596c;
+}
+
+.attention-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.attention-status {
+  max-width: 15rem;
+  color: #c3d0da;
+  font-size: 0.62rem;
+  line-height: 1.25;
+  white-space: normal;
+}
+
 .mute-button {
   display: inline-grid;
   width: 2rem;
@@ -846,7 +883,18 @@ input {
     gap: 0;
   }
 
+  .app-shell[data-app-mode="exhibition"] .attention-controls {
+    align-items: flex-end;
+  }
+
   .app-shell[data-app-mode="exhibition"] .audio-unlock-button {
+    min-height: 2.75rem;
+    padding: 0.6rem 1rem;
+    box-shadow: 0 6px 16px rgb(0 0 0 / 24%);
+    font-size: clamp(0.8rem, 2vw, 1rem);
+  }
+
+  .app-shell[data-app-mode="exhibition"] .attention-button {
     min-height: 2.75rem;
     padding: 0.6rem 1rem;
     box-shadow: 0 6px 16px rgb(0 0 0 / 24%);

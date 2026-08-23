@@ -10,7 +10,20 @@
     "types": ["node"]
   },
   "include": [
+    "src/attention/attentionMath.ts",
+    "src/attention/attentionEngagementController.ts",
+    "src/attention/attentionVisualSmoother.ts",
+    "src/attention/attentionStateController.ts",
+    "src/attention/cameraAttentionController.ts",
+    "src/attention/cameraTrackingController.ts",
+    "src/attention/faceLandmarkerProtocol.ts",
+    "src/avatar/attentionTarget.ts",
+    "scripts/camera-attention-controller.test.ts",
+    "scripts/camera-tracking.test.ts",
+    "scripts/attention-engagement.test.ts",
     "src/avatar/idleGaze.ts",
+    "scripts/attention-state.test.ts",
+    "scripts/attention-target.test.ts",
     "scripts/idle-gaze.test.ts"
   ]
 }

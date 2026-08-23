@@ -65,6 +65,49 @@ export function isConversationActionDecision(
 
 export type AttentionTarget = 'viewer' | 'chat' | 'game' | 'none';
 
+export const ATTENTION_FOCUS_TARGETS = [
+  'user',
+  'camera',
+  'screen',
+  'idle',
+  'other_person',
+] as const;
+
+export type AttentionFocusTarget = (typeof ATTENTION_FOCUS_TARGETS)[number];
+
+export const ATTENTION_PHASES = [
+  'focused',
+  'holding',
+  'uncertain',
+  'released',
+  'reengaging',
+] as const;
+
+export type AttentionPhase = (typeof ATTENTION_PHASES)[number];
+
+export interface AttentionFocus {
+  target: AttentionFocusTarget;
+  phase: AttentionPhase;
+  confidence: number;
+}
+
+export interface AttentionPosition {
+  x: number;
+  y: number;
+}
+
+export interface Attention {
+  target: AttentionTarget;
+  strength: number;
+  updatedAt: number;
+  position: AttentionPosition | null;
+  confidence: number;
+  distance?: number;
+  gaze?: AttentionPosition;
+}
+
+export type AttentionReader = () => Attention;
+
 export type ExternalStimulusMetadata = Readonly<Record<string, string>>;
 
 export type PerformerPhase =
@@ -103,11 +146,7 @@ export interface PerformerState {
     activation: number;
     updatedAt: number;
   };
-  attention: {
-    target: AttentionTarget;
-    strength: number;
-    updatedAt: number;
-  };
+  attention: Attention;
   lastSpeechAt: number | null;
   lastViewerMessageAt: number | null;
 }

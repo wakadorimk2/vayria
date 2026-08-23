@@ -19,6 +19,23 @@ The Miko VRM and VRMA files are not distributed with Vayria.
 - @pixiv/three-vrm: https://github.com/pixiv/three-vrm — MIT License
 - @pixiv/three-vrm-animation: https://github.com/pixiv/three-vrm — MIT License
 
+## MediaPipe Tasks Vision and Face Landmarker
+
+- Package: `@mediapipe/tasks-vision` 1.0.1
+- Source: https://github.com/google-ai-edge/mediapipe — Apache License 2.0
+- Web API documentation: https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker/web_js
+- Local WASM assets: `public/attention/wasm/`, copied from the npm package
+- Model: Face Landmarker task bundle
+- Model source: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+- Model notice: MediaPipe Face Landmarker model assets are distributed under
+  the applicable MediaPipe model terms and Apache License 2.0 notice.
+- Local model asset: `public/attention/face_landmarker.task`
+- Local model SHA-256: `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff`
+
+Vayria runs the Face Landmarker on the exhibition iPad. The camera frame stays
+on the device. Vayria stores and sends only the normalized face position and
+the application-level tracking availability.
+
 ## NVIDIA ARDY integration boundary
 
 Vayria does not vendor NVIDIA ARDY source or model weights.
