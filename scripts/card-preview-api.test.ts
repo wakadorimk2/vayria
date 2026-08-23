@@ -4,7 +4,9 @@ import {
   buildCardPreviewSystemPrompt,
   buildVoiceInteractionPolicySystemPrompt,
   createInteractionReactionResponse,
+  isActionCommitmentMessage,
   isContentBearingVoiceMessage,
+  isMetaOnlyActionResponse,
   normalizeVoiceInteractionDecision,
   parseCardPreviewResponse,
   parseConversationActionPolicy,
@@ -304,6 +306,9 @@ test('voice reply prompt asks for short concrete grounding', () => {
   assert.match(VOICE_REPLY_INSTRUCTION, /avoid a mutual backchannel or agreement loop/);
   assert.match(VOICE_REPLY_INSTRUCTION, /do not merely mirror the latest utterance/);
   assert.match(VOICE_REPLY_INSTRUCTION, /moves slightly sideways/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /do not treat the announcement or agreement as progress/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /perform the first small step now/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /ask one concrete question that names the missing item/);
   assert.match(VOICE_REPLY_INSTRUCTION, /Do not force a question or a new topic/);
 });
 
@@ -409,5 +414,49 @@ test('content-bearing take_floor responses cannot be generic backchannels', () =
       'それ、好き？',
     ).text,
     'うん',
+  );
+});
+
+test('action commitments must move to concrete content', () => {
+  assert.equal(isActionCommitmentMessage('目的と決定事項を整理します'), true);
+  assert.equal(isActionCommitmentMessage('まずアジェンダ案を作成しましょう'), true);
+  assert.equal(isActionCommitmentMessage('今日は雨だった'), false);
+  assert.equal(isMetaOnlyActionResponse('ええ、その方向で進めましょう'), true);
+  assert.equal(isMetaOnlyActionResponse('お願いします'), true);
+  assert.equal(isMetaOnlyActionResponse('目的は会議の成功です'), false);
+  assert.equal(isMetaOnlyActionResponse('目的は会議の成功です。整理します'), false);
+  assert.equal(isMetaOnlyActionResponse('何を目的にしますか？'), false);
+  assert.equal(isActionCommitmentMessage('何を目的に整理しましょうか'), false);
+
+  assert.throws(
+    () =>
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'take_floor',
+          backchannelCue: 'none',
+          text: 'ええ、その方向で進めましょう',
+          emotion: 'neutral',
+          activatedCards: [],
+        }),
+        [],
+        null,
+        '目的と決定事項を整理します',
+      ),
+    /Action commitments must lead to concrete content/,
+  );
+  assert.equal(
+    parseVoiceAssistantResponse(
+      JSON.stringify({
+        voiceAction: 'take_floor',
+        backchannelCue: 'none',
+        text: '目的は会議の成功です',
+        emotion: 'neutral',
+        activatedCards: [],
+      }),
+      [],
+      null,
+      '目的と決定事項を整理します',
+    ).text,
+    '目的は会議の成功です',
   );
 });

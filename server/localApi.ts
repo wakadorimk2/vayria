@@ -29,8 +29,10 @@ import {
 import {
   classifyViewerMessageFastPath,
   isContentBearingVoiceMessage,
+  isActionCommitmentMessage,
   isDefiniteBackchannelMessage,
   isDefiniteQuestionMessage,
+  isMetaOnlyActionResponse,
 } from '../src/performer/runtime.js';
 import {
   appendPlaycheckRecord,
@@ -211,7 +213,11 @@ class CardContractError extends Error {}
 class VoicePolicyContractError extends CardContractError {}
 class ConversationPolicyContractError extends Error {}
 
-export { isContentBearingVoiceMessage } from '../src/performer/runtime.js';
+export {
+  isActionCommitmentMessage,
+  isContentBearingVoiceMessage,
+  isMetaOnlyActionResponse,
+} from '../src/performer/runtime.js';
 
 export function normalizeConversationActionDecision(
   message: string,
@@ -1052,6 +1058,15 @@ function parseAssistantResponse(
         'Content-bearing voice take_floor responses must contain a concrete reaction, not only a backchannel.',
       );
     }
+    if (
+      voiceAction === 'take_floor' &&
+      isActionCommitmentMessage(message ?? '') &&
+      isMetaOnlyActionResponse(text)
+    ) {
+      throw new VoicePolicyContractError(
+        'Action commitments must lead to concrete content or a concrete missing-information question, not only meta agreement.',
+      );
+    }
   } else if (mode === 'autonomous') {
     if (!isAutonomousAction(record.action)) {
       throw new CardContractError(
@@ -1385,6 +1400,10 @@ export const VOICE_REPLY_INSTRUCTION = [
   'Use recent conversation history to avoid a mutual backchannel or agreement loop.',
   'If the last few turns already agree with or paraphrase one another, do not merely mirror the latest utterance.',
   'When appropriate after several agreeing or mirroring turns, add one small new observation, feeling, sensory detail, topic angle, or light disagreement so the conversation moves slightly sideways.',
+  'When the latest utterance announces a concrete action such as confirming, organizing, sharing, creating, preparing, starting, or proceeding, do not treat the announcement or agreement as progress.',
+  'If the needed information is present, perform the first small step now and state one concrete item or result.',
+  'If the needed information is missing, ask one concrete question that names the missing item.',
+  'Do not reply with only meta-agreement such as その方向で進めましょう, お願いします, 確認しましょう, 整理しましょう, or では始めましょう.',
   'Do not force a question or a new topic. If the moment is intentionally quiet, keep a take_floor reply brief instead of forcing novelty, but do not repeat the same agreement across turns.',
   'A fragment, filler, hesitation, or small self-correction is allowed when it sounds natural.',
   'Use at most two short clauses.',
@@ -1671,7 +1690,7 @@ async function generateReply(
   const response = parseAssistantResponse(
     await requestReply(
       mode === 'voice'
-        ? 'Your previous attempt violated the voice action or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text and empty activatedCards for listen or backchannel. For content-bearing input, take_floor text must contain a concrete reaction and must not be only a generic acknowledgment. Use non-empty text for take_floor and include the forced current card when one exists.'
+        ? 'Your previous attempt violated the voice action or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text and empty activatedCards for listen or backchannel. For content-bearing input, take_floor text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces an action, do one concrete first step or ask one concrete missing-information question; do not answer with meta-agreement only. Use non-empty text for take_floor and include the forced current card when one exists.'
         : 'Your previous attempt violated the card contract. Follow the current brain-card subset and forced-card requirements exactly.',
     ),
     mode,
