@@ -1,3 +1,4 @@
+import type { InteractionTimelineEvent } from '../conversation/interactionTimeline.js';
 import type { VoiceInputEvent } from './voiceInput.js';
 
 export const AUDIO_LAB_MODES = [
@@ -15,6 +16,21 @@ export const DEFAULT_VAD_THRESHOLD = 0.02;
 export const AUDIO_ENDPOINT_VALUES = [400, 600] as const;
 export type AudioEndpointMs = (typeof AUDIO_ENDPOINT_VALUES)[number];
 export const DEFAULT_AUDIO_ENDPOINT_MS: AudioEndpointMs = 600;
+export const DEFAULT_EXHIBITION_MIX_ENDPOINT_MS: AudioEndpointMs = 400;
+
+export function getEffectiveAudioEndpointMs(
+  mode: AudioLabMode,
+  configuredEndpointMs: AudioEndpointMs,
+): AudioEndpointMs {
+  if (mode === 'exhibition-mix') {
+    return DEFAULT_EXHIBITION_MIX_ENDPOINT_MS;
+  }
+  if (mode === 'processed' || mode === 'processed-vad') {
+    return configuredEndpointMs;
+  }
+  return DEFAULT_AUDIO_ENDPOINT_MS;
+}
+
 export const EXHIBITION_AUDIO_PRESETS = [
   'off',
   'mild',
@@ -49,7 +65,7 @@ export const AUDIO_PROCESSING_CONSTRAINTS = [
 export type AudioProcessingConstraint =
   (typeof AUDIO_PROCESSING_CONSTRAINTS)[number];
 
-export type BargeInState = 'idle' | 'ducked' | 'confirmed' | 'restored';
+export type BargeInState = 'idle' | 'candidate' | 'confirmed' | 'restored';
 export type BargeInAction = 'duck' | 'interrupt' | 'restore';
 
 export const KNOWN_HALLUCINATION_PHRASES = [
@@ -487,6 +503,16 @@ export interface VoiceLabBargeInRecord {
   reason?: string;
 }
 
+export interface VoiceLabInteractionTimelineRecord {
+  kind: 'interaction_timeline';
+  timestamp: string;
+  sessionId: string;
+  mode: AudioLabMode;
+  preset: ExhibitionAudioPreset;
+  audioEndpointMs?: AudioEndpointMs;
+  event: InteractionTimelineEvent;
+}
+
 export interface VoiceLabErrorRecord {
   kind: 'error';
   timestamp: string;
@@ -513,6 +539,7 @@ export type VoiceLabRecord =
   | VoiceLabUtteranceRecord
   | VoiceLabVadRejectedRecord
   | VoiceLabBargeInRecord
+  | VoiceLabInteractionTimelineRecord
   | VoiceLabErrorRecord
   | VoiceLabSttRuntimeRecord
   | VoiceLabSessionSummaryRecord;
@@ -684,7 +711,7 @@ export function isVoiceInputDiagnostic(
         record.action === 'interrupt' ||
         record.action === 'restore') &&
       (record.state === 'idle' ||
-        record.state === 'ducked' ||
+        record.state === 'candidate' ||
         record.state === 'confirmed' ||
         record.state === 'restored') &&
       typeof record.ttsPlaying === 'boolean' &&
@@ -730,6 +757,7 @@ export function isVoiceLabRecord(value: unknown): value is VoiceLabRecord {
     'utterance',
     'vad_rejected',
     'barge_in',
+    'interaction_timeline',
     'error',
     'stt_runtime',
     'session_summary',

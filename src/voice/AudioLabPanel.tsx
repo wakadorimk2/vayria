@@ -244,12 +244,12 @@ export function AudioLabPanel({
             </div>
             <div>
               <dt>Barge-in</dt>
-              <dd data-active={bargeInState === 'ducked'}>{bargeInState}</dd>
+              <dd data-active={bargeInState === 'candidate'}>{bargeInState}</dd>
             </div>
             <div>
               <dt>TTS ducked</dt>
-              <dd data-active={bargeInState === 'ducked'}>
-                {bargeInState === 'ducked' ? 'yes' : 'no'}
+              <dd data-active={bargeInState === 'candidate'}>
+                {bargeInState === 'candidate' ? 'yes' : 'no'}
               </dd>
             </div>
           </dl>

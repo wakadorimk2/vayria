@@ -15,9 +15,13 @@
     "src/performer/runtime.ts",
     "src/performer/profile.ts",
     "src/performer/types.ts",
+    "src/conversation/floorController.ts",
+    "src/conversation/interactionTimeline.ts",
+    "src/conversation/semanticDialogueHistory.ts",
     "scripts/card-preview-api.test.ts",
     "scripts/local-api-capture.test.ts",
     "scripts/card-reactions.test.ts",
-    "scripts/performer-runtime.test.ts"
+    "scripts/performer-runtime.test.ts",
+    "scripts/conversation-floor.test.ts"
   ]
 }

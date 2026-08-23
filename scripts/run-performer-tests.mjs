@@ -8,6 +8,9 @@ const testFiles = [
   resolve(
     'node_modules/.tmp/performer-test/scripts/performer-runtime.test.js',
   ),
+  resolve(
+    'node_modules/.tmp/performer-test/scripts/conversation-floor.test.js',
+  ),
 ];
 const result = spawnSync(process.execPath, ['--test', ...testFiles], {
   stdio: 'inherit',

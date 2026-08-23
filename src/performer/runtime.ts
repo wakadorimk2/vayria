@@ -86,6 +86,15 @@ export function isDefiniteBackchannelMessage(message: string): boolean {
   return PHATIC_ONLY_MESSAGES.has(withoutTerminalPunctuation);
 }
 
+export function isContentBearingVoiceMessage(message: string): boolean {
+  const normalized = normalizeConversationText(message);
+  return Boolean(
+    normalized &&
+      !isDefiniteBackchannelMessage(normalized) &&
+      !isDefiniteUnfinishedMessage(normalized),
+  );
+}
+
 export function classifyViewerMessageFastPath(
   message: string,
 ): ConversationActionDecision | null {

@@ -2,6 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
 import { createConversationEventEmitter } from './conversationEvents';
 import { apiUrl } from '../runtimeConfig';
+import {
+  createFloorController,
+  toTurnSignal,
+  type FloorController,
+  type VoiceTurnMetadata,
+} from './floorController';
+import {
+  createInteractionTimeline,
+  type InteractionTimelineEvent,
+} from './interactionTimeline';
+import {
+  createSemanticDialogueHistory,
+  DEFAULT_HISTORY_TURN_LIMIT,
+} from './semanticDialogueHistory';
 import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
   ConversationActionDecision,
@@ -9,6 +23,7 @@ import type {
   PerformanceResult,
 } from '../performer/types';
 import { isConversationActionDecision } from '../performer/types';
+import type { VoiceInputEvent } from '../voice/voiceInput';
 
 export type ConversationStatus =
   | 'idle'
@@ -52,11 +67,6 @@ export interface ChatCardContext {
   forcedCardId: string | null;
 }
 
-interface ConversationHistoryItem {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
 export interface PerformanceContextPayload {
   callbackTendency: number;
   fragmentation: number;
@@ -64,7 +74,7 @@ export interface PerformanceContextPayload {
 }
 
 interface ConversationOptions {
-  historyLimit?: number;
+  historyTurnLimit?: number;
   isMuted?: boolean;
   isExhibitionMode?: boolean;
   onPerformanceCue?: (
@@ -74,6 +84,7 @@ interface ConversationOptions {
   onPerformancePlan?: (plan: PerformancePlan) => void;
   onPerformanceResult?: (result: PerformanceResult) => void;
   onInteractionAction?: (decision: ConversationActionDecision) => void;
+  onInteractionTimelineEvent?: (event: InteractionTimelineEvent) => void;
 }
 
 interface ErrorResponse {
@@ -85,8 +96,7 @@ interface ProcessTurnResult {
   decision: AutonomousDecision | null;
 }
 
-const DEFAULT_HISTORY_LIMIT = 6;
-const MAX_HISTORY_LIMIT = 10;
+const MAX_HISTORY_TURN_LIMIT = 10;
 const SUBTITLE_HOLD_MS = 1_500;
 const ACTIVE_STATUSES: ConversationStatus[] = [
   'thinking',
@@ -179,9 +189,9 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-function normalizeHistoryLimit(value: number | undefined): number {
-  if (value === undefined) return DEFAULT_HISTORY_LIMIT;
-  return Math.max(1, Math.min(Math.floor(value), MAX_HISTORY_LIMIT));
+function normalizeHistoryTurnLimit(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_HISTORY_TURN_LIMIT;
+  return Math.max(1, Math.min(Math.floor(value), MAX_HISTORY_TURN_LIMIT));
 }
 
 function waitMilliseconds(delayMs: number): Promise<void> {
@@ -193,7 +203,7 @@ export function useConversation(
   playback: PerformancePlayback,
   options: ConversationOptions = {},
 ) {
-  const historyLimit = normalizeHistoryLimit(options.historyLimit);
+  const historyTurnLimit = normalizeHistoryTurnLimit(options.historyTurnLimit);
   const isMuted = options.isMuted ?? false;
   const isExhibitionMode = options.isExhibitionMode ?? false;
   const [reply, setReply] = useState('');
@@ -203,8 +213,14 @@ export function useConversation(
   const [source, setSource] = useState<ConversationSource | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
+  const [timeline] = useState(() => createInteractionTimeline());
+  const [floorController] = useState<FloorController>(() =>
+    createFloorController(timeline),
+  );
+  const [semanticHistory] = useState(() =>
+    createSemanticDialogueHistory(historyTurnLimit),
+  );
   const subtitleClearTimerRef = useRef<number | null>(null);
-  const historyRef = useRef<ConversationHistoryItem[]>([]);
   const lastAutonomousReplyRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const sourceRef = useRef<ConversationSource | null>(null);
@@ -223,11 +239,14 @@ export function useConversation(
     onPerformancePlanRef.current = options.onPerformancePlan;
     onPerformanceResultRef.current = options.onPerformanceResult;
     onInteractionActionRef.current = options.onInteractionAction;
+    timeline.setListener(options.onInteractionTimelineEvent);
   }, [
     options.onPerformanceCue,
     options.onPerformancePlan,
     options.onPerformanceResult,
     options.onInteractionAction,
+    options.onInteractionTimelineEvent,
+    timeline,
   ]);
 
   const setConversationState = useCallback(
@@ -339,7 +358,8 @@ export function useConversation(
   const resetConversation = useCallback(() => {
     finishActivePlanAsCancelled();
     invalidateCurrentTurn(true);
-    historyRef.current = [];
+    semanticHistory.clear();
+    floorController.reset('conversation_reset');
     lastAutonomousReplyRef.current = null;
     clearSubtitle();
     setReply('');
@@ -348,16 +368,26 @@ export function useConversation(
   }, [
     clearSubtitle,
     finishActivePlanAsCancelled,
+    floorController,
     invalidateCurrentTurn,
+    semanticHistory,
     setConversationState,
   ]);
 
-  const appendHistory = useCallback(
-    (items: ConversationHistoryItem[]) => {
-      historyRef.current = [...historyRef.current, ...items].slice(-historyLimit);
-    },
-    [historyLimit],
+  const previewVoiceMessage = useCallback(
+    (message: string) => floorController.preview(message).candidateText,
+    [floorController],
   );
+
+  const recordVoiceSignal = useCallback((event: VoiceInputEvent) => {
+    if (
+      event.type === 'interim_transcript_updated' ||
+      event.type === 'listening_started'
+    ) {
+      return;
+    }
+    floorController.observeSignal(toTurnSignal(event));
+  }, [floorController]);
 
   const processTurn = useCallback(
     async (
@@ -367,8 +397,10 @@ export function useConversation(
       onReplyAccepted: (activatedCardIds: string[]) => void,
       autonomousContext: AutonomousContext | null,
       plan: PerformancePlan,
+      voiceMetadata?: VoiceTurnMetadata,
     ): Promise<ProcessTurnResult> => {
       const eventEmitter = createConversationEventEmitter(turnSource);
+      const messageForRequest = message;
       let terminalEventEmitted = false;
       const emitTerminalEvent = (
         event: 'turn_completed' | 'turn_aborted' | 'turn_failed',
@@ -380,6 +412,9 @@ export function useConversation(
       };
 
       eventEmitter.emit('input_received');
+      if (turnSource === 'manual') {
+        floorController.reset('manual_input');
+      }
 
       if (turnSource === 'autonomous') {
         if (
@@ -420,12 +455,24 @@ export function useConversation(
         plan.actionDecision.action !== 'take_floor'
           ? plan.actionDecision
           : null;
+      const finalizedVoiceMetadata: VoiceTurnMetadata =
+        voiceMetadata ?? {
+          segmentId: eventEmitter.turnId,
+          at: Date.now(),
+          asrConfidence: null,
+        };
       if (localInteractionDecision) {
         const reactionPlan = createInteractionReactionPlan(plan);
         activePlanRef.current = plan;
         onPerformancePlanRef.current?.(reactionPlan);
         playback.prepare(reactionPlan);
-        appendHistory([{ role: 'user', content: message ?? '' }]);
+        if (turnSource === 'voice') {
+          floorController.applyFinalized(
+            message ?? '',
+            localInteractionDecision,
+            finalizedVoiceMetadata,
+          );
+        }
         setConversationState('idle', null);
         emitResult(reactionPlan, 'completed', {
           interactionAction: localInteractionDecision.action,
@@ -482,8 +529,10 @@ export function useConversation(
                 : turnSource === 'voice'
                   ? 'voice'
                   : 'manual',
-            ...(message === null ? {} : { message }),
-            history: historyRef.current,
+            ...(messageForRequest === null
+              ? {}
+              : { message: messageForRequest }),
+            history: semanticHistory.toMessages(),
             ...cardContext,
             performanceContext: plan.speech?.llmContext ?? {
               callbackTendency: 0,
@@ -587,7 +636,13 @@ export function useConversation(
           activePlanRef.current = plan;
           onPerformancePlanRef.current?.(reactionPlan);
           playback.prepare(reactionPlan);
-          appendHistory([{ role: 'user', content: message ?? '' }]);
+          if (turnSource === 'voice') {
+            floorController.applyFinalized(
+              message ?? '',
+              interactionDecision,
+              finalizedVoiceMetadata,
+            );
+          }
           setConversationState('idle', null);
           emitResult(reactionPlan, 'completed', {
             interactionAction: interactionDecision.action,
@@ -633,13 +688,34 @@ export function useConversation(
         onReplyAccepted(activatedCards);
 
         if (INTERACTIVE_SOURCES.includes(turnSource)) {
-          appendHistory([
-            { role: 'user', content: message ?? '' },
-            { role: 'assistant', content: responseText },
-          ]);
+          if (turnSource === 'voice' && interactionDecision) {
+            const floorTransition = floorController.applyFinalized(
+              message ?? '',
+              interactionDecision,
+              finalizedVoiceMetadata,
+            );
+            if (floorTransition.action === 'take_floor' && !responseText) {
+              throw new Error('TAKE_FLOOR response must contain text.');
+            }
+            if (floorTransition.committedText) {
+              semanticHistory.commitTurn(
+                floorTransition.committedText,
+                responseText,
+                finalizedVoiceMetadata.at,
+              );
+            }
+          } else if (turnSource === 'manual') {
+            semanticHistory.commitTurn(
+              message ?? '',
+              responseText,
+            );
+          }
         }
 
         if (isMutedRef.current) {
+          if (turnSource === 'voice') {
+            floorController.release('muted');
+          }
           clearSubtitle();
           setConversationState('idle', null);
           emitResult(executionPlan, 'cancelled', {
@@ -675,6 +751,12 @@ export function useConversation(
         abortControllerRef.current = ttsController;
         const ttsStartedAt = performance.now();
         eventEmitter.emit('tts_start', { phase: 'tts' });
+        timeline.record({
+          kind: 'tts_event',
+          at: Date.now(),
+          phase: 'start',
+          channel: 'server_tts',
+        });
         const ttsResponse = await fetch(apiUrl('/api/tts'), {
           method: 'POST',
           headers: {
@@ -706,6 +788,13 @@ export function useConversation(
         eventEmitter.emit('tts_ready', {
           durationMs: performance.now() - ttsStartedAt,
           phase: 'tts',
+        });
+        timeline.record({
+          kind: 'tts_event',
+          at: Date.now(),
+          phase: 'ready',
+          channel: 'server_tts',
+          durationMs: performance.now() - ttsStartedAt,
         });
         if (abortControllerRef.current === ttsController) {
           abortControllerRef.current = null;
@@ -766,7 +855,10 @@ export function useConversation(
 
         if (turnSource === 'autonomous') {
           lastAutonomousReplyRef.current = responseText;
-          appendHistory([{ role: 'assistant', content: responseText }]);
+          semanticHistory.appendAssistant(responseText);
+        }
+        if (turnSource === 'voice') {
+          floorController.release('response_completed');
         }
         setConversationState('idle', null);
         emitResult(executionPlan, 'completed', {
@@ -809,6 +901,9 @@ export function useConversation(
           return { completed: false, decision: null };
         }
         if (isAbortError(caughtError)) {
+          if (turnSource === 'voice') {
+            floorController.release('aborted');
+          }
           clearSubtitle();
           setConversationState('idle', null);
           emitResult(executionPlan, 'cancelled');
@@ -821,6 +916,9 @@ export function useConversation(
           };
         }
 
+        if (turnSource === 'voice') {
+          floorController.reset('take_floor_failed');
+        }
         clearSubtitle();
         setError(
           caughtError instanceof Error
@@ -835,22 +933,27 @@ export function useConversation(
         });
         return { completed: false, decision: null };
       } finally {
+        if (turnSource === 'voice' && floorController.getState().floorOwner === 'vayria') {
+          floorController.release('turn_ended');
+        }
         if (activeTurnControlRef.current === turnControl) {
           activeTurnControlRef.current = null;
         }
       }
     },
     [
-      appendHistory,
       clearSubtitle,
       clearSubtitleTimer,
       emitResult,
       finishActivePlanAsCancelled,
+      floorController,
       invalidateCurrentTurn,
       isExhibitionMode,
       playback,
+      semanticHistory,
       scheduleSubtitleClear,
       setConversationState,
+      timeline,
     ],
   );
 
@@ -880,6 +983,7 @@ export function useConversation(
       cardContext: ChatCardContext,
       onReplyAccepted: (activatedCardIds: string[]) => void,
       plan: PerformancePlan,
+      voiceMetadata?: VoiceTurnMetadata,
     ) =>
       (
         await processTurn(
@@ -889,6 +993,7 @@ export function useConversation(
           onReplyAccepted,
           null,
           plan,
+          voiceMetadata,
         )
       ).completed,
     [processTurn],
@@ -961,6 +1066,8 @@ export function useConversation(
     isManualBusy: isBusy && INTERACTIVE_SOURCES.includes(source ?? 'manual'),
     reply,
     isSubtitleVisible,
+    previewVoiceMessage,
+    recordVoiceSignal,
     resetConversation,
     sendAutonomous,
     sendManual,

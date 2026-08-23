@@ -82,7 +82,7 @@ Mode B/Cの無音終了は`600ms`が既定値です。
 URLまたは環境変数を変更した後は、ページを再読み込みしてください。
 Audio Labのendpoint selectorはマイク停止中だけ有効です。
 Mode AとMode Dはendpoint selectorの対象外です。
-Mode Dは既存の`600ms`を使います。
+Mode Dは`400ms`を使います。
 
 Python STTの展示用既定profileは次です。
 
@@ -130,7 +130,7 @@ UIの範囲は`0.005`から`0.2`です。
 - `Baseline`: 既存の経路を使用します。localの既定値は`SpeechRecognition`または`webkitSpeechRecognition`です。exhibitionで既存のRemote PCM設定を使う場合は、既存のPython STT経路を使用します。
 - `Processed`: Remote PCMへ接続し、`echoCancellation`、`noiseSuppression`、`autoGainControl`を要求します。Python WebRTC VADを使います。
 - `Processed + VAD`: ProcessedにRMSベースのブラウザー側VADを追加します。200msチャンクを使います。endpointが`600ms`なら3チャンク、`400ms`なら2チャンクでspeechを終了します。Python WebRTC VADも残します。
-- `Exhibition Mix`: Presetに応じた標準AEC・NS・AGC、適応型RMSゲート、既存のPython WebRTC VAD、barge-in、TTS duckingを組み合わせます。Mode DはRemote PCM経路を使い、endpointは既存の`600ms`です。
+- `Exhibition Mix`: Presetに応じた標準AEC・NS・AGC、適応型RMSゲート、既存のPython WebRTC VAD、barge-in、TTS duckingを組み合わせます。Mode DはRemote PCM経路を使い、endpointは`400ms`です。ブラウザー側RMSゲートも200msチャンク2個でspeechを終了します。
 
 ## Mode Dの確認ポイント
 
@@ -154,9 +154,11 @@ speech終了はthreshold未満3チャンクです。
 candidate rejectはnoise floor未満2チャンクです。
 ゲートはPCMの音量を加工しません。
 
-Mode DでTTS再生中にspeech startを検出すると、TTS音量を20msで約`0.12`へ下げます。
-accepted transcriptが返ると、現在の会話ターンをbarge-inとして停止します。
-空transcript、既知誤認識、STTエラー、停止、2.5秒timeoutではTTS音量を復元します。
+Mode DでTTS再生中にspeech startを検出すると、`barge_in_candidate`へ遷移します。
+候補中は、TTS音量だけを20msで約`0.12`へ下げます。
+空transcript、既知誤認識、純粋な相槌は候補を破棄し、TTS音量を復元します。
+内容のある確定発話だけが`confirmed_barge_in`へ進み、現在の会話ターンを停止します。
+STTエラー、停止、2.5秒timeoutでもTTS音量を復元します。
 Mode A/B/Cではこのbarge-in状態機械を使いません。
 
 Mode Dのログにはnoise floor、effective threshold、最大VAD score、barge-in状態を保存します。

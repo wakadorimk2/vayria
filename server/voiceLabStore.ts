@@ -122,6 +122,18 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
       ]),
     ],
     [
+      'interaction_timeline',
+      new Set([
+        'kind',
+        'timestamp',
+        'sessionId',
+        'mode',
+        'preset',
+        'audioEndpointMs',
+        'event',
+      ]),
+    ],
+    [
       'error',
       new Set([
         'kind',
@@ -191,6 +203,23 @@ function validateSummary(value: unknown): boolean {
   return true;
 }
 
+function validateInteractionTimelineEvent(value: unknown): boolean {
+  if (!isPlainRecord(value) || typeof value.kind !== 'string') return false;
+  if (typeof value.at !== 'number' || !Number.isFinite(value.at)) return false;
+  return [
+    'turn_signal',
+    'floor_action',
+    'floor_acquired',
+    'floor_released',
+    'pending_expired',
+    'pending_discarded',
+    'transcript_discarded',
+    'backchannel_played',
+    'tts_event',
+    'barge_in',
+  ].includes(value.kind);
+}
+
 function validateVoiceLabRecordShape(record: VoiceLabRecord): boolean {
   const allowedKeys = RECORD_KEYS.get(record.kind);
   if (!allowedKeys) return false;
@@ -213,6 +242,12 @@ function validateVoiceLabRecordShape(record: VoiceLabRecord): boolean {
     return false;
   }
   if (record.kind === 'session_summary' && !validateSummary(record.summary)) {
+    return false;
+  }
+  if (
+    record.kind === 'interaction_timeline' &&
+    !validateInteractionTimelineEvent(record.event)
+  ) {
     return false;
   }
   return true;

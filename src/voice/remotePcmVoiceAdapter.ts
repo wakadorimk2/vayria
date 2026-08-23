@@ -16,6 +16,7 @@ import {
   DEFAULT_AUDIO_INPUT_MODE,
   DEFAULT_EXHIBITION_AUDIO_PRESET,
   DEFAULT_VAD_THRESHOLD,
+  getEffectiveAudioEndpointMs,
   getExhibitionAudioPresetConfig,
   isVoiceInputDiagnostic as isAudioLabVoiceInputDiagnostic,
   isSttRuntimeInfo,
@@ -347,8 +348,12 @@ export function createRemotePcmVoiceAdapter(
   const presetConfig = getExhibitionAudioPresetConfig(audioPreset);
   const requestedAudioConstraints = readAudioConstraints(audioMode, audioPreset);
   const usesSelectableEndpoint =
-    audioMode === 'processed' || audioMode === 'processed-vad';
-  const endpointMs = usesSelectableEndpoint ? audioEndpointMs : 600;
+    audioMode === 'processed' ||
+    audioMode === 'processed-vad' ||
+    audioMode === 'exhibition-mix';
+  const endpointMs = usesSelectableEndpoint
+    ? getEffectiveAudioEndpointMs(audioMode, audioEndpointMs)
+    : DEFAULT_AUDIO_ENDPOINT_MS;
   const hangoverChunkCount = getVadHangoverChunkCount(endpointMs);
   const rmsVad =
     audioMode === 'processed-vad'
@@ -358,13 +363,10 @@ export function createRemotePcmVoiceAdapter(
       : null;
   const adaptiveRmsVad =
     audioMode === 'exhibition-mix' && presetConfig.browserGateEnabled
-      ? new AdaptiveRmsVad(
-          options.vadThreshold ?? presetConfig.defaultVadThreshold,
-          {
-            noiseFloorMultiplier: presetConfig.noiseFloorMultiplier,
-            hangoverChunkCount: getVadHangoverChunkCount(600),
-          },
-        )
+      ? new AdaptiveRmsVad(options.vadThreshold ?? presetConfig.defaultVadThreshold, {
+          noiseFloorMultiplier: presetConfig.noiseFloorMultiplier,
+          hangoverChunkCount: getVadHangoverChunkCount(endpointMs),
+        })
       : null;
   const activeVad = rmsVad ?? adaptiveRmsVad;
 

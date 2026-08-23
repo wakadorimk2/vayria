@@ -32,7 +32,9 @@ import {
   clampVadThreshold,
   DEFAULT_AUDIO_INPUT_MODE,
   DEFAULT_AUDIO_LAB_MODE,
+  DEFAULT_EXHIBITION_MIX_ENDPOINT_MS,
   DEFAULT_EXHIBITION_AUDIO_PRESET,
+  getEffectiveAudioEndpointMs,
   getExhibitionAudioPresetConfig,
   findKnownHallucinationPhrase,
   resolveInitialAudioLabMode,
@@ -47,7 +49,12 @@ import {
   calculatePcm16Rms,
 } from '../src/voice/rmsVad.js';
 import { AdaptiveRmsVad } from '../src/voice/adaptiveRmsVad.js';
-import { reduceBargeIn } from '../src/voice/bargeIn.js';
+import {
+  isConfirmedBargeInTranscript,
+  isRejectedBargeInCandidate,
+  reduceBargeIn,
+} from '../src/voice/bargeIn.js';
+import { createInteractionTimeline } from '../src/conversation/interactionTimeline.js';
 import {
   FIRST_PCM_FRAME_TIMEOUT_MS,
   createRemotePcmVoiceAdapter,
@@ -904,6 +911,11 @@ test('RMS VAD rejects low-level noise and preserves a short utterance', () => {
 test('RMS VAD maps the selectable endpoint to a shorter hangover', () => {
   assert.deepEqual(AUDIO_ENDPOINT_VALUES, [400, 600]);
   assert.equal(DEFAULT_AUDIO_ENDPOINT_MS, 600);
+  assert.equal(DEFAULT_EXHIBITION_MIX_ENDPOINT_MS, 400);
+  assert.equal(getEffectiveAudioEndpointMs('exhibition-mix', 600), 400);
+  assert.equal(getEffectiveAudioEndpointMs('processed', 400), 400);
+  assert.equal(getEffectiveAudioEndpointMs('processed-vad', 600), 600);
+  assert.equal(getEffectiveAudioEndpointMs('baseline', 400), 600);
   assert.equal(getVadHangoverChunkCount(400), 2);
   assert.equal(getVadHangoverChunkCount(600), 3);
 
@@ -971,50 +983,69 @@ test('adaptive RMS VAD rejects a low-level candidate after two noise-floor chunk
   assert.equal(rejected.forwardedChunks.length, 0);
 });
 
-test('barge-in reducer ducks only with TTS and restores or interrupts correctly', () => {
+test('barge-in confirmation accepts only content-bearing transcripts', () => {
+  assert.equal(isConfirmedBargeInTranscript('今日は雨だった'), true);
+  assert.equal(isConfirmedBargeInTranscript('うん'), false);
+  assert.equal(isConfirmedBargeInTranscript('はい'), false);
+  assert.equal(
+    isConfirmedBargeInTranscript('ご視聴ありがとうございました'),
+    false,
+  );
+  assert.equal(isConfirmedBargeInTranscript(''), false);
+  assert.equal(isConfirmedBargeInTranscript('あ'.repeat(1_001)), false);
+});
+
+test('barge-in reducer separates candidate ducking from confirmed interruption', () => {
   assert.deepEqual(
     reduceBargeIn('idle', { type: 'speech_started', ttsPlaying: false }),
     { state: 'idle', effects: [] },
   );
 
-  const ducked = reduceBargeIn('idle', {
+  const candidate = reduceBargeIn('idle', {
     type: 'speech_started',
     ttsPlaying: true,
   });
-  assert.deepEqual(ducked, {
-    state: 'ducked',
+  assert.deepEqual(candidate, {
+    state: 'candidate',
     effects: ['duck'],
-    reason: 'speech-started',
+    reason: 'barge-in-candidate',
   });
+  assert.deepEqual(
+    reduceBargeIn('candidate', {
+      type: 'speech_started',
+      ttsPlaying: true,
+    }),
+    { state: 'candidate', effects: [] },
+  );
 
   assert.deepEqual(
-    reduceBargeIn('ducked', {
+    reduceBargeIn('candidate', {
       type: 'transcript_finalized',
       accepted: true,
     }),
     {
       state: 'confirmed',
       effects: ['interrupt', 'restore'],
-      reason: 'accepted-transcript',
+      reason: 'confirmed-barge-in',
     },
   );
   assert.deepEqual(
-    reduceBargeIn('ducked', {
+    reduceBargeIn('candidate', {
       type: 'transcript_finalized',
       accepted: false,
     }),
     {
       state: 'restored',
       effects: ['restore'],
-      reason: 'empty-or-filtered-transcript',
+      reason: 'candidate-rejected',
     },
   );
   assert.deepEqual(
-    reduceBargeIn('ducked', { type: 'timeout' }),
+    reduceBargeIn('candidate', { type: 'timeout' }),
     { state: 'restored', effects: ['restore'], reason: 'timeout' },
   );
   assert.deepEqual(
-    reduceBargeIn('ducked', { type: 'recognition_failed' }),
+    reduceBargeIn('candidate', { type: 'recognition_failed' }),
     {
       state: 'restored',
       effects: ['restore'],
@@ -1022,7 +1053,7 @@ test('barge-in reducer ducks only with TTS and restores or interrupts correctly'
     },
   );
   assert.deepEqual(
-    reduceBargeIn('ducked', { type: 'recognition_stopped' }),
+    reduceBargeIn('candidate', { type: 'recognition_stopped' }),
     {
       state: 'restored',
       effects: ['restore'],
@@ -1035,10 +1066,60 @@ test('barge-in reducer ducks only with TTS and restores or interrupts correctly'
       ttsPlaying: true,
     }),
     {
-      state: 'ducked',
+      state: 'candidate',
       effects: ['duck'],
-      reason: 'speech-started',
+      reason: 'barge-in-candidate',
     },
+  );
+});
+
+test('rejected barge-in candidates stay out of the conversation input', () => {
+  const rejected = reduceBargeIn('candidate', {
+    type: 'transcript_finalized',
+    accepted: false,
+  });
+  const confirmed = reduceBargeIn('candidate', {
+    type: 'transcript_finalized',
+    accepted: true,
+  });
+
+  assert.equal(
+    isRejectedBargeInCandidate('segment-1', 'segment-1', rejected),
+    true,
+  );
+  assert.equal(
+    isRejectedBargeInCandidate('segment-1', 'segment-1', confirmed),
+    false,
+  );
+  assert.equal(
+    isRejectedBargeInCandidate('segment-1', 'segment-2', rejected),
+    false,
+  );
+});
+
+test('interaction timeline distinguishes candidate and confirmed barge-in states', () => {
+  const timeline = createInteractionTimeline();
+  timeline.record({
+    kind: 'barge_in',
+    at: 100,
+    action: 'duck',
+    state: 'candidate',
+  });
+  timeline.record({
+    kind: 'barge_in',
+    at: 200,
+    action: 'interrupt+restore',
+    state: 'confirmed',
+  });
+
+  assert.deepEqual(
+    timeline.snapshot().map((event) =>
+      event.kind === 'barge_in' ? [event.action, event.state] : null,
+    ),
+    [
+      ['duck', 'candidate'],
+      ['interrupt+restore', 'confirmed'],
+    ],
   );
 });
 
@@ -1280,7 +1361,7 @@ test('Voice Lab recorder stores Mode D thresholds and barge-in summary metrics',
     type: 'barge_in',
     at: 1_900,
     action: 'duck',
-    state: 'ducked',
+    state: 'candidate',
     ttsPlaying: true,
   });
   recorder.handleDiagnostic({
@@ -1289,7 +1370,7 @@ test('Voice Lab recorder stores Mode D thresholds and barge-in summary metrics',
     action: 'interrupt',
     state: 'confirmed',
     ttsPlaying: true,
-    reason: 'accepted-transcript',
+    reason: 'confirmed-barge-in',
   });
   recorder.handleDiagnostic({
     type: 'barge_in',
@@ -1435,6 +1516,28 @@ test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifie
       },
     };
     assert.deepEqual(readVoiceLabRecord(runtimeRecord), runtimeRecord);
+    const timelineRecord = {
+      kind: 'interaction_timeline' as const,
+      timestamp: '2026-08-22T00:00:00.000Z',
+      sessionId: 'vl-store-session',
+      mode: 'exhibition-mix' as const,
+      preset: 'mild' as const,
+      audioEndpointMs: 600 as const,
+      event: {
+        kind: 'floor_action' as const,
+        action: 'listen' as const,
+        at: 1_000,
+        segmentId: 'segment-1',
+        pendingFragmentCount: 0,
+        asrConfidence: null,
+      },
+    };
+    assert.deepEqual(readVoiceLabRecord(timelineRecord), timelineRecord);
+    await appendVoiceLabRecord(root, timelineRecord);
+    assert.deepEqual(
+      await readVoiceLabRecords(root, timelineRecord.sessionId),
+      [record, timelineRecord],
+    );
     assert.throws(
       () => readVoiceLabRecord({ ...record, sessionId: '../escape' }),
       /session ID is invalid/,

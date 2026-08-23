@@ -61,3 +61,25 @@ def test_four_hundred_ms_silence_finalizes_once() -> None:
         "speech_ended",
         "utterance_finalized",
     ]
+
+
+def test_four_hundred_ms_silence_separates_two_utterances() -> None:
+    classifier = SequenceClassifier(
+        [True, True] + [False] * 20 + [True, True] + [False] * 20
+    )
+    detector = PcmUtteranceDetector(
+        classifier=classifier,
+        end_silence_frame_count=400 // 20,
+    )
+
+    events = detector.feed(b"".join(frame(index) for index in range(44)))
+
+    assert [event.type for event in events] == [
+        "speech_started",
+        "speech_ended",
+        "utterance_finalized",
+        "speech_started",
+        "speech_ended",
+        "utterance_finalized",
+    ]
+    assert events[0].segment_id != events[3].segment_id
