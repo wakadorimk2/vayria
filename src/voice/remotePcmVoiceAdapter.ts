@@ -362,7 +362,8 @@ export function createRemotePcmVoiceAdapter(
         })
       : null;
   const adaptiveRmsVad =
-    audioMode === 'exhibition-mix' && presetConfig.browserGateEnabled
+    (audioMode === 'processed' || audioMode === 'exhibition-mix') &&
+    presetConfig.browserGateEnabled
       ? new AdaptiveRmsVad(options.vadThreshold ?? presetConfig.defaultVadThreshold, {
           noiseFloorMultiplier: presetConfig.noiseFloorMultiplier,
           hangoverChunkCount: getVadHangoverChunkCount(endpointMs),

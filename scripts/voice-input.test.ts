@@ -24,6 +24,7 @@ import {
 import {
   DEFAULT_AUDIO_ENDPOINT_MS,
   AUDIO_ENDPOINT_VALUES,
+  BARGE_IN_DUCK_GAIN,
   calculatePerMinuteRate,
   clampVadThreshold,
   DEFAULT_AUDIO_INPUT_MODE,
@@ -668,6 +669,65 @@ test('remote PCM adapter validates the first AudioWorklet frame before activatio
   }
 });
 
+test('processed remote adapter gates low-level noise but forwards speech-level audio', async () => {
+  const environment = installRemoteBrowserEnvironment();
+  try {
+    const diagnostics: Array<{
+      type: string;
+      noiseFloor?: number | null;
+      effectiveThreshold?: number | null;
+    }> = [];
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'processed',
+      audioPreset: 'mild',
+      diagnostics: true,
+      onEvent: () => undefined,
+      onDiagnostic: (diagnostic) => {
+        diagnostics.push({
+          type: diagnostic.type,
+          ...(diagnostic.type === 'audio_level'
+            ? {
+                noiseFloor: diagnostic.noiseFloor,
+                effectiveThreshold: diagnostic.effectiveThreshold,
+              }
+            : {}),
+        });
+      },
+    });
+
+    const startPromise = adapter.start();
+    await waitForRemoteCondition(() => environment.worklets.length === 1);
+    environment.worklets[0]!.emit(makePcmChunk(0.01));
+
+    assert.equal(await startPromise, true);
+    const socket = environment.sockets[0];
+    const hasBinaryFrame = () =>
+      socket?.sent.some((value) => value instanceof ArrayBuffer) ?? false;
+    assert.equal(hasBinaryFrame(), false);
+
+    environment.worklets[0]!.emit(makePcmChunk(0.01));
+    environment.worklets[0]!.emit(makePcmChunk(0));
+    environment.worklets[0]!.emit(makePcmChunk(0));
+    assert.equal(hasBinaryFrame(), false);
+
+    environment.worklets[0]!.emit(makePcmChunk(0.08));
+    assert.equal(hasBinaryFrame(), true);
+    assert.ok(
+      diagnostics.some(
+        (diagnostic) =>
+          diagnostic.type === 'audio_level' &&
+          diagnostic.noiseFloor !== null &&
+          diagnostic.effectiveThreshold !== null,
+      ),
+    );
+
+    await adapter.stop();
+    adapter.dispose();
+  } finally {
+    environment.restore();
+  }
+});
+
 test('remote PCM adapter falls back to ScriptProcessor when AudioWorklet stays silent', async () => {
   const environment = installRemoteBrowserEnvironment({ timerScale: 0.01 });
   try {
@@ -1198,6 +1258,7 @@ test('Audio Lab normalizes known hallucinations and anonymizes track settings', 
 test('Audio Lab defaults to Processed while retaining Mode D for debug selection', () => {
   assert.equal(DEFAULT_AUDIO_INPUT_MODE, 'baseline');
   assert.equal(DEFAULT_AUDIO_LAB_MODE, 'processed');
+  assert.equal(BARGE_IN_DUCK_GAIN, 0.25);
   assert.equal(DEFAULT_EXHIBITION_AUDIO_PRESET, 'mild');
   assert.equal(resolveInitialAudioLabMode(true), 'processed');
   assert.equal(resolveInitialAudioLabMode(false), 'baseline');
