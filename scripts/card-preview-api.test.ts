@@ -259,6 +259,7 @@ test('voice policy prompt prioritizes content-bearing utterances', () => {
   );
 
   assert.match(prompt, /question, request, concrete fact, feeling, preference, experience/);
+  assert.match(prompt, /without producing a spoken echo/);
   assert.match(prompt, /Do not use listen or backchannel for a content-bearing utterance/);
   assert.match(prompt, /clearly unfinished fragment/);
   assert.match(prompt, /react_nonverbally/);
@@ -293,7 +294,7 @@ test('common policy safety net keeps ambiguous decisions for the LLM', () => {
       action: 'backchannel',
       backchannelCue: 'un',
     }),
-    { action: 'backchannel', backchannelCue: 'un' },
+    { action: 'silence', backchannelCue: 'none' },
   );
 });
 

@@ -142,14 +142,7 @@ export function classifyViewerMessageFastPath(
     return createActionDecision('listen');
   }
   if (isDefiniteBackchannelMessage(message)) {
-    const normalized = normalizeConversationText(message).replace(
-      TERMINAL_PUNCTUATION,
-      '',
-    );
-    return createActionDecision(
-      'backchannel',
-      normalized === 'んー' || normalized === 'うーん' ? 'uun' : 'un',
-    );
+    return createActionDecision('silence');
   }
   return null;
 }

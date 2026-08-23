@@ -155,14 +155,18 @@ test('conversation fast path classifies unfinished speech as listen', () => {
   );
 });
 
-test('conversation fast path classifies phatic speech as backchannel', () => {
+test('conversation fast path receives phatic speech without a spoken reply', () => {
   assert.deepEqual(
     classifyViewerMessageFastPath('うん'),
-    { action: 'backchannel', backchannelCue: 'un' },
+    { action: 'silence', backchannelCue: 'none' },
   );
   assert.deepEqual(
     classifyViewerMessageFastPath('うーん'),
-    { action: 'backchannel', backchannelCue: 'uun' },
+    { action: 'silence', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    classifyViewerMessageFastPath('うん。'),
+    { action: 'silence', backchannelCue: 'none' },
   );
 });
 
