@@ -16,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 
 $worktreePortStart = 5188
 $worktreePortEnd = 5210
+$exhibitionPort = 5187
 $portMutexName = 'Vayria.WorktreePortAllocation'
 $gitCommand = (Get-Command git.exe -CommandType Application -ErrorAction Stop |
   Select-Object -First 1).Source
@@ -332,10 +333,7 @@ function Ensure-ExhibitionEnvironment {
   [CmdletBinding(SupportsShouldProcess = $true)]
   param(
     [Parameter(Mandatory = $true)]
-    [string]$RepositoryRoot,
-
-    [Parameter(Mandatory = $true)]
-    [int]$SelectedPort
+    [string]$RepositoryRoot
   )
 
   $envPath = Join-Path $RepositoryRoot '.env.exhibition.local'
@@ -358,7 +356,7 @@ function Ensure-ExhibitionEnvironment {
     'VITE_AUDIO_ENDPOINT_MS=600'
     'VITE_VOICE_INPUT_TRANSPORT=remote'
     'VAYRIA_BIND_HOST=0.0.0.0'
-    "VAYRIA_PORT=$SelectedPort"
+    "VAYRIA_PORT=$exhibitionPort"
     'VAYRIA_HTTPS=false'
     'VAYRIA_HTTPS_CERT_FILE='
     'VAYRIA_HTTPS_KEY_FILE='
@@ -366,9 +364,9 @@ function Ensure-ExhibitionEnvironment {
     'VAYRIA_STT_WS_URL=ws://127.0.0.1:8787/stream'
   )
 
-  if ($PSCmdlet.ShouldProcess($envPath, "Create exhibition environment for port $SelectedPort")) {
+  if ($PSCmdlet.ShouldProcess($envPath, "Create exhibition environment for port $exhibitionPort")) {
     Set-Content -LiteralPath $envPath -Value $lines -Encoding utf8
-    Write-Output "Configured exhibition environment $envPath on port $SelectedPort"
+    Write-Output "Configured exhibition environment $envPath on port $exhibitionPort"
   }
 }
 
@@ -395,9 +393,8 @@ try {
   if (Test-Path -LiteralPath $envPath -PathType Leaf) {
     $existingPort = Get-ExistingWorktreePort -EnvPath $envPath
     Ensure-ExhibitionEnvironment `
-      -RepositoryRoot $repositoryRoot `
-      -SelectedPort $existingPort
-    Write-Output "Existing Vayria worktree configuration preserved on port $existingPort."
+      -RepositoryRoot $repositoryRoot
+    Write-Output "Existing Vayria worktree configuration preserved on local port $existingPort; exhibition environment uses port $exhibitionPort."
     return
   }
 
@@ -423,10 +420,9 @@ try {
     -ResolvedHttpsConfigFile $resolvedHttpsConfigFile
 
   Ensure-ExhibitionEnvironment `
-    -RepositoryRoot $repositoryRoot `
-    -SelectedPort $selectedPort
+    -RepositoryRoot $repositoryRoot
 
-  Write-Output "Configured Vayria worktree on port $selectedPort."
+  Write-Output "Configured Vayria worktree on local port $selectedPort; exhibition environment uses port $exhibitionPort."
 }
 finally {
   if ($lockAcquired) {
