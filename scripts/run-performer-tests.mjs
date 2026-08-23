@@ -12,6 +12,9 @@ const testFiles = [
     'node_modules/.tmp/performer-test/scripts/conversation-floor.test.js',
   ),
   resolve(
+    'node_modules/.tmp/performer-test/scripts/participation-controller.test.js',
+  ),
+  resolve(
     'node_modules/.tmp/performer-test/scripts/character-identity.test.js',
   ),
   resolve(

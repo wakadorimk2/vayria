@@ -250,6 +250,9 @@ function isVoiceInputEvent(value: unknown): value is VoiceInputEvent {
   ) {
     return (
       typeof record.segmentId === 'string' &&
+      (record.speakerId === undefined ||
+        record.speakerId === null ||
+        typeof record.speakerId === 'string') &&
       (record.type !== 'utterance_finalized' || typeof record.text === 'string') &&
       (record.type !== 'interim_transcript_updated' ||
         typeof record.text === 'string') &&

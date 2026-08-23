@@ -650,6 +650,7 @@ export default function App() {
   const {
     cancelAutonomous,
     error,
+    evaluateVoiceParticipation,
     interruptCurrentTurn,
     isBusy,
     isManualBusy,
@@ -1084,9 +1085,6 @@ export default function App() {
           cancelNonSpeechPlan();
           cancelActiveCardReactionPlan();
           const identityForRequest = rememberExplicitAlias(message);
-          setAutonomousContext((current) =>
-            recordViewerIntent(current, message, identityForRequest),
-          );
           const confirmedBargeIn =
             bargeInTransition?.effects.includes('interrupt') ?? false;
           if (confirmedBargeIn) {
@@ -1101,6 +1099,24 @@ export default function App() {
           ) {
             interruptCurrentTurn('voice_interrupt');
           }
+          const participation = evaluateVoiceParticipation(
+            {
+              segmentId: event.segmentId,
+              text: message,
+              speakerId: event.speakerId,
+              at: event.at,
+            },
+            identityForRequest,
+          );
+          if (
+            participation.mode === 'multi_party' &&
+            participation.decision === 'SILENT'
+          ) {
+            return;
+          }
+          setAutonomousContext((current) =>
+            recordViewerIntent(current, message, identityForRequest),
+          );
           const trigger: PerformerTrigger = {
             kind: 'viewer_message',
             text: message,
@@ -1147,6 +1163,7 @@ export default function App() {
       cancelNonSpeechPlan,
       createPlanForTrigger,
       dispatchBargeIn,
+      evaluateVoiceParticipation,
       handleReplyAccepted,
       interruptCurrentTurn,
       isBusy,

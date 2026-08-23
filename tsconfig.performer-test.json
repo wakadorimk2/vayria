@@ -18,6 +18,7 @@
     "src/performer/types.ts",
     "src/conversation/floorController.ts",
     "src/conversation/interactionTimeline.ts",
+    "src/conversation/participationController.ts",
     "src/conversation/semanticDialogueHistory.ts",
     "src/conversation/autonomousContext.ts",
     "src/conversation/useAutonomousTalk.ts",
@@ -27,6 +28,7 @@
     "scripts/card-reactions.test.ts",
     "scripts/performer-runtime.test.ts",
     "scripts/conversation-floor.test.ts",
+    "scripts/participation-controller.test.ts",
     "scripts/character-identity.test.ts",
     "scripts/autonomous-context.test.ts",
     "scripts/autonomous-talk.test.ts"
