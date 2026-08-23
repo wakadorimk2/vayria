@@ -538,11 +538,13 @@ export default function App() {
 
   const {
     cancelAutonomous,
+    clearSubtitle,
     error,
     interruptCurrentTurn,
     isBusy,
     isManualBusy,
     reply,
+    isSubtitleVisible,
     resetConversation,
     sendAutonomous,
     sendManual,
@@ -551,6 +553,7 @@ export default function App() {
     status,
   } = useConversation(playbackCoordinator, {
     historyLimit: 6,
+    isExhibitionMode,
     isMuted,
     onPerformanceCue: handlePerformanceCue,
     onPerformancePlan: handlePerformancePlan,
@@ -654,6 +657,8 @@ export default function App() {
     status === 'idle'
       ? getVoiceStatusLabel(isVoiceInputEnabled, voiceInputPhase)
       : STATUS_LABELS[status];
+  const shouldShowReply =
+    Boolean(reply) && (!isExhibitionMode || isSubtitleVisible);
   const voiceError = getVoiceErrorMessage(voiceInputErrorCode);
   const conversationError = error || voiceValidationError || voiceError;
   const exhibitionAudioActionLabel = voiceError
@@ -833,6 +838,7 @@ export default function App() {
     (event: VoiceInputEvent) => {
       switch (event.type) {
         case 'speech_started': {
+          clearSubtitle();
           cancelNonSpeechPlan();
           if (isBusy || activePlanRef.current !== null) {
             interruptCurrentTurn('voice_interrupt');
@@ -963,6 +969,7 @@ export default function App() {
       cancelActiveCardReactionPlan,
       cancelNonSpeechPlan,
       clearBackchannelTimer,
+      clearSubtitle,
       createPlanForTrigger,
       dispatchBargeIn,
       handleReplyAccepted,
@@ -1370,8 +1377,8 @@ export default function App() {
         aria-label="Character conversation"
       >
         <div className="conversation-copy" aria-live="polite">
-          {reply && <p className="reply">{reply}</p>}
-          {(!isExhibitionMode || !reply) && (
+          {shouldShowReply && <p className="reply">{reply}</p>}
+          {(!isExhibitionMode || !shouldShowReply) && (
             <p className="status">
               {isMuted && status === 'idle'
                 ? 'ミュート中です。テキスト会話は利用できます。'
