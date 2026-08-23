@@ -1409,6 +1409,7 @@ export const VOICE_REPLY_INSTRUCTION = [
   'When the viewer directly asks you to perform an action such as introducing yourself, stating the purpose, naming one item, or moving to the next item, perform that action in the reply. Do not reply only that you will do it.',
   'If the needed information is present, perform the first small step now and state one concrete item or result.',
   'If the needed information is missing, ask one concrete question that names the missing item.',
+  'Do not invent meeting-style purpose, agenda, decisions, owners, or schedules unless the latest request makes them necessary. For casual chat, daily requests, role-play, or simple question-and-answer, respond to the concrete content directly.',
   'Do not reply with only meta-agreement such as その方向で進めましょう, お願いします, 確認しましょう, 整理しましょう, or では始めましょう.',
   'Do not force a question or a new topic. If the moment is intentionally quiet, keep a take_floor reply brief instead of forcing novelty, but do not repeat the same agreement across turns.',
   'A fragment, filler, hesitation, or small self-correction is allowed when it sounds natural.',
