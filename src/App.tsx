@@ -1233,6 +1233,7 @@ export default function App() {
     isBusy: isPerformerBusy,
     isVoiceInputActive: isVoiceInputEnabled,
     isLoopEnabled: isAutonomousLoopEnabled,
+    isWaitingForViewer: autonomousContext.viewerEngagement === 'settled',
     isMuted,
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked),

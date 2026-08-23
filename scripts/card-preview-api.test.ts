@@ -142,6 +142,7 @@ test('autonomous director prompt prioritizes the latest viewer intent', () => {
     3,
     'question',
     0,
+    'available',
     {
       phase: 'scheduled',
       energy: 0.42,
@@ -154,6 +155,7 @@ test('autonomous director prompt prioritizes the latest viewer intent', () => {
 
   assert.match(prompt, /Latest viewer intent: question/);
   assert.match(prompt, /Autonomous turns since latest viewer input: 0/);
+  assert.match(prompt, /Viewer engagement: available/);
   assert.match(prompt, /Self energy: 0\.42/);
   assert.match(prompt, /Self attention target: viewer/);
   assert.match(
@@ -162,6 +164,7 @@ test('autonomous director prompt prioritizes the latest viewer intent', () => {
   );
   assert.match(prompt, /give that latest viewer turn priority/);
   assert.match(prompt, /backchannel or unfinished, silence is acceptable/);
+  assert.match(prompt, /viewer engagement is settled, do not start a new conversational topic/);
   assert.match(prompt, /Use the self state as quiet background context/);
 });
 

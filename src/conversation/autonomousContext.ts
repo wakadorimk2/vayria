@@ -5,6 +5,7 @@ import {
 } from '../character/identity.js';
 import {
   isActionCommitmentMessage,
+  isDefiniteConversationClosingMessage,
   isDefiniteBackchannelMessage,
   isDefiniteNonverbalAcknowledgementMessage,
   isDefiniteParticipationMessage,
@@ -19,6 +20,7 @@ export const VIEWER_INTENTS = [
   'question',
   'request',
   'action_commitment',
+  'closing',
   'unfinished',
   'backchannel',
   'statement',
@@ -26,11 +28,16 @@ export const VIEWER_INTENTS = [
 
 export type ViewerIntent = (typeof VIEWER_INTENTS)[number];
 
+export const VIEWER_ENGAGEMENTS = ['available', 'settled'] as const;
+
+export type ViewerEngagement = (typeof VIEWER_ENGAGEMENTS)[number];
+
 export interface AutonomousContext {
   topic: string | null;
   topicTurns: number;
   viewerIntent: ViewerIntent | null;
   viewerTurnsSince: number;
+  viewerEngagement: ViewerEngagement;
 }
 
 export const MAX_VIEWER_TURNS_SINCE = 100;
@@ -40,6 +47,7 @@ export const INITIAL_AUTONOMOUS_CONTEXT: AutonomousContext = {
   topicTurns: 0,
   viewerIntent: null,
   viewerTurnsSince: 0,
+  viewerEngagement: 'available',
 };
 
 export function isViewerIntent(value: unknown): value is ViewerIntent {
@@ -49,10 +57,20 @@ export function isViewerIntent(value: unknown): value is ViewerIntent {
   );
 }
 
+export function isViewerEngagement(value: unknown): value is ViewerEngagement {
+  return (
+    typeof value === 'string' &&
+    (VIEWER_ENGAGEMENTS as readonly string[]).includes(value)
+  );
+}
+
 export function classifyViewerIntent(
   message: string,
   identity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
 ): ViewerIntent {
+  if (isDefiniteConversationClosingMessage(message)) {
+    return 'closing';
+  }
   if (resolveSelfName(message, identity).role === 'direct_address') {
     return 'direct_address';
   }
@@ -75,10 +93,18 @@ export function recordViewerIntent(
   message: string,
   identity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
 ): AutonomousContext {
+  const viewerIntent = classifyViewerIntent(message, identity);
+  const keepsSettledState =
+    current.viewerEngagement === 'settled' &&
+    (viewerIntent === 'backchannel' || viewerIntent === 'unfinished');
   return {
     ...current,
-    viewerIntent: classifyViewerIntent(message, identity),
+    viewerIntent,
     viewerTurnsSince: 0,
+    viewerEngagement:
+      viewerIntent === 'closing' || keepsSettledState
+        ? 'settled'
+        : 'available',
   };
 }
 

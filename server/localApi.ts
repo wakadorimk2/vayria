@@ -24,7 +24,9 @@ import {
 } from '../src/character/identity.js';
 import {
   isViewerIntent,
+  isViewerEngagement,
   type ViewerIntent,
+  type ViewerEngagement,
 } from '../src/conversation/autonomousContext.js';
 import {
   ATTENTION_TARGETS,
@@ -177,6 +179,7 @@ interface ChatRequestPayload {
   topicTurns: number;
   viewerIntent: ViewerIntent | null;
   viewerTurnsSince: number;
+  viewerEngagement: ViewerEngagement;
   performerState: PerformerStateContext | null;
   previousAutonomousReply: string | null;
   performanceContext: PerformanceContextPayload;
@@ -754,6 +757,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'topicTurns',
     'viewerIntent',
     'viewerTurnsSince',
+    'viewerEngagement',
     'performerState',
     'previousAutonomousReply',
     'performanceContext',
@@ -949,6 +953,19 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   const viewerTurnsSince =
     typeof viewerTurnsSinceValue === 'number' ? viewerTurnsSinceValue : 0;
 
+  const viewerEngagementValue = record.viewerEngagement;
+  if (
+    viewerEngagementValue !== undefined &&
+    !isViewerEngagement(viewerEngagementValue)
+  ) {
+    throw new RequestError(
+      'viewerEngagement must be available or settled.',
+      400,
+    );
+  }
+  const viewerEngagement =
+    viewerEngagementValue === undefined ? 'available' : viewerEngagementValue;
+
   const performerStateValue = record.performerState;
   const performerState = readPerformerStateContext(performerStateValue);
 
@@ -1014,11 +1031,12 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
       topicTurnsValue === undefined ||
       viewerIntentValue === undefined ||
       viewerTurnsSinceValue === undefined ||
+      viewerEngagementValue === undefined ||
       performerStateValue === undefined ||
       performerState === null)
   ) {
     throw new RequestError(
-      'autonomous requests must contain topic, topicTurns, viewerIntent, viewerTurnsSince, and performerState.',
+      'autonomous requests must contain topic, topicTurns, viewerIntent, viewerTurnsSince, viewerEngagement, and performerState.',
       400,
     );
   }
@@ -1046,6 +1064,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     topicTurns,
     viewerIntent,
     viewerTurnsSince,
+    viewerEngagement,
     performerState,
     previousAutonomousReply,
     performanceContext,
@@ -1689,6 +1708,7 @@ async function generateInteractiveResponse(
     0,
     null,
     0,
+    'available',
     null,
     null,
     performanceContext,
@@ -1706,6 +1726,7 @@ export function buildAutonomousDirectorInstruction(
   topicTurns: number,
   viewerIntent: ViewerIntent | null,
   viewerTurnsSince: number,
+  viewerEngagement: ViewerEngagement,
   performerState: PerformerStateContext | null,
 ): string {
   const performerStateLines = performerState
@@ -1723,10 +1744,12 @@ export function buildAutonomousDirectorInstruction(
     `Current topic spoken-turn count: ${topicTurns}`,
     `Latest viewer intent: ${viewerIntent ?? '(none)'}`,
     `Autonomous turns since latest viewer input: ${viewerTurnsSince}`,
+    `Viewer engagement: ${viewerEngagement}`,
     ...performerStateLines,
     'When autonomous turns since latest viewer input is 0, treat the latest viewer intent and recent conversation history as the current situation.',
     'When the latest viewer intent is direct_address, call, question, request, or action_commitment, give that latest viewer turn priority over the previous autonomous topic.',
     'When the latest viewer intent is backchannel or unfinished, silence is acceptable. Do not force a new topic.',
+    'When viewer engagement is settled, do not start a new conversational topic. Choose silence unless an explicit external stimulus requires speech.',
     'Use the self state as quiet background context when choosing speech length, emotional color, and whether to continue or stay silent.',
     'When energy or attention is low, prefer a brief thought or silence. Do not force a lecture or a question.',
     'When attention is directed at the viewer, let recent viewer history guide a small concrete callback when one is natural.',
@@ -1750,6 +1773,7 @@ async function generateReply(
   topicTurns: number,
   viewerIntent: ViewerIntent | null,
   viewerTurnsSince: number,
+  viewerEngagement: ViewerEngagement,
   performerState: PerformerStateContext | null,
   previousAutonomousReply: string | null,
   performanceContext: PerformanceContextPayload,
@@ -1859,6 +1883,7 @@ async function generateReply(
           topicTurns,
           viewerIntent,
           viewerTurnsSince,
+          viewerEngagement,
           performerState,
         )
       : '';
@@ -2540,6 +2565,7 @@ async function handleRequest(
         topicTurns,
         viewerIntent,
         viewerTurnsSince,
+        viewerEngagement,
         performerState,
         previousAutonomousReply,
         performanceContext,
@@ -2586,6 +2612,7 @@ async function handleRequest(
           topicTurns,
           viewerIntent,
           viewerTurnsSince,
+          viewerEngagement,
           performerState,
           previousAutonomousReply,
           performanceContext,

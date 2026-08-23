@@ -177,11 +177,14 @@ It does not own emotion state.
 
 The application keeps one in-memory session while the page remains open.
 The session contains conversation history, autonomous topic context, the latest
-structured viewer intent, the age of that intent, the last autonomous reply,
-Performer State, and per-turn card state.
+structured viewer intent, the age of that intent, the viewer engagement state,
+the last autonomous reply, Performer State, and per-turn card state.
 
 The viewer intent is derived from the latest input and does not store its raw
 text. The age counts completed non-silent autonomous turns since that input.
+Explicit conversation-closing input sets viewer engagement to `settled`.
+The autonomous timer waits in that state until substantive viewer input returns
+the state to `available`. Backchannels and unfinished fragments do not reopen it.
 
 The loop starts after the avatar and audio are ready.
 It schedules the initial four-second delay, then schedules the next delay after
@@ -218,11 +221,13 @@ The resolver calculates it for each `PerformancePlan`.
 
 Topic and viewer intent are conversation-owned in v0.1.
 `App.tsx` and `useConversation` keep `AutonomousContext`, `topic`, `topicTurns`,
-`viewerIntent`, and `viewerTurnsSince`.
+`viewerIntent`, `viewerTurnsSince`, and `viewerEngagement`.
 Moving topic into the Runtime is a v0.2 decision.
 
 Autonomous chat requests also receive a bounded `PerformerStateContext`
 projection at request time. It contains phase, energy, emotion, and attention.
+They receive `viewerEngagement` so the director can preserve the settled wait
+state in its decision context.
 The projection is prompt context only. It is not added to semantic history or
 structured event records.
 

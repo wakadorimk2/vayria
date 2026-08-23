@@ -569,6 +569,8 @@ export function useConversation(
                   topicTurns: autonomousContext?.topicTurns ?? 0,
                   viewerIntent: autonomousContext?.viewerIntent ?? null,
                   viewerTurnsSince: autonomousContext?.viewerTurnsSince ?? 0,
+                  viewerEngagement:
+                    autonomousContext?.viewerEngagement ?? 'available',
                   previousAutonomousReply: lastAutonomousReplyRef.current,
                   performerState: performerStateContext,
                 }
