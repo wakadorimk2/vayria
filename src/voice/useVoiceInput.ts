@@ -25,6 +25,10 @@ import {
 } from './voiceInput';
 import { runtimeConfig, type VoiceInputTransport } from '../runtimeConfig';
 
+const DEV_RESOURCE_CLEANUP_GRACE_MS = 100;
+const isDevelopmentBuild =
+  (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
+
 export interface UseVoiceInputOptions {
   language?: string;
   transport?: VoiceInputTransport;
@@ -77,6 +81,10 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const optionsRef = useRef(options);
   const controllerRef = useRef<VoiceInputController | null>(null);
   const adapterRef = useRef<VoiceInputAdapter | null>(null);
+  const adapterConfigRef = useRef<string | null>(null);
+  const deferredCleanupTimerRef = useRef<number | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const sessionActiveRef = useRef(false);
   const [snapshot, setSnapshot] = useState<VoiceInputSnapshot>(
     INITIAL_VOICE_INPUT_SNAPSHOT,
   );
@@ -103,9 +111,55 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   }, [options]);
 
   useEffect(() => {
-    let active = true;
+    if (deferredCleanupTimerRef.current !== null) {
+      window.clearTimeout(deferredCleanupTimerRef.current);
+      deferredCleanupTimerRef.current = null;
+    }
+
+    const configuredTransport =
+      optionsRef.current.transport ?? runtimeConfig.voiceTransport;
+    const adapterConfig = `${audioMode}|${audioPreset}|${audioEndpointMs}|${configuredTransport}`;
+    const existingAdapter = adapterRef.current;
+
+    const disposeAdapter = (adapter: VoiceInputAdapter) => {
+      if (adapterRef.current !== adapter) return;
+      sessionActiveRef.current = false;
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
+      adapter.dispose();
+      adapterRef.current = null;
+      adapterConfigRef.current = null;
+    };
+
+    const scheduleAdapterDispose = (adapter: VoiceInputAdapter) => {
+      if (!isDevelopmentBuild) {
+        disposeAdapter(adapter);
+        return;
+      }
+
+      deferredCleanupTimerRef.current = window.setTimeout(() => {
+        deferredCleanupTimerRef.current = null;
+        disposeAdapter(adapter);
+      }, DEV_RESOURCE_CLEANUP_GRACE_MS);
+    };
+
+    if (
+      existingAdapter &&
+      adapterConfigRef.current === adapterConfig
+    ) {
+      sessionActiveRef.current = true;
+      setIsSupported(existingAdapter.isSupported);
+      existingAdapter.setTtsPlaying?.(Boolean(optionsRef.current.ttsPlaying));
+      return () => {
+        scheduleAdapterDispose(existingAdapter);
+      };
+    }
+
+    if (existingAdapter) disposeAdapter(existingAdapter);
+
+    sessionActiveRef.current = true;
     queueMicrotask(() => {
-      if (!active) return;
+      if (!sessionActiveRef.current) return;
       setIsEnabled(false);
       setIsSttProcessing(false);
       setIsVadSpeech(false);
@@ -122,10 +176,11 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     const controller = controllerRef.current ?? createVoiceInputController();
     controllerRef.current = controller;
     const unsubscribe = controller.subscribe(setSnapshot);
+    unsubscribeRef.current = unsubscribe;
     const adapterOptions = {
       language: optionsRef.current.language,
       onEvent: (event: VoiceInputEvent) => {
-        if (!active) return;
+        if (!sessionActiveRef.current) return;
         controller.dispatch(event);
         optionsRef.current.onEvent?.(event);
         switch (event.type) {
@@ -157,7 +212,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         }
       },
       onDiagnostic: (diagnostic: VoiceInputDiagnostic) => {
-        if (!active) return;
+        if (!sessionActiveRef.current) return;
         setLastDiagnostic(diagnostic);
         optionsRef.current.onDiagnostic?.(diagnostic);
         switch (diagnostic.type) {
@@ -189,8 +244,6 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         }
       },
     };
-    const configuredTransport =
-      optionsRef.current.transport ?? runtimeConfig.voiceTransport;
     const useRemote = audioMode !== 'baseline' || configuredTransport === 'remote';
     const adapter =
       useRemote
@@ -209,6 +262,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
           })
         : createBrowserSpeechRecognitionAdapter(adapterOptions);
     adapterRef.current = adapter;
+    adapterConfigRef.current = adapterConfig;
     adapter.setTtsPlaying?.(Boolean(optionsRef.current.ttsPlaying));
     setIsSupported(adapter.isSupported);
 
@@ -221,10 +275,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     }
 
     return () => {
-      active = false;
-      unsubscribe();
-      adapter.dispose();
-      adapterRef.current = null;
+      scheduleAdapterDispose(adapter);
     };
   }, [audioMode, audioPreset, audioEndpointMs]);
 

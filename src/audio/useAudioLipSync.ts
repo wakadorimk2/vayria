@@ -7,6 +7,9 @@ import {
 const SMOOTHING_FACTOR = 0.5;
 const RMS_CEILING = 0.12;
 const REACTION_GAIN_SCALE = 0.55;
+const DEV_RESOURCE_CLEANUP_GRACE_MS = 100;
+const isDevelopmentBuild =
+  (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
 
 export interface PlayAudioOptions {
   startDelayMs?: number;
@@ -51,6 +54,7 @@ export function useAudioLipSync(volume = 1) {
   const primaryMouthOpenRef = useRef(0);
   const reactionMouthOpenRef = useRef(0);
   const volumeRef = useRef(normalizedVolume);
+  const deferredCleanupTimerRef = useRef<number | null>(null);
 
   const ensureAudioContext = useCallback(() => {
     if (!contextRef.current || contextRef.current.state === 'closed') {
@@ -401,7 +405,13 @@ export function useAudioLipSync(volume = 1) {
   }, [normalizedVolume]);
 
   useEffect(() => {
-    return () => {
+    if (deferredCleanupTimerRef.current !== null) {
+      window.clearTimeout(deferredCleanupTimerRef.current);
+      deferredCleanupTimerRef.current = null;
+    }
+
+    const disposeAudioResources = () => {
+      deferredCleanupTimerRef.current = null;
       stop();
       gainRef.current?.disconnect();
       gainRef.current = null;
@@ -410,6 +420,18 @@ export function useAudioLipSync(volume = 1) {
       if (contextRef.current?.state !== 'closed') {
         void contextRef.current?.close();
       }
+    };
+
+    return () => {
+      if (isDevelopmentBuild) {
+        deferredCleanupTimerRef.current = window.setTimeout(
+          disposeAudioResources,
+          DEV_RESOURCE_CLEANUP_GRACE_MS,
+        );
+        return;
+      }
+
+      disposeAudioResources();
     };
   }, [stop]);
 

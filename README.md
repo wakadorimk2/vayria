@@ -68,6 +68,9 @@ Audio Labを有効にした開発調査では、raw transcriptを調査ログへ
 Audio LabのMode A/B/C/D、固定ケース、JSONLログは
 [`docs/evaluation/voice-audio-lab.md`](docs/evaluation/voice-audio-lab.md)を参照してください。
 `?audioLab=1`を付けたAudio Labは、初期ModeにProcessedを選びます。
+
+開発中の通常のFast Refreshでは、音声入力のセッションと`AudioContext`の破棄を短時間遅延し、更新後に同じセッションを再利用します。
+音声フック自体の変更やページ全体の再読み込みでは、ブラウザーが音声セッションを再初期化するため、音声の再有効化が必要です。
 通常の`exhibition`起動も、Mode BのProcessedを使います。
 通常の`local`と`public`起動は、Baselineを使います。
 
