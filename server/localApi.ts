@@ -1366,7 +1366,7 @@ export const VOICE_REPLY_INSTRUCTION = [
   'Reply in the same language as the user.',
   'This is a spoken Japanese conversation.',
   'Usually use one short conversational unit of about 8 to 24 Japanese characters.',
-  'For a content-bearing viewer utterance, pick one concrete topic word, feeling, or question intent from the latest utterance, or use a natural short paraphrase of it.',
+  'For a content-bearing viewer utterance, pick one concrete topic word, feeling, or question intent from the latest utterance and respond to it with a concrete reaction. Use a paraphrase only when it adds a distinct reaction or clarifies the meaning.',
   'Answer a direct question briefly.',
   'Do not make the reply only a generic acknowledgment such as うん, そうなんだ, なるほど, or そっか.',
   'Do not repeat the whole utterance.',

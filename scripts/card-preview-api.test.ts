@@ -297,7 +297,8 @@ test('common policy safety net keeps ambiguous decisions for the LLM', () => {
 
 test('voice reply prompt asks for short concrete grounding', () => {
   assert.match(VOICE_REPLY_INSTRUCTION, /8 to 24 Japanese characters/);
-  assert.match(VOICE_REPLY_INSTRUCTION, /one concrete topic word, feeling, or question intent/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /one concrete topic word, feeling, or question intent from the latest utterance and respond to it with a concrete reaction/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /Use a paraphrase only when it adds a distinct reaction or clarifies the meaning/);
   assert.match(VOICE_REPLY_INSTRUCTION, /Answer a direct question briefly/);
   assert.match(VOICE_REPLY_INSTRUCTION, /generic acknowledgment/);
   assert.match(VOICE_REPLY_INSTRUCTION, /avoid a mutual backchannel or agreement loop/);
