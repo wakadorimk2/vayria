@@ -14,6 +14,7 @@
     "src/voice/audioLab.ts",
     "src/voice/backchannelPolicy.ts",
     "src/voice/pcm16.ts",
+    "src/voice/remotePcmVoiceAdapter.ts",
     "src/voice/rmsVad.ts",
     "src/voice/voiceInput.ts",
     "src/voice/voiceLabRecorder.ts",

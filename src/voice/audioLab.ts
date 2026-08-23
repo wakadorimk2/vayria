@@ -123,6 +123,24 @@ export interface AudioLabMediaSettings {
   applied: AudioLabAppliedMediaSettings;
 }
 
+export type VoiceCaptureEngine = 'audio-worklet' | 'script-processor';
+export type VoiceCaptureHealthStatus =
+  | 'probing'
+  | 'ready'
+  | 'recovering'
+  | 'failed';
+
+export interface VoiceCaptureHealth {
+  engine: VoiceCaptureEngine | null;
+  audioContextState: 'running' | 'suspended' | 'closed' | 'unavailable';
+  trackMuted: boolean | null;
+  trackReadyState: 'live' | 'ended' | 'unavailable';
+  pcmFrameCount: number;
+  lastPcmAt: number | null;
+  status: VoiceCaptureHealthStatus;
+  errorCode: string | null;
+}
+
 export type VoiceInputDiagnostic =
   | {
       type: 'media_settings';
@@ -139,6 +157,11 @@ export type VoiceInputDiagnostic =
       noiseFloor: number | null;
       effectiveThreshold: number | null;
       vadThreshold: number | null;
+    }
+  | {
+      type: 'capture_health';
+      at: number;
+      health: VoiceCaptureHealth;
     }
   | {
       type: 'vad_rejected';
@@ -580,6 +603,45 @@ export function isVoiceInputDiagnostic(
   }
   if (record.type === 'media_settings') {
     return Boolean(record.settings) && Number.isFinite(record.at);
+  }
+  if (record.type === 'capture_health') {
+    if (!record.health || typeof record.health !== 'object' || Array.isArray(record.health)) {
+      return false;
+    }
+    const health = record.health as Record<string, unknown>;
+    const validEngine =
+      health.engine === null ||
+      health.engine === 'audio-worklet' ||
+      health.engine === 'script-processor';
+    const validContextState =
+      health.audioContextState === 'unavailable' ||
+      health.audioContextState === 'running' ||
+      health.audioContextState === 'suspended' ||
+      health.audioContextState === 'closed';
+    const validTrackState =
+      health.trackReadyState === 'unavailable' ||
+      health.trackReadyState === 'live' ||
+      health.trackReadyState === 'ended';
+    const validStatus =
+      health.status === 'probing' ||
+      health.status === 'ready' ||
+      health.status === 'recovering' ||
+      health.status === 'failed';
+    return (
+      validEngine &&
+      validContextState &&
+      (health.trackMuted === null || typeof health.trackMuted === 'boolean') &&
+      validTrackState &&
+      typeof health.pcmFrameCount === 'number' &&
+      Number.isFinite(health.pcmFrameCount) &&
+      health.pcmFrameCount >= 0 &&
+      (health.lastPcmAt === null ||
+        (typeof health.lastPcmAt === 'number' &&
+          Number.isFinite(health.lastPcmAt))) &&
+      validStatus &&
+      (health.errorCode === null || typeof health.errorCode === 'string') &&
+      Number.isFinite(record.at)
+    );
   }
   if (record.type === 'audio_level') {
     return (
