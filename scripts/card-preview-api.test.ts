@@ -259,6 +259,7 @@ test('voice policy prompt prioritizes content-bearing utterances', () => {
   );
 
   assert.match(prompt, /question, request, concrete fact, feeling, preference, experience/);
+  assert.match(prompt, /direct participation call such as ねえ or ちょっと/);
   assert.match(prompt, /without producing a spoken echo/);
   assert.match(prompt, /Do not use listen or backchannel for a content-bearing utterance/);
   assert.match(prompt, /clearly unfinished fragment/);
@@ -271,6 +272,7 @@ test('voice content classifier separates topics from phatic and unfinished speec
   assert.equal(isContentBearingVoiceMessage('それどう思う？'), true);
   assert.equal(isContentBearingVoiceMessage('えっと…'), false);
   assert.equal(isContentBearingVoiceMessage('うん'), false);
+  assert.equal(isContentBearingVoiceMessage('あー'), false);
   assert.equal(isContentBearingVoiceMessage('今日は雨だったけど…'), false);
 });
 
@@ -295,6 +297,13 @@ test('common policy safety net keeps ambiguous decisions for the LLM', () => {
       backchannelCue: 'un',
     }),
     { action: 'silence', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    normalizeVoiceInteractionDecision('ねえ', {
+      action: 'listen',
+      backchannelCue: 'none',
+    }),
+    { action: 'take_floor', backchannelCue: 'none' },
   );
 });
 

@@ -41,9 +41,11 @@ const PHATIC_ONLY_MESSAGES = new Set([
   'まあ',
   'んー',
   'うーん',
+  'あー',
   'ね',
   'あ',
 ]);
+const PARTICIPATION_ONLY_MESSAGES = new Set(['ねえ', 'ちょっと']);
 const UNFINISHED_ENDING =
   /(?:けど|けれど|けれども|ですが|なので|だから|から|ので|し|っていうか|というか|なんていうか)$/u;
 const TERMINAL_PUNCTUATION = /[。．.!！?？、,，…\s]+$/u;
@@ -100,6 +102,17 @@ export function isDefiniteBackchannelMessage(message: string): boolean {
   return PHATIC_ONLY_MESSAGES.has(withoutTerminalPunctuation);
 }
 
+export function isDefiniteParticipationMessage(message: string): boolean {
+  const normalized = normalizeConversationText(message);
+  if (!normalized || isDefiniteQuestionMessage(normalized)) return false;
+  if (ELLIPSIS_ENDING.test(normalized)) return false;
+  const withoutTerminalPunctuation = normalized.replace(
+    TERMINAL_PUNCTUATION,
+    '',
+  );
+  return PARTICIPATION_ONLY_MESSAGES.has(withoutTerminalPunctuation);
+}
+
 export function isContentBearingVoiceMessage(message: string): boolean {
   const normalized = normalizeConversationText(message);
   return Boolean(
@@ -140,6 +153,9 @@ export function classifyViewerMessageFastPath(
   }
   if (isDefiniteUnfinishedMessage(message)) {
     return createActionDecision('listen');
+  }
+  if (isDefiniteParticipationMessage(message)) {
+    return createActionDecision('take_floor');
   }
   if (isDefiniteBackchannelMessage(message)) {
     return createActionDecision('silence');

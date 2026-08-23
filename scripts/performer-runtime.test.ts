@@ -168,6 +168,25 @@ test('conversation fast path receives phatic speech without a spoken reply', () 
     classifyViewerMessageFastPath('うん。'),
     { action: 'silence', backchannelCue: 'none' },
   );
+  assert.deepEqual(
+    classifyViewerMessageFastPath('あー'),
+    { action: 'silence', backchannelCue: 'none' },
+  );
+});
+
+test('conversation fast path treats direct calls as participation intent', () => {
+  assert.deepEqual(
+    classifyViewerMessageFastPath('ねえ'),
+    { action: 'take_floor', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    classifyViewerMessageFastPath('ちょっと。'),
+    { action: 'take_floor', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    classifyViewerMessageFastPath('ちょっと…'),
+    { action: 'listen', backchannelCue: 'none' },
+  );
 });
 
 test('conversation fast path leaves ambiguous viewer speech for the LLM', () => {
