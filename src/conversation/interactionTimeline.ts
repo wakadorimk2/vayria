@@ -1,5 +1,13 @@
 import type { ConversationAction } from '../performer/types.js';
 import type { BargeInState } from '../voice/audioLab.js';
+import type {
+  FloorState,
+  OverlapState,
+  ParticipationCategory,
+  ParticipationDecisionKind,
+  ParticipationMode,
+  ParticipationReason,
+} from './participationController.js';
 
 export type InteractionTimelineSignal =
   | 'speech_started'
@@ -74,6 +82,22 @@ export type InteractionTimelineEvent =
       action: string;
       state: BargeInState;
       reason?: string;
+    }
+  | {
+      kind: 'participation_decision';
+      at: number;
+      currentSpeakerId: string | null;
+      recentSpeakerIds: readonly (string | null)[];
+      participantCount: number;
+      floorState: FloorState;
+      overlapState: OverlapState;
+      addressivity: Readonly<Record<string, number>>;
+      decision: ParticipationDecisionKind;
+      mode: ParticipationMode;
+      category: ParticipationCategory;
+      reason: ParticipationReason;
+      confidence: number;
+      transcriptLength: number;
     };
 
 export interface InteractionTimeline {

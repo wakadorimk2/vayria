@@ -13,6 +13,13 @@ import {
   type VoiceTurnMetadata,
 } from './floorController';
 import {
+  createParticipationController,
+  type ConversationContext,
+  type ParticipationController,
+  type ParticipationDecision,
+  type ParticipationUtteranceInput,
+} from './participationController';
+import {
   createInteractionTimeline,
   type InteractionTimelineEvent,
 } from './interactionTimeline';
@@ -84,6 +91,7 @@ interface ConversationOptions {
   isMuted?: boolean;
   isExhibitionMode?: boolean;
   characterIdentity?: CharacterIdentity;
+  conversationContext?: ConversationContext | null;
   programContext?: ProgramContext;
   getPerformerStateContext?: () => PerformerStateContext;
   onPerformanceCue?: (
@@ -226,6 +234,14 @@ export function useConversation(
   const [floorController] = useState<FloorController>(() =>
     createFloorController(timeline),
   );
+  const [participationController] = useState<ParticipationController>(() =>
+    createParticipationController({
+      context: options.conversationContext,
+      characterIdentity:
+        options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY,
+      timeline,
+    }),
+  );
   const [semanticHistory] = useState(() =>
     createSemanticDialogueHistory(historyTurnLimit),
   );
@@ -268,7 +284,12 @@ export function useConversation(
   useEffect(() => {
     characterIdentityRef.current =
       options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY;
-  }, [options.characterIdentity]);
+    participationController.setCharacterIdentity(characterIdentityRef.current);
+  }, [options.characterIdentity, participationController]);
+
+  useEffect(() => {
+    participationController.setContext(options.conversationContext);
+  }, [options.conversationContext, participationController]);
 
   useEffect(() => {
     programContextRef.current =
@@ -390,6 +411,7 @@ export function useConversation(
     invalidateCurrentTurn(true);
     semanticHistory.clear();
     floorController.reset('conversation_reset');
+    participationController.reset();
     lastSelfUtteranceRef.current = null;
     clearSubtitle();
     setReply('');
@@ -400,6 +422,7 @@ export function useConversation(
     finishActivePlanAsCancelled,
     floorController,
     invalidateCurrentTurn,
+    participationController,
     semanticHistory,
     setConversationState,
   ]);
@@ -409,15 +432,55 @@ export function useConversation(
     [floorController],
   );
 
-  const recordVoiceSignal = useCallback((event: VoiceInputEvent) => {
-    if (
-      event.type === 'interim_transcript_updated' ||
-      event.type === 'listening_started'
-    ) {
-      return;
-    }
-    floorController.observeSignal(toTurnSignal(event));
-  }, [floorController]);
+  const recordVoiceSignal = useCallback(
+    (event: VoiceInputEvent) => {
+      if (event.type === 'speech_started') {
+        participationController.observeSpeechStarted({
+          speakerId: event.speakerId,
+          at: event.at,
+        });
+      } else if (event.type === 'speech_ended') {
+        participationController.observeSpeechEnded({
+          speakerId: event.speakerId,
+          at: event.at,
+        });
+      } else if (
+        event.type === 'recognition_failed' ||
+        event.type === 'recognition_stopped'
+      ) {
+        participationController.reset();
+      }
+
+      if (
+        event.type === 'interim_transcript_updated' ||
+        event.type === 'listening_started'
+      ) {
+        return;
+      }
+      floorController.observeSignal(toTurnSignal(event));
+    },
+    [floorController, participationController],
+  );
+
+  const evaluateVoiceParticipation = useCallback(
+    (
+      input: ParticipationUtteranceInput,
+      characterIdentityOverride?: CharacterIdentity,
+    ): ParticipationDecision => {
+      const decision = participationController.evaluateFinalized(
+        input,
+        characterIdentityOverride ?? characterIdentityRef.current,
+      );
+      if (
+        decision.mode === 'multi_party' &&
+        decision.decision === 'SILENT'
+      ) {
+        floorController.release('participation_silent', input.at ?? Date.now());
+      }
+      return decision;
+    },
+    [floorController, participationController],
+  );
 
   const processTurn = useCallback(
     async (
@@ -1120,6 +1183,7 @@ export function useConversation(
     cancelAutonomous,
     clearSubtitle,
     error,
+    evaluateVoiceParticipation,
     isBusy,
     interruptCurrentTurn,
     isManualBusy: isBusy && INTERACTIVE_SOURCES.includes(source ?? 'manual'),

@@ -13,22 +13,28 @@ export interface ListeningReactionCue {
   target: 'viewer';
 }
 
+export interface VoiceSpeakerMetadata {
+  speakerId?: string | null;
+}
+
 export type VoiceInputEvent =
   | { type: 'listening_started'; at: number }
-  | { type: 'speech_started'; segmentId: string; at: number }
-  | {
+  | ({ type: 'speech_started'; segmentId: string; at: number } &
+      VoiceSpeakerMetadata)
+  | ({
       type: 'interim_transcript_updated';
       segmentId: string;
       text: string;
       at: number;
-    }
-  | { type: 'speech_ended'; segmentId: string; at: number }
-  | {
+    } & VoiceSpeakerMetadata)
+  | ({ type: 'speech_ended'; segmentId: string; at: number } &
+      VoiceSpeakerMetadata)
+  | ({
       type: 'utterance_finalized';
       segmentId: string;
       text: string;
       at: number;
-    }
+    } & VoiceSpeakerMetadata)
   | { type: 'recognition_stopped'; at: number }
   | { type: 'recognition_failed'; code: string; at: number };
 
