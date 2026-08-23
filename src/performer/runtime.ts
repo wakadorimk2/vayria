@@ -58,6 +58,14 @@ const ACTION_COMMITMENT_CLAUSE_PATTERN = new RegExp(
   `^[^。．.!！?？]{0,72}${ACTION_COMMITMENT_STEM.source}[^。．.!！?？]{0,32}${ACTION_COMMITMENT_ENDING.source}[。．.!！?？]?$`,
   'u',
 );
+const DIRECT_ACTION_REQUEST_STEM =
+  /(?:自己紹介|紹介|目的|アジェンダ|設定画面|次の項目|一つ|整理|共有|作成|準備|開始|始め|進め|まとめ|説明|提示|検討|検証|実行|対応|話し|答え|決め|選び|見せ|聞き|調べ|考え|続け|取り組み)/u;
+const DIRECT_ACTION_REQUEST_ENDING =
+  /(?:して|言って|挙げて|進んで|見せて|教えて|答えて|始めて|作って|まとめて|紹介して|説明して|共有して|整理して|作成して|準備して|開始して|進めて|提示して|検討して|検証して|実行して|対応して|話して|決めて|選んで|聞いて|調べて|考えて|続けて|取り組んで|お願いします)(?:ください|くれる|もらえる|ね|よ)?$/u;
+const DIRECT_ACTION_REQUEST_CLAUSE_PATTERN = new RegExp(
+  `^[^。．.!！?？]{0,72}${DIRECT_ACTION_REQUEST_STEM.source}[^。．.!！?？]{0,32}${DIRECT_ACTION_REQUEST_ENDING.source}$`,
+  'u',
+);
 const META_ONLY_GENERIC_RESPONSE_PATTERN =
   /^(?:お願いします|了解(?:しました)?|承知しました|わかりました|そうしましょう|その方向で(?:進めましょう)?|この方向で(?:進めましょう)?|では(?:始めましょう)?|それでは(?:始めましょう)?|確認しましょう|整理しましょう|共有します)[。．.!！?？]?$/u;
 
@@ -127,6 +135,14 @@ export function isActionCommitmentMessage(message: string): boolean {
   if (!normalized || isDefiniteQuestionMessage(normalized)) return false;
   return splitConversationClauses(normalized).some((clause) =>
     ACTION_COMMITMENT_CLAUSE_PATTERN.test(clause),
+  );
+}
+
+export function isDirectActionRequestMessage(message: string): boolean {
+  const normalized = normalizeConversationText(message);
+  if (!normalized) return false;
+  return splitConversationClauses(normalized).some((clause) =>
+    DIRECT_ACTION_REQUEST_CLAUSE_PATTERN.test(clause),
   );
 }
 

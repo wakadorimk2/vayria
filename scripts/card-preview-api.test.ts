@@ -6,6 +6,7 @@ import {
   createInteractionReactionResponse,
   isActionCommitmentMessage,
   isContentBearingVoiceMessage,
+  isDirectActionRequestMessage,
   isMetaOnlyActionResponse,
   normalizeVoiceInteractionDecision,
   parseCardPreviewResponse,
@@ -317,6 +318,7 @@ test('voice reply prompt asks for short concrete grounding', () => {
   assert.match(VOICE_REPLY_INSTRUCTION, /do not merely mirror the latest utterance/);
   assert.match(VOICE_REPLY_INSTRUCTION, /moves slightly sideways/);
   assert.match(VOICE_REPLY_INSTRUCTION, /do not treat the announcement or agreement as progress/);
+  assert.match(VOICE_REPLY_INSTRUCTION, /directly asks you to perform an action/);
   assert.match(VOICE_REPLY_INSTRUCTION, /perform the first small step now/);
   assert.match(VOICE_REPLY_INSTRUCTION, /ask one concrete question that names the missing item/);
   assert.match(VOICE_REPLY_INSTRUCTION, /Do not force a question or a new topic/);
@@ -435,6 +437,11 @@ test('action commitments must move to concrete content', () => {
     true,
   );
   assert.equal(isActionCommitmentMessage('今日は雨だった'), false);
+  assert.equal(isDirectActionRequestMessage('自己紹介して'), true);
+  assert.equal(isDirectActionRequestMessage('目的を言って'), true);
+  assert.equal(isDirectActionRequestMessage('一つ挙げてください'), true);
+  assert.equal(isDirectActionRequestMessage('次の項目へ進んで'), true);
+  assert.equal(isDirectActionRequestMessage('今日は雨だった'), false);
   assert.equal(isMetaOnlyActionResponse('ええ、その方向で進めましょう'), true);
   assert.equal(isMetaOnlyActionResponse('お願いします'), true);
   assert.equal(
@@ -461,6 +468,37 @@ test('action commitments must move to concrete content', () => {
         '目的と決定事項を整理します',
       ),
     /Action commitments must lead to concrete content/,
+  );
+  assert.throws(
+    () =>
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'take_floor',
+          backchannelCue: 'none',
+          text: 'はい、自己紹介します',
+          emotion: 'neutral',
+          activatedCards: [],
+        }),
+        [],
+        null,
+        '自己紹介して',
+      ),
+    /Action commitments must lead to concrete content/,
+  );
+  assert.equal(
+    parseVoiceAssistantResponse(
+      JSON.stringify({
+        voiceAction: 'take_floor',
+        backchannelCue: 'none',
+        text: '私はVayriaです。静かな会話を大切にします',
+        emotion: 'neutral',
+        activatedCards: [],
+      }),
+      [],
+      null,
+      '自己紹介して',
+    ).text,
+    '私はVayriaです。静かな会話を大切にします',
   );
   assert.throws(
     () =>

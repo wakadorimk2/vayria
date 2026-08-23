@@ -30,6 +30,7 @@ import {
   classifyViewerMessageFastPath,
   isContentBearingVoiceMessage,
   isActionCommitmentMessage,
+  isDirectActionRequestMessage,
   isDefiniteBackchannelMessage,
   isDefiniteQuestionMessage,
   isMetaOnlyActionResponse,
@@ -216,6 +217,7 @@ class ConversationPolicyContractError extends Error {}
 export {
   isActionCommitmentMessage,
   isContentBearingVoiceMessage,
+  isDirectActionRequestMessage,
   isMetaOnlyActionResponse,
 } from '../src/performer/runtime.js';
 
@@ -1060,7 +1062,8 @@ function parseAssistantResponse(
     }
     if (
       voiceAction === 'take_floor' &&
-      isActionCommitmentMessage(message ?? '') &&
+      (isActionCommitmentMessage(message ?? '') ||
+        isDirectActionRequestMessage(message ?? '')) &&
       isMetaOnlyActionResponse(text)
     ) {
       throw new VoicePolicyContractError(
@@ -1403,6 +1406,7 @@ export const VOICE_REPLY_INSTRUCTION = [
   'If the last few turns already agree with or paraphrase one another, do not merely mirror the latest utterance.',
   'When appropriate after several agreeing or mirroring turns, add one small new observation, feeling, sensory detail, topic angle, or light disagreement so the conversation moves slightly sideways.',
   'When the latest utterance announces a concrete action such as confirming, organizing, sharing, creating, preparing, starting, or proceeding, do not treat the announcement or agreement as progress.',
+  'When the viewer directly asks you to perform an action such as introducing yourself, stating the purpose, naming one item, or moving to the next item, perform that action in the reply. Do not reply only that you will do it.',
   'If the needed information is present, perform the first small step now and state one concrete item or result.',
   'If the needed information is missing, ask one concrete question that names the missing item.',
   'Do not reply with only meta-agreement such as その方向で進めましょう, お願いします, 確認しましょう, 整理しましょう, or では始めましょう.',
@@ -1692,7 +1696,7 @@ async function generateReply(
   const response = parseAssistantResponse(
     await requestReply(
       mode === 'voice'
-        ? 'Your previous attempt violated the voice action or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text and empty activatedCards for listen or backchannel. For content-bearing input, take_floor text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces an action, do one concrete first step or ask one concrete missing-information question; do not answer with meta-agreement only. Use non-empty text for take_floor and include the forced current card when one exists.'
+        ? 'Your previous attempt violated the voice action or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text and empty activatedCards for listen or backchannel. For content-bearing input, take_floor text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Use non-empty text for take_floor and include the forced current card when one exists.'
         : 'Your previous attempt violated the card contract. Follow the current brain-card subset and forced-card requirements exactly.',
     ),
     mode,
