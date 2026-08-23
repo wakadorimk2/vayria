@@ -1,6 +1,7 @@
 export const VOICE_INTERACTION_ACTIONS = [
   'listen',
   'backchannel',
+  'react_nonverbally',
   'take_floor',
 ] as const;
 

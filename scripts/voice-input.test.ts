@@ -89,6 +89,13 @@ test('voice reaction contract keeps backchannel cues compatible', () => {
   );
   assert.equal(
     isVoiceInteractionDecision({
+      action: 'react_nonverbally',
+      backchannelCue: 'none',
+    }),
+    true,
+  );
+  assert.equal(
+    isVoiceInteractionDecision({
       action: 'backchannel',
       backchannelCue: 'none',
     }),

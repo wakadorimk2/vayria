@@ -146,6 +146,27 @@ test('voice assistant response accepts only compatible action and cue pairs', ()
   assert.deepEqual(
     parseVoiceAssistantResponse(
       JSON.stringify({
+        voiceAction: 'react_nonverbally',
+        backchannelCue: 'none',
+        text: '',
+        emotion: 'joy',
+        activatedCards: [],
+      }),
+      [],
+      null,
+      'まあ、そんな感じ',
+    ),
+    {
+      text: '',
+      emotion: 'neutral',
+      activatedCards: [],
+      voiceAction: 'react_nonverbally',
+      backchannelCue: 'none',
+    },
+  );
+  assert.deepEqual(
+    parseVoiceAssistantResponse(
+      JSON.stringify({
         voiceAction: 'take_floor',
         backchannelCue: 'none',
         text: '雨ですね',
@@ -262,6 +283,7 @@ test('voice policy prompt prioritizes content-bearing utterances', () => {
   assert.match(prompt, /question, request, concrete fact, feeling, preference, experience/);
   assert.match(prompt, /direct participation call such as ねえ or ちょっと/);
   assert.match(prompt, /without producing a spoken echo/);
+  assert.match(prompt, /small existing reaction is clearly sufficient/);
   assert.match(prompt, /Do not use listen or backchannel for a content-bearing utterance/);
   assert.match(prompt, /clearly unfinished fragment/);
   assert.match(prompt, /react_nonverbally/);
@@ -486,6 +508,22 @@ test('action commitments must move to concrete content', () => {
         '自己紹介して',
       ),
     /Action commitments must lead to concrete content/,
+  );
+  assert.throws(
+    () =>
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'react_nonverbally',
+          backchannelCue: 'none',
+          text: '',
+          emotion: 'neutral',
+          activatedCards: [],
+        }),
+        [],
+        null,
+        '自己紹介して',
+      ),
+    /Content-bearing voice responses must use take_floor/,
   );
   assert.equal(
     parseVoiceAssistantResponse(

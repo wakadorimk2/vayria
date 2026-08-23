@@ -128,6 +128,7 @@ type ExhibitionPresentationState = 'idle' | 'selecting' | 'reacting';
 
 const AUDIO_SETTINGS_STORAGE_KEY = 'vayria.audio-settings.v1';
 const LEGACY_AUDIO_SETTINGS_STORAGE_KEY = 'wildcard.audio-settings.v1';
+const VOICE_NONVERBAL_REACTION_HOLD_MS = 650;
 
 interface AudioControlState {
   isMuted: boolean;
@@ -389,6 +390,20 @@ export default function App() {
         } else {
           setListeningReaction(undefined);
         }
+        return;
+      }
+
+      if (decision.action === 'react_nonverbally') {
+        setListeningReaction({
+          id: reactionId,
+          kind: 'nod',
+          target: 'viewer',
+        });
+        window.setTimeout(() => {
+          if (voiceReactionIdRef.current === reactionId) {
+            setListeningReaction(undefined);
+          }
+        }, VOICE_NONVERBAL_REACTION_HOLD_MS);
         return;
       }
 
