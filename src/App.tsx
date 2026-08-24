@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
 } from 'react';
 import { VrmStage, type VrmStageHandle } from './avatar/VrmStage';
@@ -106,6 +107,9 @@ import {
   isAudioEndpointMs,
   isAudioLabMode,
   resolveInitialAudioLabMode,
+  VAD_THRESHOLD_MAX,
+  VAD_THRESHOLD_MIN,
+  VAD_THRESHOLD_STEP,
   type AudioEndpointMs,
   type AudioLabMode,
   type BargeInState,
@@ -202,7 +206,51 @@ function getVoiceErrorMessage(code: string | null): string {
   }
 }
 
+function MicrophoneIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="control-icon"
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm6-3a6 6 0 0 1-12 0m6 6v4m-3 0h6"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="control-icon"
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        d="M3 12s3.2-5 9-5 9 5 9 5-3.2 5-9 5-9-5-9-5Zm9-2.25A2.25 2.25 0 1 0 12 14.25 2.25 2.25 0 0 0 12 9.75Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
 type ExhibitionPresentationState = 'idle' | 'selecting' | 'reacting';
+
+const EXHIBITION_MICROPHONE_PANEL_ID = 'exhibition-microphone-adjuster';
+const MICROPHONE_INPUT_ACTIVITY_FLOOR = 0.001;
+const MICROPHONE_METER_MAX = VAD_THRESHOLD_MAX;
 
 const AUDIO_SETTINGS_STORAGE_KEY = 'vayria.audio-settings.v1';
 const LEGACY_AUDIO_SETTINGS_STORAGE_KEY = 'wildcard.audio-settings.v1';
@@ -542,6 +590,9 @@ export default function App() {
       getExhibitionAudioPresetConfig(runtimeConfig.audioPreset)
         .defaultVadThreshold ?? DEFAULT_VAD_THRESHOLD,
   );
+  const [isMicrophoneControlExpanded, setIsMicrophoneControlExpanded] =
+    useState(false);
+  const microphoneControlRef = useRef<HTMLDivElement>(null);
   const [audioEndpointMs, setAudioEndpointMs] = useState<AudioEndpointMs>(
     runtimeConfig.audioEndpointMs,
   );
@@ -587,6 +638,8 @@ export default function App() {
   });
   const {
     errorCode: voiceInputErrorCode,
+    audioLevel,
+    effectiveThreshold,
     isEnabled: isVoiceInputEnabled,
     isSttProcessing,
     isSupported: isVoiceInputSupported,
@@ -1142,6 +1195,86 @@ export default function App() {
     Boolean(reply) && (!isExhibitionMode || isSubtitleVisible);
   const voiceError = getVoiceErrorMessage(voiceInputErrorCode);
   const conversationError = error || voiceValidationError || voiceError;
+  const displayedAudioLevel = isVoiceInputEnabled ? audioLevel : null;
+  const browserGateAvailable =
+    audioLabMode === 'processed-vad' ||
+    ((audioLabMode === 'processed' || audioLabMode === 'exhibition-mix') &&
+      runtimeConfig.audioPreset !== 'off');
+  const displayThreshold = browserGateAvailable
+    ? (effectiveThreshold ?? vadThreshold)
+    : null;
+  const microphoneLevel = Math.max(0, displayedAudioLevel ?? 0);
+  const microphoneMeterValue = Math.min(
+    MICROPHONE_METER_MAX,
+    microphoneLevel,
+  );
+  const microphoneLevelPercent = Math.min(
+    100,
+    (microphoneLevel / MICROPHONE_METER_MAX) * 100,
+  );
+  const microphoneThresholdValue = Math.min(
+    VAD_THRESHOLD_MAX,
+    Math.max(VAD_THRESHOLD_MIN, displayThreshold ?? vadThreshold),
+  );
+  const thresholdPercent =
+    displayThreshold === null
+      ? null
+      : Math.min(
+          100,
+          Math.max(0, (displayThreshold / MICROPHONE_METER_MAX) * 100),
+        );
+  const microphoneInputStrength = Math.min(
+    1,
+    microphoneLevel / MICROPHONE_METER_MAX,
+  );
+  const microphoneFeedbackStyle = {
+    '--microphone-glow-size': `${1 + microphoneInputStrength * 5}px`,
+    '--microphone-pulse-scale': `${1 + microphoneInputStrength * 0.04}`,
+    '--microphone-ring-opacity': `${microphoneInputStrength * 0.22}`,
+    '--microphone-ring-scale': `${1 + microphoneInputStrength * 0.06}`,
+  } as CSSProperties;
+  const isMicrophoneInputActive =
+    isVoiceInputEnabled && microphoneLevel > MICROPHONE_INPUT_ACTIVITY_FLOOR;
+  const isThresholdCurrentlyCrossed =
+    isVoiceInputEnabled &&
+    displayThreshold !== null &&
+    microphoneLevel >= displayThreshold;
+  const microphoneStatusLabel = voiceError
+    ? 'マイクを確認'
+    : isSttProcessing
+      ? '判定中'
+      : isVadSpeech
+        ? '聞き取り中'
+        : !isVoiceInputEnabled
+          ? '待機中'
+          : displayedAudioLevel === null
+            ? '入力待ち'
+            : displayThreshold !== null &&
+                displayedAudioLevel < displayThreshold
+              ? '反応ライン未満'
+              : '入力あり';
+
+  useEffect(() => {
+    if (!isMicrophoneControlExpanded) return;
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (microphoneControlRef.current?.contains(event.target)) return;
+      setIsMicrophoneControlExpanded(false);
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setIsMicrophoneControlExpanded(false);
+    };
+
+    document.addEventListener('pointerdown', handleOutsidePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsidePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isMicrophoneControlExpanded]);
+
   useEffect(() => {
     const logicalAttentionTarget =
       cardAttentionTarget ??
@@ -1188,7 +1321,9 @@ export default function App() {
   ]);
   const exhibitionAudioActionLabel = voiceError
     ? '音声とマイクを再試行'
-    : '音声とマイクを有効化';
+    : isVoiceInputEnabled
+      ? '音声入力を停止'
+      : '音声とマイクを有効化';
   const shouldShowAudioUnlockControl =
     !isExhibitionMode ||
     !isAudioUnlocked ||
@@ -2041,6 +2176,23 @@ export default function App() {
     volume,
   ]);
 
+  const handleExhibitionAudioToggle = useCallback(async () => {
+    if (isVoiceInputEnabled && !voiceError) {
+      await stopVoiceInput();
+      return;
+    }
+    await handleExhibitionAudioUnlock();
+  }, [
+    handleExhibitionAudioUnlock,
+    isVoiceInputEnabled,
+    stopVoiceInput,
+    voiceError,
+  ]);
+
+  const handleMicrophoneControlToggle = useCallback(() => {
+    setIsMicrophoneControlExpanded((current) => !current);
+  }, []);
+
   const handleVolumeInput = (event: FormEvent<HTMLInputElement>) => {
     const inputVolume = Number(event.currentTarget.value) / 100;
     if (!Number.isFinite(inputVolume)) return;
@@ -2085,17 +2237,116 @@ export default function App() {
           >
             {isExhibitionMode ? (
               <>
-                {shouldShowAudioUnlockControl && (
+                <div
+                  ref={microphoneControlRef}
+                  className="microphone-control"
+                  data-expanded={isMicrophoneControlExpanded ? 'true' : 'false'}
+                >
                   <button
-                    aria-label={`${exhibitionAudioActionLabel}する`}
-                    className="audio-unlock-button"
-                    onClick={handleExhibitionAudioUnlock}
-                    title={`${exhibitionAudioActionLabel}します`}
+                    aria-controls={EXHIBITION_MICROPHONE_PANEL_ID}
+                    aria-expanded={isMicrophoneControlExpanded}
+                    aria-label={`マイク調整を${isMicrophoneControlExpanded ? '閉じる' : '開く'}`}
+                    className="audio-unlock-button microphone-disclosure-button"
+                    data-input-active={isMicrophoneInputActive ? 'true' : 'false'}
+                    data-state={
+                      voiceError
+                        ? 'error'
+                        : isVoiceInputEnabled
+                          ? 'on'
+                          : 'off'
+                    }
+                    data-threshold-crossing={
+                      isThresholdCurrentlyCrossed ? 'true' : 'false'
+                    }
+                    onClick={handleMicrophoneControlToggle}
+                    style={microphoneFeedbackStyle}
+                    title={`マイク調整を${isMicrophoneControlExpanded ? '閉じます' : '開きます'}。${microphoneStatusLabel}`}
                     type="button"
                   >
-                    {exhibitionAudioActionLabel}
+                    <MicrophoneIcon />
+                    <span className="visually-hidden">
+                      {`マイク調整を${isMicrophoneControlExpanded ? '閉じる' : '開く'}。${microphoneStatusLabel}。音声の開始・停止は展開後に操作します。`}
+                    </span>
                   </button>
-                )}
+                  <div
+                    aria-label="マイク入力と反応ライン"
+                    className="microphone-adjuster"
+                    data-gate={browserGateAvailable ? 'enabled' : 'disabled'}
+                    data-state={voiceError ? 'error' : isVoiceInputEnabled ? 'on' : 'off'}
+                    data-threshold-crossing={
+                      isThresholdCurrentlyCrossed ? 'true' : 'false'
+                    }
+                    hidden={!isMicrophoneControlExpanded}
+                    id={EXHIBITION_MICROPHONE_PANEL_ID}
+                  >
+                    <div
+                      aria-label="マイク入力レベル"
+                      aria-valuemax={MICROPHONE_METER_MAX}
+                      aria-valuemin={0}
+                      aria-valuenow={microphoneMeterValue}
+                      aria-valuetext={
+                        displayedAudioLevel === null
+                          ? '入力レベル未取得'
+                          : `入力レベル ${displayedAudioLevel.toFixed(3)}`
+                      }
+                      className="microphone-vertical-meter"
+                      role="meter"
+                    >
+                      <span
+                        className="microphone-vertical-meter__fill"
+                        style={{ height: `${microphoneLevelPercent}%` }}
+                      />
+                      {thresholdPercent !== null && (
+                        <span
+                          aria-hidden="true"
+                          className="microphone-vertical-meter__threshold"
+                          style={{ bottom: `${thresholdPercent}%` }}
+                        />
+                      )}
+                      <input
+                        aria-label="マイクの反応ライン"
+                        aria-valuemax={VAD_THRESHOLD_MAX}
+                        aria-valuemin={VAD_THRESHOLD_MIN}
+                        aria-valuenow={microphoneThresholdValue}
+                        aria-valuetext={
+                          displayThreshold === null
+                            ? '反応ラインなし'
+                            : `現在の反応ライン ${displayThreshold.toFixed(3)}`
+                        }
+                        className="microphone-vertical-meter__input"
+                        disabled={!browserGateAvailable}
+                        max={VAD_THRESHOLD_MAX}
+                        min={VAD_THRESHOLD_MIN}
+                        onChange={(event) =>
+                          handleVadThresholdChange(Number(event.target.value))
+                        }
+                        step={VAD_THRESHOLD_STEP}
+                        type="range"
+                        value={microphoneThresholdValue}
+                      />
+                    </div>
+                    <button
+                      aria-label={`${exhibitionAudioActionLabel}する`}
+                      aria-pressed={isVoiceInputEnabled}
+                      className="microphone-adjuster__toggle"
+                      data-state={
+                        voiceError
+                          ? 'error'
+                          : isVoiceInputEnabled
+                            ? 'on'
+                            : 'off'
+                      }
+                      onClick={handleExhibitionAudioToggle}
+                      title={`${exhibitionAudioActionLabel}します`}
+                      type="button"
+                    >
+                      <MicrophoneIcon />
+                      <span className="visually-hidden">
+                        {exhibitionAudioActionLabel}
+                      </span>
+                    </button>
+                  </div>
+                </div>
                 <div
                   className="attention-controls"
                   aria-label="視線追従コントロール"
@@ -2109,15 +2360,22 @@ export default function App() {
                     }
                     aria-pressed={cameraAttentionEnabled}
                     className="attention-button"
+                    data-state={cameraAttentionEnabled ? 'on' : 'off'}
                     onClick={handleCameraAttentionToggle}
                     title={cameraAttentionStatusMessage || '視線追従を有効化します'}
                     type="button"
                   >
-                    {cameraAttentionStatus === 'starting'
-                      ? '視線追従を準備中…'
-                      : cameraAttentionEnabled
-                        ? '視線追従を停止'
-                        : '視線追従を有効化'}
+                    <EyeIcon />
+                    <span className="control-state" aria-hidden="true">
+                      {cameraAttentionEnabled ? 'ON' : 'OFF'}
+                    </span>
+                    <span className="visually-hidden">
+                      {cameraAttentionStatus === 'starting'
+                        ? '視線追従を準備中…'
+                        : cameraAttentionEnabled
+                          ? '視線追従を停止'
+                          : '視線追従を有効化'}
+                    </span>
                   </button>
                   {cameraAttentionStatusMessage &&
                     cameraAttentionStatus !== 'idle' && (

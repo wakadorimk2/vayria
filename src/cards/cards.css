@@ -2,12 +2,12 @@
   --wildcard-card-width: 168px;
   --wildcard-card-ratio: 5 / 7;
   --wildcard-card-gap: 17px;
-  --wildcard-card-paper: #e9dfca;
-  --wildcard-card-ink: #2d2922;
-  --wildcard-card-border: #afa28a;
-  --wildcard-concept-accent: #5f6873;
-  --wildcard-mood-accent: #9a5f58;
-  --wildcard-effect-accent: #6c7555;
+  --wildcard-card-paper: #f4efe6;
+  --wildcard-card-ink: #2d2731;
+  --wildcard-card-border: #b9a6ad;
+  --wildcard-concept-accent: #9d7892;
+  --wildcard-mood-accent: #b97e98;
+  --wildcard-effect-accent: #b79a61;
 }
 
 .cards-preview {
@@ -1391,6 +1391,355 @@
 @media (prefers-reduced-motion: reduce) {
   .card-behavior-preview__back-link,
   .card-behavior-preview__audio-button {
+    transition: none;
+  }
+}
+
+/* Vayria salon cards: make the hand the intentional action anchor. */
+.app-shell .card-zone__header {
+  color: rgb(244 239 230 / 78%);
+  text-shadow: 0 2px 10px rgb(8 8 21 / 72%);
+}
+
+.app-shell .card-zone__header h2 {
+  font-family: Georgia, "Yu Mincho", serif;
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.app-shell .card-zone--brain .card-zone__header {
+  opacity: 0.68;
+}
+
+.app-shell .card-zone--brain .card-zone__cards {
+  padding: 0.42rem 0.52rem 0.55rem;
+  border: 1px solid rgb(214 166 184 / 11%);
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(ellipse at center, rgb(91 60 98 / 31%), transparent 72%),
+    rgb(23 23 37 / 12%);
+  box-shadow: 0 8px 24px rgb(8 8 21 / 12%);
+  backdrop-filter: blur(8px);
+}
+
+.app-shell .card-zone--brain .wildcard-card:not(
+    .wildcard-card--selected,
+    .wildcard-card--active,
+    .wildcard-card--drop-target,
+    .wildcard-card--pending-insertion
+  ) {
+  opacity: 0.7;
+}
+
+.app-shell .card-zone--brain .wildcard-card--selected,
+.app-shell .card-zone--brain .wildcard-card--active,
+.app-shell .card-zone--brain .wildcard-card--drop-target,
+.app-shell .card-zone--brain .wildcard-card--pending-insertion {
+  opacity: 1;
+}
+
+.app-shell .card-zone--brain .wildcard-card--disabled {
+  opacity: 0.28;
+}
+
+.app-shell .wildcard-card {
+  --paper: var(--ivory);
+  border-color: color-mix(in srgb, var(--kind-accent) 42%, #b9a6ad);
+  border-radius: 0.95rem;
+  background:
+    radial-gradient(circle at 28% 16%, rgb(255 255 255 / 55%), transparent 34%),
+    linear-gradient(145deg, rgb(255 255 255 / 20%), transparent 42%),
+    linear-gradient(to bottom, transparent 72%, rgb(91 60 98 / 5%)),
+    var(--paper);
+  box-shadow:
+    0 5px 12px rgb(8 8 21 / 24%),
+    0 16px 28px rgb(8 8 21 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 74%);
+}
+
+.app-shell .wildcard-card--concept {
+  --paper: color-mix(in srgb, var(--ivory) 94%, #d6a6b8);
+}
+
+.app-shell .wildcard-card--mood {
+  --paper: color-mix(in srgb, var(--ivory) 92%, #d6a6b8);
+}
+
+.app-shell .wildcard-card--effect {
+  --paper: color-mix(in srgb, var(--ivory) 94%, #c7a86b);
+}
+
+.app-shell .wildcard-card::before {
+  inset: 5px;
+  border-color: color-mix(in srgb, var(--kind-accent) 25%, transparent);
+  border-radius: 0.7rem;
+}
+
+.app-shell .wildcard-card__label {
+  color: #302934;
+  font-family: "Yu Mincho", "Hiragino Mincho ProN", Georgia, serif;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.app-shell .wildcard-card__pip,
+.app-shell .wildcard-card__motif {
+  color: var(--kind-accent);
+}
+
+.app-shell .wildcard-card__motif {
+  opacity: 0.14;
+}
+
+.app-shell .card-zone--hand .card-zone__cards {
+  gap: 0;
+  align-items: end;
+  padding-inline: clamp(0.4rem, 1.2vw, 1rem);
+}
+
+.app-shell .card-zone--hand .wildcard-card {
+  margin-left: clamp(-1.4rem, -1.7vw, -0.55rem);
+  transform-origin: 50% 100%;
+}
+
+.app-shell .card-zone--hand .wildcard-card:first-child {
+  margin-left: 0;
+}
+
+.app-shell .card-zone--hand .card-zone__action {
+  color: rgb(244 239 230 / 58%);
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  text-shadow: 0 2px 8px rgb(8 8 21 / 80%);
+}
+
+.app-shell .card-zone--hand .wildcard-card:nth-child(1) {
+  --card-rotation: -7deg;
+  z-index: 1;
+}
+
+.app-shell .card-zone--hand .wildcard-card:nth-child(2) {
+  --card-rotation: -3.5deg;
+  z-index: 2;
+}
+
+.app-shell .card-zone--hand .wildcard-card:nth-child(3) {
+  --card-rotation: 0deg;
+  z-index: 3;
+}
+
+.app-shell .card-zone--hand .wildcard-card:nth-child(4) {
+  --card-rotation: 3.5deg;
+  z-index: 2;
+}
+
+.app-shell .card-zone--hand .wildcard-card:nth-child(5) {
+  --card-rotation: 7deg;
+  z-index: 1;
+}
+
+.app-shell .card-zone--hand .wildcard-card:nth-child(3)[data-state="normal"] {
+  --card-lift: -2px;
+  box-shadow:
+    0 7px 15px rgb(8 8 21 / 28%),
+    0 18px 30px rgb(8 8 21 / 14%),
+    inset 0 1px 0 rgb(255 255 255 / 78%);
+}
+
+.app-shell .card-zone--hand .wildcard-card:hover:not(.wildcard-card--disabled),
+.app-shell .card-zone--hand .wildcard-card:focus-visible:not(
+    .wildcard-card--disabled
+  ) {
+  border-color: color-mix(in srgb, var(--kind-accent) 68%, #f4efe6);
+  box-shadow:
+    0 10px 18px rgb(8 8 21 / 30%),
+    0 20px 34px rgb(8 8 21 / 16%),
+    inset 0 1px 0 rgb(255 255 255 / 82%);
+}
+
+.app-shell .card-zone--hand .wildcard-card--selected {
+  border-color: color-mix(in srgb, var(--kind-accent) 72%, #f4efe6);
+  box-shadow:
+    0 12px 22px rgb(8 8 21 / 34%),
+    0 0 0 3px color-mix(in srgb, var(--dusty-pink) 26%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 82%);
+}
+
+.app-shell .card-zone--hand .wildcard-card--dragging {
+  box-shadow:
+    0 16px 26px rgb(8 8 21 / 38%),
+    0 0 0 4px color-mix(in srgb, var(--soft-gold) 30%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 82%);
+}
+
+.app-shell[data-app-mode="exhibition"] .card-zone--hand .wildcard-card {
+  margin-left: clamp(-1.6rem, -2vw, -0.8rem);
+}
+
+.app-shell[data-app-mode="exhibition"] .card-zone--hand .card-zone__cards {
+  padding-inline: clamp(0.7rem, 1.8vw, 1.6rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .card-zone--hand .wildcard-card:hover:not(
+      .wildcard-card--disabled
+    ),
+  .app-shell .card-zone--hand .wildcard-card:focus-visible:not(
+      .wildcard-card--disabled
+    ) {
+    transform: translateY(var(--card-lift)) rotate(var(--card-rotation));
+  }
+}
+
+/* Vayria salon second pass: glass memories, paper hand, shared gold grammar. */
+.app-shell .card-zone--brain .card-zone__cards {
+  border-color: rgb(244 239 230 / 10%);
+  background:
+    linear-gradient(180deg, rgb(244 239 230 / 6%), rgb(23 23 37 / 10%)),
+    rgb(23 23 37 / 12%);
+  box-shadow:
+    0 7px 18px rgb(8 8 21 / 10%),
+    inset 0 1px 0 rgb(255 255 255 / 9%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.app-shell .card-zone--brain .wildcard-card {
+  border-color: rgb(244 239 230 / 16%);
+  background:
+    radial-gradient(circle at 28% 16%, rgb(255 255 255 / 15%), transparent 36%),
+    linear-gradient(145deg, rgb(255 255 255 / 8%), transparent 48%),
+    rgb(244 239 230 / 7%);
+  box-shadow:
+    0 4px 10px rgb(8 8 21 / 13%),
+    inset 0 1px 0 rgb(255 255 255 / 18%);
+  color: rgb(244 239 230 / 76%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.app-shell .card-zone--brain .wildcard-card__label {
+  color: rgb(244 239 230 / 72%);
+}
+
+.app-shell .card-zone--brain .wildcard-card__pip,
+.app-shell .card-zone--brain .wildcard-card__motif {
+  color: rgb(214 184 117 / 70%);
+}
+
+.app-shell .card-zone--brain .wildcard-card:not(
+    .wildcard-card--selected,
+    .wildcard-card--active,
+    .wildcard-card--drop-target,
+    .wildcard-card--pending-insertion
+  ) {
+  opacity: 0.48;
+}
+
+.app-shell .card-zone--brain .wildcard-card--selected,
+.app-shell .card-zone--brain .wildcard-card--active,
+.app-shell .card-zone--brain .wildcard-card--drop-target,
+.app-shell .card-zone--brain .wildcard-card--pending-insertion {
+  border-color: rgb(214 184 117 / 68%);
+  background:
+    linear-gradient(145deg, rgb(214 184 117 / 15%), rgb(244 239 230 / 7%)),
+    rgb(23 23 37 / 14%);
+  box-shadow:
+    0 7px 14px rgb(8 8 21 / 18%),
+    0 0 0 2px rgb(214 184 117 / 14%),
+    inset 0 1px 0 rgb(244 239 230 / 22%);
+  color: var(--ivory);
+  opacity: 0.96;
+}
+
+.app-shell .card-zone--hand .wildcard-card {
+  --card-ornament-length: clamp(0.65rem, 1.1vw, 1rem);
+  box-shadow:
+    0 4px 10px rgb(8 8 21 / 22%),
+    0 12px 22px rgb(8 8 21 / 9%),
+    inset 0 1px 0 rgb(255 255 255 / 72%);
+}
+
+.app-shell .card-zone--hand .wildcard-card:hover:not(.wildcard-card--disabled),
+.app-shell .card-zone--hand .wildcard-card:focus-visible:not(
+    .wildcard-card--disabled
+  ) {
+  box-shadow:
+    0 8px 14px rgb(8 8 21 / 25%),
+    0 16px 26px rgb(8 8 21 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 80%);
+}
+
+.app-shell .card-zone--hand .wildcard-card--selected,
+.app-shell .card-zone--hand .wildcard-card--active {
+  outline: 1px solid rgb(199 168 107 / 78%);
+  outline-offset: 3px;
+  box-shadow:
+    0 10px 18px rgb(8 8 21 / 28%),
+    0 0 0 2px rgb(214 184 117 / 18%),
+    inset 0 1px 0 rgb(255 255 255 / 82%);
+}
+
+.app-shell .card-zone--hand .wildcard-card--selected::before,
+.app-shell .card-zone--hand .wildcard-card--active::before {
+  z-index: 0;
+  inset: 4px;
+  border: 0;
+  border-radius: 0.7rem;
+  background:
+    linear-gradient(var(--vayria-frame-gold, #d6b875), var(--vayria-frame-gold, #d6b875))
+      left top / var(--card-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold, #d6b875), var(--vayria-frame-gold, #d6b875))
+      left top / 1px var(--card-ornament-length) no-repeat,
+    linear-gradient(var(--vayria-frame-gold, #d6b875), var(--vayria-frame-gold, #d6b875))
+      right top / var(--card-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold, #d6b875), var(--vayria-frame-gold, #d6b875))
+      right top / 1px var(--card-ornament-length) no-repeat,
+    linear-gradient(var(--vayria-frame-gold, #d6b875), var(--vayria-frame-gold, #d6b875))
+      left bottom / var(--card-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold, #d6b875), var(--vayria-frame-gold, #d6b875))
+      left bottom / 1px var(--card-ornament-length) no-repeat,
+    linear-gradient(var(--vayria-frame-gold, #d6b875), var(--vayria-frame-gold, #d6b875))
+      right bottom / var(--card-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold, #d6b875), var(--vayria-frame-gold, #d6b875))
+      right bottom / 1px var(--card-ornament-length) no-repeat;
+  opacity: 0.86;
+}
+
+.app-shell .card-zone--hand .wildcard-card--selected > *,
+.app-shell .card-zone--hand .wildcard-card--active > * {
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell .card-zone--hand .wildcard-card--disabled {
+  filter: grayscale(0.35) saturate(0.7);
+  opacity: 0.34;
+}
+
+.app-shell .card-zone--hand .card-zone__action {
+  width: fit-content;
+  max-width: min(80vw, 22rem);
+  margin-inline: auto;
+  padding: 0.24rem 0.58rem;
+  border: 1px solid rgb(244 239 230 / 10%);
+  border-radius: 999px;
+  background: rgb(23 23 37 / 14%);
+  color: rgb(244 239 230 / 54%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+}
+
+@media (max-width: 720px) {
+  .app-shell .card-zone--hand .wildcard-card {
+    --card-ornament-length: 0.55rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .card-zone--hand .card-zone__action {
     transition: none;
   }
 }
