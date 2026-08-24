@@ -83,7 +83,30 @@ function Write-JsonFile {
   )
 
   $json = [ordered]@{} + $Value | ConvertTo-Json -Compress
-  Set-Content -LiteralPath $Path -Value $json -Encoding utf8
+  $directory = Split-Path -Parent $Path
+  $fileName = Split-Path -Leaf $Path
+  $temporaryPath = Join-Path $directory ".${fileName}.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+
+  try {
+    Set-Content -LiteralPath $temporaryPath -Value $json -Encoding utf8
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+      try {
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force -ErrorAction Stop
+        return
+      }
+      catch {
+        if ($attempt -eq 19) {
+          throw
+        }
+        Start-Sleep -Milliseconds 25
+      }
+    }
+  }
+  finally {
+    if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+      Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+    }
+  }
 }
 
 function Write-TabLog {

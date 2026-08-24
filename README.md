@@ -112,11 +112,13 @@ Vayria音声をB1へ戻すと、Vayria自身の発話をSTTが再認識する可
 OpenAI API keyは`.env.local`へ保存せず、1Passwordから起動プロセスへ注入します。
 
 ```powershell
-op run --env-file .env.1password -- npm run exhibition:start
+npm run exhibition:start:op
 ```
 
-`npm run exhibition`は`npm run exhibition:start`の短縮名です。`op run`を付けない起動は、別途プロセス環境または
-`VAYRIA_SECRET_FILE`を設定している場合の互換経路です。
+このコマンドは、ユーザー領域の1Password参照ファイルを使います。
+API key本体はworktreeや`.env.local`へ保存しません。
+`npm run exhibition`は`npm run exhibition:start`の短縮名です。
+API keyを使う場合は、`npm run exhibition:start:op`を使用します。
 
 マイク、ChatGPT音声、Vayria音声を個別に再生し、Vayriaの音声メーターで経路を確認します。
 音声メーターはマイクとChatGPT音声で動き、Vayria自身の音声では動かない状態が期待値です。
@@ -189,8 +191,8 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    Copy-Item -LiteralPath '.env.example' -Destination '.env.local'
    ```
 
-   `.env.local`の`OPENAI_API_KEY=`と`VAYRIA_SECRET_FILE=`は空のままにします。
-   OpenAI API keyは、次の1Password経路で起動時だけ注入します。
+   `.env.local`にはAPI keyを記述しません。
+   OpenAI API keyは、専用の1Password起動コマンドから実行時だけ注入します。
 
 3. zonoko モデルを追加した AivisSpeech CLIを起動します。
 
@@ -243,20 +245,22 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    pwsh -NoProfile -File .\scripts\Configure-VayriaOnePassword.ps1
    ```
 
-   スクリプトは項目のメタデータを表示し、Vault・Item・Fieldを尋ねます。
-   `.env.1password`へ保存されるのは次の`op://`参照だけで、API key本体は保存・表示しません。
+   1PasswordアプリでOpenAI API keyフィールドのメニューからSecret Referenceをコピーし、
+   スクリプトのプロンプトへ貼り付けます。
+   スクリプトは項目一覧を取得しません。
+   `%USERPROFILE%\.vayria\vayria-op.env`へ保存されるのは次の`op://`参照だけです。
+   API key本体は保存・表示しません。
 
    ```dotenv
    OPENAI_API_KEY=op://Vault/Item/Field
    ```
 
    `op://`の右辺をAPI key本体へ置き換えないでください。
+   新しいworktreeへ`.env`ファイルをコピーする必要はありません。
 
 6. `.env.local`にはAivisSpeechの設定だけを記述します。
 
    ```dotenv
-   OPENAI_API_KEY=
-   VAYRIA_SECRET_FILE=
    VAYRIA_HTTPS_CONFIG_FILE=
    AIVIS_BASE_URL=http://127.0.0.1:10101
    AIVIS_SPEED_SCALE=1.15
@@ -265,8 +269,6 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    AIVIS_TEMPO_DYNAMICS_SCALE=1.0
    ```
 
-   `VAYRIA_SECRET_FILE`は、既存の外部secretファイルを使う場合の互換設定です。
-   通常の展示では設定せず、`op run --env-file .env.1password -- ...`を使用します。
    `VAYRIA_HTTPS_CONFIG_FILE`を設定した場合、共有ファイルのHTTPS設定を優先します。
    `VAYRIA_HTTPS_CONFIG_FILE`を設定しない場合は、既存の`VAYRIA_HTTPS_*`直接設定を使用します。
 
@@ -309,11 +311,11 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    Local environmentのActionには、次を登録します。
 
    ```powershell
-   npm run dev
+   npm run dev:op
    ```
 
    Setup scriptはAPIを起動しません。
-   ActionがworktreeごとのAPIを起動します。
+   ActionがworktreeごとのAPIを1Password経由で起動します。
    local開発では、`main`は`5187`を使用します。
    worker worktreeは`5188`から`5210`の空きポートを自動で使用します。
    Setup scriptはworktreeごとの`.env.exhibition.local`も自動で生成します。
@@ -329,7 +331,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    `.worktreeinclude`には`.env.local`を追加しません。
 
    Codexを使わない場合は、次のラッパーでAPI keyをコピーせずにworktreeの設定を作成できます。
-   その後、対象worktreeで`npm run dev`を起動します。
+   その後、対象worktreeで`npm run dev:op`を起動します。
 
    ```powershell
    pwsh -NoProfile -File .\scripts\Start-VayriaWorktree.ps1 `
@@ -393,7 +395,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 10. 開発サーバーを起動します。
 
    ```powershell
-   op run --env-file .env.1password -- npm run dev
+   npm run dev:op
    ```
 
    OpenAI APIを使わない画面確認だけなら、`npm run dev`でも起動できます。
@@ -512,15 +514,14 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    展示当日の短い手順は[`docs/exhibition-quickstart.md`](docs/exhibition-quickstart.md)を参照してください。
 
    ```powershell
-   op run --env-file .env.1password -- npm run exhibition:start
+   npm run exhibition:start:op
    ```
 
    このコマンドは、AivisSpeech、uv経由のPython STT、Viteを起動します。
-   `npm run exhibition`は上記コマンドの短縮名です。`op run`を付けない起動は、別途プロセス環境または`VAYRIA_SECRET_FILE`を設定している場合の互換経路です。
+   `:op`コマンドがVite/npmプロセスへだけOpenAI API keyを注入します。
    このコマンドは、HotspotアダプタのIPv4を毎回検出してから、検出したインターフェースだけへ展示フロントをbindします。
    Windows Terminalがある場合は、制御タブ、AivisSpeechタブ、STTタブ、Viteタブを1つのウィンドウへ作成します。
    Windows Terminalがない場合は、サービスごとのPowerShell別窓を使用します。
-   `op run`がVite/npmプロセスへだけOpenAI API keyを注入します。
    AivisSpeechがzonokoを提供し、Python STTが`127.0.0.1:8787`で待ち受けた後、
    exhibitionフロントを起動します。
    起動ログに表示された`https://vayria.local:5187`をiPadで開きます。mDNSが使えない場合は、診断でfallback IPが証明書SANに含まれることを確認できたときだけfallback URLを使います。iPadは会場Wi-Fiへ接続せず、`Vayria-Exhibition`だけに接続します。
@@ -552,7 +553,7 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    ```
 
    ```powershell
-   op run --env-file .env.1password -- npm run dev:exhibition
+   npm run dev:exhibition:op
    ```
 
    手動起動時は、ViteのbindとHotspot IPが一致していることを`npm run exhibition:check`で確認してください。
@@ -650,10 +651,10 @@ New-NetFirewallRule -DisplayName 'Vayria Exhibition mDNS UDP 5353 (Private)' -Di
 展示音声入力は`getUserMedia()`を使用します。HTTPSページでマイク許可を与えてください。
 Pythonサービスは`127.0.0.1`だけで待ち受けます。iPadからPythonポートへ直接接続しません。
 
-`.env.local`、`.env.1password`、`public/avatar/*.vrm`、生成途中の motion asset は Git の追跡対象外です。
+`.env.local`、`public/avatar/*.vrm`、生成途中の motion asset は Git の追跡対象外です。
 `.env.exhibition` と `.env.exhibition.local` も Git の追跡対象外です。
 VRMの正本もGitリポジトリの外に置きます。`.worktreeinclude`には追加しません。
-API keyは`op run`からViteのNode middlewareへ一時的に渡し、AivisSpeechの設定はNode middlewareだけが読みます。
+API keyは`:op`コマンドからViteのNode middlewareへ一時的に渡し、AivisSpeechの設定はNode middlewareだけが読みます。
 ブラウザー bundle には埋め込みません。
 
 ## 感情マッピング

@@ -5,8 +5,6 @@ param(
   [ValidateRange(0, 65535)]
   [int]$Port = 0,
 
-  [string]$SecretFile = (Join-Path $env:USERPROFILE '.vayria\secrets.env'),
-
   [string]$HttpsConfigFile = (Join-Path $env:USERPROFILE '.vayria\https.env'),
 
   [string]$AvatarSourcePath = (Join-Path $env:USERPROFILE '.vayria\avatar\model.vrm')
@@ -48,24 +46,6 @@ function Resolve-WorktreeRoot {
   }
 
   return (Resolve-Path -LiteralPath $rootText -ErrorAction Stop).Path
-}
-
-function Resolve-SecretFile {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Path
-  )
-
-  if (-not [IO.Path]::IsPathRooted($Path)) {
-    throw 'SecretFile must be an absolute path.'
-  }
-
-  $resolvedPath = [IO.Path]::GetFullPath($Path)
-  if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
-    throw "The external secret file does not exist: $resolvedPath"
-  }
-
-  return $resolvedPath
 }
 
 function Resolve-HttpsConfigFile {
@@ -158,17 +138,6 @@ function Get-ExistingWorktreePort {
   if ($existingPort -lt 1 -or $existingPort -gt 65535) {
     throw "Existing .env.local has an invalid VAYRIA_PORT. Setup stopped without overwriting it: $EnvPath"
   }
-
-  $secretReference = Get-EnvironmentValue -Path $EnvPath -Name 'VAYRIA_SECRET_FILE'
-  if ([string]::IsNullOrWhiteSpace($secretReference)) {
-    throw "Existing .env.local has no VAYRIA_SECRET_FILE. Setup stopped without overwriting it: $EnvPath"
-  }
-
-  if (-not [IO.Path]::IsPathRooted($secretReference)) {
-    throw "Existing .env.local has a relative VAYRIA_SECRET_FILE. Setup stopped without overwriting it: $EnvPath"
-  }
-
-  [void](Resolve-SecretFile -Path $secretReference)
 
   $httpsConfigReference = Get-EnvironmentValue -Path $EnvPath -Name 'VAYRIA_HTTPS_CONFIG_FILE'
   if (-not [string]::IsNullOrWhiteSpace($httpsConfigReference)) {
@@ -308,9 +277,6 @@ function Invoke-WorktreeInitialization {
     [Parameter(Mandatory = $true)]
     [int]$SelectedPort,
 
-    [Parameter(Mandatory = $true)]
-    [string]$ResolvedSecretFile,
-
     [string]$ResolvedHttpsConfigFile
   )
 
@@ -318,7 +284,6 @@ function Invoke-WorktreeInitialization {
   $initializerParameters = @{
     WorktreePath     = $RepositoryRoot
     Port             = $SelectedPort
-    SecretFile       = $ResolvedSecretFile
     HttpsConfigFile = $ResolvedHttpsConfigFile
   }
 
@@ -373,7 +338,6 @@ function Ensure-ExhibitionEnvironment {
 
 $repositoryRoot = Resolve-WorktreeRoot -Path $WorktreePath
 $envPath = Join-Path $repositoryRoot '.env.local'
-$resolvedSecretFile = Resolve-SecretFile -Path $SecretFile
 $resolvedHttpsConfigFile = Resolve-HttpsConfigFile -Path $HttpsConfigFile
 Invoke-AvatarSynchronization -RepositoryRoot $repositoryRoot -SourcePath $AvatarSourcePath
 $mutex = [Threading.Mutex]::new($false, $portMutexName)
@@ -417,7 +381,6 @@ try {
   Invoke-WorktreeInitialization `
     -RepositoryRoot $repositoryRoot `
     -SelectedPort $selectedPort `
-    -ResolvedSecretFile $resolvedSecretFile `
     -ResolvedHttpsConfigFile $resolvedHttpsConfigFile
 
   Ensure-ExhibitionEnvironment `
