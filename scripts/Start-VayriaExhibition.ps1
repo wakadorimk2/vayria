@@ -622,27 +622,15 @@ function Test-HttpsConfiguration {
     [string]$ExhibitionEnvironmentFile
   )
 
-  $httpsEnabled = Test-TruthyValue (Get-EffectiveEnvironmentValue `
-      -Name 'VAYRIA_HTTPS' `
-      -LocalEnvironmentFile $LocalEnvironmentFile `
-      -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile)
-  $script:effectiveHttps = $httpsEnabled
-  if (-not $httpsEnabled) {
-    return
-  }
-
   $configFile = Get-EffectiveEnvironmentValue `
     -Name 'VAYRIA_HTTPS_CONFIG_FILE' `
     -LocalEnvironmentFile $LocalEnvironmentFile `
     -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
-  $certificateFile = Get-EffectiveEnvironmentValue `
-    -Name 'VAYRIA_HTTPS_CERT_FILE' `
+  $httpsValue = Get-EffectiveEnvironmentValue `
+    -Name 'VAYRIA_HTTPS' `
     -LocalEnvironmentFile $LocalEnvironmentFile `
     -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
-  $privateKeyFile = Get-EffectiveEnvironmentValue `
-    -Name 'VAYRIA_HTTPS_KEY_FILE' `
-    -LocalEnvironmentFile $LocalEnvironmentFile `
-    -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
+  $resolvedConfigFile = $null
 
   if (-not [string]::IsNullOrWhiteSpace($configFile)) {
     if (-not [IO.Path]::IsPathRooted($configFile)) {
@@ -652,6 +640,29 @@ function Test-HttpsConfiguration {
     if (-not (Test-Path -LiteralPath $resolvedConfigFile -PathType Leaf)) {
       throw "VAYRIA_HTTPS_CONFIG_FILE was not found: $resolvedConfigFile"
     }
+
+    $sharedHttpsValue = Get-EnvironmentFileValue -Path $resolvedConfigFile -Name 'VAYRIA_HTTPS'
+    if ($null -ne $sharedHttpsValue) {
+      $httpsValue = $sharedHttpsValue
+    }
+  }
+
+  $httpsEnabled = Test-TruthyValue $httpsValue
+  $script:effectiveHttps = $httpsEnabled
+  if (-not $httpsEnabled) {
+    return
+  }
+
+  $certificateFile = Get-EffectiveEnvironmentValue `
+    -Name 'VAYRIA_HTTPS_CERT_FILE' `
+    -LocalEnvironmentFile $LocalEnvironmentFile `
+    -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
+  $privateKeyFile = Get-EffectiveEnvironmentValue `
+    -Name 'VAYRIA_HTTPS_KEY_FILE' `
+    -LocalEnvironmentFile $LocalEnvironmentFile `
+    -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
+
+  if ($null -ne $resolvedConfigFile) {
     $certificateFile = Get-EnvironmentFileValue -Path $resolvedConfigFile -Name 'VAYRIA_HTTPS_CERT_FILE'
     $privateKeyFile = Get-EnvironmentFileValue -Path $resolvedConfigFile -Name 'VAYRIA_HTTPS_KEY_FILE'
   }
