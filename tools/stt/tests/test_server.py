@@ -14,12 +14,13 @@ from vayria_stt.server import (
     SUPPORTED_CHUNK_MS,
     SUPPORTED_FORMAT,
     _handle_detector_event,
+    _parse_control,
     _parse_start,
     _transcription_worker,
     handle_connection,
 )
 from vayria_stt.transcriber import TranscriptionResult
-from vayria_stt.vad import DetectorEvent
+from vayria_stt.vad import FRAME_BYTES, DetectorEvent
 
 
 class FakeTranscriber:
@@ -51,6 +52,20 @@ class RuntimeTranscriber(FakeTranscriber):
             "fallbackReason": "CUDA unavailable",
             "modelLoadMs": 123,
         }
+
+
+class SequenceClassifier:
+    def __init__(self, values: list[bool]) -> None:
+        self.values = values
+
+    def is_speech(self, frame: bytes, sample_rate: int) -> bool:
+        assert len(frame) == FRAME_BYTES
+        assert sample_rate == 16_000
+        return self.values.pop(0)
+
+
+def frame(value: int = 1) -> bytes:
+    return bytes([value]) * FRAME_BYTES
 
 
 class FakeConnection:
@@ -90,6 +105,18 @@ def test_start_message_accepts_only_supported_endpoint_values() -> None:
         assert _parse_start({**base, "endSilenceMs": value}).end_silence_ms == value
     with pytest.raises(Exception):
         _parse_start({**base, "endSilenceMs": 500})
+
+
+def test_boundary_control_messages_are_strict_and_known() -> None:
+    assert [_parse_control({"type": value}) for value in (
+        "speech_started",
+        "speech_ended",
+        "stop",
+    )] == ["speech_started", "speech_ended", "stop"]
+    with pytest.raises(Exception):
+        _parse_control({"type": "unknown"})
+    with pytest.raises(Exception):
+        _parse_control({"type": "speech_ended", "segmentId": "client-id"})
 
 
 def test_diagnostic_worker_emits_raw_and_filtered_transcript() -> None:
@@ -168,6 +195,103 @@ def test_websocket_start_binary_stop_wire() -> None:
                 )
                 assert json.loads(await client.recv())["type"] == "listening_started"
                 await client.send(b"\x00" * 6_400)
+                await client.send(json.dumps({"type": "stop"}))
+                assert json.loads(await client.recv())["type"] == "recognition_stopped"
+
+    asyncio.run(scenario())
+
+
+def test_boundary_end_flushes_stt_and_keeps_session_open() -> None:
+    async def scenario() -> None:
+        classifier = SequenceClassifier([True, True, True, True])
+        async with serve(
+            lambda connection: handle_connection(
+                connection,
+                transcriber=FakeTranscriber(),
+                classifier=classifier,
+            ),
+            "127.0.0.1",
+            0,
+        ) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}/stream") as client:
+                await client.send(
+                    json.dumps(
+                        {
+                            "type": "start",
+                            "language": "ja-JP",
+                            "sampleRate": 16_000,
+                            "channels": 1,
+                            "format": "pcm_s16le",
+                            "chunkMs": 200,
+                        }
+                    )
+                )
+                assert json.loads(await client.recv())["type"] == "listening_started"
+
+                await client.send(json.dumps({"type": "speech_started"}))
+                await client.send(frame(1))
+                await client.send(frame(2))
+                assert json.loads(await client.recv())["type"] == "speech_started"
+
+                await client.send(json.dumps({"type": "speech_ended"}))
+                assert json.loads(await client.recv())["type"] == "speech_ended"
+                assert json.loads(await client.recv())["type"] == "utterance_finalized"
+                await client.send(json.dumps({"type": "speech_ended"}))
+
+                await client.send(json.dumps({"type": "speech_started"}))
+                await client.send(frame(3))
+                await client.send(frame(4))
+                assert json.loads(await client.recv())["type"] == "speech_started"
+                await client.send(json.dumps({"type": "speech_ended"}))
+                assert json.loads(await client.recv())["type"] == "speech_ended"
+                assert json.loads(await client.recv())["type"] == "utterance_finalized"
+
+                await client.send(json.dumps({"type": "stop"}))
+                assert json.loads(await client.recv())["type"] == "recognition_stopped"
+
+    asyncio.run(scenario())
+
+
+def test_missing_boundary_flushes_after_end_silence_timeout_and_keeps_session_open() -> None:
+    async def scenario() -> None:
+        classifier = SequenceClassifier([True, True])
+        async with serve(
+            lambda connection: handle_connection(
+                connection,
+                transcriber=FakeTranscriber(),
+                classifier=classifier,
+            ),
+            "127.0.0.1",
+            0,
+        ) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}/stream") as client:
+                await client.send(
+                    json.dumps(
+                        {
+                            "type": "start",
+                            "language": "ja-JP",
+                            "sampleRate": 16_000,
+                            "channels": 1,
+                            "format": "pcm_s16le",
+                            "chunkMs": 200,
+                            "endSilenceMs": 400,
+                        }
+                    )
+                )
+                assert json.loads(await client.recv())["type"] == "listening_started"
+                await client.send(json.dumps({"type": "speech_started"}))
+                await client.send(frame())
+                await client.send(frame())
+                assert json.loads(await client.recv())["type"] == "speech_started"
+
+                timeout_event = json.loads(await asyncio.wait_for(client.recv(), 1.5))
+                finalized_event = json.loads(await asyncio.wait_for(client.recv(), 1.5))
+                assert timeout_event["type"] == "speech_ended"
+                assert finalized_event["type"] == "utterance_finalized"
+
+                await client.send(json.dumps({"type": "speech_ended"}))
                 await client.send(json.dumps({"type": "stop"}))
                 assert json.loads(await client.recv())["type"] == "recognition_stopped"
 

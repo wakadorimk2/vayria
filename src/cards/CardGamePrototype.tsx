@@ -307,11 +307,11 @@ export function CardGamePrototype({
 
   const selectionHint =
     runtimeConfig.mode === 'exhibition'
-      ? isSpent
-        ? 'このターンは操作済み'
-        : selectionActive
-          ? '脳内へカードを選択'
-          : 'カードを触ってみて'
+        ? isSpent
+          ? 'このターンは操作済み'
+          : selectionActive
+          ? '脳内へ一枚'
+          : '気になる一枚を選んで'
       : isSpent
         ? zones.forcedCardId
           ? `脳へ干渉しました。「${zones.brain.find((card) => card.id === zones.forcedCardId)?.label ?? zones.forcedCardId}」の返答を待っています`

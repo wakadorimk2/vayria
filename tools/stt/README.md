@@ -7,8 +7,13 @@ The Vayria browser sends the following wire messages:
 1. JSON `start` with `language`, `sampleRate`, `channels`, `format`, and `chunkMs`.
    Mode B/C may add `endSilenceMs: 400` or `endSilenceMs: 600`.
    Audio Lab may add `diagnostics: true`.
-2. Binary PCM16 frames.
-3. JSON `stop` when the microphone stops.
+2. In browser-gated modes, JSON `{"type":"speech_started"}` before the first
+   PCM frame of a browser-detected speech interval.
+3. Binary PCM16 frames. The browser gate includes its pre-roll and hangover
+   frames in this sequence.
+4. In browser-gated modes, JSON `{"type":"speech_ended"}` after the final
+   hangover PCM frame.
+5. JSON `stop` when the microphone stops. This stops the whole session.
 
 The service uses WebRTC VAD with 20 ms frames. It emits `speech_started` after
 two speech frames. It emits `speech_ended` and starts batch transcription after
@@ -18,6 +23,15 @@ When diagnostics are enabled, it also emits `stt_runtime`, `stt_started`, and
 `stt_observed`.
 The diagnostic event includes raw and filtered text. The filtered text remains
 the only text sent in `utterance_finalized`.
+
+The browser Adaptive RMS VAD controls the PCM send boundary in the processed
+exhibition path. Python WebRTC VAD remains the speech classifier for received
+PCM and continues to assign server segment IDs. On `speech_ended`, the service
+flushes the current detector, queues the finalized audio, and keeps the WebSocket
+session open. Duplicate or late `speech_ended` messages are safe no-ops.
+If a browser boundary is missing, an active or pending interval is flushed after
+the configured `endSilenceMs`. An idle session does not close because of this
+fallback timer.
 
 The service listens on `127.0.0.1` by default. It does not write audio files or
 log audio content.
@@ -56,3 +70,19 @@ uv run --no-cache python -m vayria_stt.server `
 `--device` accepts `auto`, `cuda`, or `cpu`.
 `--compute-type` accepts `auto`, `float16`, or `int8`.
 The benchmark matrix is each model with CUDA and CPU.
+
+## Browser and service updates
+
+The browser adapter and this Python service share the control-message protocol.
+Update both sides before testing a processed exhibition session.
+
+Restart the Python STT service after updating the repository:
+
+```powershell
+Push-Location tools/stt
+uv run --no-cache python -m vayria_stt.server
+Pop-Location
+```
+
+Then reload the Vayria page and start the microphone again. An older Python
+process does not accept `speech_started` or `speech_ended` control messages.
