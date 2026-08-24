@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [string]$WorktreePath = (Get-Location).Path,
+  [string]$ReferenceFile = (Join-Path $env:USERPROFILE '.vayria\vayria-op.env'),
 
   [string]$Vault,
 
@@ -44,8 +44,12 @@ function Invoke-OpJson {
   return ($json -join [Environment]::NewLine) | ConvertFrom-Json
 }
 
-$resolvedWorktree = (Resolve-Path -LiteralPath $WorktreePath -ErrorAction Stop).Path
-$referenceFile = Join-Path $resolvedWorktree '.env.1password'
+if (-not [IO.Path]::IsPathRooted($ReferenceFile)) {
+  throw 'ReferenceFile must be an absolute path.'
+}
+
+$resolvedReferenceFile = [IO.Path]::GetFullPath($ReferenceFile)
+$referenceDirectory = Split-Path -Parent $resolvedReferenceFile
 $opCommand = Resolve-OpCommand
 
 try {
@@ -87,10 +91,10 @@ foreach ($part in @(@{Name = 'Vault'; Value = $Vault }, @{Name = 'Item'; Value =
 
 $secretReference = "op://$Vault/$Item/$Field"
 $content = @(
-  '# 1Password secret reference only. The OpenAI key value is never stored here.'
   "OPENAI_API_KEY=$secretReference"
 ) -join [Environment]::NewLine
 
-Set-Content -LiteralPath $referenceFile -Value ($content + [Environment]::NewLine) -Encoding utf8NoBOM
-Write-Output "Saved 1Password reference to $referenceFile"
-Write-Output 'The file contains only the op:// reference; use op run to inject the secret at process launch.'
+New-Item -ItemType Directory -Path $referenceDirectory -Force | Out-Null
+Set-Content -LiteralPath $resolvedReferenceFile -Value ($content + [Environment]::NewLine) -Encoding utf8NoBOM
+Write-Output "Saved 1Password reference to $resolvedReferenceFile"
+Write-Output 'The file contains only the op:// reference; use a Vayria :op command to inject the secret at process launch.'

@@ -48,7 +48,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       localApiPlugin({
-        openAiApiKey: resolveOpenAiApiKey(serverEnvironment),
+        openAiApiKey: resolveOpenAiApiKey(),
         aivisBaseUrl: serverEnvironment.AIVIS_BASE_URL,
         aivisSpeedScale: serverEnvironment.AIVIS_SPEED_SCALE,
         aivisPitchScale: serverEnvironment.AIVIS_PITCH_SCALE,

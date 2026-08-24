@@ -5,14 +5,11 @@
 対象worktreeのルートで、次を実行します。
 
 ```powershell
-op run --env-file .env.1password -- npm run exhibition:start
+npm run exhibition:start:op
 ```
 
-1Passwordを使わない既存の環境では、次を実行できます。
-
-```powershell
-npm run exhibition:start
-```
+このコマンドは`%USERPROFILE%\.vayria\vayria-op.env`の`op://`参照を使います。
+API key本体をworktreeへ保存しません。
 
 起動前に、AivisSpeech、CUDAランタイム、STT依存関係、環境設定、ポートを確認します。
 `npm install`、`uv sync`、環境ファイルのコピーは実行しません。

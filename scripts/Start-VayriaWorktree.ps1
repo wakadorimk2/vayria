@@ -7,8 +7,6 @@ param(
   [ValidateRange(1, 65535)]
   [int]$Port,
 
-  [string]$SecretFile = (Join-Path $env:USERPROFILE '.vayria\secrets.env'),
-
   [string]$HttpsConfigFile = (Join-Path $env:USERPROFILE '.vayria\https.env'),
 
   [string]$AivisBaseUrl = 'http://127.0.0.1:10101',
@@ -28,7 +26,6 @@ $initializeScript = Join-Path $scriptDirectory 'Initialize-WorktreeEnv.ps1'
 $initializeParameters = @{
   WorktreePath     = $resolvedWorktree
   Port             = $Port
-  SecretFile       = $SecretFile
   HttpsConfigFile = $HttpsConfigFile
   AivisBaseUrl     = $AivisBaseUrl
   AppMode          = $AppMode

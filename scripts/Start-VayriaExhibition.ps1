@@ -597,53 +597,13 @@ function Write-StageFail {
 }
 
 function Test-SecretConfiguration {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$LocalEnvironmentFile,
-
-    [Parameter(Mandatory = $true)]
-    [string]$ExhibitionEnvironmentFile
-  )
-
   $processApiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY')
-  if (-not [string]::IsNullOrWhiteSpace($processApiKey)) {
-    return
+  if ([string]::IsNullOrWhiteSpace($processApiKey)) {
+    throw 'No OpenAI API key is available in the process environment. Use npm run exhibition:start:op after configuring 1Password.'
   }
 
-  $secretFile = Get-EffectiveEnvironmentValue `
-    -Name 'VAYRIA_SECRET_FILE' `
-    -LocalEnvironmentFile $LocalEnvironmentFile `
-    -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
-  if ([string]::IsNullOrWhiteSpace($secretFile)) {
-    throw 'No OpenAI secret source was configured. Use op run or configure VAYRIA_SECRET_FILE.'
-  }
-  if (-not [IO.Path]::IsPathRooted($secretFile)) {
-    throw 'VAYRIA_SECRET_FILE must be an absolute path.'
-  }
-
-  $resolvedSecretFile = [IO.Path]::GetFullPath($secretFile)
-  if (-not (Test-Path -LiteralPath $resolvedSecretFile -PathType Leaf)) {
-    throw "VAYRIA_SECRET_FILE was not found: $resolvedSecretFile"
-  }
-
-  $hasApiKey = $false
-  foreach ($line in (Get-Content -LiteralPath $resolvedSecretFile -ErrorAction Stop)) {
-    if ($line -match '^\s*(?:export\s+)?OPENAI_API_KEY\s*=\s*(.*?)\s*$') {
-      $value = $Matches[1].Trim()
-      if ($value.Length -ge 2 -and
-          (($value.StartsWith('"') -and $value.EndsWith('"')) -or
-           ($value.StartsWith("'") -and $value.EndsWith("'")))) {
-        $value = $value.Substring(1, $value.Length - 2)
-      }
-      if (-not [string]::IsNullOrWhiteSpace($value)) {
-        $hasApiKey = $true
-        break
-      }
-    }
-  }
-
-  if (-not $hasApiKey) {
-    throw 'VAYRIA_SECRET_FILE does not contain a non-empty OPENAI_API_KEY.'
+  if ($processApiKey.Trim().StartsWith('op://', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'OPENAI_API_KEY is an unresolved 1Password reference. Use npm run exhibition:start:op.'
   }
 }
 
@@ -758,9 +718,7 @@ function Test-Preflight {
     throw "VITE_APP_MODE must be exhibition: $appMode"
   }
 
-  Test-SecretConfiguration `
-    -LocalEnvironmentFile $localEnvironmentFile `
-    -ExhibitionEnvironmentFile $exhibitionEnvironmentFile
+  Test-SecretConfiguration
   Test-HttpsConfiguration `
     -LocalEnvironmentFile $localEnvironmentFile `
     -ExhibitionEnvironmentFile $exhibitionEnvironmentFile
