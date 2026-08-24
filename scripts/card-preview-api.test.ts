@@ -19,6 +19,7 @@ import {
   readPerformerStateContext,
   readCardPreviewRequest,
   readConversationEvent,
+  readAutonomyCandidate,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
 import {
@@ -43,7 +44,7 @@ const VALID_PERFORMER_STATE = {
 
 const AUTONOMY_CANDIDATE = {
   episodeId: 'episode-1',
-  evidenceIds: ['evidence-1'],
+  decisionEvidenceIds: ['evidence-1'],
   reasons: [
     {
       id: 'reason-1',
@@ -56,7 +57,7 @@ const AUTONOMY_CANDIDATE = {
       status: 'active',
       deferCause: null,
       wakeOn: [],
-      evidenceIds: ['evidence-1'],
+      decisionEvidenceIds: ['evidence-1'],
       createdAt: 1,
       updatedAt: 1,
       lastEvaluatedEvidenceId: null,
@@ -64,6 +65,76 @@ const AUTONOMY_CANDIDATE = {
     },
   ],
 } as const;
+
+const AUTONOMY_CANDIDATE_WIRE = {
+  episodeId: AUTONOMY_CANDIDATE.episodeId,
+  decisionEvidenceIds: AUTONOMY_CANDIDATE.decisionEvidenceIds,
+  reasons: [
+    {
+      id: AUTONOMY_CANDIDATE.reasons[0].id,
+      episodeId: AUTONOMY_CANDIDATE.reasons[0].episodeId,
+      parentReasonId: AUTONOMY_CANDIDATE.reasons[0].parentReasonId,
+      kind: AUTONOMY_CANDIDATE.reasons[0].kind,
+      content: AUTONOMY_CANDIDATE.reasons[0].content,
+      semanticKey: AUTONOMY_CANDIDATE.reasons[0].semanticKey,
+      salience: AUTONOMY_CANDIDATE.reasons[0].salience,
+      status: AUTONOMY_CANDIDATE.reasons[0].status,
+      deferCause: AUTONOMY_CANDIDATE.reasons[0].deferCause,
+      wakeOn: AUTONOMY_CANDIDATE.reasons[0].wakeOn,
+      decisionEvidenceIds: AUTONOMY_CANDIDATE.reasons[0].decisionEvidenceIds,
+    },
+  ],
+} as const;
+
+test('autonomy candidate uses the decision evidence contract only', () => {
+  const parsed = readAutonomyCandidate(AUTONOMY_CANDIDATE_WIRE);
+  assert.deepEqual(parsed.decisionEvidenceIds, ['evidence-1']);
+  assert.deepEqual(parsed.reasons[0].decisionEvidenceIds, ['evidence-1']);
+
+  assert.throws(
+    () =>
+      readAutonomyCandidate({
+        ...AUTONOMY_CANDIDATE_WIRE,
+        decisionEvidenceIds: Array.from({ length: 25 }, (_, index) => `e-${index}`),
+      }),
+    /decisionEvidenceIds format is invalid/,
+  );
+  assert.throws(
+    () =>
+      readAutonomyCandidate({
+        ...AUTONOMY_CANDIDATE_WIRE,
+        reasons: [
+          {
+            ...AUTONOMY_CANDIDATE_WIRE.reasons[0],
+            decisionEvidenceIds: ['not-offered'],
+          },
+        ],
+      }),
+    /decisionEvidenceIds must be offered evidence/,
+  );
+  assert.throws(
+    () =>
+      readAutonomyCandidate({
+        ...AUTONOMY_CANDIDATE_WIRE,
+        evidenceHistory: [],
+      }),
+    /unsupported field/,
+  );
+  assert.throws(
+    () =>
+      readAutonomyCandidate({
+        episodeId: 'episode-1',
+        evidenceIds: ['evidence-1'],
+        reasons: [
+          {
+            ...AUTONOMY_CANDIDATE_WIRE.reasons[0],
+            evidenceIds: ['evidence-1'],
+          },
+        ],
+      }),
+    /unsupported field/,
+  );
+});
 
 test('performer state context validates the bounded self-state contract', () => {
   assert.deepEqual(

@@ -184,7 +184,7 @@ function readAutonomyInternalDelta(value: unknown): AutonomyInternalDelta {
 function serializeAutonomyCandidate(candidate: AutonomyCandidate) {
   return {
     episodeId: candidate.episodeId,
-    evidenceIds: [...candidate.evidenceIds],
+    decisionEvidenceIds: [...candidate.decisionEvidenceIds],
     reasons: candidate.reasons.map((reason) => ({
       id: reason.id,
       episodeId: reason.episodeId,
@@ -196,7 +196,7 @@ function serializeAutonomyCandidate(candidate: AutonomyCandidate) {
       status: reason.status,
       deferCause: reason.deferCause,
       wakeOn: [...reason.wakeOn],
-      evidenceIds: [...reason.evidenceIds],
+      decisionEvidenceIds: [...reason.decisionEvidenceIds],
     })),
   };
 }
@@ -777,7 +777,7 @@ export function useConversation(
             autonomyEvidenceContext?.episodeId ??
             null,
           evidenceId:
-            autonomyCandidate?.evidenceIds[0] ??
+            autonomyCandidate?.decisionEvidenceIds.at(-1) ??
             autonomyEvidenceContext?.evidenceId ??
             finalizedVoiceMetadata.segmentId,
           reasonIds: [

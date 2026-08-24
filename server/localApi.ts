@@ -35,6 +35,7 @@ import {
   CANDIDATE_REASON_KINDS,
   MAX_AUTONOMY_CONTENT_LENGTH,
   MAX_CANDIDATE_REASONS,
+  MAX_DECISION_EVIDENCE_IDS,
   MAX_REASON_UPDATES_PER_DELTA,
   isAutonomyDeferCause,
   isAutonomyExternalAction,
@@ -1274,12 +1275,16 @@ function readStringList(
   return values;
 }
 
-function readAutonomyCandidate(value: unknown): AutonomyCandidate {
+export function readAutonomyCandidate(value: unknown): AutonomyCandidate {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new RequestError('autonomyCandidate must be an object.', 400);
   }
   const record = value as Record<string, unknown>;
-  const allowedKeys = new Set(['episodeId', 'evidenceIds', 'reasons']);
+  const allowedKeys = new Set([
+    'episodeId',
+    'decisionEvidenceIds',
+    'reasons',
+  ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError(
       'autonomyCandidate contains an unsupported field.',
@@ -1287,10 +1292,14 @@ function readAutonomyCandidate(value: unknown): AutonomyCandidate {
     );
   }
   const episodeId = readBoundedText(record.episodeId, 'episodeId', 128);
-  const evidenceIds = readStringList(record.evidenceIds, 'evidenceIds', 64);
-  if (!evidenceIds.length) {
+  const decisionEvidenceIds = readStringList(
+    record.decisionEvidenceIds,
+    'decisionEvidenceIds',
+    MAX_DECISION_EVIDENCE_IDS,
+  );
+  if (!decisionEvidenceIds.length) {
     throw new RequestError(
-      'autonomyCandidate.evidenceIds must contain at least one evidence ID.',
+      'autonomyCandidate.decisionEvidenceIds must contain at least one evidence ID.',
       400,
     );
   }
@@ -1320,7 +1329,7 @@ function readAutonomyCandidate(value: unknown): AutonomyCandidate {
       'status',
       'deferCause',
       'wakeOn',
-      'evidenceIds',
+      'decisionEvidenceIds',
     ]);
     if (Object.keys(reason).some((key) => !allowedReasonKeys.has(key))) {
       throw new RequestError(
@@ -1379,19 +1388,19 @@ function readAutonomyCandidate(value: unknown): AutonomyCandidate {
       throw new RequestError('autonomyCandidate reason wakeOn is invalid.', 400);
     }
     const reasonEvidenceIds = readStringList(
-      reason.evidenceIds,
-      'reason.evidenceIds',
-      64,
+      reason.decisionEvidenceIds,
+      'reason.decisionEvidenceIds',
+      MAX_DECISION_EVIDENCE_IDS,
     );
     if (!reasonEvidenceIds.length) {
       throw new RequestError(
-        'autonomyCandidate reason evidenceIds must not be empty.',
+        'autonomyCandidate reason decisionEvidenceIds must not be empty.',
         400,
       );
     }
-    if (!reasonEvidenceIds.every((id) => evidenceIds.includes(id))) {
+    if (!reasonEvidenceIds.every((id) => decisionEvidenceIds.includes(id))) {
       throw new RequestError(
-        'autonomyCandidate reason evidenceIds must be offered evidence.',
+        'autonomyCandidate reason decisionEvidenceIds must be offered evidence.',
         400,
       );
     }
@@ -1406,7 +1415,7 @@ function readAutonomyCandidate(value: unknown): AutonomyCandidate {
       status: 'active',
       deferCause: null,
       wakeOn,
-      evidenceIds: reasonEvidenceIds,
+      decisionEvidenceIds: reasonEvidenceIds,
       createdAt: 0,
       updatedAt: 0,
       lastEvaluatedEvidenceId: null,
@@ -1427,7 +1436,7 @@ function readAutonomyCandidate(value: unknown): AutonomyCandidate {
     }
   }
 
-  return { episodeId, reasons, evidenceIds };
+  return { episodeId, reasons, decisionEvidenceIds };
 }
 
 function readReasonUpdates(

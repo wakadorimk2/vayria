@@ -26,6 +26,7 @@ import {
 import {
   applyReasonUpdates,
   completeInactiveEpisodes,
+  createAutonomyEvidenceId,
   createInitialAutonomyState,
   markCandidateOffered,
   observeAutonomyEvidence,
@@ -386,7 +387,8 @@ export default function App() {
     (state: AutonomyState, evidenceId: string): AutonomyEvidenceContext | null => {
       const matchingReasons = state.reasons.filter(
         (reason) =>
-          reason.status === 'active' && reason.evidenceIds.includes(evidenceId),
+          reason.status === 'active' &&
+          reason.decisionEvidenceIds.includes(evidenceId),
       );
       const episodeId = matchingReasons[0]?.episodeId;
       if (!episodeId) return null;
@@ -410,13 +412,13 @@ export default function App() {
       const episodeId =
         context.episodeId ??
         current.reasons.find((reason) =>
-          reason.evidenceIds.includes(context.evidenceId),
+          reason.decisionEvidenceIds.includes(context.evidenceId),
         )?.episodeId ??
         null;
       if (!episodeId) return;
       let nextState = current;
       if (delta.reasonUpdates.length) {
-        const deltaEvidenceId = `autonomy-delta:${context.evidenceId}:${Date.now()}`;
+        const deltaEvidenceId = createAutonomyEvidenceId('autonomy-delta');
         const stateWithDeltaEvidence = observeAutonomyEvidence(current, {
           id: deltaEvidenceId,
           kind: 'internal_state_change',
@@ -1038,7 +1040,7 @@ export default function App() {
   const autonomyCandidateKey = autonomyCandidate
     ? `${autonomyCandidate.episodeId}:${autonomyCandidate.reasons
         .map((reason) => reason.id)
-        .join(',')}:${autonomyCandidate.evidenceIds.join(',')}`
+        .join(',')}:${autonomyCandidate.decisionEvidenceIds.join(',')}`
     : null;
   const exhibitionPresentationState: ExhibitionPresentationState = isPerformerBusy
     ? 'reacting'
