@@ -1322,7 +1322,6 @@ try {
         Set-ReadyGate -Path $script:aivisReadyGateFile
         Write-ControllerMessage "[OK][AivisSpeech] Reusing healthy AivisSpeech Engine at $aivisBaseUrl."
       }
-
       Start-ExhibitionTabs -Roles $roles
       foreach ($role in $roles) {
         Wait-ForRoleProcess -RoleSlug (Get-RoleSlug -Role $role)

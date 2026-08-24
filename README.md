@@ -515,6 +515,7 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    op run --env-file .env.1password -- npm run exhibition:start
    ```
 
+   このコマンドは、AivisSpeech、uv経由のPython STT、Viteを起動します。
    `npm run exhibition`は上記コマンドの短縮名です。`op run`を付けない起動は、別途プロセス環境または`VAYRIA_SECRET_FILE`を設定している場合の互換経路です。
    このコマンドは、HotspotアダプタのIPv4を毎回検出してから、検出したインターフェースだけへ展示フロントをbindします。
    Windows Terminalがある場合は、制御タブ、AivisSpeechタブ、STTタブ、Viteタブを1つのウィンドウへ作成します。
