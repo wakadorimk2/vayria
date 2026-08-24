@@ -52,17 +52,54 @@ Remote PCMを開始している間はデバイス選択を変更できません�
 
 ## 手動オーディオ経路
 
-仮想オーディオドライバとChatGPT Windowsアプリは手動で設定します。
+Voicemeeter、仮想オーディオドライバ、ChatGPT Windowsアプリは手動で設定します。
 
-今回の実装はドライバとアプリをインストールしません。
+Vayriaはドライバとアプリをインストールしません。
 
-次の3系統を仮想ミキサーで分離します。
+次の経路をVoicemeeterで設定します。
 
 1. Vayria音声出力 → ChatGPT入力
-2. ChatGPT音声出力 → Vayria Remote PCM入力
-3. 物理マイク → Human操作用
+2. ChatGPT音声出力 → Voicemeeterの仮想入力
+3. 物理マイク → Voicemeeterの物理入力
+4. Voicemeeter B1録音出力 → Vayria Remote PCM入力
 
-最終確認では、各方向を単独で音声メーターに表示します。
+Vayria Remote PCM入力へ送る音源は、次の2つだけにします。
+
+| Voicemeeter入力 | B1 | 送信先 |
+| --- | --- | --- |
+| 物理マイク | 有効 | Vayria Remote PCM |
+| ChatGPT音声 | 有効 | Vayria Remote PCM |
+| Vayria音声出力 | 無効 | Vayria Remote PCMへ送らない |
+
+マイクをHuman操作にも使う場合は、別の出力バスへ分岐します。
+B1にはマイクとChatGPT音声だけを送ります。
+
+### Vayria側の入力選択
+
+ブラウザーの既定録音デバイスを、Voicemeeter B1の録音出力へ設定します。
+
+デバイス名はインストール構成で異なります。
+`Voicemeeter Output`、`Voicemeeter Out B1`などの録音デバイスを選びます。
+
+開発用Routerを使う場合は、次のURLを開きます。
+
+```text
+http://127.0.0.1:5187/?router=1&audioLab=1
+```
+
+`Remote PCM入力（Voicemeeter B1など）`からB1の録音出力を選びます。
+入力デバイスはRemote PCM開始前に選びます。
+
+### 確認手順
+
+1. マイクだけへ話しかけます。Vayriaの音声メーターが動くことを確認します。
+2. ChatGPT音声だけを再生します。Vayriaの音声メーターが動くことを確認します。
+3. Vayria音声を再生します。VayriaのSTTが自己発話を認識しないことを確認します。
+4. VoicemeeterのB1を停止します。Remote PCM入力が停止または入力エラーになることを確認します。
+5. `npm run exhibition:start`でPython STTを起動します。`127.0.0.1:8787`の待受後にブラウザーで音声を有効化します。
+
+スピーカーを使う場合は、音響ループを避けるためヘッドセットを推奨します。
+音声データはVayriaの録音ファイルへ保存しません。
 
 ## 評価ケース
 

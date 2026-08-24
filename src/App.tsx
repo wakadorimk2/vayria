@@ -971,9 +971,12 @@ export default function App() {
 
   const dispatchBargeIn = useCallback(
     (event: BargeInEvent) => {
-      const transition = reduceBargeIn(bargeInStateRef.current, event);
+      const previousState = bargeInStateRef.current;
+      const transition = reduceBargeIn(previousState, event);
       bargeInStateRef.current = transition.state;
-      setBargeInState(transition.state);
+      if (transition.state !== previousState) {
+        setBargeInState(transition.state);
+      }
 
       if (transition.effects.includes('duck')) {
         clearBargeInTimer();
@@ -1325,12 +1328,12 @@ export default function App() {
 
   useEffect(() => {
     if (!runtimeConfig.routerEnabled) return;
-    observeRouterSignal({
+    routerObserveSignalRef.current?.({
       type: 'vayria_status',
       status,
       voiceInputEnabled: isVoiceInputEnabled,
     });
-  }, [isVoiceInputEnabled, observeRouterSignal, status]);
+  }, [isVoiceInputEnabled, status]);
 
   useEffect(() => {
     return () => {
