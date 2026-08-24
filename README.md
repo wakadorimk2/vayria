@@ -108,7 +108,7 @@ Vayria音声をB1へ戻すと、Vayria自身の発話をSTTが再認識する可
 自己認識ループを防ぐため、Vayria音声はB1へ送らないでください。
 
 展示音声入力は、Python STTが`ws://127.0.0.1:8787/stream`で待ち受ける必要があります。
-次のコマンドはPython STTを起動してから展示フロントを起動します。
+次のコマンドは、固定パスのAivisSpeech CLI、uv経由のPython STT、npm経由の展示フロントを起動します。
 
 ```powershell
 npm run exhibition:start
@@ -185,11 +185,22 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    Copy-Item -LiteralPath '.env.example' -Destination '.env.local'
    ```
 
-3. zonoko モデルを追加した AivisSpeech を起動します。
+3. zonoko モデルを追加した AivisSpeech CLIを起動します。
 
-   アプリは `http://127.0.0.1:10101/speakers` から zonoko のスタイル名と
-   ID を取得します。API の詳細は
-   `http://127.0.0.1:10101/docs` でも確認できます。
+   CLIは次の固定パスから起動します。
+
+   ```text
+   C:\Users\<Windowsユーザー名>\.vayria\apps\AivisSpeech-1.1.0-dev\AivisSpeech\AivisSpeech-Engine\run.exe
+   ```
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1
+   ```
+
+   起動スクリプトは `http://127.0.0.1:10101/speakers` でzonokoの存在を確認します。
+   既にzonokoを提供するAivisが起動中なら再利用します。
+   GUI版AivisSpeechとCLIは同じ10101番ポートを使うため、同時に起動しません。
+   APIの詳細は `http://127.0.0.1:10101/docs` でも確認できます。
 
 4. API keyをリポジトリ外の秘密ファイルへ保存します。
 
@@ -439,9 +450,10 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 
    `VITE_VOICE_INPUT_TRANSPORT`と`VAYRIA_STT_WS_URL`は、各worktreeの`.env.exhibition.local`へ残します。
 
-5. AivisSpeechをWindows PCで起動します。
-   AivisSpeechは今回の起動コマンドでは起動しません。
-   `AIVIS_BASE_URL`で設定した既存のサービスを使用します。
+5. AivisSpeechは統合ランチャーから自動起動します。
+   単独で起動する場合は `npm run aivis:start` または
+   `pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1` を使います。
+   `AIVIS_BASE_URL`は引き続き `http://127.0.0.1:10101` を使用します。
 
 6. 対象worktreeで、Python STTとexhibitionフロントを起動します。
 
@@ -449,17 +461,32 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    npm run exhibition:start
    ```
 
-   このコマンドは、Python STTを別のPowerShell窓で起動します。
-   exhibitionフロントは、現在のPowerShell窓で起動します。
-   Python STTが`127.0.0.1:8787`で待ち受けた後に、フロントを起動します。
-   フロントを`Ctrl+C`で停止すると、このコマンドが起動したPython STTも停止します。
-   既に`8787`番ポートが使用中の場合は、既存プロセスを停止せずにエラーを表示します。
+   このコマンドは、AivisSpeech CLIとuv経由のPython STTを別のPowerShell窓で起動します。
+   AivisSpeechがzonokoを提供し、Python STTが`127.0.0.1:8787`で待ち受けた後、
+   exhibitionフロントを現在のPowerShell窓でnpm起動します。
+   フロントを`Ctrl+C`で停止すると、このコマンドが起動したAivisSpeechとPython STTも停止します。
+   既に正常なAivisSpeechが起動中の場合は再利用し、そのプロセスは停止しません。
+   AivisSpeechが別のプロセスで10101番を使用している場合や、既に8787番ポートが使用中の場合は、
+   既存プロセスを停止せずにエラーを表示します。
 
-   手動で起動する場合は、次の2つのPowerShell窓を使用します。
+   手動で起動する場合は、次の3つのPowerShell窓を使用します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1
+   ```
 
    ```powershell
    Push-Location tools/stt
-   uv run python -m vayria_stt.server
+   $env:Path = "$env:USERPROFILE\.vayria\cuda12;$env:Path"
+   uv run --no-cache python -m vayria_stt.server `
+     --model small `
+     --device cuda `
+     --compute-type float16 `
+     --hotwords "Vayria GPT-Live Codex" `
+     --require-primary-profile `
+     --fallback-model tiny `
+     --fallback-device cpu `
+     --fallback-compute-type int8
    Pop-Location
    ```
 

@@ -11,6 +11,7 @@ import {
   parseVoiceAssistantResponse,
 } from '../server/localApi.js';
 import {
+  type ExhibitionCaptureMetadata,
   readExhibitionCaptureMetadata,
   readExhibitionEvents,
 } from '../server/exhibitionCaptureStore.js';
@@ -130,6 +131,24 @@ async function waitForCaptureId(root: string): Promise<string> {
     });
   }
   throw new Error('Exhibition capture was not initialized.');
+}
+
+async function waitForCaptureCompletion(
+  root: string,
+  captureId: string,
+): Promise<ExhibitionCaptureMetadata> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      const metadata = await readExhibitionCaptureMetadata(root, captureId);
+      if (metadata.status === 'completed') return metadata;
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+    }
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+  throw new Error('Exhibition capture was not finalized.');
 }
 
 async function postEvent(
@@ -263,8 +282,7 @@ test('exhibition local API captures safe events and keeps Playcheck raw priority
     );
 
     fake.server.httpServer.emit('close');
-    const metadata = await readExhibitionCaptureMetadata(root, captureId);
-    assert.equal(metadata.status, 'completed');
+    await waitForCaptureCompletion(root, captureId);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
