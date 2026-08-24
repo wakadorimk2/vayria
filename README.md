@@ -143,9 +143,15 @@ URLの変更後はページを再読み込みしてください。
 Mode DはAudio Labでだけ選べる実験Modeです。
 Mode D（Exhibition Mix）の実効endpointは`400ms`です。
 
-展示用STTは`small / CUDA / float16`を優先します。
-ロードに失敗した場合は`tiny / CPU / int8`へfallbackします。
-実際のmodel、device、compute type、fallback理由、model load時間はAudio LabとJSONLへ記録します。
+展示用STTは`small / CUDA / float16`を主プロファイルにします。
+展示起動では主プロファイルのロードに失敗すると起動を失敗させます。
+`tiny / CPU / int8`は明示的な比較実行だけに残します。
+既定のdecodeは`beam_size=3`、`temperature=(0.0, 0.2)`、
+`without_timestamps=True`、`condition_on_previous_text=False`、
+`vad_filter=False`です。
+既定hotwordsは`Vayria GPT-Live Codex`です。
+実効model、device、compute type、fallback理由、model load時間、decode設定はAudio LabとJSONLへ記録します。
+固定音声評価は[`tools/stt/benchmarks/README.md`](tools/stt/benchmarks/README.md)を参照してください。
 
 Sessionはページ内だけの一時状態です。
 履歴、話題、直前のVayria発話、演者状態、カードのターン状態を含みます。

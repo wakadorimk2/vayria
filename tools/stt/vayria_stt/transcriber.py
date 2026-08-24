@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 import re
 from time import perf_counter
 import unicodedata
@@ -16,7 +17,14 @@ TRANSCRIPT_STRIP_CHARACTERS = " \t\r\n\u3000。、．.!！?？…"
 WARM_UP_AUDIO_SAMPLES = 320
 STT_MODEL_VALUES = ("tiny", "base", "small")
 STT_DEVICE_VALUES = ("auto", "cuda", "cpu")
-STT_COMPUTE_TYPE_VALUES = ("auto", "float16", "int8")
+STT_COMPUTE_TYPE_VALUES = ("auto", "float16", "int8", "int8_float16")
+STT_BEAM_SIZE_VALUES = (1, 3)
+DEFAULT_HOTWORDS = "Vayria GPT-Live Codex"
+DEFAULT_BEAM_SIZE = 3
+DEFAULT_TEMPERATURES = (0.0, 0.2)
+DEFAULT_WITHOUT_TIMESTAMPS = True
+DEFAULT_CONDITION_ON_PREVIOUS_TEXT = False
+DEFAULT_VAD_FILTER = False
 
 
 class Transcriber(Protocol):
@@ -42,6 +50,13 @@ class SttRuntimeInfo:
     fallbackUsed: bool
     fallbackReason: str | None
     modelLoadMs: int | None
+    decodeBeamSize: int
+    decodeTemperatures: tuple[float, ...]
+    decodeWithoutTimestamps: bool
+    decodeConditionOnPreviousText: bool
+    decodeVadFilter: bool
+    hotwords: str | None
+    primaryProfileRequired: bool
 
 
 def _normalized_for_hallucination_check(text: str) -> str:
@@ -92,6 +107,13 @@ class FasterWhisperTranscriber:
     fallback_model: str = "tiny"
     fallback_device: str = "cpu"
     fallback_compute_type: str = "int8"
+    beam_size: int = DEFAULT_BEAM_SIZE
+    temperatures: tuple[float, ...] = DEFAULT_TEMPERATURES
+    without_timestamps: bool = DEFAULT_WITHOUT_TIMESTAMPS
+    condition_on_previous_text: bool = DEFAULT_CONDITION_ON_PREVIOUS_TEXT
+    vad_filter: bool = DEFAULT_VAD_FILTER
+    hotwords: str | None = DEFAULT_HOTWORDS
+    require_primary_profile: bool = False
 
     def __post_init__(self) -> None:
         self._model = None
@@ -103,6 +125,19 @@ class FasterWhisperTranscriber:
         self._fallback_used = False
         self._fallback_reason: str | None = None
         self._model_load_ms: int | None = None
+
+        if self.beam_size not in STT_BEAM_SIZE_VALUES:
+            raise ValueError(f"unsupported STT beam size: {self.beam_size}")
+        try:
+            self.temperatures = tuple(float(value) for value in self.temperatures)
+        except (TypeError, ValueError) as error:
+            raise ValueError("STT temperatures must be numeric") from error
+        if not self.temperatures or any(
+            not math.isfinite(value) or value < 0 for value in self.temperatures
+        ):
+            raise ValueError("STT temperatures must be finite and non-negative")
+        if self.hotwords is not None:
+            self.hotwords = self.hotwords.strip() or None
 
         if self.model_name not in STT_MODEL_VALUES:
             raise ValueError(f"unsupported STT model: {self.model_name}")
@@ -162,6 +197,14 @@ class FasterWhisperTranscriber:
             self._fallback_reason = None
         except Exception as primary_error:
             self._model = None
+            self._model_load_ms = max(0, round((perf_counter() - started) * 1_000))
+            if self.require_primary_profile:
+                self._fallback_used = False
+                self._fallback_reason = None
+                raise RuntimeError(
+                    "STT primary profile load failed and fallback is disabled: "
+                    f"{primary_error}"
+                ) from primary_error
             self._fallback_used = True
             self._fallback_reason = (
                 str(primary_error) or primary_error.__class__.__name__
@@ -204,13 +247,15 @@ class FasterWhisperTranscriber:
             segments, _info = model.transcribe(
                 audio,
                 language=language,
-                beam_size=1,
-                temperature=0.0,
+                beam_size=self.beam_size,
+                temperature=self.temperatures,
                 compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
                 log_prob_threshold=LOG_PROB_THRESHOLD,
                 no_speech_threshold=NO_SPEECH_THRESHOLD,
-                condition_on_previous_text=False,
-                vad_filter=True,
+                condition_on_previous_text=self.condition_on_previous_text,
+                vad_filter=self.vad_filter,
+                without_timestamps=self.without_timestamps,
+                hotwords=self.hotwords,
             )
             next(iter(segments), None)
         finally:
@@ -228,6 +273,13 @@ class FasterWhisperTranscriber:
                 fallbackUsed=self._fallback_used,
                 fallbackReason=self._fallback_reason,
                 modelLoadMs=self._model_load_ms,
+                decodeBeamSize=self.beam_size,
+                decodeTemperatures=self.temperatures,
+                decodeWithoutTimestamps=self.without_timestamps,
+                decodeConditionOnPreviousText=self.condition_on_previous_text,
+                decodeVadFilter=self.vad_filter,
+                hotwords=self.hotwords,
+                primaryProfileRequired=self.require_primary_profile,
             )
         )
 
@@ -253,13 +305,15 @@ class FasterWhisperTranscriber:
             segments, _info = self._get_model().transcribe(
                 audio,
                 language=language,
-                beam_size=1,
-                temperature=0.0,
+                beam_size=self.beam_size,
+                temperature=self.temperatures,
                 compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
                 log_prob_threshold=LOG_PROB_THRESHOLD,
                 no_speech_threshold=NO_SPEECH_THRESHOLD,
-                condition_on_previous_text=False,
-                vad_filter=False,
+                condition_on_previous_text=self.condition_on_previous_text,
+                vad_filter=self.vad_filter,
+                without_timestamps=self.without_timestamps,
+                hotwords=self.hotwords,
             )
             raw_text = _raw_transcription_segments(segments)
             if not raw_text:

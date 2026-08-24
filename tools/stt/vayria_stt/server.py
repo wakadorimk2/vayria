@@ -12,7 +12,14 @@ from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
 from .transcriber import (
+    DEFAULT_BEAM_SIZE,
+    DEFAULT_HOTWORDS,
+    DEFAULT_TEMPERATURES,
     FasterWhisperTranscriber,
+    STT_BEAM_SIZE_VALUES,
+    STT_COMPUTE_TYPE_VALUES,
+    STT_DEVICE_VALUES,
+    STT_MODEL_VALUES,
     Transcriber,
     TranscriptionResult,
 )
@@ -317,21 +324,39 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the local Vayria PCM STT service.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
-    parser.add_argument("--model", choices=("tiny", "base", "small"), default="small")
+    parser.add_argument("--model", choices=STT_MODEL_VALUES, default="small")
     parser.add_argument("--language", default="ja")
     parser.add_argument(
         "--device",
-        choices=("auto", "cuda", "cpu"),
+        choices=STT_DEVICE_VALUES,
         default="auto",
     )
     parser.add_argument(
         "--compute-type",
-        choices=("auto", "float16", "int8"),
+        choices=STT_COMPUTE_TYPE_VALUES,
         default="auto",
     )
     parser.add_argument(
+        "--beam-size",
+        type=int,
+        choices=STT_BEAM_SIZE_VALUES,
+        default=DEFAULT_BEAM_SIZE,
+    )
+    parser.add_argument(
+        "--temperatures",
+        type=float,
+        nargs="+",
+        default=list(DEFAULT_TEMPERATURES),
+    )
+    parser.add_argument("--hotwords", default=DEFAULT_HOTWORDS)
+    parser.add_argument(
+        "--require-primary-profile",
+        action="store_true",
+        help="Fail startup instead of loading the comparison fallback profile.",
+    )
+    parser.add_argument(
         "--fallback-model",
-        choices=("tiny", "base", "small"),
+        choices=STT_MODEL_VALUES,
         default="tiny",
     )
     parser.add_argument(
@@ -341,7 +366,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--fallback-compute-type",
-        choices=("auto", "float16", "int8"),
+        choices=STT_COMPUTE_TYPE_VALUES,
         default="int8",
     )
     return parser.parse_args()
@@ -355,6 +380,10 @@ async def run(args: argparse.Namespace) -> None:
         fallback_model=args.fallback_model,
         fallback_device=args.fallback_device,
         fallback_compute_type=args.fallback_compute_type,
+        beam_size=args.beam_size,
+        temperatures=tuple(args.temperatures),
+        hotwords=args.hotwords,
+        require_primary_profile=args.require_primary_profile,
     )
     runtime = await asyncio.to_thread(transcriber.prepare)
     await asyncio.to_thread(transcriber.warm_up, args.language)

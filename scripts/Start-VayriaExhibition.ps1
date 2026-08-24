@@ -6,10 +6,12 @@ param(
   [string]$SttModel = 'small',
 
   [ValidateSet('auto', 'cuda', 'cpu')]
-  [string]$SttDevice = 'auto',
+  [string]$SttDevice = 'cuda',
 
-  [ValidateSet('auto', 'float16', 'int8')]
-  [string]$SttComputeType = 'auto',
+  [ValidateSet('auto', 'float16', 'int8', 'int8_float16')]
+  [string]$SttComputeType = 'float16',
+
+  [string]$SttHotwords = 'Vayria GPT-Live Codex',
 
   [ValidateSet('tiny', 'base', 'small')]
   [string]$SttFallbackModel = 'tiny',
@@ -17,7 +19,7 @@ param(
   [ValidateSet('cpu', 'cuda')]
   [string]$SttFallbackDevice = 'cpu',
 
-  [ValidateSet('auto', 'float16', 'int8')]
+  [ValidateSet('auto', 'float16', 'int8', 'int8_float16')]
   [string]$SttFallbackComputeType = 'int8',
 
   [switch]$SttWindow,
@@ -32,6 +34,7 @@ $sttHost = '127.0.0.1'
 $sttPort = 8787
 $sttStartupTimeoutSeconds = 30
 $launcherMutexName = 'Vayria.ExhibitionLauncher'
+$sttHotwordsArgument = '"' + $SttHotwords.Replace('"', '\"') + '"'
 
 function Resolve-RequiredCommand {
   param(
@@ -236,6 +239,9 @@ if ($SttWindow) {
       $SttDevice
       '--compute-type'
       $SttComputeType
+      '--hotwords'
+      $sttHotwordsArgument
+      '--require-primary-profile'
       '--fallback-model'
       $SttFallbackModel
       '--fallback-device'
@@ -316,6 +322,8 @@ try {
       $SttDevice
       '-SttComputeType'
       $SttComputeType
+      '-SttHotwords'
+      $sttHotwordsArgument
       '-SttFallbackModel'
       $SttFallbackModel
       '-SttFallbackDevice'
