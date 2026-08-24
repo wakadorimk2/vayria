@@ -75,6 +75,8 @@ interface VoiceStartMessage {
   diagnostics?: boolean;
 }
 
+type VoiceBoundaryMessageType = 'speech_started' | 'speech_ended';
+
 function now(): number {
   return Date.now();
 }
@@ -579,6 +581,16 @@ export function createRemotePcmVoiceAdapter(
     currentSocket.send(data);
   };
 
+  const sendBoundaryMessage = (type: VoiceBoundaryMessageType) => {
+    if (!enabled || !serverStarted) return;
+    const currentSocket = socket;
+    if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
+      fail('voice-transport-closed');
+      return;
+    }
+    currentSocket.send(JSON.stringify({ type }));
+  };
+
   const processPcmFrame = (data: ArrayBuffer) => {
     if (!enabled || !serverStarted) return;
     const audioLevel = calculatePcm16Rms(data);
@@ -617,6 +629,14 @@ export function createRemotePcmVoiceAdapter(
       effectiveThreshold,
       vadThreshold,
     });
+
+    // Keep browser-gated PCM boundaries ordered with the binary frames.
+    // The server still uses WebRTC VAD to classify the received audio.
+    for (const vadEvent of vadResult.events) {
+      if (vadEvent.type === 'speech_started') {
+        sendBoundaryMessage('speech_started');
+      }
+    }
     for (const vadEvent of vadResult.events) {
       if (vadEvent.type !== 'rejected') continue;
       emitDiagnostic({
@@ -632,6 +652,11 @@ export function createRemotePcmVoiceAdapter(
     }
     for (const forwardedChunk of vadResult.forwardedChunks) {
       sendBinaryFrame(forwardedChunk);
+    }
+    for (const vadEvent of vadResult.events) {
+      if (vadEvent.type === 'speech_ended') {
+        sendBoundaryMessage('speech_ended');
+      }
     }
   };
 

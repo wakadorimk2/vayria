@@ -13,6 +13,7 @@ export type AudioLabMode = (typeof AUDIO_LAB_MODES)[number];
 export const DEFAULT_AUDIO_INPUT_MODE: AudioLabMode = 'baseline';
 export const DEFAULT_AUDIO_LAB_MODE: AudioLabMode = 'processed';
 export const DEFAULT_VAD_THRESHOLD = 0.02;
+export const DEFAULT_MILD_VAD_THRESHOLD = 0.015;
 export const AUDIO_ENDPOINT_VALUES = [400, 600] as const;
 export type AudioEndpointMs = (typeof AUDIO_ENDPOINT_VALUES)[number];
 export const DEFAULT_AUDIO_ENDPOINT_MS: AudioEndpointMs = 600;
@@ -57,6 +58,7 @@ export const VAD_THRESHOLD_STEP = 0.005;
 export const ADAPTIVE_NOISE_FLOOR_INITIAL = 0.005;
 export const ADAPTIVE_NOISE_FLOOR_ALPHA = 0.05;
 export const ADAPTIVE_NOISE_FLOOR_MULTIPLIER = 2.5;
+export const MILD_NOISE_FLOOR_MULTIPLIER = 2.0;
 export const BARGE_IN_DUCK_GAIN = 0.25;
 export const BARGE_IN_GAIN_RAMP_MS = 20;
 export const BARGE_IN_TIMEOUT_MS = 2_500;
@@ -113,8 +115,8 @@ export const EXHIBITION_AUDIO_PRESET_CONFIGS: Record<
       autoGainControl: false,
     },
     browserGateEnabled: true,
-    defaultVadThreshold: DEFAULT_VAD_THRESHOLD,
-    noiseFloorMultiplier: ADAPTIVE_NOISE_FLOOR_MULTIPLIER,
+    defaultVadThreshold: DEFAULT_MILD_VAD_THRESHOLD,
+    noiseFloorMultiplier: MILD_NOISE_FLOOR_MULTIPLIER,
   },
   aggressive: {
     requestedConstraints: {

@@ -1479,3 +1479,976 @@ input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Vayria salon theme: keep the existing interaction model, quiet the chrome. */
+:root {
+  --ink-navy: #171725;
+  --deep-plum: #5b3c62;
+  --dusty-pink: #d6a6b8;
+  --ivory: #f4efe6;
+  --soft-gold: #c7a86b;
+  --vayria-stage-focus: #5a4165;
+  --vayria-stage-mid: #302b4a;
+  --vayria-stage-edge: #121426;
+}
+
+.app-shell {
+  color: var(--ivory);
+  background:
+    radial-gradient(ellipse at 50% 22%, rgb(91 60 98 / 18%), transparent 54%),
+    linear-gradient(135deg, #171725 0%, #25233d 48%, #121426 100%);
+}
+
+.app-title {
+  top: 1rem;
+  right: clamp(0.85rem, 2.5vw, 1.75rem);
+  left: auto;
+  z-index: 8;
+  color: rgb(244 239 230 / 82%);
+}
+
+.audio-controls {
+  gap: 0.3rem;
+  padding: 0.3rem;
+  border: 1px solid rgb(244 239 230 / 13%);
+  border-radius: 999px;
+  background: rgb(23 23 37 / 44%);
+  box-shadow: 0 8px 24px rgb(5 6 17 / 18%);
+  backdrop-filter: blur(14px);
+}
+
+.control-icon {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+}
+
+.audio-unlock-button,
+.attention-button {
+  display: inline-grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-height: 0;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(244 239 230 / 18%);
+  border-radius: 50%;
+  background: rgb(31 27 49 / 74%);
+  color: var(--ivory);
+  font-size: 0.7rem;
+  line-height: 1;
+  transition:
+    transform 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.audio-unlock-button {
+  border-color: rgb(199 168 107 / 48%);
+  color: #f2dcae;
+}
+
+.attention-button {
+  border-color: rgb(214 166 184 / 38%);
+  color: #efd5df;
+}
+
+.audio-unlock-button:hover,
+.audio-unlock-button:focus-visible,
+.attention-button:hover,
+.attention-button:focus-visible {
+  background: rgb(91 60 98 / 72%);
+  border-color: var(--dusty-pink);
+  box-shadow: 0 6px 18px rgb(10 9 24 / 30%);
+  transform: translateY(-1px);
+}
+
+.attention-button[aria-pressed="true"] {
+  border-color: var(--soft-gold);
+  background: rgb(199 168 107 / 20%);
+  box-shadow: 0 0 0 3px rgb(199 168 107 / 11%);
+  color: #f7e7ba;
+}
+
+.audio-unlock-button:focus-visible,
+.attention-button:focus-visible,
+.mute-button:focus-visible {
+  outline: 2px solid var(--dusty-pink);
+  outline-offset: 3px;
+}
+
+.attention-controls {
+  position: relative;
+  gap: 0.3rem;
+}
+
+.attention-status {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  width: max-content;
+  max-width: min(16rem, 70vw);
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgb(214 166 184 / 20%);
+  border-radius: 0.7rem;
+  background: rgb(23 23 37 / 84%);
+  color: rgb(244 239 230 / 72%);
+  box-shadow: 0 10px 24px rgb(5 6 17 / 22%);
+  backdrop-filter: blur(12px);
+}
+
+.mute-button {
+  border-color: rgb(244 239 230 / 23%);
+  background: rgb(31 27 49 / 68%);
+}
+
+.mute-button:hover {
+  border-color: var(--dusty-pink);
+  background: rgb(91 60 98 / 68%);
+}
+
+.volume-slider {
+  accent-color: var(--soft-gold);
+}
+
+.volume-value {
+  color: rgb(244 239 230 / 68%);
+}
+
+.vrm-stage {
+  --stage-background-focus: var(--vayria-stage-focus);
+  --stage-background-mid: var(--vayria-stage-mid);
+  --stage-background-edge: var(--vayria-stage-edge);
+  background:
+    radial-gradient(
+      ellipse at 50% 34%,
+      rgb(214 166 184 / 13%) 0%,
+      transparent 34%
+    ),
+    radial-gradient(
+      ellipse at 50% 64%,
+      rgb(91 60 98 / 30%) 0%,
+      transparent 66%
+    ),
+    linear-gradient(145deg, #292640 0%, #342b4b 46%, #121426 100%);
+}
+
+.vrm-stage::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse at 50% 36%,
+      transparent 24%,
+      rgb(8 8 21 / 10%) 68%,
+      rgb(8 8 21 / 42%) 100%
+    ),
+    linear-gradient(180deg, rgb(16 15 32 / 12%), transparent 54%, rgb(8 8 21 / 28%));
+  content: "";
+  pointer-events: none;
+}
+
+.stage-message,
+.expression-warning {
+  z-index: 2;
+}
+
+.card-prototype {
+  z-index: 2;
+}
+
+.app-shell[data-app-mode="exhibition"] .exhibition-copy {
+  z-index: 4;
+  color: var(--ivory);
+  text-shadow: 0 3px 18px rgb(8 8 21 / 68%);
+}
+
+.app-shell[data-app-mode="exhibition"] .exhibition-copy__title {
+  letter-spacing: 0.06em;
+}
+
+.app-shell[data-app-mode="exhibition"] .exhibition-copy__hint {
+  color: rgb(244 239 230 / 68%);
+}
+
+.conversation {
+  gap: 0.55rem;
+  padding: 0.7rem clamp(1rem, 4vw, 3rem) 0.85rem;
+  border-top-color: rgb(214 166 184 / 13%);
+  background:
+    linear-gradient(180deg, rgb(23 23 37 / 62%), rgb(12 13 26 / 92%)),
+    var(--ink-navy);
+  box-shadow: 0 -12px 32px rgb(5 6 17 / 23%);
+  backdrop-filter: blur(14px);
+}
+
+.conversation-copy {
+  min-height: 2.1rem;
+}
+
+.reply {
+  color: var(--ivory);
+}
+
+.status {
+  color: rgb(214 166 184 / 68%);
+  font-size: 0.74rem;
+  letter-spacing: 0.03em;
+}
+
+.conversation-error {
+  color: #f0b8b7;
+}
+
+.voice-input-hint {
+  color: rgb(244 239 230 / 52%);
+}
+
+.message-form {
+  gap: 0.55rem;
+}
+
+.message-form input {
+  padding: 0.72rem 0.95rem;
+  border-color: rgb(214 166 184 / 22%);
+  border-radius: 0.8rem;
+  background: rgb(31 27 49 / 62%);
+  color: var(--ivory);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+  backdrop-filter: blur(10px);
+}
+
+.message-form input:focus-visible {
+  border-color: var(--dusty-pink);
+  box-shadow: 0 0 0 2px rgb(214 166 184 / 20%);
+}
+
+.message-form input::placeholder {
+  color: rgb(244 239 230 / 42%);
+}
+
+.message-form button {
+  min-width: 5.5rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid rgb(199 168 107 / 48%);
+  border-radius: 0.8rem;
+  background: linear-gradient(145deg, #d6b87b, #a98150);
+  color: #241d20;
+  box-shadow: 0 7px 16px rgb(5 6 17 / 18%);
+}
+
+.message-form .voice-input-button {
+  min-width: 8rem;
+  border-color: rgb(214 166 184 / 28%);
+  background: rgb(91 60 98 / 70%);
+  color: var(--ivory);
+}
+
+.message-form .voice-input-button[aria-pressed="true"] {
+  border-color: var(--dusty-pink);
+  background: rgb(178 108 133 / 78%);
+}
+
+.message-form button:hover:not(:disabled),
+.message-form button:focus-visible {
+  border-color: var(--ivory);
+  box-shadow: 0 9px 20px rgb(5 6 17 / 28%);
+  transform: translateY(-1px);
+}
+
+.message-form button:focus-visible {
+  outline: 2px solid var(--dusty-pink);
+  outline-offset: 3px;
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation {
+  margin-inline: clamp(1rem, 5vw, 3rem);
+  padding: 0.55rem 0 0.75rem;
+  border-top: 0;
+  background: linear-gradient(180deg, transparent, rgb(12 13 26 / 68%));
+  box-shadow: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation-copy {
+  min-height: 1.8rem;
+}
+
+.app-shell[data-app-mode="exhibition"] .status {
+  margin-top: 0.2rem;
+  color: rgb(244 239 230 / 55%);
+  font-size: clamp(0.7rem, 1.2vw, 0.82rem);
+  text-shadow: 0 2px 9px rgb(8 8 21 / 78%);
+}
+
+.app-shell[data-app-mode="exhibition"] .reply {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgb(214 166 184 / 13%);
+  border-radius: 0.8rem;
+  background: linear-gradient(180deg, rgb(23 23 37 / 16%), rgb(12 13 26 / 58%));
+  text-shadow: 0 2px 9px rgb(8 8 21 / 82%);
+  backdrop-filter: blur(8px);
+}
+
+@media (max-width: 720px) {
+  .app-title {
+    top: 0.7rem;
+    right: 0.7rem;
+  }
+
+  .audio-controls {
+    padding: 0.24rem;
+  }
+
+  .audio-unlock-button,
+  .attention-button {
+    width: 2.05rem;
+    height: 2.05rem;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .conversation {
+    margin-inline: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audio-unlock-button,
+  .attention-button,
+  .message-form button {
+    transition: none;
+  }
+
+  .audio-unlock-button:hover,
+  .audio-unlock-button:focus-visible,
+  .attention-button:hover,
+  .attention-button:focus-visible,
+  .message-form button:hover:not(:disabled),
+  .message-form button:focus-visible {
+    transform: none;
+  }
+}
+
+/* Vayria salon polish: Civ-inspired ornament with a restrained glass surface. */
+.app-shell {
+  --vayria-frame-inset: clamp(0.45rem, 0.8vw, 0.8rem);
+  --vayria-frame-width: clamp(1px, 0.12vw, 2px);
+  --vayria-frame-inner-gap: clamp(3px, 0.35vw, 5px);
+  --vayria-frame-ornament-length: clamp(0.75rem, 1.4vw, 1.1rem);
+  --vayria-frame-gold: #d6b875;
+  --vayria-frame-outer: rgb(199 168 107 / 78%);
+  --vayria-frame-highlight: #f1dfad;
+  --vayria-frame-shadow: #80633f;
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell::before {
+  position: absolute;
+  z-index: 40;
+  inset: var(--vayria-frame-inset);
+  border: var(--vayria-frame-width) solid var(--vayria-frame-outer);
+  border-radius: clamp(0.7rem, 1.2vw, 1.1rem);
+  background:
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) left top /
+      var(--vayria-frame-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) left top /
+      1px var(--vayria-frame-ornament-length) no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) right top /
+      var(--vayria-frame-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) right top /
+      1px var(--vayria-frame-ornament-length) no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) left bottom /
+      var(--vayria-frame-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) left bottom /
+      1px var(--vayria-frame-ornament-length) no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) right bottom /
+      var(--vayria-frame-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) right bottom /
+      1px var(--vayria-frame-ornament-length) no-repeat;
+  background-origin: border-box;
+  box-shadow:
+    0 0 0 1px var(--vayria-frame-shadow),
+    0 0 12px rgb(199 168 107 / 10%),
+    inset 0 1px 0 rgb(244 239 230 / 24%);
+  content: "";
+  pointer-events: none;
+}
+
+.app-shell::after {
+  position: absolute;
+  z-index: 41;
+  inset: calc(
+    var(--vayria-frame-inset) + var(--vayria-frame-width) + var(--vayria-frame-inner-gap)
+  );
+  border: 1px solid rgb(214 184 117 / 76%);
+  border-radius: clamp(0.5rem, 1vw, 0.9rem);
+  background:
+    radial-gradient(
+        circle,
+        var(--vayria-frame-highlight) 0 1.5px,
+        transparent 1.8px
+      )
+      center top / 0.5rem 0.5rem no-repeat,
+    radial-gradient(
+        circle,
+        var(--vayria-frame-highlight) 0 1.5px,
+        transparent 1.8px
+      )
+      center bottom / 0.5rem 0.5rem no-repeat;
+  box-shadow:
+    inset 0 0 7px rgb(244 239 230 / 12%),
+    0 0 6px rgb(214 184 117 / 8%);
+  content: "";
+  pointer-events: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation {
+  position: absolute;
+  z-index: 3;
+  right: clamp(1rem, 5vw, 3rem);
+  bottom: var(--exhibition-hand-reserved-height);
+  left: clamp(1rem, 5vw, 3rem);
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .message-form {
+  display: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation-copy {
+  display: grid;
+  justify-items: center;
+  width: 100%;
+  min-height: 0;
+  text-align: center;
+}
+
+.app-shell[data-app-mode="exhibition"] .reply {
+  display: -webkit-box;
+  width: fit-content;
+  max-width: min(72vw, 34rem);
+  margin-inline: auto;
+  overflow: hidden;
+  padding: 0.28rem 0.78rem;
+  border: 1px solid rgb(244 239 230 / 15%);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgb(244 239 230 / 9%), rgb(23 23 37 / 20%));
+  box-shadow:
+    0 5px 18px rgb(8 8 21 / 14%),
+    inset 0 1px 0 rgb(255 255 255 / 12%);
+  color: var(--ivory);
+  font-size: clamp(0.9rem, 2.1vw, 1.2rem);
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 0 2px 8px rgb(8 8 21 / 78%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.app-shell[data-app-mode="exhibition"] .status {
+  margin-top: 0.25rem;
+  color: rgb(244 239 230 / 52%);
+  font-size: clamp(0.68rem, 1.1vw, 0.78rem);
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-shadow: 0 2px 8px rgb(8 8 21 / 72%);
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation-error {
+  border: 1px solid rgb(240 184 183 / 42%);
+  box-shadow: 0 6px 18px rgb(31 8 13 / 26%);
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    --vayria-frame-inset: 0.35rem;
+    --vayria-frame-width: 1px;
+    --vayria-frame-inner-gap: 2px;
+    --vayria-frame-ornament-length: 0.7rem;
+  }
+
+  .app-shell::before {
+    border-radius: 0.7rem;
+  }
+
+  .app-shell::after {
+    border-radius: 0.55rem;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .reply {
+    max-width: calc(100vw - 2.5rem);
+  }
+}
+
+/* Vayria salon second pass: keep utility chrome quiet and tactile. */
+.audio-controls {
+  gap: 0.2rem;
+  padding: 0.22rem;
+  border-color: rgb(244 239 230 / 11%);
+  background: rgb(23 23 37 / 32%);
+  box-shadow: 0 5px 16px rgb(5 6 17 / 12%);
+}
+
+.audio-unlock-button,
+.attention-button {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-color: rgb(214 184 117 / 42%);
+  background: rgb(31 27 49 / 58%);
+  box-shadow: 0 3px 9px rgb(5 6 17 / 12%);
+}
+
+.attention-button {
+  border-color: rgb(214 166 184 / 30%);
+}
+
+.audio-unlock-button:hover,
+.audio-unlock-button:focus-visible,
+.attention-button:hover,
+.attention-button:focus-visible {
+  border-color: rgb(214 184 117 / 70%);
+  background: rgb(91 60 98 / 58%);
+  box-shadow: 0 4px 12px rgb(10 9 24 / 20%);
+}
+
+.attention-status {
+  border-color: rgb(214 184 117 / 24%);
+  background: rgb(23 23 37 / 72%);
+  box-shadow: 0 8px 18px rgb(5 6 17 / 16%);
+}
+
+.conversation {
+  gap: 0.55rem;
+  padding: 0.6rem clamp(1rem, 4vw, 3rem) 0.75rem;
+  border-top: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.conversation-copy {
+  width: min(100%, 48rem);
+  min-height: 0;
+  margin-inline: auto;
+  padding: 0.38rem 0.78rem;
+  border: 1px solid rgb(244 239 230 / 11%);
+  border-radius: 0.95rem;
+  background:
+    linear-gradient(180deg, rgb(244 239 230 / 7%), rgb(23 23 37 / 20%)),
+    rgb(23 23 37 / 22%);
+  box-shadow:
+    0 8px 20px rgb(5 6 17 / 10%),
+    inset 0 1px 0 rgb(255 255 255 / 10%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.conversation .reply {
+  font-size: clamp(0.95rem, 1.8vw, 1.15rem);
+  line-height: 1.45;
+}
+
+.conversation .status {
+  color: rgb(244 239 230 / 54%);
+  font-size: 0.72rem;
+  letter-spacing: 0.035em;
+}
+
+.conversation .conversation-error {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.34rem 0.62rem;
+  border: 1px solid rgb(240 184 183 / 48%);
+  border-radius: 0.65rem;
+  background: rgb(82 26 31 / 60%);
+  box-shadow: 0 5px 14px rgb(31 8 13 / 18%);
+}
+
+.message-form input {
+  border-color: rgb(214 166 184 / 18%);
+  background: rgb(31 27 49 / 50%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation-copy {
+  width: fit-content;
+  max-width: min(72vw, 34rem);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .reply {
+  border-color: rgb(214 184 117 / 28%);
+  background:
+    linear-gradient(180deg, rgb(244 239 230 / 8%), rgb(23 23 37 / 24%)),
+    rgb(23 23 37 / 18%);
+  box-shadow:
+    0 5px 16px rgb(8 8 21 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 11%);
+}
+
+.app-shell[data-app-mode="exhibition"] .status {
+  color: rgb(244 239 230 / 50%);
+  font-size: clamp(0.68rem, 1.1vw, 0.78rem);
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation-error {
+  border-color: rgb(240 184 183 / 58%);
+  background: rgb(82 26 31 / 72%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audio-unlock-button,
+  .attention-button,
+  .conversation-copy,
+  .message-form input {
+    transition: none;
+  }
+}
+
+/* Vayria microphone UX: keep the normal state quiet and expand vertically. */
+.app-shell[data-app-mode="exhibition"] .audio-controls {
+  position: relative;
+  gap: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-control {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button,
+.app-shell[data-app-mode="exhibition"] .attention-button {
+  display: inline-grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-height: 0;
+  padding: 0;
+  place-items: center;
+  border-radius: 50%;
+  white-space: nowrap;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button {
+  --microphone-glow-size: 1px;
+  --microphone-pulse-scale: 1;
+  --microphone-ring-opacity: 0;
+  --microphone-ring-scale: 1;
+  position: relative;
+  border-color: rgb(214 184 117 / 48%);
+  background: rgb(31 27 49 / 62%);
+  color: #f2dcae;
+  box-shadow:
+    0 0 0 1px rgb(214 184 117 / 12%),
+    0 4px 12px rgb(5 6 17 / 16%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-state="off"] {
+  border-color: rgb(244 239 230 / 23%);
+  background: rgb(23 23 37 / 42%);
+  color: rgb(244 239 230 / 70%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-state="on"] {
+  border-color: rgb(214 184 117 / 68%);
+  background: rgb(199 168 107 / 17%);
+  color: #f4dfac;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-state="error"] {
+  border-color: rgb(240 184 183 / 76%);
+  background: rgb(82 26 31 / 56%);
+  color: #f5c1bb;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button::before {
+  position: absolute;
+  inset: -0.27rem;
+  border: 1px solid rgb(214 184 117 / 24%);
+  border-radius: 50%;
+  content: "";
+  opacity: var(--microphone-ring-opacity);
+  pointer-events: none;
+  transform: scale(var(--microphone-ring-scale));
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-input-active="true"] .control-icon {
+  animation: microphone-input-pulse 1.8s ease-in-out infinite;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"] {
+  border-color: var(--soft-gold);
+  box-shadow:
+    0 0 0 1px rgb(244 239 230 / 24%),
+    0 0 var(--microphone-glow-size) rgb(214 184 117 / 48%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before {
+  animation: microphone-threshold-ring 280ms ease-out;
+  border-color: var(--soft-gold);
+  opacity: 1;
+}
+
+.app-shell[data-app-mode="exhibition"] .attention-button {
+  border-color: rgb(214 166 184 / 34%);
+  background: rgb(31 27 49 / 56%);
+  color: #efd5df;
+}
+
+.app-shell[data-app-mode="exhibition"] .attention-button[data-state="on"] {
+  border-color: rgb(214 184 117 / 66%);
+  background: rgb(199 168 107 / 18%);
+  color: #f7e7ba;
+}
+
+.app-shell[data-app-mode="exhibition"] .control-state {
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 0.5rem);
+  left: 50%;
+  display: flex;
+  width: 4.4rem;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.48rem 0.38rem 0.42rem;
+  border: 1px solid rgb(214 184 117 / 32%);
+  border-radius: 0.9rem;
+  background:
+    linear-gradient(180deg, rgb(244 239 230 / 8%), rgb(23 23 37 / 30%)),
+    rgb(23 23 37 / 78%);
+  box-shadow:
+    0 10px 24px rgb(5 6 17 / 24%),
+    inset 0 1px 0 rgb(255 255 255 / 10%);
+  color: var(--ivory);
+  pointer-events: auto;
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster[hidden] {
+  display: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster[data-state="error"] {
+  border-color: rgb(240 184 183 / 60%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster[data-threshold-crossing="true"] {
+  border-color: rgb(214 184 117 / 62%);
+  box-shadow:
+    0 10px 24px rgb(5 6 17 / 24%),
+    0 0 12px rgb(214 184 117 / 20%),
+    inset 0 1px 0 rgb(255 255 255 / 10%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter {
+  --microphone-meter-height: clamp(7rem, 18vh, 10rem);
+  position: relative;
+  width: 1.55rem;
+  height: var(--microphone-meter-height);
+  overflow: visible;
+  border: 1px solid rgb(244 239 230 / 17%);
+  border-radius: 999px;
+  background: rgb(10 10 24 / 54%);
+  box-shadow: inset 0 1px 4px rgb(5 6 17 / 30%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__fill {
+  position: absolute;
+  right: 0.18rem;
+  bottom: 0.18rem;
+  left: 0.18rem;
+  display: block;
+  max-height: calc(100% - 0.36rem);
+  min-height: 0;
+  border-radius: inherit;
+  background: linear-gradient(0deg, #b99461, #e9ce8e 68%, #f1dfad);
+  box-shadow: 0 0 7px rgb(214 184 117 / 26%);
+  transition: height 100ms linear;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__threshold {
+  position: absolute;
+  right: -0.35rem;
+  left: -0.35rem;
+  height: 0.22rem;
+  border: 1px solid rgb(244 239 230 / 72%);
+  border-radius: 999px;
+  background: var(--soft-gold);
+  box-shadow: 0 0 0 1px rgb(23 23 37 / 60%), 0 0 7px rgb(214 184 117 / 44%);
+  pointer-events: none;
+  transform: translateY(50%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--microphone-meter-height);
+  height: 1.55rem;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: ns-resize;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  z-index: 2;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-webkit-slider-runnable-track {
+  height: 0.22rem;
+  background: transparent;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-webkit-slider-thumb {
+  width: 0.82rem;
+  height: 0.82rem;
+  margin-top: -0.3rem;
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid #f4efe6;
+  border-radius: 50%;
+  background: var(--soft-gold);
+  box-shadow: 0 0 0 2px rgb(23 23 37 / 62%), 0 0 7px rgb(214 184 117 / 50%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-moz-range-track {
+  height: 0.22rem;
+  background: transparent;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-moz-range-thumb {
+  width: 0.82rem;
+  height: 0.82rem;
+  border: 1px solid #f4efe6;
+  border-radius: 50%;
+  background: var(--soft-gold);
+  box-shadow: 0 0 0 2px rgb(23 23 37 / 62%), 0 0 7px rgb(214 184 117 / 50%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input:disabled {
+  cursor: not-allowed;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input:focus-visible {
+  outline: 2px solid var(--dusty-pink);
+  outline-offset: 3px;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle {
+  display: inline-grid;
+  width: 1.7rem;
+  height: 1.7rem;
+  min-height: 0;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(244 239 230 / 22%);
+  border-radius: 50%;
+  background: rgb(23 23 37 / 52%);
+  color: rgb(244 239 230 / 72%);
+  cursor: pointer;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] {
+  border-color: rgb(214 184 117 / 70%);
+  background: rgb(199 168 107 / 18%);
+  color: #f4dfac;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="error"] {
+  border-color: rgb(240 184 183 / 76%);
+  background: rgb(82 26 31 / 56%);
+  color: #f5c1bb;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle:focus-visible {
+  outline: 2px solid var(--dusty-pink);
+  outline-offset: 3px;
+}
+
+@keyframes microphone-input-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 1px rgb(214 184 117 / 26%));
+    transform: scale(1);
+  }
+
+  50% {
+    filter: drop-shadow(0 0 var(--microphone-glow-size) rgb(214 184 117 / 52%));
+    transform: scale(var(--microphone-pulse-scale));
+  }
+}
+
+@keyframes microphone-threshold-ring {
+  0% {
+    opacity: 0.8;
+    transform: scale(0.9);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.16);
+  }
+}
+
+@media (max-width: 720px) {
+  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button,
+  .app-shell[data-app-mode="exhibition"] .attention-button {
+    width: 2.05rem;
+    height: 2.05rem;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .microphone-adjuster {
+    width: 4.15rem;
+    padding-inline: 0.3rem;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter {
+    --microphone-meter-height: clamp(6.4rem, 18vh, 8.5rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-input-active="true"] .control-icon,
+  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before {
+    animation: none;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__fill {
+    transition: none;
+  }
+}
