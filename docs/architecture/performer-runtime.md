@@ -18,7 +18,11 @@ The runtime does not contain Vayria- or WildCard-specific concepts.
 App.tsx
   ├─ viewer input
   ├─ card insert
-  └─ autonomous timer
+  └─ Evidence observation
+       ↓
+autonomyState / candidate scheduler
+       ↓
+Performer Core
        ↓
 useConversation
        ├─ /api/chat
@@ -32,16 +36,17 @@ Before v0.1, `useConversation` owned conversation state, emotion reset, TTS, and
 
 Before v0.1, cards were sent as card IDs and prompt instructions.
 
-Before v0.1, `useAutonomousTalk` selected the fixed 4-second and 8–18-second timer distribution.
+The current autonomous path does not use elapsed time as a speech trigger.
+`useAutonomousTalk` dispatches only an already admitted Evidence candidate.
 
 ### v0.1 integration boundary
 
 ```text
-viewer / timer
+Evidence / interaction state
       ↓
-Performer Core
+Evidence → CandidateReason stack
       ↓
-Action Intent
+salience-ranked candidate gate
       ↓
 Direction Contributions
       ↓
@@ -64,6 +69,7 @@ The current source mapping is:
 | Baseline intent and plan resolver | `src/performer/runtime.ts` |
 | React state bridge | `src/performer/usePerformerRuntime.ts` |
 | Voice floor state and pending context | `src/conversation/floorController.ts` |
+| Evidence, reasons, episodes, and safety fuse | `src/conversation/autonomyState.ts` |
 | Committed semantic dialogue history | `src/conversation/semanticDialogueHistory.ts` |
 | Autonomous topic and latest viewer intent | `src/conversation/autonomousContext.ts`, `src/App.tsx` |
 | Latest completed self utterance | `src/conversation/useConversation.ts`, `server/localApi.ts` |
@@ -72,7 +78,7 @@ The current source mapping is:
 | Voice interaction timeline | `src/conversation/interactionTimeline.ts`, `src/voice/voiceLabRecorder.ts` |
 | WildCard direction | `src/cards/wildcardDirection.ts` |
 | Request and playback execution | `src/conversation/useConversation.ts` |
-| Autonomous timer and environment checks | `src/conversation/useAutonomousTalk.ts` |
+| Candidate scheduler and environment checks | `src/conversation/useAutonomousTalk.ts` |
 | In-memory session orchestration | `src/App.tsx`, conversation and card hooks |
 | LLM and TTS provider boundary | `server/localApi.ts` |
 | Expression, gaze, and idle motion | `src/avatar/VrmStage.tsx`, `src/avatar/idleMotion.ts`, `src/avatar/idleGaze.ts` |
@@ -139,7 +145,11 @@ The Core accepts only generic triggers.
 ```ts
 type PerformerTrigger =
   | { kind: 'viewer_message'; text: string }
-  | { kind: 'idle_tick'; elapsedMs: number }
+  | {
+      kind: 'autonomous_candidate';
+      episodeId: string;
+      reasonIds: readonly string[];
+    }
   | {
       kind: 'external_stimulus';
       semanticCue: string;
@@ -161,11 +171,11 @@ The same boundary can receive a game event, a tip, or a system event later.
 
 ### React boundary
 
-`useAutonomousTalk` measures timer readiness, visibility, mute state, and busy state.
+`useAutonomousTalk` measures candidate readiness, visibility, mute state, and busy state.
 
-It calls `getNextAutonomousDelay()`.
+It does not create a candidate and it does not calculate a delay.
 
-The Performer Runtime applies initiative and energy.
+The Performer Runtime receives `autonomous_candidate` only after the Evidence gate admits it.
 
 The hook does not decide whether the performer wants to speak.
 
@@ -183,24 +193,23 @@ structured viewer intent, the age of that intent, the viewer engagement state,
 the last autonomous reply, Performer State, and per-turn card state.
 
 The viewer intent is derived from the latest input and does not store its raw
-text. The age counts completed non-silent autonomous turns since that input.
-Explicit conversation-closing input sets viewer engagement to `settled`.
-The autonomous timer waits in that state until substantive viewer input returns
-the state to `available`. Backchannels and unfinished fragments do not reopen it.
+text. The age remains auxiliary context for the LLM.
+Evidence and CandidateReason state control autonomous evaluation.
+Explicit conversation-closing input does not create a reason by itself.
+Pure backchannels do not create a reason.
 
-The loop starts after the avatar and audio are ready.
-It schedules the initial four-second delay, then schedules the next delay after
-speech, silence, or a local non-speech plan completes. Microphone readiness alone
-does not stop the loop; viewer VAD speech and STT processing do. Active performer
-work still blocks a new autonomous candidate.
+The scheduler starts after the avatar and audio are ready.
+It dispatches only active reasons whose latest Evidence has not been evaluated.
+Viewer VAD speech and STT processing block dispatch.
+Active performer work also blocks dispatch.
 
-A communication failure pauses the autonomous loop and preserves the session.
-Manual input can resume the loop.
-Mute and page invisibility pause the loop without resetting session data.
+A communication failure does not recreate the same candidate.
+New Evidence can create or wake a later candidate.
+Mute and page invisibility pause dispatch without resetting session data.
 
 `Session Reset` is a local development control.
 It stops active requests, playback, and non-speech timers.
-It resets the in-memory session and starts a new initial-delay cycle.
+It resets the in-memory session and clears Evidence candidates.
 `Reset Turn` remains a card-only reset.
 
 The session is not persisted.
@@ -265,7 +274,7 @@ structured event records.
 - emotion and attention half-life
 - energy baseline
 - response and pre-reaction timing
-- autonomous timing distribution
+- candidate readiness and bounded safety state
 
 The default profile preserves the previous exhibition timing as its starting point.
 
@@ -278,7 +287,7 @@ Cards modify the effective profile for a plan.
 Examples:
 
 - `viewer_message` prefers `speak`.
-- `idle_tick` can choose `speak`, `react_nonverbally`, or `ignore`.
+- `autonomous_candidate` resolves to `speak` after the candidate gate.
 - a generic external stimulus prefers a non-verbal reaction.
 - a Direction constraint can resolve an external stimulus to speech.
 
@@ -471,21 +480,22 @@ Performer Core creates intent
 central resolver creates Performance Plan
 ```
 
-### Autonomous tick
+### Autonomous candidate
 
 ```text
-timer readiness
+external Evidence
   ↓
-getNextAutonomousDelay()
+CandidateReason stack
   ↓
-idle_tick
+salience-ranked candidate
   ↓
-initiative + energy
+autonomous_candidate
   ↓
-speak / wait / ignore / non-verbal reaction
+LLM: speak / none + internalDelta
 ```
 
-If the plan does not speak, the runtime completes a non-speech plan locally.
+If the LLM returns `none`, the runtime stores its valid internal delta and completes
+the plan without outward speech.
 
 If the plan speaks, `useConversation` performs the LLM and TTS request.
 
@@ -498,7 +508,7 @@ The conversation generation guard rejects stale fetch and playback completions.
 The active plan ID guard rejects stale `PerformanceResult` updates.
 
 Session Reset increments the session generation before it clears active state.
-Old autonomous callbacks and non-speech timers cannot create or complete a plan
+Old callbacks and non-speech plan timers cannot create or complete a plan
 in the new session.
 
 ## 8. Prior art and Build / Buy / Borrow decision
@@ -569,7 +579,7 @@ The current MVP uses the existing VRM stage and an idle VRM LookAt controller. M
 - persistent emotion across turns;
 - emotion activation decay;
 - pre-reaction before speech;
-- initiative-controlled autonomous cadence;
+- evidence-driven autonomous candidate evaluation;
 - baseline attention target and gaze;
 - Performance Result to State transition.
 
@@ -598,7 +608,7 @@ The current MVP uses the existing VRM stage and an idle VRM LookAt controller. M
 
 The implementation is organized around these boundaries:
 
-1. `VAYRIA-PERFORMER-01`: Core, State, Profile, generic Trigger, baseline policy, autonomous delay.
+1. `VAYRIA-PERFORMER-01`: Core, State, Profile, generic Trigger, baseline policy, candidate handoff.
 2. `VAYRIA-PERFORMANCE-02`: Intent, Plan, pre-reaction, Result, State reducer.
 3. `VAYRIA-DIRECTION-03`: Direction Contribution, Effect, Constraint, central resolver.
 4. `VAYRIA-WILDCARD-04`: card translation, card modifiers, effect lifecycle, WildCard constraint.

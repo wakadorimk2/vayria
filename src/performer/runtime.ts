@@ -262,6 +262,11 @@ export function classifyFastPathAction(
   profile: PerformerProfile = DEFAULT_PERFORMER_PROFILE,
   random = Math.random,
 ): ConversationActionDecision | null {
+  // Fast-path classification is content-based. Runtime state and randomness
+  // remain in the signature for the stable Performer API.
+  void state;
+  void profile;
+  void random;
   switch (trigger.kind) {
     case 'viewer_message':
       return classifyViewerMessageFastPath(trigger.text);
@@ -269,19 +274,8 @@ export function classifyFastPathAction(
       return createActionDecision('react_nonverbally');
     case 'memory_callback':
       return createActionDecision('take_floor');
-    case 'idle_tick': {
-      const initiative = clamp(profile.initiativeBaseline);
-      const energyFactor = 0.55 + state.energy * 0.45;
-      const speakChance = clamp(0.16 + initiative * 0.62 * energyFactor);
-      const roll = random();
-      return createActionDecision(
-        roll < speakChance
-          ? 'take_floor'
-          : roll < speakChance + 0.18
-            ? 'react_nonverbally'
-            : 'wait',
-      );
-    }
+    case 'autonomous_candidate':
+      return createActionDecision('take_floor');
   }
 }
 
@@ -413,7 +407,7 @@ function updateStateForTrigger(
             },
           }
         : state;
-    case 'idle_tick':
+    case 'autonomous_candidate':
       return state;
   }
 }
@@ -472,13 +466,11 @@ export function createActionIntent(
         attentionTarget: 'chat',
         speechContext,
     };
-    case 'idle_tick': {
+    case 'autonomous_candidate': {
       return {
         trigger: trigger.kind,
-        preferredIntent: actionDecision
-          ? actionToPerformanceIntent(actionDecision)
-          : 'wait',
-        ...(actionDecision ? { actionDecision } : {}),
+        preferredIntent: 'speak',
+        actionDecision: createActionDecision('take_floor'),
         attentionTarget: attentionTarget === 'none' ? 'viewer' : attentionTarget,
         speechContext,
       };
@@ -835,7 +827,7 @@ export function reducePerformanceResult(
     ? result.speechEndedAt ?? result.completedAt
     : nextState.lastSpeechAt;
   const energyDelta = result.spokenText
-    ? result.trigger === 'idle_tick'
+    ? result.trigger === 'autonomous_candidate'
       ? -0.055
       : -0.025
     : 0;
@@ -847,25 +839,6 @@ export function reducePerformanceResult(
     emotion,
     lastSpeechAt,
   };
-}
-
-export function getNextAutonomousDelay(
-  state: PerformerState,
-  profile: PerformerProfile = DEFAULT_PERFORMER_PROFILE,
-  isFirstTick: boolean,
-  random = Math.random,
-): number {
-  if (isFirstTick) {
-    return Math.round(profile.autonomousInitialDelayMs);
-  }
-
-  const base =
-    profile.autonomousMinDelayMs +
-    random() * (profile.autonomousMaxDelayMs - profile.autonomousMinDelayMs);
-  const initiativeFactor = 1.35 - clamp(profile.initiativeBaseline) * 0.7;
-  return Math.round(
-    Math.max(profile.autonomousMinDelayMs, base * initiativeFactor),
-  );
 }
 
 export { DEFAULT_PERFORMER_PROFILE };

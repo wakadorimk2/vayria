@@ -1,34 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 
-export const INITIAL_AUTONOMOUS_DELAY_MS = 4_000;
-export const AUTONOMOUS_MIN_DELAY_MS = 8_000;
-export const AUTONOMOUS_MAX_DELAY_MS = 18_000;
-
-interface UseAutonomousTalkOptions {
-  cancelAutonomous: () => void;
-  getNextAutonomousDelay: () => number;
+export interface AutonomousSchedulerState {
+  hasCandidate: boolean;
   isBusy: boolean;
   isVoiceActivityActive: boolean;
   isLoopEnabled: boolean;
-  isWaitingForViewer: boolean;
-  isMuted: boolean;
-  isReady: boolean;
-  sessionGeneration: number;
-  onIdleTick: () => Promise<boolean>;
-}
-
-export function shouldScheduleAutonomousTalk(state: {
-  isBusy: boolean;
-  isVoiceActivityActive: boolean;
-  isLoopEnabled: boolean;
-  isWaitingForViewer: boolean;
   isMuted: boolean;
   isReady: boolean;
   isVisible: boolean;
-}): boolean {
+}
+
+export function shouldScheduleAutonomousTalk(
+  state: AutonomousSchedulerState,
+): boolean {
   return (
+    state.hasCandidate &&
     !state.isMuted &&
-    !state.isWaitingForViewer &&
     state.isLoopEnabled &&
     !state.isVoiceActivityActive &&
     state.isReady &&
@@ -37,36 +24,49 @@ export function shouldScheduleAutonomousTalk(state: {
   );
 }
 
+interface UseAutonomousTalkOptions {
+  cancelAutonomous: () => void;
+  candidateKey: string | null;
+  hasCandidate: boolean;
+  isBusy: boolean;
+  isVoiceActivityActive: boolean;
+  isLoopEnabled: boolean;
+  isMuted: boolean;
+  isReady: boolean;
+  sessionGeneration: number;
+  onCandidate: () => Promise<boolean>;
+}
+
+/**
+ * Dispatches an already admitted candidate when the runtime becomes ready.
+ * Time passage alone never creates or dispatches a candidate.
+ */
 export function useAutonomousTalk({
   cancelAutonomous,
-  getNextAutonomousDelay,
+  candidateKey,
+  hasCandidate,
   isBusy,
   isVoiceActivityActive,
   isLoopEnabled,
-  isWaitingForViewer,
   isMuted,
   isReady,
   sessionGeneration,
-  onIdleTick,
+  onCandidate,
 }: UseAutonomousTalkOptions) {
   const [isVisible, setIsVisible] = useState(
     () => document.visibilityState === 'visible',
   );
-  const [scheduleVersion, setScheduleVersion] = useState(0);
-  const onIdleTickRef = useRef(onIdleTick);
-  const getNextAutonomousDelayRef = useRef(getNextAutonomousDelay);
+  const dispatchedCandidateRef = useRef<string | null>(null);
+  const onCandidateRef = useRef(onCandidate);
 
   useEffect(() => {
-    onIdleTickRef.current = onIdleTick;
-    getNextAutonomousDelayRef.current = getNextAutonomousDelay;
-  }, [getNextAutonomousDelay, onIdleTick]);
+    onCandidateRef.current = onCandidate;
+  }, [onCandidate]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
       const visible = document.visibilityState === 'visible';
-      if (!visible) {
-        cancelAutonomous();
-      }
+      if (!visible) cancelAutonomous();
       setIsVisible(visible);
     };
 
@@ -78,20 +78,13 @@ export function useAutonomousTalk({
   }, [cancelAutonomous]);
 
   useEffect(() => {
-    if (isMuted) {
-      cancelAutonomous();
-      return;
-    }
-    if (isWaitingForViewer) {
-      cancelAutonomous();
-      return;
-    }
+    if (!hasCandidate || !candidateKey) return;
     if (
       !shouldScheduleAutonomousTalk({
+        hasCandidate,
         isBusy,
         isVoiceActivityActive,
         isLoopEnabled,
-        isWaitingForViewer,
         isMuted,
         isReady,
         isVisible,
@@ -99,33 +92,21 @@ export function useAutonomousTalk({
     ) {
       return;
     }
+    if (dispatchedCandidateRef.current === candidateKey) return;
 
-    const delay = Math.max(
-      0,
-      Math.round(getNextAutonomousDelayRef.current()),
-    );
-    const timer = setTimeout(() => {
-      void onIdleTickRef.current()
-        .then((shouldContinue) => {
-          if (!shouldContinue) return;
-          setScheduleVersion((current) => current + 1);
-        })
-        .catch(() => {
-          // A failed autonomous tick stops the loop until the next manual action or reset.
-        });
-    }, delay);
-
-    return () => clearTimeout(timer);
+    dispatchedCandidateRef.current = candidateKey;
+    void onCandidateRef.current().catch(() => {
+      // The candidate remains marked as evaluated until new evidence arrives.
+    });
   }, [
-    cancelAutonomous,
+    candidateKey,
+    hasCandidate,
     isBusy,
     isVoiceActivityActive,
     isLoopEnabled,
-    isWaitingForViewer,
     isMuted,
     isReady,
     isVisible,
-    scheduleVersion,
     sessionGeneration,
   ]);
 }

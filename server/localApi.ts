@@ -29,6 +29,24 @@ import {
   type ViewerEngagement,
 } from '../src/conversation/autonomousContext.js';
 import {
+  AUTONOMY_DEFER_CAUSES,
+  AUTONOMY_EXTERNAL_ACTIONS,
+  AUTONOMY_WAKE_CONDITIONS,
+  CANDIDATE_REASON_KINDS,
+  MAX_AUTONOMY_CONTENT_LENGTH,
+  MAX_CANDIDATE_REASONS,
+  MAX_REASON_UPDATES_PER_DELTA,
+  isAutonomyDeferCause,
+  isAutonomyExternalAction,
+  isAutonomyWakeCondition,
+  isCandidateReasonKind,
+  type AutonomyCandidate,
+  type AutonomyExternalAction,
+  type AutonomyInternalDelta,
+  type CandidateReason,
+  type ReasonUpdate,
+} from '../src/conversation/autonomyState.js';
+import {
   DEFAULT_PROGRAM_CONTEXT,
   isProgramContext,
   type ProgramContext,
@@ -111,7 +129,6 @@ const MAX_TOPIC_TURNS = 100;
 const MAX_VIEWER_TURNS_SINCE = 100;
 const MAX_EVENT_TURN_ID_LENGTH = 128;
 const MAX_EVENT_REASON_LENGTH = 120;
-const AUTONOMOUS_ACTIONS = ['continue', 'new_topic', 'silence'] as const;
 const INTERACTIVE_POLICY_ACTIONS = [
   'listen',
   'backchannel',
@@ -164,7 +181,6 @@ interface AivisStyle {
 
 type ChatMode = 'manual' | 'voice' | 'autonomous';
 type ConversationEventSource = ChatMode;
-type AutonomousAction = (typeof AUTONOMOUS_ACTIONS)[number];
 type ConversationEventName = (typeof CONVERSATION_EVENTS)[number];
 
 interface ChatHistoryItem {
@@ -194,6 +210,7 @@ interface ChatRequestPayload {
   performerState: PerformerStateContext | null;
   lastSelfUtterance: string | null;
   performanceContext: PerformanceContextPayload;
+  autonomyCandidate: AutonomyCandidate | null;
 }
 
 interface CardPreviewRequestPayload {
@@ -203,8 +220,9 @@ interface CardPreviewRequestPayload {
 
 interface CardAssistantResponse extends AssistantResponse {
   activatedCards: string[];
-  action?: AutonomousAction;
-  topic?: string;
+  externalAction?: AutonomyExternalAction;
+  usedReasonIds?: string[];
+  internalDelta?: AutonomyInternalDelta;
   interactionAction?: ConversationAction;
   voiceAction?: VoiceInteractionAction;
   backchannelCue?: ConversationBackchannelCue;
@@ -773,6 +791,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'performerState',
     'lastSelfUtterance',
     'performanceContext',
+    'autonomyCandidate',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError(
@@ -1049,6 +1068,30 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     };
   }
 
+  const autonomyCandidateValue = record.autonomyCandidate;
+  let autonomyCandidate: AutonomyCandidate | null = null;
+  if (mode === 'autonomous') {
+    if (autonomyCandidateValue === undefined) {
+      throw new RequestError(
+        'autonomous requests must contain autonomyCandidate.',
+        400,
+      );
+    }
+    try {
+      autonomyCandidate = readAutonomyCandidate(autonomyCandidateValue);
+    } catch (error) {
+      if (error instanceof CardContractError) {
+        throw new RequestError(error.message, 400);
+      }
+      throw error;
+    }
+  } else if (autonomyCandidateValue !== undefined) {
+    throw new RequestError(
+      'autonomyCandidate is only valid for autonomous requests.',
+      400,
+    );
+  }
+
   if (
     mode === 'autonomous' &&
     (topicValue === undefined ||
@@ -1058,10 +1101,11 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
       viewerEngagementValue === undefined ||
       programContextValue === undefined ||
       performerStateValue === undefined ||
-      performerState === null)
+      performerState === null ||
+      autonomyCandidate === null)
   ) {
     throw new RequestError(
-      'autonomous requests must contain topic, topicTurns, viewerIntent, viewerTurnsSince, viewerEngagement, programContext, and performerState.',
+      'autonomous requests must contain topic, topicTurns, viewerIntent, viewerTurnsSince, viewerEngagement, programContext, performerState, and autonomyCandidate.',
       400,
     );
   }
@@ -1094,6 +1138,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     performerState,
     lastSelfUtterance,
     performanceContext,
+    autonomyCandidate,
   };
 }
 
@@ -1177,11 +1222,397 @@ function readTtsRequest(payload: unknown): {
   };
 }
 
-function isAutonomousAction(value: unknown): value is AutonomousAction {
-  return (
-    typeof value === 'string' &&
-    (AUTONOMOUS_ACTIONS as readonly string[]).includes(value)
+function readBoundedText(
+  value: unknown,
+  field: string,
+  maximum = MAX_AUTONOMY_CONTENT_LENGTH,
+): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new CardContractError(`${field} must be non-empty text.`);
+  }
+  const text = value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
+  if (text.length > maximum) {
+    throw new CardContractError(
+      `${field} must be ${maximum} characters or fewer.`,
+    );
+  }
+  return text;
+}
+
+function readStringList(
+  value: unknown,
+  field: string,
+  maximumItems: number,
+  maximumLength = 128,
+): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > maximumItems ||
+    !value.every(
+      (item) => typeof item === 'string' && item.trim().length <= maximumLength,
+    )
+  ) {
+    throw new CardContractError(`${field} format is invalid.`);
+  }
+  const values = value.map((item) => (item as string).trim());
+  if (new Set(values).size !== values.length) {
+    throw new CardContractError(`${field} must not contain duplicates.`);
+  }
+  return values;
+}
+
+function readAutonomyCandidate(value: unknown): AutonomyCandidate {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RequestError('autonomyCandidate must be an object.', 400);
+  }
+  const record = value as Record<string, unknown>;
+  const allowedKeys = new Set(['episodeId', 'evidenceIds', 'reasons']);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+    throw new RequestError(
+      'autonomyCandidate contains an unsupported field.',
+      400,
+    );
+  }
+  const episodeId = readBoundedText(record.episodeId, 'episodeId', 128);
+  const evidenceIds = readStringList(record.evidenceIds, 'evidenceIds', 64);
+  if (!evidenceIds.length) {
+    throw new RequestError(
+      'autonomyCandidate.evidenceIds must contain at least one evidence ID.',
+      400,
+    );
+  }
+  const reasonValues = record.reasons;
+  if (
+    !Array.isArray(reasonValues) ||
+    reasonValues.length < 1 ||
+    reasonValues.length > MAX_CANDIDATE_REASONS
+  ) {
+    throw new RequestError('autonomyCandidate.reasons format is invalid.', 400);
+  }
+
+  const candidateReasonIds = new Set<string>();
+  const reasons: CandidateReason[] = reasonValues.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new RequestError('autonomyCandidate reason must be an object.', 400);
+    }
+    const reason = value as Record<string, unknown>;
+    const allowedReasonKeys = new Set([
+      'id',
+      'episodeId',
+      'parentReasonId',
+      'kind',
+      'content',
+      'semanticKey',
+      'salience',
+      'status',
+      'deferCause',
+      'wakeOn',
+      'evidenceIds',
+    ]);
+    if (Object.keys(reason).some((key) => !allowedReasonKeys.has(key))) {
+      throw new RequestError(
+        'autonomyCandidate reason contains an unsupported field.',
+        400,
+      );
+    }
+    const id = readBoundedText(reason.id, 'reason.id', 128);
+    if (candidateReasonIds.has(id)) {
+      throw new RequestError('autonomyCandidate reason IDs must be unique.', 400);
+    }
+    candidateReasonIds.add(id);
+    const reasonEpisodeId = readBoundedText(
+      reason.episodeId,
+      'reason.episodeId',
+      128,
+    );
+    if (reasonEpisodeId !== episodeId) {
+      throw new RequestError(
+        'autonomyCandidate reasons must use the candidate episode ID.',
+        400,
+      );
+    }
+    const parentReasonId =
+      reason.parentReasonId === null || reason.parentReasonId === undefined
+        ? null
+        : readBoundedText(reason.parentReasonId, 'reason.parentReasonId', 128);
+    if (!isCandidateReasonKind(reason.kind)) {
+      throw new RequestError('autonomyCandidate reason kind is invalid.', 400);
+    }
+    const content = readBoundedText(reason.content, 'reason.content');
+    const semanticKey = readBoundedText(reason.semanticKey, 'reason.semanticKey');
+    const salience = reason.salience;
+    if (
+      typeof salience !== 'number' ||
+      !Number.isFinite(salience) ||
+      salience < 0 ||
+      salience > 1
+    ) {
+      throw new RequestError('autonomyCandidate reason salience is invalid.', 400);
+    }
+    if (reason.status !== 'active') {
+      throw new RequestError(
+        'autonomyCandidate can contain only active reasons.',
+        400,
+      );
+    }
+    if (reason.deferCause !== null && reason.deferCause !== undefined) {
+      throw new RequestError(
+        'active autonomyCandidate reasons cannot have deferCause.',
+        400,
+      );
+    }
+    const wakeOn = readStringList(reason.wakeOn, 'reason.wakeOn', 6);
+    if (!wakeOn.every(isAutonomyWakeCondition)) {
+      throw new RequestError('autonomyCandidate reason wakeOn is invalid.', 400);
+    }
+    const reasonEvidenceIds = readStringList(
+      reason.evidenceIds,
+      'reason.evidenceIds',
+      64,
+    );
+    if (!reasonEvidenceIds.length) {
+      throw new RequestError(
+        'autonomyCandidate reason evidenceIds must not be empty.',
+        400,
+      );
+    }
+    if (!reasonEvidenceIds.every((id) => evidenceIds.includes(id))) {
+      throw new RequestError(
+        'autonomyCandidate reason evidenceIds must be offered evidence.',
+        400,
+      );
+    }
+    return {
+      id,
+      episodeId,
+      parentReasonId,
+      kind: reason.kind,
+      content,
+      semanticKey,
+      salience,
+      status: 'active',
+      deferCause: null,
+      wakeOn,
+      evidenceIds: reasonEvidenceIds,
+      createdAt: 0,
+      updatedAt: 0,
+      lastEvaluatedEvidenceId: null,
+      mergedIntoReasonId: null,
+    };
+  });
+
+  for (const reason of reasons) {
+    if (
+      reason.parentReasonId !== null &&
+      (reason.parentReasonId === reason.id ||
+        !candidateReasonIds.has(reason.parentReasonId))
+    ) {
+      throw new RequestError(
+        'autonomyCandidate reason parent must be another offered reason.',
+        400,
+      );
+    }
+  }
+
+  return { episodeId, reasons, evidenceIds };
+}
+
+function readReasonUpdates(
+  value: unknown,
+  candidate: AutonomyCandidate | null,
+): AutonomyInternalDelta {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CardContractError('internalDelta must be an object.');
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== 'reasonUpdates')) {
+    throw new CardContractError('internalDelta contains an unsupported field.');
+  }
+  const updateValues = record.reasonUpdates;
+  if (
+    !Array.isArray(updateValues) ||
+    updateValues.length > MAX_REASON_UPDATES_PER_DELTA
+  ) {
+    throw new CardContractError('internalDelta.reasonUpdates format is invalid.');
+  }
+  const offeredReasons = new Map(
+    (candidate?.reasons ?? []).map((reason) => [reason.id, reason]),
   );
+  const touchedIds = new Set<string>();
+  const createdSemanticKeys = new Set<string>();
+  const updates: ReasonUpdate[] = [];
+  for (const value of updateValues) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new CardContractError('reason update must be an object.');
+    }
+    const update = value as Record<string, unknown>;
+    const operation = update.operation;
+    if (typeof operation !== 'string') {
+      throw new CardContractError('reason update operation is invalid.');
+    }
+    const requireReason = () => {
+      const reasonId = readBoundedText(update.reasonId, 'reasonId', 128);
+      const reason = offeredReasons.get(reasonId);
+      if (!reason) {
+        throw new CardContractError('reason update references an unknown reason.');
+      }
+      if (touchedIds.has(reasonId)) {
+        throw new CardContractError('reason updates must not duplicate a reason.');
+      }
+      touchedIds.add(reasonId);
+      return { reasonId, reason };
+    };
+    if (operation === 'create') {
+      if (
+        Object.keys(update).some(
+          (key) =>
+            !['operation', 'kind', 'content', 'semanticKey', 'salience', 'parentReasonId'].includes(key),
+        )
+      ) {
+        throw new CardContractError('create reason update contains an unsupported field.');
+      }
+      if (!isCandidateReasonKind(update.kind)) {
+        throw new CardContractError('create reason update kind is invalid.');
+      }
+      const content = readBoundedText(update.content, 'reason content');
+      const semanticKey = readBoundedText(update.semanticKey, 'reason semanticKey');
+      if (createdSemanticKeys.has(semanticKey)) {
+        throw new CardContractError('reason updates must not duplicate a semantic key.');
+      }
+      createdSemanticKeys.add(semanticKey);
+      const salience = update.salience;
+      if (
+        typeof salience !== 'number' ||
+        !Number.isFinite(salience) ||
+        salience < 0 ||
+        salience > 1
+      ) {
+        throw new CardContractError('create reason salience is invalid.');
+      }
+      const parentReasonId =
+        update.parentReasonId === null || update.parentReasonId === undefined
+          ? null
+          : readBoundedText(update.parentReasonId, 'parentReasonId', 128);
+      if (parentReasonId && !offeredReasons.has(parentReasonId)) {
+        throw new CardContractError('create reason parent is unknown.');
+      }
+      updates.push({
+        operation: 'create',
+        kind: update.kind,
+        content,
+        semanticKey,
+        salience,
+        parentReasonId,
+      });
+      continue;
+    }
+    if (operation === 'reinforce') {
+      if (
+        Object.keys(update).some(
+          (key) => !['operation', 'reasonId', 'content', 'salienceDelta'].includes(key),
+        )
+      ) {
+        throw new CardContractError('reinforce reason update contains an unsupported field.');
+      }
+      const { reasonId, reason } = requireReason();
+      const content =
+        update.content === undefined
+          ? undefined
+          : readBoundedText(update.content, 'reason content');
+      const salienceDelta = update.salienceDelta;
+      if (
+        salienceDelta !== undefined &&
+        (typeof salienceDelta !== 'number' ||
+          !Number.isFinite(salienceDelta) ||
+          salienceDelta < -1 ||
+          salienceDelta > 1)
+      ) {
+        throw new CardContractError('reason salienceDelta is invalid.');
+      }
+      if (reason.status !== 'active') {
+        throw new CardContractError('reinforce requires an active reason.');
+      }
+      updates.push({ operation: 'reinforce', reasonId, ...(content === undefined ? {} : { content }), ...(salienceDelta === undefined ? {} : { salienceDelta }) });
+      continue;
+    }
+    if (operation === 'resolve' || operation === 'expire') {
+      if (Object.keys(update).some((key) => !['operation', 'reasonId'].includes(key))) {
+        throw new CardContractError('reason status update contains an unsupported field.');
+      }
+      const { reasonId, reason } = requireReason();
+      if (reason.status !== 'active') {
+        throw new CardContractError('reason status transition is invalid.');
+      }
+      updates.push({ operation, reasonId });
+      continue;
+    }
+    if (operation === 'defer') {
+      if (Object.keys(update).some((key) => !['operation', 'reasonId', 'cause', 'wakeOn'].includes(key))) {
+        throw new CardContractError('defer reason update contains an unsupported field.');
+      }
+      const { reasonId, reason } = requireReason();
+      if (reason.status !== 'active' || !isAutonomyDeferCause(update.cause)) {
+        throw new CardContractError('defer reason update is invalid.');
+      }
+      const wakeOn = readStringList(update.wakeOn, 'wakeOn', 6);
+      if (!wakeOn.length || !wakeOn.every(isAutonomyWakeCondition)) {
+        throw new CardContractError('defer reason wakeOn is invalid.');
+      }
+      updates.push({ operation, reasonId, cause: update.cause, wakeOn });
+      continue;
+    }
+    if (operation === 'reactivate') {
+      if (Object.keys(update).some((key) => !['operation', 'reasonId', 'salienceDelta'].includes(key))) {
+        throw new CardContractError('reactivate reason update contains an unsupported field.');
+      }
+      const { reasonId, reason } = requireReason();
+      if (reason.status !== 'deferred' && reason.status !== 'expired') {
+        throw new CardContractError('reactivate reason status is invalid.');
+      }
+      const salienceDelta = update.salienceDelta;
+      if (
+        salienceDelta !== undefined &&
+        (typeof salienceDelta !== 'number' || !Number.isFinite(salienceDelta) || salienceDelta < -1 || salienceDelta > 1)
+      ) {
+        throw new CardContractError('reactivate salienceDelta is invalid.');
+      }
+      updates.push({ operation, reasonId, ...(salienceDelta === undefined ? {} : { salienceDelta }) });
+      continue;
+    }
+    if (operation === 'merge') {
+      if (Object.keys(update).some((key) => !['operation', 'reasonId', 'targetReasonId'].includes(key))) {
+        throw new CardContractError('merge reason update contains an unsupported field.');
+      }
+      const { reasonId } = requireReason();
+      const targetReasonId = readBoundedText(update.targetReasonId, 'targetReasonId', 128);
+      const target = offeredReasons.get(targetReasonId);
+      if (!target || targetReasonId === reasonId || target.status !== 'active') {
+        throw new CardContractError('merge reason target is invalid.');
+      }
+      if (touchedIds.has(targetReasonId)) {
+        throw new CardContractError('reason updates must not duplicate a reason.');
+      }
+      touchedIds.add(targetReasonId);
+      updates.push({ operation, reasonId, targetReasonId });
+      continue;
+    }
+    throw new CardContractError('reason update operation is invalid.');
+  }
+  return { reasonUpdates: updates };
+}
+
+function readUsedReasonIds(
+  value: unknown,
+  candidate: AutonomyCandidate,
+): string[] {
+  const usedReasonIds = readStringList(value, 'usedReasonIds', candidate.reasons.length);
+  const offeredIds = new Set(candidate.reasons.map((reason) => reason.id));
+  if (usedReasonIds.some((reasonId) => !offeredIds.has(reasonId))) {
+    throw new CardContractError(
+      'usedReasonIds must reference the offered candidate reasons.',
+    );
+  }
+  return usedReasonIds;
 }
 
 function parseAssistantResponse(
@@ -1191,6 +1622,7 @@ function parseAssistantResponse(
   forcedCardId: string | null,
   message: string | null,
   characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
+  autonomyCandidate: AutonomyCandidate | null = null,
 ): CardAssistantResponse {
   let payload: unknown;
   try {
@@ -1219,8 +1651,16 @@ function parseAssistantResponse(
     );
   }
 
-  let action: AutonomousAction | undefined;
-  let topic: string | undefined;
+  const hasInternalDelta = record.internalDelta !== undefined;
+  if (mode === 'autonomous' && !hasInternalDelta) {
+    throw new CardContractError('Autonomous responses require internalDelta.');
+  }
+  const internalDelta = readReasonUpdates(
+    hasInternalDelta ? record.internalDelta : { reasonUpdates: [] },
+    mode === 'autonomous' ? autonomyCandidate : null,
+  );
+  let externalAction: AutonomyExternalAction | undefined;
+  let usedReasonIds: string[] | undefined;
   let voiceAction: VoiceInteractionAction | undefined;
   let backchannelCue: VoiceBackchannelCue | undefined;
   if (mode === 'voice') {
@@ -1285,29 +1725,31 @@ function parseAssistantResponse(
       );
     }
   } else if (mode === 'autonomous') {
-    if (!isAutonomousAction(record.action)) {
+    if (!autonomyCandidate) {
       throw new CardContractError(
-        'Autonomous response action must be continue, new_topic, or silence.',
+        'Autonomous responses require an offered autonomy candidate.',
       );
     }
-    action = record.action;
-    if (typeof record.topic !== 'string') {
-      throw new CardContractError('Autonomous response topic must be text.');
-    }
-    topic = record.topic.trim();
-    if (topic.length > MAX_TOPIC_LENGTH) {
+    if (!isAutonomyExternalAction(record.externalAction)) {
       throw new CardContractError(
-        `Autonomous response topic must be ${MAX_TOPIC_LENGTH} characters or fewer.`,
+        'Autonomous response externalAction must be speak or none.',
       );
     }
-    if (action !== 'silence' && !text) {
+    externalAction = record.externalAction;
+    usedReasonIds = readUsedReasonIds(record.usedReasonIds, autonomyCandidate);
+    if (externalAction === 'speak' && !text) {
       throw new CardContractError(
         'Autonomous speaking responses must contain text.',
       );
     }
-    if (action === 'silence' && text) {
+    if (externalAction === 'none' && text) {
       throw new CardContractError(
-        'Autonomous silence responses must contain empty text.',
+        'Autonomous none responses must contain empty text.',
+      );
+    }
+    if (externalAction === 'speak' && !usedReasonIds.length) {
+      throw new CardContractError(
+        'Autonomous speaking responses must use at least one reason.',
       );
     }
   } else if (!text) {
@@ -1317,7 +1759,7 @@ function parseAssistantResponse(
   const activatedCards = record.activatedCards;
   const requiresActivatedCard =
     mode === 'manual' ||
-    (mode === 'autonomous' && forcedCardId !== null) ||
+    (mode === 'autonomous' && externalAction === 'speak' && forcedCardId !== null) ||
     (mode === 'voice' && voiceAction === 'take_floor' && forcedCardId !== null);
   if (
     !Array.isArray(activatedCards) ||
@@ -1337,9 +1779,9 @@ function parseAssistantResponse(
       'Voice listen, react_nonverbally, and backchannel responses must not activate cards.',
     );
   }
-  if (mode === 'autonomous' && action === 'silence' && activatedCards.length) {
+  if (mode === 'autonomous' && externalAction === 'none' && activatedCards.length) {
     throw new CardContractError(
-      'Autonomous silence responses must not activate cards.',
+      'Autonomous none responses must not activate cards.',
     );
   }
   if (activatedCards.some((id) => !brainCardIds.includes(id))) {
@@ -1347,15 +1789,10 @@ function parseAssistantResponse(
       'activatedCards must be a subset of the current brain cards.',
     );
   }
-  if (mode === 'autonomous' && action === 'silence' && forcedCardId) {
-    throw new CardContractError(
-      'Autonomous silence is not allowed when a card is forced.',
-    );
-  }
   const mustIncludeForcedCard =
     forcedCardId !== null &&
     (mode !== 'voice' || voiceAction === 'take_floor') &&
-    !(mode === 'autonomous' && action === 'silence');
+    !(mode === 'autonomous' && externalAction === 'none');
   if (mustIncludeForcedCard && !activatedCards.includes(forcedCardId)) {
     throw new CardContractError(
       'activatedCards must include the forced card.',
@@ -1366,10 +1803,14 @@ function parseAssistantResponse(
     text,
     emotion: normalizeEmotion(record.emotion),
     activatedCards,
+    ...(hasInternalDelta ? { internalDelta } : {}),
   };
   if (mode === 'autonomous') {
-    response.action = action;
-    response.topic = topic;
+    response.externalAction = externalAction;
+    response.usedReasonIds = usedReasonIds;
+    if (externalAction === 'none') {
+      response.emotion = normalizeEmotion('neutral');
+    }
   }
   if (mode === 'voice') {
     response.voiceAction = voiceAction;
@@ -1393,6 +1834,24 @@ export function parseVoiceAssistantResponse(
     forcedCardId,
     message,
     characterIdentity,
+  );
+}
+
+export function parseAutonomousAssistantResponse(
+  value: string,
+  candidate: AutonomyCandidate,
+  brainCardIds: readonly string[],
+  forcedCardId: string | null,
+  characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
+): CardAssistantResponse {
+  return parseAssistantResponse(
+    value,
+    'autonomous',
+    brainCardIds,
+    forcedCardId,
+    null,
+    characterIdentity,
+    candidate,
   );
 }
 
@@ -1796,6 +2255,7 @@ export function buildAutonomousDirectorInstruction(
   performerState: PerformerStateContext | null,
   programContext: ProgramContext = DEFAULT_PROGRAM_CONTEXT,
   lastSelfUtterance: string | null = null,
+  autonomyCandidate: AutonomyCandidate | null = null,
 ): string {
   const performerStateLines = performerState
     ? [
@@ -1814,8 +2274,18 @@ export function buildAutonomousDirectorInstruction(
         '<last-self-utterance>',
         lastSelfUtterance,
         '</last-self-utterance>',
-      ]
+    ]
     : ['Latest completed Vayria spoken line: (none)'];
+  const candidateLines = autonomyCandidate
+    ? [
+        '<autonomy-candidate>',
+        ...autonomyCandidate.reasons.map(
+          (reason) =>
+            `- ${reason.id} | kind=${reason.kind} | salience=${reason.salience.toFixed(2)} | ${reason.content}`,
+        ),
+        '</autonomy-candidate>',
+      ]
+    : ['Autonomy candidate: (none)'];
   return [
     buildProgramContextSystemPrompt(programContext),
     `Current topic: ${topic ?? '(none)'}`,
@@ -1827,17 +2297,17 @@ export function buildAutonomousDirectorInstruction(
     ...selfUtteranceLines,
     'When autonomous turns since latest viewer input is 0, treat the latest viewer intent and recent conversation history as the current situation.',
     'When the latest viewer intent is direct_address, call, question, request, or action_commitment, give that latest viewer turn priority over the previous autonomous topic.',
-    'When the latest viewer intent is backchannel or unfinished, silence is acceptable. Do not force a new topic.',
-    'When viewer engagement is settled, do not start a new conversational topic. Choose silence unless an explicit external stimulus requires speech.',
-    'Use the self state as quiet background context when choosing speech length, emotional color, and whether to continue or stay silent.',
-    'When energy or attention is low, prefer a brief thought or silence. Do not force a lecture or a question.',
+    'When the latest viewer intent is backchannel or unfinished, do not force a new topic.',
+    'Use the self state as quiet background context when choosing speech length and emotional color.',
+    'When energy or attention is low, prefer a brief thought. Do not force a lecture or a question.',
     'When attention is directed at the viewer, let recent viewer history guide a small concrete callback when one is natural.',
     'Do not mention this state metadata in the spoken reply.',
-    'Choose exactly one action for this autonomous candidate.',
-    'continue means speak while staying with the current topic.',
-    'new_topic means speak about a different topic and return a short topic label.',
-    'silence means deliberately say nothing: text must be empty, emotion must be neutral, and activatedCards must be empty.',
-    'For continue and new_topic, return a non-empty short topic label and spoken text.',
+    ...candidateLines,
+    'Choose exactly one externalAction for this offered candidate: speak or none.',
+    'Use speak only when the candidate reasons support an outward sentence.',
+    'Use none when the candidate should remain internal or be deferred. Set text to an empty string for none.',
+    'For speak, list every reason that materially supports the sentence in usedReasonIds.',
+    'Return internalDelta.reasonUpdates for validated internal changes only. Do not invent reason IDs.',
   ].join('\n');
 }
 
@@ -1858,10 +2328,34 @@ async function generateReply(
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
   programContext: ProgramContext,
+  autonomyCandidate: AutonomyCandidate | null = null,
 ): Promise<GeneratedChatResponse> {
-  const minActivatedCardItems =
-    mode === 'manual' ||
-    (mode === 'autonomous' && forcedCardId !== null) ? 1 : 0;
+  const minActivatedCardItems = mode === 'manual' ? 1 : 0;
+  const reasonUpdateSchema = {
+    type: 'object',
+    properties: {
+      operation: {
+        type: 'string',
+        enum: ['create', 'reinforce', 'resolve', 'expire', 'defer', 'reactivate', 'merge'],
+      },
+      kind: { type: 'string', enum: CANDIDATE_REASON_KINDS },
+      content: { type: 'string' },
+      semanticKey: { type: 'string' },
+      salience: { type: 'number' },
+      reasonId: { type: 'string' },
+      parentReasonId: { type: ['string', 'null'] },
+      salienceDelta: { type: 'number' },
+      cause: { type: 'string', enum: AUTONOMY_DEFER_CAUSES },
+      wakeOn: {
+        type: 'array',
+        items: { type: 'string', enum: AUTONOMY_WAKE_CONDITIONS },
+        maxItems: AUTONOMY_WAKE_CONDITIONS.length,
+      },
+      targetReasonId: { type: 'string' },
+    },
+    required: ['operation'],
+    additionalProperties: false,
+  };
   const responseProperties = {
     text: { type: 'string' },
     emotion: {
@@ -1877,13 +2371,32 @@ async function generateReply(
       minItems: minActivatedCardItems,
       maxItems: MAX_ACTIVATED_CARDS,
     },
+    internalDelta: {
+      type: 'object',
+      properties: {
+        reasonUpdates: {
+          type: 'array',
+          items: reasonUpdateSchema,
+          maxItems: MAX_REASON_UPDATES_PER_DELTA,
+        },
+      },
+      required: ['reasonUpdates'],
+      additionalProperties: false,
+    },
     ...(mode === 'autonomous'
       ? {
-          action: {
+          externalAction: {
             type: 'string',
-            enum: AUTONOMOUS_ACTIONS,
+            enum: AUTONOMY_EXTERNAL_ACTIONS,
           },
-          topic: { type: 'string' },
+          usedReasonIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: autonomyCandidate?.reasons.map((reason) => reason.id) ?? [],
+            },
+            maxItems: MAX_CANDIDATE_REASONS,
+          },
         }
       : {}),
     ...(mode === 'voice'
@@ -1903,7 +2416,8 @@ async function generateReply(
     'text',
     'emotion',
     'activatedCards',
-    ...(mode === 'autonomous' ? ['action', 'topic'] : []),
+    'internalDelta',
+    ...(mode === 'autonomous' ? ['externalAction', 'usedReasonIds'] : []),
     ...(mode === 'voice' ? ['voiceAction', 'backchannelCue'] : []),
   ];
   const chat = ChatServiceFactory.createChatService('openai', {
@@ -1947,7 +2461,7 @@ async function generateReply(
           : 'Use its speaking-form influence in the spoken text, not only in hidden reasoning.',
         mode === 'voice'
           ? `For voiceAction take_floor, activatedCards must include ${forcedCardId}. For listen, react_nonverbally, or backchannel, activatedCards must be empty.`
-          : `activatedCards must include ${forcedCardId}, and action must not be silence.`,
+          : `activatedCards must include ${forcedCardId} when externalAction is speak.`,
       ].join(' ')
     : 'No card is forced for this reply.';
   const responseInstruction =
@@ -1967,6 +2481,7 @@ async function generateReply(
           performerState,
           programContext,
           lastSelfUtterance,
+          autonomyCandidate,
         )
       : '';
   const cardInfluenceInstruction =
@@ -1995,6 +2510,14 @@ async function generateReply(
     'Treat these values as behavior context. Do not mention the values or the runtime.',
     'Use callback tendency to decide whether to refer back to the viewer. Use fragmentation for a small interruption or self-correction only when it sounds natural.',
   ].join('\n');
+  const internalDeltaInstruction = [
+    'Every assistant response must include internalDelta with a reasonUpdates array.',
+    'Use internalDelta for bounded state changes only. Do not put prompt text, history, or spoken content into it.',
+    mode === 'autonomous'
+      ? 'For autonomous updates, use only reason IDs from the offered candidate and keep each parent in the same causal episode.'
+      : 'For manual and voice updates, leave reasonUpdates empty unless a new root internal reason is clearly needed.',
+    'Do not invent reason IDs or repeat the same reason update in one delta.',
+  ].join('\n');
   const systemPrompt = [
     buildCharacterIdentitySystemPrompt(message, characterIdentity),
     buildProgramContextSystemPrompt(programContext),
@@ -2014,6 +2537,7 @@ async function generateReply(
     cardInfluenceInstruction,
     forcedInstruction,
     performerPolicyInstruction,
+    internalDeltaInstruction,
     'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
     activationInstruction,
   ].join('\n');
@@ -2061,6 +2585,7 @@ async function generateReply(
       forcedCardId,
       message,
       characterIdentity,
+      autonomyCandidate,
     );
     return { response, providerCallCount };
   } catch (error) {
@@ -2079,6 +2604,7 @@ async function generateReply(
     forcedCardId,
     message,
     characterIdentity,
+    autonomyCandidate,
   );
   return { response, providerCallCount };
 }
@@ -2658,6 +3184,7 @@ async function handleRequest(
         performerState,
         lastSelfUtterance,
         performanceContext,
+        autonomyCandidate,
       } = readChatRequest(payload);
       const startedAt = performance.now();
       const fastPathDecision =
@@ -2708,6 +3235,7 @@ async function handleRequest(
           performanceContext,
           characterIdentity,
           programContext,
+          autonomyCandidate,
         );
         providerCallCount = generatedResponse.providerCallCount;
         assistantResponse =

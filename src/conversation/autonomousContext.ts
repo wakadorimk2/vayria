@@ -107,26 +107,3 @@ export function recordViewerIntent(
         : 'available',
   };
 }
-
-export function advanceAutonomousContext(
-  current: AutonomousContext,
-  decision: {
-    action: 'continue' | 'new_topic' | 'silence';
-    topic: string;
-  },
-): AutonomousContext {
-  if (decision.action === 'silence') return current;
-
-  return {
-    ...current,
-    topic: decision.topic,
-    topicTurns:
-      decision.action === 'new_topic' || current.topic === null
-        ? 1
-        : current.topicTurns + 1,
-    viewerTurnsSince:
-      current.viewerIntent === null
-        ? 0
-        : Math.min(current.viewerTurnsSince + 1, MAX_VIEWER_TURNS_SINCE),
-  };
-}

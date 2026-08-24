@@ -20,6 +20,10 @@ Routerは次の状態を別々に持ちます。
 - `gptInputGate`: GPT音声からVayria入力へのゲート
 - `vayriaOutputGate`: Vayria出力ゲート
 
+Routerは自律発話理由を作りません。Routerは音声状態、ゲート状態、評価値だけを観測します。
+`Take Floor`は候補を削除せず、自律処理を停止します。`Let Continue`は処理可能状態へ戻します。
+理由がない状態で`Let Continue`を実行しても、LLMや発話は生成しません。
+
 ## 操作
 
 UIボタンまたは次のホットキーを使います。
@@ -69,6 +73,9 @@ Remote PCMを開始している間はデバイス選択を変更できません�
 - `continuity_variation`
 
 `continuity_variation`は6往復を上限にします。
+
+自律評価は固定タイマーでは開始しません。Evidenceから候補理由がある場合だけ、
+共通の自律ポリシー評価を実行します。
 
 RouterパネルでCase StartとCase Finishを操作します。
 

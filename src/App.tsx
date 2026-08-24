@@ -20,12 +20,26 @@ import {
 } from './character/identity';
 import { useAutonomousTalk } from './conversation/useAutonomousTalk';
 import {
-  advanceAutonomousContext,
   INITIAL_AUTONOMOUS_CONTEXT,
   recordViewerIntent,
 } from './conversation/autonomousContext';
 import {
+  applyReasonUpdates,
+  completeInactiveEpisodes,
+  createInitialAutonomyState,
+  markCandidateOffered,
+  observeAutonomyEvidence,
+  resolveUsedReasons,
+  selectAutonomyCandidate,
+  type AutonomyCandidate,
+  type AutonomyEvidence,
+  type AutonomyInternalDelta,
+  type AutonomyState,
+} from './conversation/autonomyState';
+import {
   useConversation,
+  type AutonomyDeltaContext,
+  type AutonomyEvidenceContext,
   type AutonomousContext,
   type ChatCardContext,
 } from './conversation/useConversation';
@@ -44,11 +58,13 @@ import { usePerformerRuntime } from './performer/usePerformerRuntime';
 import type {
   Attention,
   ConversationActionDecision,
+  DirectionContribution,
   AttentionReader,
   PerformancePlan,
   PerformanceResult,
   PerformerTrigger,
 } from './performer/types';
+import { isContentBearingVoiceMessage } from './performer/runtime';
 import { runtimeConfig } from './runtimeConfig';
 import { fetchListeningBackchannels } from './voice/backchannel';
 import type { ListeningBackchannelAudio } from './voice/backchannelPolicy';
@@ -271,6 +287,9 @@ export default function App() {
   );
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>(INITIAL_AUTONOMOUS_CONTEXT);
+  const [autonomyState, setAutonomyState] = useState<AutonomyState>(
+    createInitialAutonomyState,
+  );
   const [isAutonomousLoopEnabled, setIsAutonomousLoopEnabled] =
     useState(true);
   const [sessionGeneration, setSessionGeneration] = useState(0);
@@ -290,7 +309,6 @@ export default function App() {
   const {
     completePlan,
     createPlan,
-    getNextAutonomousDelay: getRuntimeAutonomousDelay,
     getPerformerStateContext,
     resetRuntime,
     setPhase,
@@ -312,6 +330,12 @@ export default function App() {
     confidence: 0,
   });
   const characterIdentityRef = useRef<CharacterIdentity>(characterIdentity);
+  const autonomyStateRef = useRef(autonomyState);
+  const pendingCardStimulusRef = useRef<{
+    cardContext: ChatCardContext;
+    contribution: DirectionContribution;
+    programContext: ProgramContext;
+  } | null>(null);
   useEffect(() => {
     characterIdentityRef.current = characterIdentity;
   }, [characterIdentity]);
@@ -350,6 +374,82 @@ export default function App() {
       ),
     };
   }, [readCameraSnapshot]);
+
+  const recordAutonomyEvidence = useCallback((evidence: AutonomyEvidence) => {
+    const nextState = observeAutonomyEvidence(autonomyStateRef.current, evidence);
+    autonomyStateRef.current = nextState;
+    setAutonomyState(nextState);
+    return nextState;
+  }, []);
+
+  const readAutonomyEvidenceContext = useCallback(
+    (state: AutonomyState, evidenceId: string): AutonomyEvidenceContext | null => {
+      const matchingReasons = state.reasons.filter(
+        (reason) =>
+          reason.status === 'active' && reason.evidenceIds.includes(evidenceId),
+      );
+      const episodeId = matchingReasons[0]?.episodeId;
+      if (!episodeId) return null;
+      return {
+        episodeId,
+        evidenceId,
+        reasonIds: matchingReasons
+          .filter((reason) => reason.episodeId === episodeId)
+          .map((reason) => reason.id),
+      };
+    },
+    [],
+  );
+
+  const handleAutonomyDelta = useCallback(
+    (
+      delta: AutonomyInternalDelta,
+      context: AutonomyDeltaContext,
+    ) => {
+      const current = autonomyStateRef.current;
+      const episodeId =
+        context.episodeId ??
+        current.reasons.find((reason) =>
+          reason.evidenceIds.includes(context.evidenceId),
+        )?.episodeId ??
+        null;
+      if (!episodeId) return;
+      let nextState = current;
+      if (delta.reasonUpdates.length) {
+        const deltaEvidenceId = `autonomy-delta:${context.evidenceId}:${Date.now()}`;
+        const stateWithDeltaEvidence = observeAutonomyEvidence(current, {
+          id: deltaEvidenceId,
+          kind: 'internal_state_change',
+          at: Date.now(),
+          semanticKey: `internal-delta:${context.source}`,
+          episodeId,
+        });
+        const result = applyReasonUpdates(stateWithDeltaEvidence, delta.reasonUpdates, {
+          episodeId,
+          evidenceId: deltaEvidenceId,
+          at: Date.now(),
+        });
+        if (result.changed) nextState = result.state;
+      }
+      const resolvableReasonIds = context.reasonIds.filter((reasonId) =>
+        nextState.reasons.some(
+          (reason) => reason.id === reasonId && reason.status === 'active',
+        ),
+      );
+      if (context.resolvesReason && resolvableReasonIds.length) {
+        nextState = resolveUsedReasons(
+          nextState,
+          resolvableReasonIds,
+          episodeId,
+        );
+      }
+      nextState = completeInactiveEpisodes(nextState);
+      if (nextState === current) return;
+      autonomyStateRef.current = nextState;
+      setAutonomyState(nextState);
+    },
+    [],
+  );
   const [voiceValidationError, setVoiceValidationError] = useState('');
   const voiceEventHandlerRef = useRef<((event: VoiceInputEvent) => void) | null>(
     null,
@@ -715,6 +815,7 @@ export default function App() {
     onPerformanceResult: handlePerformanceResult,
     onInteractionAction: handleInteractionAction,
     onInteractionTimelineEvent: handleInteractionTimelineEvent,
+    onAutonomyDelta: handleAutonomyDelta,
   });
 
   const routerResetSessionRef = useRef<(() => void) | null>(null);
@@ -729,16 +830,41 @@ export default function App() {
           break;
         case 'set_autonomous_enabled':
           setIsAutonomousLoopEnabled(effect.enabled);
+          recordAutonomyEvidence({
+            id: `router-state:${Date.now()}`,
+            kind: 'interaction_state_change',
+            at: Date.now(),
+            semanticKey: `autonomous-enabled:${effect.enabled}`,
+            wakeConditions: effect.enabled
+              ? ['floor_available', 'interaction_state_changed']
+              : ['interaction_state_changed'],
+          });
           break;
         case 'set_gpt_input_gate':
+          break;
         case 'set_vayria_output_gate':
+          recordAutonomyEvidence({
+            id: `router-output-gate:${Date.now()}`,
+            kind: 'interaction_state_change',
+            at: Date.now(),
+            semanticKey: `vayria-output-gate:${effect.gate}`,
+            wakeConditions:
+              effect.gate === 'open'
+                ? ['floor_available', 'interaction_state_changed']
+                : ['interaction_state_changed'],
+          });
           break;
         case 'reset_vayria':
           routerResetSessionRef.current?.();
           break;
       }
     }
-  }, [cancelAutonomous, interruptCurrentTurn, stopReaction]);
+  }, [
+    cancelAutonomous,
+    interruptCurrentTurn,
+    recordAutonomyEvidence,
+    stopReaction,
+  ]);
   const conversationRouter = useConversationRouter({
     enabled: runtimeConfig.routerEnabled,
     onEffects: handleRouterEffects,
@@ -878,6 +1004,42 @@ export default function App() {
 
   const displayEmotion = activeEmotionCue?.emotion ?? performer.state.emotion.value;
   const isPerformerBusy = isBusy || activePlan !== null;
+  const autonomyCandidate = useMemo(
+    () =>
+      selectAutonomyCandidate(autonomyState, {
+        enabled:
+          isAutonomousLoopEnabled &&
+          (!runtimeConfig.routerEnabled ||
+            (routerSnapshot.controlState === 'idle' &&
+              routerSnapshot.vayriaOutputGate === 'open')),
+        busy: isPerformerBusy,
+        floorAvailable:
+          !isVadSpeech &&
+          !isSttProcessing &&
+          (!runtimeConfig.routerEnabled ||
+            (routerSnapshot.controlState === 'idle' &&
+              routerSnapshot.vayriaOutputGate === 'open')),
+        attentionAvailable: !isCardSelectionActive,
+        interactionAvailable: isAvatarReady && !isMuted,
+      }),
+    [
+      autonomyState,
+      isAvatarReady,
+      isAutonomousLoopEnabled,
+      isCardSelectionActive,
+      isMuted,
+      isPerformerBusy,
+      isSttProcessing,
+      isVadSpeech,
+      routerSnapshot.controlState,
+      routerSnapshot.vayriaOutputGate,
+    ],
+  );
+  const autonomyCandidateKey = autonomyCandidate
+    ? `${autonomyCandidate.episodeId}:${autonomyCandidate.reasons
+        .map((reason) => reason.id)
+        .join(',')}:${autonomyCandidate.evidenceIds.join(',')}`
+    : null;
   const exhibitionPresentationState: ExhibitionPresentationState = isPerformerBusy
     ? 'reacting'
     : isCardSelectionActive
@@ -984,6 +1146,10 @@ export default function App() {
     setActivePlan(null);
     setActiveEmotionCue(null);
     setAutonomousContext(INITIAL_AUTONOMOUS_CONTEXT);
+    const initialAutonomyState = createInitialAutonomyState();
+    autonomyStateRef.current = initialAutonomyState;
+    setAutonomyState(initialAutonomyState);
+    pendingCardStimulusRef.current = null;
     setProgramPhase(DEFAULT_PROGRAM_CONTEXT.phase);
     setInput('');
     setIsAutonomousLoopEnabled(true);
@@ -1197,6 +1363,12 @@ export default function App() {
       recordVoiceSignal(event);
       switch (event.type) {
         case 'speech_started': {
+          recordAutonomyEvidence({
+            id: `voice-floor:${event.segmentId}:started`,
+            kind: 'interaction_state_change',
+            at: event.at,
+            semanticKey: 'floor:user-speaking',
+          });
           // Speech detection is only a candidate. Final text decides turn handoff.
           const isBargeInCandidate = ttsPlaying;
           if (isBargeInCandidate) {
@@ -1214,6 +1386,13 @@ export default function App() {
           return;
         }
         case 'speech_ended':
+          recordAutonomyEvidence({
+            id: `voice-floor:${event.segmentId}:available`,
+            kind: 'interaction_state_change',
+            at: event.at,
+            semanticKey: 'floor:available',
+            wakeConditions: ['floor_available', 'interaction_state_changed'],
+          });
           return;
         case 'utterance_finalized': {
           stopReaction();
@@ -1262,6 +1441,34 @@ export default function App() {
           }
 
           setVoiceValidationError('');
+          let voiceAutonomyEvidenceContext: AutonomyEvidenceContext | undefined;
+          if (isContentBearingVoiceMessage(message)) {
+            const semanticKey = `conversation:${message
+              .normalize('NFKC')
+              .replace(/\s+/gu, ' ')
+              .trim()
+              .slice(0, 96)}`;
+            const evidenceId = `voice-evidence:${event.segmentId}`;
+            const nextAutonomyState = recordAutonomyEvidence({
+              id: evidenceId,
+              kind: 'conversation_input',
+              at: event.at,
+              semanticKey,
+              content: message,
+              wakeConditions: ['new_evidence', 'floor_available'],
+              reasonProposals: [
+                {
+                  kind: 'conversation_continuation',
+                  content: message,
+                  semanticKey,
+                  salience: /[?？]/u.test(message) ? 0.9 : 0.68,
+                },
+              ],
+            });
+            voiceAutonomyEvidenceContext =
+              readAutonomyEvidenceContext(nextAutonomyState, evidenceId) ??
+              undefined;
+          }
           cancelNonSpeechPlan();
           cancelActiveCardReactionPlan();
           const identityForRequest = rememberExplicitAlias(message);
@@ -1316,6 +1523,8 @@ export default function App() {
             plan,
             { segmentId: event.segmentId, at: event.at, asrConfidence: null },
             identityForRequest,
+            undefined,
+            voiceAutonomyEvidenceContext,
           );
           return;
         }
@@ -1351,8 +1560,10 @@ export default function App() {
       isMuted,
       observeRouterSignal,
       prepare,
+      recordAutonomyEvidence,
       recordVoiceSignal,
       readCardContext,
+      readAutonomyEvidenceContext,
       rememberExplicitAlias,
       sendVoice,
       ttsPlaying,
@@ -1371,9 +1582,10 @@ export default function App() {
   const startAutonomous = useCallback(
     async (options: {
       cardContextOverride?: ChatCardContext;
-      contribution?: ReturnType<typeof getDirectionContribution>;
+      contribution?: DirectionContribution;
       programContextOverride?: ProgramContext;
       trigger?: PerformerTrigger;
+      candidate?: AutonomyCandidate;
     } = {}) => {
       const expectedSessionGeneration = sessionGeneration;
       const isCurrentSession = () =>
@@ -1392,16 +1604,35 @@ export default function App() {
         return false;
       }
 
-      const trigger =
-        options.trigger ?? ({ kind: 'idle_tick', elapsedMs: 0 } as const);
+      const candidate = options.candidate ?? autonomyCandidate;
+      if (!candidate) return false;
+      const stimulus = pendingCardStimulusRef.current;
+      pendingCardStimulusRef.current = null;
+      const cardContextOverride =
+        options.cardContextOverride ?? stimulus?.cardContext;
+      const contribution = options.contribution ?? stimulus?.contribution;
+      const programContextOverride =
+        options.programContextOverride ?? stimulus?.programContext;
+      const offeredState = markCandidateOffered(
+        autonomyStateRef.current,
+        candidate,
+      );
+      autonomyStateRef.current = offeredState;
+      setAutonomyState(offeredState);
+      const trigger: PerformerTrigger =
+        options.trigger ?? {
+          kind: 'autonomous_candidate',
+          episodeId: candidate.episodeId,
+          reasonIds: candidate.reasons.map((reason) => reason.id),
+        };
       const isForcedCardTurn =
-        options.contribution?.directionId === 'wildcard' &&
-        options.cardContextOverride?.forcedCardId !== null &&
-        options.cardContextOverride?.forcedCardId !== undefined;
+        contribution?.directionId === 'wildcard' &&
+        cardContextOverride?.forcedCardId !== null &&
+        cardContextOverride?.forcedCardId !== undefined;
       const preactivatedPlan: PerformancePlan | null = isForcedCardTurn
         ? createPlanForTrigger(
             trigger,
-            options.contribution ?? getDirectionContribution(trigger),
+            contribution ?? getDirectionContribution(trigger),
           )
         : null;
 
@@ -1458,27 +1689,37 @@ export default function App() {
         preactivatedPlan ??
         createPlanForTrigger(
           trigger,
-          options.contribution ?? getDirectionContribution(trigger),
+          contribution ?? getDirectionContribution(trigger),
         );
       if (plan.intent !== 'speak') {
         return executeNonSpeechPlan(plan);
       }
       beginReply();
       const decision = await sendAutonomous(
-        options.cardContextOverride ?? readCardContext(),
+        cardContextOverride ?? readCardContext(),
         autonomousContext,
         handleReplyAccepted,
         plan,
-        options.programContextOverride,
+        programContextOverride,
+        candidate,
       );
       if (!decision || !isCurrentSession()) return false;
-      setAutonomousContext((current) =>
-        advanceAutonomousContext(current, decision),
-      );
+      let nextState = autonomyStateRef.current;
+      if (decision.externalAction === 'speak') {
+        nextState = resolveUsedReasons(
+          nextState,
+          decision.usedReasonIds,
+          candidate.episodeId,
+        );
+      }
+      nextState = completeInactiveEpisodes(nextState);
+      autonomyStateRef.current = nextState;
+      setAutonomyState(nextState);
       return true;
     },
     [
       autonomousContext,
+      autonomyCandidate,
       beginReply,
       createPlanForTrigger,
       executeNonSpeechPlan,
@@ -1502,25 +1743,35 @@ export default function App() {
   const handleCardInserted = useCallback(
     (result: CardSwapResult) => {
       setProgramPhase('after_card_change');
-      const trigger: PerformerTrigger = {
-        kind: 'external_stimulus',
-        semanticCue: `something_changed:${result.insertedCardId}`,
-        metadata: { origin: 'wildcard' },
-      };
       const contribution = activateCardSwap(result);
+      recordAutonomyEvidence({
+        id: `card-evidence:${result.animationSequence}`,
+        kind: 'environment_change',
+        at: Date.now(),
+        semanticKey: `card:${result.insertedCardId}`,
+        content: `カードが変わりました: ${result.insertedCardId}`,
+        wakeConditions: ['new_evidence', 'interaction_state_changed'],
+        reasonProposals: [
+          {
+            kind: 'environment_change',
+            content: `カードが変わりました: ${result.insertedCardId}`,
+            semanticKey: `card:${result.insertedCardId}`,
+            salience: 0.82,
+          },
+        ],
+      });
       if (!isAutonomousLoopEnabled || isMuted || isBusy) return;
-      void startAutonomous({
-        cardContextOverride: {
+      pendingCardStimulusRef.current = {
+        cardContext: {
           brainCardIds: result.brainCardIds,
           forcedCardId: result.forcedCardId,
         },
         contribution,
-        programContextOverride: {
+        programContext: {
           ...programContext,
           phase: 'after_card_change',
         },
-        trigger,
-      });
+      };
     },
     [
       activateCardSwap,
@@ -1528,17 +1779,9 @@ export default function App() {
       isBusy,
       isMuted,
       programContext,
+      recordAutonomyEvidence,
       setProgramPhase,
-      startAutonomous,
     ],
-  );
-
-  const getNextAutonomousDelay = useCallback(
-    () =>
-      getRuntimeAutonomousDelay([
-        getDirectionContribution({ kind: 'idle_tick', elapsedMs: 0 }),
-      ]),
-    [getDirectionContribution, getRuntimeAutonomousDelay],
   );
 
   const handleVoiceToggle = useCallback(async () => {
@@ -1560,15 +1803,15 @@ export default function App() {
 
   useAutonomousTalk({
     cancelAutonomous,
-    getNextAutonomousDelay,
+    candidateKey: autonomyCandidateKey,
+    hasCandidate: autonomyCandidate !== null,
     isBusy: isPerformerBusy,
     isVoiceActivityActive: isVadSpeech || isSttProcessing,
     isLoopEnabled: isAutonomousLoopEnabled,
-    isWaitingForViewer: autonomousContext.viewerEngagement === 'settled',
     isMuted,
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
-    onIdleTick: startAutonomous,
+    onCandidate: startAutonomous,
     sessionGeneration,
   });
 
@@ -1598,6 +1841,33 @@ export default function App() {
       text: trimmedInput,
     };
     const identityForRequest = rememberExplicitAlias(trimmedInput);
+    let manualAutonomyEvidenceContext: AutonomyEvidenceContext | undefined;
+    if (isContentBearingVoiceMessage(trimmedInput)) {
+      const semanticKey = `conversation:${trimmedInput
+        .normalize('NFKC')
+        .replace(/\s+/gu, ' ')
+        .trim()
+        .slice(0, 96)}`;
+      const evidenceId = `manual-evidence:${Date.now()}`;
+      const nextAutonomyState = recordAutonomyEvidence({
+        id: evidenceId,
+        kind: 'conversation_input',
+        at: Date.now(),
+        semanticKey,
+        content: trimmedInput,
+        wakeConditions: ['new_evidence', 'floor_available'],
+        reasonProposals: [
+          {
+            kind: 'conversation_continuation',
+            content: trimmedInput,
+            semanticKey,
+            salience: /[?？]/u.test(trimmedInput) ? 0.9 : 0.68,
+          },
+        ],
+      });
+      manualAutonomyEvidenceContext =
+        readAutonomyEvidenceContext(nextAutonomyState, evidenceId) ?? undefined;
+    }
     setAutonomousContext((current) =>
       recordViewerIntent(current, trimmedInput, identityForRequest),
     );
@@ -1613,6 +1883,8 @@ export default function App() {
       handleReplyAccepted,
       plan,
       identityForRequest,
+      undefined,
+      manualAutonomyEvidenceContext,
     );
   };
 
