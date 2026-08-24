@@ -3472,7 +3472,7 @@ async function handleRequest(
       requestPhase = 'llm';
       if (!config.openAiApiKey) {
         throw new RequestError(
-          'OPENAI_API_KEY is not configured in .env.local.',
+          'OPENAI_API_KEY is not available in the process environment or a configured secret source. Start with `op run --env-file .env.1password -- npm run exhibition:start` after configuring 1Password.',
           503,
         );
       }
@@ -3508,7 +3508,7 @@ async function handleRequest(
       requestPhase = 'llm';
       if (!config.openAiApiKey) {
         throw new RequestError(
-          'OPENAI_API_KEY is not configured in .env.local.',
+          'OPENAI_API_KEY is not available in the process environment or a configured secret source. Start with `op run --env-file .env.1password -- npm run exhibition:start` after configuring 1Password.',
           503,
         );
       }
