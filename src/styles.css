@@ -1828,3 +1828,104 @@ input {
     transform: none;
   }
 }
+
+/* Vayria salon polish: keep the frame quiet and let the face and hand lead. */
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell::before {
+  position: absolute;
+  z-index: 40;
+  inset: clamp(0.45rem, 0.8vw, 0.8rem);
+  border: clamp(1px, 0.14vw, 2px) solid rgb(199 168 107 / 58%);
+  border-radius: clamp(0.7rem, 1.2vw, 1.1rem);
+  box-shadow:
+    inset 0 0 0 1px rgb(244 239 230 / 14%),
+    inset 0 0 18px rgb(199 168 107 / 8%),
+    0 0 12px rgb(199 168 107 / 11%);
+  content: "";
+  pointer-events: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation {
+  position: absolute;
+  z-index: 3;
+  right: clamp(1rem, 5vw, 3rem);
+  bottom: var(--exhibition-hand-reserved-height);
+  left: clamp(1rem, 5vw, 3rem);
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .message-form {
+  display: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation-copy {
+  display: grid;
+  justify-items: center;
+  width: 100%;
+  min-height: 0;
+  text-align: center;
+}
+
+.app-shell[data-app-mode="exhibition"] .reply {
+  display: -webkit-box;
+  width: fit-content;
+  max-width: min(72vw, 34rem);
+  margin-inline: auto;
+  overflow: hidden;
+  padding: 0.28rem 0.78rem;
+  border: 1px solid rgb(244 239 230 / 15%);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgb(244 239 230 / 9%), rgb(23 23 37 / 20%));
+  box-shadow:
+    0 5px 18px rgb(8 8 21 / 14%),
+    inset 0 1px 0 rgb(255 255 255 / 12%);
+  color: var(--ivory);
+  font-size: clamp(0.9rem, 2.1vw, 1.2rem);
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 0 2px 8px rgb(8 8 21 / 78%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.app-shell[data-app-mode="exhibition"] .status {
+  margin-top: 0.25rem;
+  color: rgb(244 239 230 / 52%);
+  font-size: clamp(0.68rem, 1.1vw, 0.78rem);
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-shadow: 0 2px 8px rgb(8 8 21 / 72%);
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation-error {
+  border: 1px solid rgb(240 184 183 / 42%);
+  box-shadow: 0 6px 18px rgb(31 8 13 / 26%);
+}
+
+@media (max-width: 720px) {
+  .app-shell::before {
+    inset: 0.35rem;
+    border-width: 1px;
+    border-radius: 0.7rem;
+  }
+
+  .app-shell[data-app-mode="exhibition"] .reply {
+    max-width: calc(100vw - 2.5rem);
+  }
+}
