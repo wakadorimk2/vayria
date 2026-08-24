@@ -18,7 +18,17 @@ import {
   writeCharacterIdentity,
   type CharacterIdentity,
 } from './character/identity';
-import { useAutonomousTalk } from './conversation/useAutonomousTalk';
+import {
+  useAutonomousTalk,
+  type AutonomyCandidateTelemetry,
+  type AutonomyExternalEventSignal,
+  type AutonomousTurnOutcome,
+} from './conversation/useAutonomousTalk';
+import {
+  readAutonomyTurnGateTiming,
+  type AutonomyTurnGateExternalEvent,
+} from './conversation/autonomyTurnGate';
+import { emitAutonomyGateEvent } from './conversation/conversationEvents';
 import {
   INITIAL_AUTONOMOUS_CONTEXT,
   recordViewerIntent,
@@ -291,6 +301,9 @@ export default function App() {
   const [autonomyState, setAutonomyState] = useState<AutonomyState>(
     createInitialAutonomyState,
   );
+  const [autonomyExternalEvent, setAutonomyExternalEvent] = useState<
+    AutonomyExternalEventSignal | null
+  >(null);
   const [isAutonomousLoopEnabled, setIsAutonomousLoopEnabled] =
     useState(true);
   const [sessionGeneration, setSessionGeneration] = useState(0);
@@ -311,6 +324,7 @@ export default function App() {
     completePlan,
     createPlan,
     getPerformerStateContext,
+    profile: performerProfile,
     resetRuntime,
     setPhase,
   } = performer;
@@ -383,6 +397,16 @@ export default function App() {
     return nextState;
   }, []);
 
+  const notifyMeaningfulAutonomyEvent = useCallback(
+    (kind: AutonomyTurnGateExternalEvent) => {
+      setAutonomyExternalEvent((current) => ({
+        sequence: (current?.sequence ?? 0) + 1,
+        kind,
+      }));
+    },
+    [],
+  );
+
   const readAutonomyEvidenceContext = useCallback(
     (state: AutonomyState, evidenceId: string): AutonomyEvidenceContext | null => {
       const matchingReasons = state.reasons.filter(
@@ -417,6 +441,11 @@ export default function App() {
         null;
       if (!episodeId) return;
       let nextState = current;
+      let createdReasonIds: readonly string[] = [];
+      let resolvedReasonIds: readonly string[] = [];
+      const internalDeltaOperations = delta.reasonUpdates.map(
+        (update) => update.operation,
+      );
       if (delta.reasonUpdates.length) {
         const deltaEvidenceId = createAutonomyEvidenceId('autonomy-delta');
         const stateWithDeltaEvidence = observeAutonomyEvidence(current, {
@@ -431,6 +460,16 @@ export default function App() {
           evidenceId: deltaEvidenceId,
           at: Date.now(),
         });
+        createdReasonIds = result.createdReasonIds;
+        resolvedReasonIds = result.state.reasons
+          .filter((reason) => {
+            if (reason.status !== 'resolved') return false;
+            const previous = current.reasons.find(
+              (candidate) => candidate.id === reason.id,
+            );
+            return previous?.status !== 'resolved';
+          })
+          .map((reason) => reason.id);
         if (result.changed) nextState = result.state;
       }
       const resolvableReasonIds = context.reasonIds.filter((reasonId) =>
@@ -439,6 +478,9 @@ export default function App() {
         ),
       );
       if (context.resolvesReason && resolvableReasonIds.length) {
+        resolvedReasonIds = [
+          ...new Set([...resolvedReasonIds, ...resolvableReasonIds]),
+        ];
         nextState = resolveUsedReasons(
           nextState,
           resolvableReasonIds,
@@ -446,6 +488,23 @@ export default function App() {
         );
       }
       nextState = completeInactiveEpisodes(nextState);
+      if (delta.reasonUpdates.length || resolvedReasonIds.length) {
+        emitAutonomyGateEvent({
+          gateEvent: 'internal_delta',
+          gatePhase: 'running',
+          transition: 'ignored',
+          internalDeltaOperations,
+          affectedReasonIds: [
+            ...new Set([
+              ...context.reasonIds,
+              ...createdReasonIds,
+              ...resolvedReasonIds,
+            ]),
+          ],
+          createdReasonIds,
+          resolvedReasonIds,
+        });
+      }
       if (nextState === current) return;
       autonomyStateRef.current = nextState;
       setAutonomyState(nextState);
@@ -841,6 +900,7 @@ export default function App() {
               ? ['floor_available', 'interaction_state_changed']
               : ['interaction_state_changed'],
           });
+          notifyMeaningfulAutonomyEvent('router_change');
           break;
         case 'set_gpt_input_gate':
           break;
@@ -855,6 +915,7 @@ export default function App() {
                 ? ['floor_available', 'interaction_state_changed']
                 : ['interaction_state_changed'],
           });
+          notifyMeaningfulAutonomyEvent('router_change');
           break;
         case 'reset_vayria':
           routerResetSessionRef.current?.();
@@ -864,6 +925,7 @@ export default function App() {
   }, [
     cancelAutonomous,
     interruptCurrentTurn,
+    notifyMeaningfulAutonomyEvent,
     recordAutonomyEvidence,
     stopReaction,
   ]);
@@ -1042,6 +1104,18 @@ export default function App() {
         .map((reason) => reason.id)
         .join(',')}:${autonomyCandidate.decisionEvidenceIds.join(',')}`
     : null;
+  const autonomyCandidateTelemetry: AutonomyCandidateTelemetry | null =
+    autonomyCandidate
+      ? {
+          episodeId: autonomyCandidate.episodeId,
+          reasonIds: autonomyCandidate.reasons.map((reason) => reason.id),
+          decisionEvidenceIds: autonomyCandidate.decisionEvidenceIds,
+        }
+      : null;
+  const autonomyTurnGateTiming = useMemo(
+    () => readAutonomyTurnGateTiming(performerProfile),
+    [performerProfile],
+  );
   const exhibitionPresentationState: ExhibitionPresentationState = isPerformerBusy
     ? 'reacting'
     : isCardSelectionActive
@@ -1467,6 +1541,7 @@ export default function App() {
                 },
               ],
             });
+            notifyMeaningfulAutonomyEvent('viewer_speech');
             voiceAutonomyEvidenceContext =
               readAutonomyEvidenceContext(nextAutonomyState, evidenceId) ??
               undefined;
@@ -1560,6 +1635,7 @@ export default function App() {
       interruptCurrentTurn,
       isBusy,
       isMuted,
+      notifyMeaningfulAutonomyEvent,
       observeRouterSignal,
       prepare,
       recordAutonomyEvidence,
@@ -1603,11 +1679,11 @@ export default function App() {
         isBusy ||
         Boolean(activePlanRef.current)
       ) {
-        return false;
+        return 'aborted' as AutonomousTurnOutcome;
       }
 
       const candidate = options.candidate ?? autonomyCandidate;
-      if (!candidate) return false;
+      if (!candidate) return 'aborted' as AutonomousTurnOutcome;
       const stimulus = pendingCardStimulusRef.current;
       pendingCardStimulusRef.current = null;
       const cardContextOverride =
@@ -1665,7 +1741,7 @@ export default function App() {
         const audioReady = await prepare();
         if (!audioReady || !isCurrentSession()) {
           cancelPreactivatedPlan();
-          return false;
+          return 'aborted' as AutonomousTurnOutcome;
         }
       } else {
         void prepare();
@@ -1685,7 +1761,7 @@ export default function App() {
           : !keepsPreactivatedPlan)
       ) {
         cancelPreactivatedPlan();
-        return false;
+        return 'aborted' as AutonomousTurnOutcome;
       }
       const plan =
         preactivatedPlan ??
@@ -1694,7 +1770,9 @@ export default function App() {
           contribution ?? getDirectionContribution(trigger),
         );
       if (plan.intent !== 'speak') {
-        return executeNonSpeechPlan(plan);
+        return executeNonSpeechPlan(plan)
+          ? ('none' as AutonomousTurnOutcome)
+          : ('aborted' as AutonomousTurnOutcome);
       }
       beginReply();
       const decision = await sendAutonomous(
@@ -1705,7 +1783,19 @@ export default function App() {
         programContextOverride,
         candidate,
       );
-      if (!decision || !isCurrentSession()) return false;
+      if (!decision || !isCurrentSession()) {
+        return 'aborted' as AutonomousTurnOutcome;
+      }
+      emitAutonomyGateEvent({
+        gateEvent: 'turn_result',
+        gatePhase: 'running',
+        transition: 'ignored',
+        candidateEpisodeId: candidate.episodeId,
+        candidateReasonIds: candidate.reasons.map((reason) => reason.id),
+        candidateEvidenceIds: candidate.decisionEvidenceIds,
+        usedReasonIds: decision.usedReasonIds,
+        externalAction: decision.externalAction,
+      });
       let nextState = autonomyStateRef.current;
       if (decision.externalAction === 'speak') {
         nextState = resolveUsedReasons(
@@ -1717,7 +1807,7 @@ export default function App() {
       nextState = completeInactiveEpisodes(nextState);
       autonomyStateRef.current = nextState;
       setAutonomyState(nextState);
-      return true;
+      return decision.externalAction === 'speak' ? 'speak' : 'none';
     },
     [
       autonomousContext,
@@ -1762,6 +1852,7 @@ export default function App() {
           },
         ],
       });
+      notifyMeaningfulAutonomyEvent('card_change');
       if (!isAutonomousLoopEnabled || isMuted || isBusy) return;
       pendingCardStimulusRef.current = {
         cardContext: {
@@ -1780,6 +1871,7 @@ export default function App() {
       isAutonomousLoopEnabled,
       isBusy,
       isMuted,
+      notifyMeaningfulAutonomyEvent,
       programContext,
       recordAutonomyEvidence,
       setProgramPhase,
@@ -1806,6 +1898,8 @@ export default function App() {
   useAutonomousTalk({
     cancelAutonomous,
     candidateKey: autonomyCandidateKey,
+    candidateTelemetry: autonomyCandidateTelemetry,
+    externalEventSignal: autonomyExternalEvent,
     hasCandidate: autonomyCandidate !== null,
     isBusy: isPerformerBusy,
     isVoiceActivityActive: isVadSpeech || isSttProcessing,
@@ -1814,7 +1908,9 @@ export default function App() {
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
     onCandidate: startAutonomous,
+    onGateEvent: emitAutonomyGateEvent,
     sessionGeneration,
+    timing: autonomyTurnGateTiming,
   });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -1867,6 +1963,7 @@ export default function App() {
           },
         ],
       });
+      notifyMeaningfulAutonomyEvent('viewer_speech');
       manualAutonomyEvidenceContext =
         readAutonomyEvidenceContext(nextAutonomyState, evidenceId) ?? undefined;
     }

@@ -21,6 +21,7 @@
     "src/conversation/participationController.ts",
     "src/conversation/semanticDialogueHistory.ts",
     "src/conversation/autonomousContext.ts",
+    "src/conversation/autonomyTurnGate.ts",
     "src/conversation/useAutonomousTalk.ts",
     "src/conversation/autonomyState.ts",
     "src/conversation/programContext.ts",
@@ -33,6 +34,7 @@
     "scripts/character-identity.test.ts",
     "scripts/autonomous-context.test.ts",
     "scripts/autonomous-talk.test.ts",
+    "scripts/autonomy-turn-gate.test.ts",
     "scripts/autonomy-state.test.ts"
   ]
 }

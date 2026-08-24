@@ -176,6 +176,9 @@ export interface PerformerProfile {
   attentionDecayHalfLifeMs: number;
   energyBaseline: number;
   responseDelayBaselineMs: number;
+  initialAutonomyDelayMs: number;
+  autonomyQuietTimeMinMs: number;
+  autonomyQuietTimeMaxMs: number;
   leadBeforeSpeechMs: number;
   motionLeadMs: number;
   motionEnterBlendMs: number;

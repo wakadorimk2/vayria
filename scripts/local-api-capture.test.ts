@@ -223,10 +223,37 @@ test('exhibition local API captures safe events and keeps Playcheck raw priority
       ),
       204,
     );
+    assert.equal(
+      await postEvent(fake.handlers[0], {
+        at: '2026-08-22T00:00:02.000Z',
+        elapsedMs: 30,
+        event: 'autonomy_gate',
+        source: 'autonomous',
+        turnId: 'autonomy-gate-1',
+        gateEvent: 'turn_completed',
+        gatePhase: 'refractory',
+        transition: 'entered_refractory',
+        candidateEpisodeId: 'episode-1',
+        candidateReasonIds: ['reason-1'],
+        candidateEvidenceIds: ['evidence-1'],
+        usedReasonIds: ['reason-1'],
+        createdReasonIds: ['reason-2'],
+        resolvedReasonIds: ['reason-1'],
+        externalAction: 'speak',
+        nextEligibleAt: 18_000,
+        delayMs: 8_000,
+      }),
+      204,
+    );
 
     const events = await readExhibitionEvents(root, captureId);
-    assert.equal(events.length, 1);
+    assert.equal(events.length, 2);
     assert.equal(events[0].event, 'input_received');
+    assert.equal(events[1].event, 'autonomy_gate');
+    assert.deepEqual(events[1].usedReasonIds, ['reason-1']);
+    assert.deepEqual(events[1].createdReasonIds, ['reason-2']);
+    assert.deepEqual(events[1].resolvedReasonIds, ['reason-1']);
+    assert.deepEqual(events[1].candidateEvidenceIds, ['evidence-1']);
     assert.equal('message' in events[0], false);
     assert.equal('history' in events[0], false);
     assert.equal('apiKey' in events[0], false);

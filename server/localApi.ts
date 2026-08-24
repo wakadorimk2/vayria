@@ -53,6 +53,14 @@ import {
   type ProgramContext,
 } from '../src/conversation/programContext.js';
 import {
+  AUTONOMY_TURN_GATE_BLOCK_REASONS,
+  AUTONOMY_TURN_GATE_EVENTS,
+  AUTONOMY_TURN_GATE_EXTERNAL_EVENTS,
+  AUTONOMY_TURN_GATE_PHASES,
+  AUTONOMY_TURN_GATE_TRANSITIONS,
+  type AutonomyTurnGateTelemetry,
+} from '../src/conversation/autonomyTurnGate.js';
+import {
   ATTENTION_TARGETS,
   PERFORMER_PHASES,
   type PerformerStateContext,
@@ -130,6 +138,17 @@ const MAX_TOPIC_TURNS = 100;
 const MAX_VIEWER_TURNS_SINCE = 100;
 const MAX_EVENT_TURN_ID_LENGTH = 128;
 const MAX_EVENT_REASON_LENGTH = 120;
+const MAX_EVENT_ID_LIST_LENGTH = 16;
+const SAFE_EVENT_ID_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/u;
+const AUTONOMY_DELTA_OPERATIONS = [
+  'create',
+  'reinforce',
+  'resolve',
+  'expire',
+  'defer',
+  'reactivate',
+  'merge',
+] as const;
 const AUTONOMY_REASON_UPDATE_FIELDS = new Set([
   'operation',
   'kind',
@@ -162,6 +181,7 @@ const CONVERSATION_EVENTS = [
   'turn_completed',
   'turn_aborted',
   'turn_failed',
+  'autonomy_gate',
 ] as const;
 const CARD_BY_ID: ReadonlyMap<string, WildcardCardData> = new Map(
   cardPool.map((card) => [card.id, card]),
@@ -259,6 +279,22 @@ interface ClientConversationEvent {
   reason?: string;
   interactionAction?: ConversationAction;
   runId?: string;
+  gateEvent?: AutonomyTurnGateTelemetry['gateEvent'];
+  gatePhase?: AutonomyTurnGateTelemetry['gatePhase'];
+  transition?: AutonomyTurnGateTelemetry['transition'];
+  blockedBy?: AutonomyTurnGateTelemetry['blockedBy'];
+  externalEvent?: AutonomyTurnGateTelemetry['externalEvent'];
+  candidateEpisodeId?: string;
+  candidateReasonIds?: string[];
+  candidateEvidenceIds?: string[];
+  usedReasonIds?: string[];
+  internalDeltaOperations?: string[];
+  affectedReasonIds?: string[];
+  createdReasonIds?: string[];
+  resolvedReasonIds?: string[];
+  externalAction?: AutonomyTurnGateTelemetry['externalAction'];
+  nextEligibleAt?: number | null;
+  delayMs?: number;
 }
 
 class RequestError extends Error {
@@ -410,6 +446,22 @@ const PLAYCHECK_RECORD_FIELDS = [
   'activeRequests',
   'audioBytes',
   'providerCallCount',
+  'gateEvent',
+  'gatePhase',
+  'transition',
+  'blockedBy',
+  'externalEvent',
+  'candidateEpisodeId',
+  'candidateReasonIds',
+  'candidateEvidenceIds',
+  'usedReasonIds',
+  'internalDeltaOperations',
+  'affectedReasonIds',
+  'createdReasonIds',
+  'resolvedReasonIds',
+  'externalAction',
+  'nextEligibleAt',
+  'delayMs',
 ] as const;
 const SAFE_PLAYCHECK_REASONS = new Set([
   'busy',
@@ -441,16 +493,18 @@ async function recordStructuredEvent(
     };
     for (const field of PLAYCHECK_RECORD_FIELDS) {
       const value = fields[field];
-      if (
-        typeof value === 'string' ||
-        typeof value === 'number'
-      ) {
+      if (typeof value === 'string' || typeof value === 'number') {
         if (
           field === 'reason' &&
           (typeof value !== 'string' || !SAFE_PLAYCHECK_REASONS.has(value))
         ) {
           continue;
         }
+        record[field] = value;
+      } else if (
+        Array.isArray(value) &&
+        value.every((item) => typeof item === 'string')
+      ) {
         record[field] = value;
       }
     }
@@ -477,7 +531,16 @@ async function recordStructuredEvent(
   };
   for (const field of ['origin', ...PLAYCHECK_RECORD_FIELDS]) {
     const value = fields[field];
-    if (typeof value !== 'string' && typeof value !== 'number') continue;
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      !(
+        Array.isArray(value) &&
+        value.every((item) => typeof item === 'string')
+      )
+    ) {
+      continue;
+    }
     if (
       field === 'reason' &&
       (typeof value !== 'string' || !SAFE_PLAYCHECK_REASONS.has(value))
@@ -495,6 +558,24 @@ async function recordStructuredEvent(
     } catch (error) {
       console.warn('Exhibition event recording failed.', error);
   }
+}
+
+function readSafeEventId(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !SAFE_EVENT_ID_PATTERN.test(value)) {
+    throw new RequestError(`${field} is invalid.`, 400);
+  }
+  return value;
+}
+
+function readSafeEventIdList(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.length > MAX_EVENT_ID_LIST_LENGTH) {
+    throw new RequestError(`${field} must be a bounded string list.`, 400);
+  }
+  const values = value.map((item) => readSafeEventId(item, field));
+  if (new Set(values).size !== values.length) {
+    throw new RequestError(`${field} must contain unique IDs.`, 400);
+  }
+  return values;
 }
 
 export function readConversationEvent(payload: unknown): ClientConversationEvent {
@@ -515,6 +596,22 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     'reason',
     'interactionAction',
     'runId',
+    'gateEvent',
+    'gatePhase',
+    'transition',
+    'blockedBy',
+    'externalEvent',
+    'candidateEpisodeId',
+    'candidateReasonIds',
+    'candidateEvidenceIds',
+    'usedReasonIds',
+    'internalDeltaOperations',
+    'affectedReasonIds',
+    'createdReasonIds',
+    'resolvedReasonIds',
+    'externalAction',
+    'nextEligibleAt',
+    'delayMs',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError('Event body contains an unsupported field.', 400);
@@ -542,6 +639,54 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     throw new RequestError('event is invalid.', 400);
   }
 
+  const gateFields = [
+    'gateEvent',
+    'gatePhase',
+    'transition',
+    'blockedBy',
+    'externalEvent',
+    'candidateEpisodeId',
+    'candidateReasonIds',
+    'candidateEvidenceIds',
+    'usedReasonIds',
+    'internalDeltaOperations',
+    'affectedReasonIds',
+    'externalAction',
+    'nextEligibleAt',
+    'delayMs',
+  ];
+  const hasGateFields = gateFields.some((field) => record[field] !== undefined);
+  if (event !== 'autonomy_gate' && hasGateFields) {
+    throw new RequestError(
+      'Autonomy gate fields are only valid for autonomy_gate events.',
+      400,
+    );
+  }
+  if (event === 'autonomy_gate') {
+    if (source !== 'autonomous') {
+      throw new RequestError(
+        'autonomy_gate events must use the autonomous source.',
+        400,
+      );
+    }
+    if (
+      typeof record.gateEvent !== 'string' ||
+      !(AUTONOMY_TURN_GATE_EVENTS as readonly string[]).includes(
+        record.gateEvent,
+      )
+    ) {
+      throw new RequestError('gateEvent is invalid.', 400);
+    }
+    if (
+      typeof record.gatePhase !== 'string' ||
+      !(AUTONOMY_TURN_GATE_PHASES as readonly string[]).includes(
+        record.gatePhase,
+      )
+    ) {
+      throw new RequestError('gatePhase is invalid.', 400);
+    }
+  }
+
   const at = record.at;
   if (
     typeof at !== 'string' ||
@@ -566,6 +711,101 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     source,
     turnId,
   };
+
+  if (record.gateEvent !== undefined) {
+    eventPayload.gateEvent = record.gateEvent as AutonomyTurnGateTelemetry['gateEvent'];
+  }
+  if (record.gatePhase !== undefined) {
+    eventPayload.gatePhase = record.gatePhase as AutonomyTurnGateTelemetry['gatePhase'];
+  }
+  if (record.transition !== undefined) {
+    if (
+      typeof record.transition !== 'string' ||
+      !(AUTONOMY_TURN_GATE_TRANSITIONS as readonly string[]).includes(
+        record.transition,
+      )
+    ) {
+      throw new RequestError('transition is invalid.', 400);
+    }
+    eventPayload.transition = record.transition as AutonomyTurnGateTelemetry['transition'];
+  }
+  if (record.blockedBy !== undefined) {
+    if (
+      typeof record.blockedBy !== 'string' ||
+      !(AUTONOMY_TURN_GATE_BLOCK_REASONS as readonly string[]).includes(
+        record.blockedBy,
+      )
+    ) {
+      throw new RequestError('blockedBy is invalid.', 400);
+    }
+    eventPayload.blockedBy = record.blockedBy as AutonomyTurnGateTelemetry['blockedBy'];
+  }
+  if (record.externalEvent !== undefined) {
+    if (
+      typeof record.externalEvent !== 'string' ||
+      !(AUTONOMY_TURN_GATE_EXTERNAL_EVENTS as readonly string[]).includes(
+        record.externalEvent,
+      )
+    ) {
+      throw new RequestError('externalEvent is invalid.', 400);
+    }
+    eventPayload.externalEvent = record.externalEvent as AutonomyTurnGateTelemetry['externalEvent'];
+  }
+  if (record.candidateEpisodeId !== undefined) {
+    eventPayload.candidateEpisodeId = readSafeEventId(
+      record.candidateEpisodeId,
+      'candidateEpisodeId',
+    );
+  }
+  for (const field of [
+    'candidateReasonIds',
+    'candidateEvidenceIds',
+    'usedReasonIds',
+    'affectedReasonIds',
+    'createdReasonIds',
+    'resolvedReasonIds',
+  ] as const) {
+    if (record[field] !== undefined) {
+      eventPayload[field] = readSafeEventIdList(record[field], field);
+    }
+  }
+  if (record.internalDeltaOperations !== undefined) {
+    const operations = readSafeEventIdList(
+      record.internalDeltaOperations,
+      'internalDeltaOperations',
+    );
+    if (
+      operations.some(
+        (operation) =>
+          !(AUTONOMY_DELTA_OPERATIONS as readonly string[]).includes(operation),
+      )
+    ) {
+      throw new RequestError('internalDeltaOperations is invalid.', 400);
+    }
+    eventPayload.internalDeltaOperations = operations;
+  }
+  if (record.externalAction !== undefined) {
+    if (record.externalAction !== 'speak' && record.externalAction !== 'none') {
+      throw new RequestError('externalAction is invalid.', 400);
+    }
+    eventPayload.externalAction = record.externalAction;
+  }
+  for (const field of ['nextEligibleAt', 'delayMs'] as const) {
+    if (record[field] === undefined) continue;
+    const value = record[field];
+    if (field === 'nextEligibleAt' && value === null) {
+      eventPayload.nextEligibleAt = null;
+      continue;
+    }
+    if (
+      typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < 0
+    ) {
+      throw new RequestError(`${field} is invalid.`, 400);
+    }
+    eventPayload[field] = value;
+  }
 
   if (record.runId !== undefined) {
     if (!isPlaycheckRunId(record.runId)) {
@@ -3177,6 +3417,52 @@ async function handleRequest(
         ...(event.interactionAction === undefined
           ? {}
           : { interactionAction: event.interactionAction }),
+        ...(event.gateEvent === undefined
+          ? {}
+          : { gateEvent: event.gateEvent }),
+        ...(event.gatePhase === undefined
+          ? {}
+          : { gatePhase: event.gatePhase }),
+        ...(event.transition === undefined
+          ? {}
+          : { transition: event.transition }),
+        ...(event.blockedBy === undefined
+          ? {}
+          : { blockedBy: event.blockedBy }),
+        ...(event.externalEvent === undefined
+          ? {}
+          : { externalEvent: event.externalEvent }),
+        ...(event.candidateEpisodeId === undefined
+          ? {}
+          : { candidateEpisodeId: event.candidateEpisodeId }),
+        ...(event.candidateReasonIds === undefined
+          ? {}
+          : { candidateReasonIds: event.candidateReasonIds }),
+        ...(event.candidateEvidenceIds === undefined
+          ? {}
+          : { candidateEvidenceIds: event.candidateEvidenceIds }),
+        ...(event.usedReasonIds === undefined
+          ? {}
+          : { usedReasonIds: event.usedReasonIds }),
+        ...(event.internalDeltaOperations === undefined
+          ? {}
+          : { internalDeltaOperations: event.internalDeltaOperations }),
+        ...(event.affectedReasonIds === undefined
+          ? {}
+          : { affectedReasonIds: event.affectedReasonIds }),
+        ...(event.createdReasonIds === undefined
+          ? {}
+          : { createdReasonIds: event.createdReasonIds }),
+        ...(event.resolvedReasonIds === undefined
+          ? {}
+          : { resolvedReasonIds: event.resolvedReasonIds }),
+        ...(event.externalAction === undefined
+          ? {}
+          : { externalAction: event.externalAction }),
+        ...(event.nextEligibleAt === undefined
+          ? {}
+          : { nextEligibleAt: event.nextEligibleAt }),
+        ...(event.delayMs === undefined ? {} : { delayMs: event.delayMs }),
       });
       sendNoContent(response);
       return;

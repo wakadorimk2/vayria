@@ -13,6 +13,7 @@ LOG_PROB_THRESHOLD = -1.0
 COMPRESSION_RATIO_THRESHOLD = 2.4
 HALLUCINATION_ONLY_PHRASES = frozenset({"ご視聴ありがとうございました"})
 TRANSCRIPT_STRIP_CHARACTERS = " \t\r\n\u3000。、．.!！?？…"
+WARM_UP_AUDIO_SAMPLES = 320
 STT_MODEL_VALUES = ("tiny", "base", "small")
 STT_DEVICE_VALUES = ("auto", "cuda", "cpu")
 STT_COMPUTE_TYPE_VALUES = ("auto", "float16", "int8")
@@ -198,7 +199,7 @@ class FasterWhisperTranscriber:
         model = self._get_model()
         import numpy as np
 
-        audio = np.zeros(8_000, dtype=np.float32)
+        audio = np.zeros(WARM_UP_AUDIO_SAMPLES, dtype=np.float32)
         try:
             segments, _info = model.transcribe(
                 audio,
@@ -209,7 +210,7 @@ class FasterWhisperTranscriber:
                 log_prob_threshold=LOG_PROB_THRESHOLD,
                 no_speech_threshold=NO_SPEECH_THRESHOLD,
                 condition_on_previous_text=False,
-                vad_filter=False,
+                vad_filter=True,
             )
             next(iter(segments), None)
         finally:

@@ -96,6 +96,7 @@ def test_warm_up_uses_the_effective_model(monkeypatch) -> None:
     provider.warm_up("ja")
 
     assert model.options["language"] == "ja"
+    assert model.options["vad_filter"] is True
 
 
 def test_faster_whisper_receives_explicit_hallucination_guards() -> None:

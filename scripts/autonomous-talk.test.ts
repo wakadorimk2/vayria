@@ -10,6 +10,7 @@ const READY_STATE = {
   isMuted: false,
   isReady: true,
   isVisible: true,
+  isTurnGateReady: true,
 };
 
 test('a candidate is required before autonomous scheduling', () => {
@@ -25,6 +26,16 @@ test('viewer speech and STT processing block a new autonomous candidate', () => 
     shouldScheduleAutonomousTalk({
       ...READY_STATE,
       isVoiceActivityActive: true,
+    }),
+    false,
+  );
+});
+
+test('the autonomy turn gate blocks a candidate while it is not ready', () => {
+  assert.equal(
+    shouldScheduleAutonomousTalk({
+      ...READY_STATE,
+      isTurnGateReady: false,
     }),
     false,
   );

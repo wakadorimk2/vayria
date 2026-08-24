@@ -689,6 +689,60 @@ test('conversation events validate the shared interactionAction field', () => {
   );
 });
 
+test('autonomy gate events keep only bounded diagnostic fields', () => {
+  const event = readConversationEvent({
+    at: '2026-08-23T00:00:00.000Z',
+    elapsedMs: 0,
+    event: 'autonomy_gate',
+    source: 'autonomous',
+    turnId: 'autonomy-gate-1',
+    gateEvent: 'turn_completed',
+    gatePhase: 'refractory',
+    transition: 'entered_refractory',
+    candidateReasonIds: ['reason-1'],
+    candidateEvidenceIds: ['evidence-1'],
+    usedReasonIds: ['reason-1'],
+    createdReasonIds: ['reason-2'],
+    resolvedReasonIds: ['reason-1'],
+    internalDeltaOperations: ['create', 'resolve'],
+    externalAction: 'speak',
+    nextEligibleAt: 18_000,
+    delayMs: 8_000,
+  });
+  assert.deepEqual(event.usedReasonIds, ['reason-1']);
+  assert.deepEqual(event.createdReasonIds, ['reason-2']);
+  assert.deepEqual(event.resolvedReasonIds, ['reason-1']);
+  assert.deepEqual(event.internalDeltaOperations, ['create', 'resolve']);
+  assert.equal(event.externalAction, 'speak');
+  assert.throws(
+    () =>
+      readConversationEvent({
+        at: '2026-08-23T00:00:00.000Z',
+        elapsedMs: 0,
+        event: 'autonomy_gate',
+        source: 'autonomous',
+        turnId: 'autonomy-gate-1',
+        gateEvent: 'turn_completed',
+        gatePhase: 'refractory',
+        content: 'must not be logged',
+      }),
+    /unsupported field/,
+  );
+  assert.throws(
+    () =>
+      readConversationEvent({
+        at: '2026-08-23T00:00:00.000Z',
+        elapsedMs: 0,
+        event: 'autonomy_gate',
+        source: 'autonomous',
+        turnId: 'autonomy-gate-1',
+        gateEvent: 'not-valid',
+        gatePhase: 'refractory',
+      }),
+    /gateEvent is invalid/,
+  );
+});
+
 test('voice policy prompt prioritizes content-bearing utterances', () => {
   const prompt = buildVoiceInteractionPolicySystemPrompt(
     null,

@@ -132,6 +132,7 @@ export function usePerformerRuntime(
   );
 
   return {
+    profile,
     state,
     createPlan,
     completePlan,

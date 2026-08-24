@@ -24,6 +24,9 @@ const testFiles = [
     'node_modules/.tmp/performer-test/scripts/autonomous-talk.test.js',
   ),
   resolve(
+    'node_modules/.tmp/performer-test/scripts/autonomy-turn-gate.test.js',
+  ),
+  resolve(
     'node_modules/.tmp/performer-test/scripts/autonomy-state.test.js',
   ),
 ];
