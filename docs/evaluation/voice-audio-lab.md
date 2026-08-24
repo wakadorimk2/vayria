@@ -84,17 +84,26 @@ Audio Labのendpoint selectorはマイク停止中だけ有効です。
 Mode AとMode Dはendpoint selectorの対象外です。
 Mode Dは`400ms`を使います。
 
-Python STTの展示用既定profileは次です。
+Python STTの展示用主profileは次です。
 
 ```text
 primary: small / CUDA / float16
-fallback: tiny / CPU / int8
+fallback: disabled for exhibition startup
 ```
 
 起動時にモデルをロードしてwarm-upします。
-CUDAの実ロードに失敗した場合だけfallbackします。
-実効model、device、compute type、fallback理由、model load時間をAudio LabとJSONLへ記録します。
-比較用profileは`tiny`、`base`、`small`と`CUDA`、`CPU`の組み合わせです。
+主profileの実ロードに失敗した場合、展示起動は失敗します。
+比較用の明示的な起動では、`tiny / CPU / int8`をfallback profileとして残せます。
+実効model、device、compute type、fallback理由、model load時間、decode設定をAudio LabとJSONLへ記録します。
+既定decodeは`beam_size=3`、`temperature=(0.0, 0.2)`、`without_timestamps=True`、
+`condition_on_previous_text=False`、`vad_filter=False`です。
+既定hotwordsは`Vayria GPT-Live Codex`です。
+比較用profileは`small / float16`、`small / int8_float16`、`base / float16`です。
+`beam_size=1`と`beam_size=3`を比較できます。
+`medium`以上は4 GB VRAMと他のGPU処理を考慮して初回評価から外します。
+
+発話終了の定義は、サーバーVADがendpointを確定して`speech_ended`を送信した時刻です。
+物理的な発話終了のサンプル時刻ではありません。
 
 Presetの役割は次です。
 
@@ -239,11 +248,21 @@ JSONLの発話レコードには次の時刻と時間を保存します。
 - `sttLatencyMs`
 - `endpointToResultLatencyMs`
 - `speechToResultLatencyMs`
+- `conversationInputReceivedAt`
+- `finalizedToConversationInputMs`
 
 `sttLatencyMs`は従来どおり、STT開始から最終結果までです。
 今回の主な比較対象は、発話終了から最終STTまでの`endpointToResultLatencyMs`です。
-展示用のstretch targetは`700ms以下`です。
-quality profileまたはCPU fallbackが超えても、失敗とは判定しません。
+`finalizedToConversationInputMs`は、最終結果を会話処理へ渡した時間です。
+`speech_ended`から`utterance_finalized`までのEOU→結果p50/p95を計測します。
+`sttQueueWaitMs`、`sttProcessingMs`、結果→会話入力のp50/p95も計測します。
+700 msは今回の初期hard guardrailです。
+5分区間ごとのEOU→結果p95が700 msを超えた候補は未達成とします。
+
+固定音声セットのCER、WER、固有名詞recall、短発話完全一致率、hallucination rateは
+[`tools/stt/benchmarks/README.md`](../../tools/stt/benchmarks/README.md)の手順で計測します。
+無音、環境音、雑音の期待結果は空文字にします。
+後置換や曖昧な自動補正は使いません。
 
 ## 音声LLMの呼び出し回数
 

@@ -48,6 +48,7 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
   snapshot: VoiceLabSnapshot;
   handleDiagnostic: (diagnostic: VoiceInputDiagnostic) => void;
   handleVoiceEvent: (event: VoiceInputEvent) => void;
+  handleConversationInputReceived: (segmentId: string, at?: number) => void;
   handleInteractionTimelineEvent: (event: InteractionTimelineEvent) => void;
   downloadJsonl: () => void;
 } {
@@ -125,6 +126,16 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
     setSnapshot(recorder.getSnapshot());
   }, []);
 
+  const handleConversationInputReceived = useCallback(
+    (segmentId: string, at = Date.now()) => {
+      const recorder = recorderRef.current;
+      if (!recorder) return;
+      recorder.recordConversationInputReceived(segmentId, at);
+      setSnapshot(recorder.getSnapshot());
+    },
+    [],
+  );
+
   const handleInteractionTimelineEvent = useCallback(
     (event: InteractionTimelineEvent) => {
       const recorder = recorderRef.current;
@@ -166,6 +177,7 @@ export function useVoiceLab(options: UseVoiceLabOptions): {
     snapshot,
     handleDiagnostic,
     handleVoiceEvent,
+    handleConversationInputReceived,
     handleInteractionTimelineEvent,
     downloadJsonl,
   };

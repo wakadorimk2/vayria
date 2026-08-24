@@ -285,9 +285,10 @@ export function AudioLabPanel({
                 {formatLatency(utterance.endpointToResultLatencyMs ?? null)} / STT{' '}
                 {formatLatency(utterance.sttLatencyMs)} / total{' '}
                 {formatLatency(utterance.speechToResultLatencyMs ?? null)} / queue{' '}
-                {formatLatency(utterance.sttQueueWaitMs ?? null)} / process{' '}
-                {formatLatency(utterance.sttProcessingMs ?? null)} /{' '}
-                {utterance.vadAccepted === null
+                 {formatLatency(utterance.sttQueueWaitMs ?? null)} / process{' '}
+                 {formatLatency(utterance.sttProcessingMs ?? null)} /{' '}
+                 handoff {formatLatency(utterance.finalizedToConversationInputMs ?? null)} /{' '}
+                 {utterance.vadAccepted === null
                   ? 'VAD n/a'
                   : utterance.vadAccepted
                     ? 'VAD accepted'

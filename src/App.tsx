@@ -613,7 +613,10 @@ export default function App() {
     audioEndpointMs: effectiveAudioEndpointMs,
     ttsPlaying,
   });
-  const { handleInteractionTimelineEvent } = voiceLab;
+  const {
+    handleInteractionTimelineEvent,
+    handleConversationInputReceived,
+  } = voiceLab;
   const voiceInput = useVoiceInput({
     audioMode: audioLabMode,
     audioPreset: runtimeConfig.audioPreset,
@@ -623,6 +626,11 @@ export default function App() {
     ttsPlaying,
     onDiagnostic: voiceLab.handleDiagnostic,
     onEvent: (event) => {
+      if (event.type === 'utterance_finalized') {
+        voiceEventHandlerRef.current?.(event);
+        voiceLab.handleVoiceEvent(event);
+        return;
+      }
       voiceLab.handleVoiceEvent(event);
       voiceEventHandlerRef.current?.(event);
     },
@@ -1731,6 +1739,7 @@ export default function App() {
             beginReply();
           }
           if (!isMuted) void prepare();
+          handleConversationInputReceived(event.segmentId, Date.now());
           void sendVoice(
             message,
             readCardContext(),
@@ -1782,6 +1791,7 @@ export default function App() {
       readAutonomyEvidenceContext,
       rememberExplicitAlias,
       sendVoice,
+      handleConversationInputReceived,
       ttsPlaying,
       stopReaction,
       routerSnapshot.gptInputGate,

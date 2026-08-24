@@ -1,0 +1,46 @@
+{
+  "description": "Local-only fixed corpus. Add WAV files under benchmarks/local/audio.",
+  "cases": [
+    {
+      "id": "normal-ja-01",
+      "category": "normal-ja",
+      "audio": "normal-ja-01.wav",
+      "reference": "こんにちは。展示の説明をお願いします。"
+    },
+    {
+      "id": "short-backchannel-01",
+      "category": "backchannel",
+      "audio": "short-backchannel-01.wav",
+      "reference": "うん",
+      "shortUtterance": true
+    },
+    {
+      "id": "short-interruption-01",
+      "category": "interruption",
+      "audio": "short-interruption-01.wav",
+      "reference": "ちょっと待って",
+      "shortUtterance": true
+    },
+    {
+      "id": "proper-nouns-01",
+      "category": "proper-nouns",
+      "audio": "proper-nouns-01.wav",
+      "reference": "VayriaとGPT-LiveとCodexについて教えてください。",
+      "terms": ["Vayria", "GPT-Live", "Codex"]
+    },
+    {
+      "id": "silence-01",
+      "category": "silence",
+      "audio": "silence-01.wav",
+      "reference": "",
+      "expectedEmpty": true
+    },
+    {
+      "id": "environment-noise-01",
+      "category": "environment-noise",
+      "audio": "environment-noise-01.wav",
+      "reference": "",
+      "expectedEmpty": true
+    }
+  ]
+}

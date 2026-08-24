@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from vayria_stt.transcriber import (
     FasterWhisperTranscriber,
     Transcriber,
@@ -81,6 +83,35 @@ def test_auto_profile_falls_back_to_tiny_cpu_and_records_reason(monkeypatch) -> 
     assert runtime["fallbackUsed"] is True
     assert runtime["fallbackReason"] == "CUDA unavailable"
     assert isinstance(runtime["modelLoadMs"], int)
+    assert runtime["decodeBeamSize"] == 3
+    assert runtime["decodeTemperatures"] == (0.0, 0.2)
+    assert runtime["decodeWithoutTimestamps"] is True
+    assert runtime["decodeConditionOnPreviousText"] is False
+    assert runtime["decodeVadFilter"] is False
+    assert runtime["hotwords"] == "Vayria GPT-Live Codex"
+    assert runtime["primaryProfileRequired"] is False
+
+
+def test_primary_profile_requirement_disables_fallback(monkeypatch) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_load(self, model_name: str, device: str, compute_type: str):
+        calls.append((model_name, device, compute_type))
+        raise RuntimeError("CUDA unavailable")
+
+    monkeypatch.setattr(FasterWhisperTranscriber, "_load_model", fake_load)
+    provider = FasterWhisperTranscriber(
+        model_name="small",
+        device="cuda",
+        compute_type="float16",
+        require_primary_profile=True,
+    )
+
+    with pytest.raises(RuntimeError, match="fallback is disabled"):
+        provider.prepare()
+
+    assert calls == [("small", "cuda", "float16")]
+    assert provider.runtime_info()["fallbackUsed"] is False
 
 
 def test_warm_up_uses_the_effective_model(monkeypatch) -> None:
@@ -96,7 +127,12 @@ def test_warm_up_uses_the_effective_model(monkeypatch) -> None:
     provider.warm_up("ja")
 
     assert model.options["language"] == "ja"
-    assert model.options["vad_filter"] is True
+    assert model.options["beam_size"] == 3
+    assert model.options["temperature"] == (0.0, 0.2)
+    assert model.options["without_timestamps"] is True
+    assert model.options["condition_on_previous_text"] is False
+    assert model.options["vad_filter"] is False
+    assert model.options["hotwords"] == "Vayria GPT-Live Codex"
 
 
 def test_faster_whisper_receives_explicit_hallucination_guards() -> None:
@@ -104,14 +140,41 @@ def test_faster_whisper_receives_explicit_hallucination_guards() -> None:
 
     assert model.options == {
         "language": "ja",
-        "beam_size": 1,
-        "temperature": 0.0,
+        "beam_size": 3,
+        "temperature": (0.0, 0.2),
         "compression_ratio_threshold": 2.4,
         "log_prob_threshold": -1.0,
         "no_speech_threshold": 0.6,
         "condition_on_previous_text": False,
         "vad_filter": False,
+        "without_timestamps": True,
+        "hotwords": "Vayria GPT-Live Codex",
     }
+
+
+def test_empty_hotwords_disable_hotwords_without_changing_decode_settings() -> None:
+    provider = FasterWhisperTranscriber(hotwords="   ")
+    model = FakeWhisperModel([FakeSegment("こんにちは")])
+    provider._model = model
+
+    provider.transcribe_pcm16(
+        b"\x00\x01" * 320,
+        sample_rate=16_000,
+        language="ja",
+    )
+
+    assert model.options["hotwords"] is None
+    assert provider.runtime_info()["hotwords"] is None
+
+
+def test_int8_float16_is_a_supported_compute_type() -> None:
+    provider = FasterWhisperTranscriber(
+        model_name="small",
+        device="cuda",
+        compute_type="int8_float16",
+    )
+
+    assert provider.runtime_info()["effectiveComputeType"] == "int8_float16"
 
 
 def test_low_confidence_segments_are_discarded() -> None:

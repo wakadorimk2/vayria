@@ -45,7 +45,12 @@ export const STT_MODEL_VALUES = ['tiny', 'base', 'small'] as const;
 export type SttModel = (typeof STT_MODEL_VALUES)[number];
 export const STT_DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export type SttDevice = (typeof STT_DEVICE_VALUES)[number];
-export const STT_COMPUTE_TYPE_VALUES = ['auto', 'float16', 'int8'] as const;
+export const STT_COMPUTE_TYPE_VALUES = [
+  'auto',
+  'float16',
+  'int8',
+  'int8_float16',
+] as const;
 export type SttComputeType = (typeof STT_COMPUTE_TYPE_VALUES)[number];
 export const VAD_THRESHOLD_MIN = 0.005;
 export const VAD_THRESHOLD_MAX = 0.2;
@@ -233,6 +238,13 @@ export interface SttRuntimeInfo {
   fallbackUsed: boolean;
   fallbackReason: string | null;
   modelLoadMs: number | null;
+  decodeBeamSize: number;
+  decodeTemperatures: number[];
+  decodeWithoutTimestamps: boolean;
+  decodeConditionOnPreviousText: boolean;
+  decodeVadFilter: boolean;
+  hotwords: string | null;
+  primaryProfileRequired: boolean;
 }
 
 export function isSttRuntimeInfo(value: unknown): value is SttRuntimeInfo {
@@ -256,7 +268,21 @@ export function isSttRuntimeInfo(value: unknown): value is SttRuntimeInfo {
     (record.modelLoadMs === null ||
       (typeof record.modelLoadMs === 'number' &&
         Number.isFinite(record.modelLoadMs) &&
-        record.modelLoadMs >= 0))
+        record.modelLoadMs >= 0)) &&
+    (record.decodeBeamSize === 1 || record.decodeBeamSize === 3) &&
+    Array.isArray(record.decodeTemperatures) &&
+    record.decodeTemperatures.length > 0 &&
+    record.decodeTemperatures.every(
+      (temperature) =>
+        typeof temperature === 'number' &&
+        Number.isFinite(temperature) &&
+        temperature >= 0,
+    ) &&
+    typeof record.decodeWithoutTimestamps === 'boolean' &&
+    typeof record.decodeConditionOnPreviousText === 'boolean' &&
+    typeof record.decodeVadFilter === 'boolean' &&
+    (record.hotwords === null || typeof record.hotwords === 'string') &&
+    typeof record.primaryProfileRequired === 'boolean'
   );
 }
 
@@ -460,6 +486,8 @@ export interface VoiceLabUtteranceRecord {
   sttProcessingMs?: number | null;
   endpointToResultLatencyMs?: number | null;
   speechToResultLatencyMs?: number | null;
+  conversationInputReceivedAt?: string | null;
+  finalizedToConversationInputMs?: number | null;
 }
 
 export interface VoiceLabSttRuntimeRecord {

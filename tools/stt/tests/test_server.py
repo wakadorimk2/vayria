@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from contextlib import suppress
 
 import pytest
@@ -18,8 +19,9 @@ from vayria_stt.server import (
     _parse_start,
     _transcription_worker,
     handle_connection,
+    parse_args,
 )
-from vayria_stt.transcriber import TranscriptionResult
+from vayria_stt.transcriber import FasterWhisperTranscriber, TranscriptionResult
 from vayria_stt.vad import FRAME_BYTES, DetectorEvent
 
 
@@ -51,6 +53,13 @@ class RuntimeTranscriber(FakeTranscriber):
             "fallbackUsed": True,
             "fallbackReason": "CUDA unavailable",
             "modelLoadMs": 123,
+            "decodeBeamSize": 3,
+            "decodeTemperatures": [0.0, 0.2],
+            "decodeWithoutTimestamps": True,
+            "decodeConditionOnPreviousText": False,
+            "decodeVadFilter": False,
+            "hotwords": "Vayria GPT-Live Codex",
+            "primaryProfileRequired": False,
         }
 
 
@@ -74,6 +83,41 @@ class FakeConnection:
 
     async def send(self, message: str) -> None:
         self.messages.append(message)
+
+
+def test_parse_args_accepts_comparison_compute_type_and_primary_profile(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "vayria-stt",
+            "--compute-type",
+            "int8_float16",
+            "--hotwords",
+            "Vayria GPT-Live Codex",
+            "--require-primary-profile",
+            "--beam-size",
+            "1",
+        ],
+    )
+
+    args = parse_args()
+
+    assert args.compute_type == "int8_float16"
+    assert args.hotwords == "Vayria GPT-Live Codex"
+    assert args.require_primary_profile is True
+    assert args.beam_size == 1
+    assert args.temperatures == [0.0, 0.2]
+
+
+def test_parse_args_preserves_empty_hotwords_as_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["vayria-stt", "--hotwords", ""])
+
+    args = parse_args()
+    transcriber = FasterWhisperTranscriber(hotwords=args.hotwords)
+
+    assert args.hotwords == ""
+    assert transcriber.runtime_info()["hotwords"] is None
 
 
 def test_start_message_can_enable_diagnostics() -> None:

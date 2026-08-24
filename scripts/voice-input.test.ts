@@ -1445,6 +1445,7 @@ test('Voice Lab recorder measures latency, known errors, TTS overlap, and summar
     acceptedText: '',
     filterReason: 'known-hallucination',
   });
+  recorder.recordConversationInputReceived('segment-1', 1_450);
   recorder.handleVoiceEvent({
     type: 'utterance_finalized',
     segmentId: 'segment-1',
@@ -1467,6 +1468,11 @@ test('Voice Lab recorder measures latency, known errors, TTS overlap, and summar
   assert.equal(utterance.sttProcessingMs, 200);
   assert.equal(utterance.endpointToResultLatencyMs, 100);
   assert.equal(utterance.speechToResultLatencyMs, 400);
+  assert.equal(
+    utterance.conversationInputReceivedAt,
+    '1970-01-01T00:00:01.450Z',
+  );
+  assert.equal(utterance.finalizedToConversationInputMs, 50);
   assert.equal(utterance.audioEndpointMs, 600);
   assert.equal(utterance.audioDurationMs, 300);
   assert.equal(utterance.ttsPlayingDuringUtterance, true);
@@ -1712,6 +1718,13 @@ test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifie
         fallbackUsed: false,
         fallbackReason: null,
         modelLoadMs: 842,
+        decodeBeamSize: 3,
+        decodeTemperatures: [0.0, 0.2],
+        decodeWithoutTimestamps: true,
+        decodeConditionOnPreviousText: false,
+        decodeVadFilter: false,
+        hotwords: 'Vayria GPT-Live Codex',
+        primaryProfileRequired: true,
       },
     };
     assert.deepEqual(readVoiceLabRecord(runtimeRecord), runtimeRecord);

@@ -31,6 +31,7 @@ interface ActiveUtterance {
   sttStartedAt: string | null;
   sttQueuedAt: string | null;
   sttObservedAt: string | null;
+  conversationInputReceivedAt: string | null;
   rawText: string;
   acceptedText: string;
   maxVadScore: number | null;
@@ -114,6 +115,10 @@ export class VoiceLabRecorder {
   private readonly pendingFinalizedEvents = new Map<
     string,
     Extract<VoiceInputEvent, { type: 'utterance_finalized' }>
+  >();
+  private readonly pendingConversationInputReceivedAt = new Map<
+    string,
+    string
   >();
   private pendingMaxVadScore: number | null = null;
   private pendingVadThreshold: number | null = null;
@@ -215,6 +220,17 @@ export class VoiceLabRecorder {
     this.currentTtsPlaying = false;
   }
 
+  recordConversationInputReceived(segmentId: string, at = Date.now()): void {
+    if (!this.enabled || !this.sessionId) return;
+    const timestamp = timestampFromMilliseconds(at);
+    const active = this.activeUtterances.get(segmentId);
+    if (active) {
+      active.conversationInputReceivedAt = timestamp;
+      return;
+    }
+    this.pendingConversationInputReceivedAt.set(segmentId, timestamp);
+  }
+
   handleDiagnostic(diagnostic: VoiceInputDiagnostic): void {
     if (!this.enabled) return;
     switch (diagnostic.type) {
@@ -314,7 +330,10 @@ export class VoiceLabRecorder {
   handleVoiceEvent(event: VoiceInputEvent): void {
     if (!this.enabled) return;
     switch (event.type) {
-      case 'speech_started':
+      case 'speech_started': {
+        const pendingConversationInputReceivedAt =
+          this.pendingConversationInputReceivedAt.get(event.segmentId) ?? null;
+        this.pendingConversationInputReceivedAt.delete(event.segmentId);
         this.activeUtterances.set(event.segmentId, {
           mode: this.currentMode,
           segmentId: event.segmentId,
@@ -323,6 +342,7 @@ export class VoiceLabRecorder {
           sttStartedAt: null,
           sttQueuedAt: null,
           sttObservedAt: null,
+          conversationInputReceivedAt: pendingConversationInputReceivedAt,
           rawText: this.pendingSttObservations.get(event.segmentId)?.rawText ?? '',
           acceptedText:
             this.pendingSttObservations.get(event.segmentId)?.acceptedText ?? '',
@@ -336,6 +356,7 @@ export class VoiceLabRecorder {
         });
         this.resetPendingVadMetrics();
         return;
+      }
       case 'speech_ended': {
         const active = this.activeUtterances.get(event.segmentId);
         if (!active) return;
@@ -443,6 +464,8 @@ export class VoiceLabRecorder {
       sttStartedAt: null,
       sttQueuedAt: null,
       sttObservedAt: null,
+      conversationInputReceivedAt:
+        this.pendingConversationInputReceivedAt.get(event.segmentId) ?? null,
       rawText: '',
       acceptedText: '',
       maxVadScore: null,
@@ -483,6 +506,14 @@ export class VoiceLabRecorder {
     const speechToResultLatencyMs = millisecondsBetween(
       speechStartAt,
       timestamp,
+    );
+    const conversationInputReceivedAt =
+      active.conversationInputReceivedAt ??
+      this.pendingConversationInputReceivedAt.get(event.segmentId) ??
+      null;
+    const finalizedToConversationInputMs = millisecondsBetween(
+      timestamp,
+      conversationInputReceivedAt,
     );
     const rejectReason = !recognizedText
       ? knownHallucinationPhrase
@@ -525,12 +556,15 @@ export class VoiceLabRecorder {
       sttProcessingMs,
       endpointToResultLatencyMs,
       speechToResultLatencyMs,
+      conversationInputReceivedAt,
+      finalizedToConversationInputMs,
     };
 
     this.appendRecord(record);
     this.updateSummary(record, active.ttsCandidateStartedDuringTts);
     this.activeUtterances.delete(event.segmentId);
     this.pendingSttObservations.delete(event.segmentId);
+    this.pendingConversationInputReceivedAt.delete(event.segmentId);
     this.latestTranscript = recognizedText;
   }
 

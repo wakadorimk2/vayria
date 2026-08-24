@@ -108,11 +108,15 @@ Vayria音声をB1へ戻すと、Vayria自身の発話をSTTが再認識する可
 自己認識ループを防ぐため、Vayria音声はB1へ送らないでください。
 
 展示音声入力は、Python STTが`ws://127.0.0.1:8787/stream`で待ち受ける必要があります。
-次のコマンドはPython STTを起動してから展示フロントを起動します。
+次のコマンドは、固定パスのAivisSpeech CLI、uv経由のPython STT、npm経由の展示フロントを起動します。
+OpenAI API keyは`.env.local`へ保存せず、1Passwordから起動プロセスへ注入します。
 
 ```powershell
-npm run exhibition:start
+op run --env-file .env.1password -- npm run exhibition:start
 ```
+
+`op run`を付けない`npm run exhibition:start`は、別途プロセス環境または
+`VAYRIA_SECRET_FILE`を設定している場合の互換経路です。
 
 マイク、ChatGPT音声、Vayria音声を個別に再生し、Vayriaの音声メーターで経路を確認します。
 音声メーターはマイクとChatGPT音声で動き、Vayria自身の音声では動かない状態が期待値です。
@@ -143,9 +147,15 @@ URLの変更後はページを再読み込みしてください。
 Mode DはAudio Labでだけ選べる実験Modeです。
 Mode D（Exhibition Mix）の実効endpointは`400ms`です。
 
-展示用STTは`small / CUDA / float16`を優先します。
-ロードに失敗した場合は`tiny / CPU / int8`へfallbackします。
-実際のmodel、device、compute type、fallback理由、model load時間はAudio LabとJSONLへ記録します。
+展示用STTは`small / CUDA / float16`を主プロファイルにします。
+展示起動では主プロファイルのロードに失敗すると起動を失敗させます。
+`tiny / CPU / int8`は明示的な比較実行だけに残します。
+既定のdecodeは`beam_size=3`、`temperature=(0.0, 0.2)`、
+`without_timestamps=True`、`condition_on_previous_text=False`、
+`vad_filter=False`です。
+既定hotwordsは`Vayria GPT-Live Codex`です。
+実効model、device、compute type、fallback理由、model load時間、decode設定はAudio LabとJSONLへ記録します。
+固定音声評価は[`tools/stt/benchmarks/README.md`](tools/stt/benchmarks/README.md)を参照してください。
 
 Sessionはページ内だけの一時状態です。
 履歴、話題、直前のVayria発話、演者状態、カードのターン状態を含みます。
@@ -179,28 +189,74 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    Copy-Item -LiteralPath '.env.example' -Destination '.env.local'
    ```
 
-3. zonoko モデルを追加した AivisSpeech を起動します。
+   `.env.local`の`OPENAI_API_KEY=`と`VAYRIA_SECRET_FILE=`は空のままにします。
+   OpenAI API keyは、次の1Password経路で起動時だけ注入します。
 
-   アプリは `http://127.0.0.1:10101/speakers` から zonoko のスタイル名と
-   ID を取得します。API の詳細は
-   `http://127.0.0.1:10101/docs` でも確認できます。
+3. zonoko モデルを追加した AivisSpeech CLIを起動します。
 
-4. API keyをリポジトリ外の秘密ファイルへ保存します。
+   ランチャーは次の優先順位でAivisSpeechのインストール先を選びます。
 
-   既定のパスは`C:\Users\wakad\.vayria\secrets.env`です。
-   別のWindowsユーザーでは、自分のユーザープロファイル配下に作成します。
+   1. `-AivisInstallPath`引数
+   2. `VAYRIA_AIVIS_INSTALL_PATH`環境変数
+   3. `%USERPROFILE%\.vayria\apps\AivisSpeech-1.1.0-dev`
+   4. `%LOCALAPPDATA%\Programs\AivisSpeech`
 
-   ```dotenv
-   OPENAI_API_KEY=your_key_here
+   現在のPCの通常インストールを使う場合は、次のように設定できます。
+
+   ```powershell
+   $env:VAYRIA_AIVIS_INSTALL_PATH = "$env:LOCALAPPDATA\Programs\AivisSpeech"
+   pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1
    ```
 
-   このファイルはGitリポジトリの外へ置きます。
+   一時的に引数で指定することもできます。
 
-5. `.env.local`には秘密ファイルのパスとAivisSpeechの設定を記述します。
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1 `
+     -AivisInstallPath "$env:LOCALAPPDATA\Programs\AivisSpeech"
+   ```
+
+   ランチャーはインストール先から`run.exe`を解決します。
+   `.vayria`配下のポータブル配置と、`%LOCALAPPDATA%\Programs\AivisSpeech`配下の通常配置に対応します。
+   `VAYRIA_AIVIS_INSTALL_PATH`はPowerShellランチャーが読む値です。
+   `.env.local`はViteのNode設定であり、PowerShellランチャーへ自動継承されないため、インストール先には使いません。
+
+   起動スクリプトは `http://127.0.0.1:10101/speakers` でzonokoの存在を確認します。
+   既にzonokoを提供するAivisが起動中なら再利用します。
+   初回起動ではCPU起動とWindows側の処理により、Aivisの起動確認まで最大60秒待機します。
+   GUI版AivisSpeechとCLIは同じ10101番ポートを使うため、同時に起動しません。
+   APIの詳細は `http://127.0.0.1:10101/docs` でも確認できます。
+
+4. 1Password CLIとデスクトップアプリ連携を設定します。
+
+   1Passwordデスクトップアプリの設定で「Integrate with 1Password CLI」を有効にし、
+   PowerShellでサインインします。
+
+   ```powershell
+   op signin
+   ```
+
+   既にサインイン済みなら、この手順はスキップできます。
+
+5. OpenAI API keyを保存した1Password項目を選び、参照だけを保存します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Configure-VayriaOnePassword.ps1
+   ```
+
+   スクリプトは項目のメタデータを表示し、Vault・Item・Fieldを尋ねます。
+   `.env.1password`へ保存されるのは次の`op://`参照だけで、API key本体は保存・表示しません。
+
+   ```dotenv
+   OPENAI_API_KEY=op://Vault/Item/Field
+   ```
+
+   `op://`の右辺をAPI key本体へ置き換えないでください。
+
+6. `.env.local`にはAivisSpeechの設定だけを記述します。
 
    ```dotenv
    OPENAI_API_KEY=
-   VAYRIA_SECRET_FILE=C:\Users\<Windowsユーザー名>\.vayria\secrets.env
+   VAYRIA_SECRET_FILE=
    VAYRIA_HTTPS_CONFIG_FILE=
    AIVIS_BASE_URL=http://127.0.0.1:10101
    AIVIS_SPEED_SCALE=1.15
@@ -209,8 +265,8 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    AIVIS_TEMPO_DYNAMICS_SCALE=1.0
    ```
 
-   `VAYRIA_SECRET_FILE`を設定した場合、外部ファイルの`OPENAI_API_KEY`を優先します。
-   `VAYRIA_SECRET_FILE`を設定しない場合は、既存の`.env.local`直書き方式を使用します。
+   `VAYRIA_SECRET_FILE`は、既存の外部secretファイルを使う場合の互換設定です。
+   通常の展示では設定せず、`op run --env-file .env.1password -- ...`を使用します。
    `VAYRIA_HTTPS_CONFIG_FILE`を設定した場合、共有ファイルのHTTPS設定を優先します。
    `VAYRIA_HTTPS_CONFIG_FILE`を設定しない場合は、既存の`VAYRIA_HTTPS_*`直接設定を使用します。
 
@@ -227,7 +283,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    zonoko の一部スタイルでは、AivisSpeech が
    `AIVIS_INTONATION_SCALE` を無視する場合があります。
 
-6. 展示音声入力用のPython環境を作成します。
+7. 展示音声入力用のPython環境を作成します。
 
    ```powershell
    Push-Location tools/stt
@@ -237,7 +293,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
    Pythonサービスの設定と起動方法は [`tools/stt/README.md`](tools/stt/README.md) を参照してください。
 
-7. worktreeごとに`.env.local`を作成して、APIを起動します。
+8. worktreeごとに`.env.local`を作成して、APIを起動します。
 
    Codexデスクトップアプリでは、新規チャットで`Worktree`と`Local environment`を選択すると、
    セットアップスクリプトがworktree作成時に実行されます。
@@ -295,7 +351,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    各worker worktreeは`5188`から`5210`の未使用ポートを使用します。
    実機用のexhibition起動は、常に`5187`を使用します。
 
-7. VRMの正本をGitリポジトリの外へ保存します。
+9. VRMの正本をGitリポジトリの外へ保存します。
 
    既定の正本パスは次です。
 
@@ -334,13 +390,15 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    public/avatar/model.vrm
    ```
 
-8. 開発サーバーを起動します。
+10. 開発サーバーを起動します。
 
    ```powershell
-   npm run dev
+   op run --env-file .env.1password -- npm run dev
    ```
 
-9. `http://127.0.0.1:5187/` をブラウザーで開きます。
+   OpenAI APIを使わない画面確認だけなら、`npm run dev`でも起動できます。
+
+11. `http://127.0.0.1:5187/` をブラウザーで開きます。
 
 ## モーションライブラリ
 
@@ -388,7 +446,8 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 
 ### iPad 展示の確認
 
-1. `.env.example` を `.env.local` へコピーし、API key と AivisSpeech の設定を記述します。
+1. `.env.example` を `.env.local` へコピーし、AivisSpeechの設定を記述します。
+   OpenAI API keyは`.env.local`へ書かず、セットアップの1Password手順で構成します。
 2. worktreeのSetup scriptが`.env.exhibition.local`を生成したことを確認します。
    `.env.exhibition.example`の手動コピーは不要です。
 3. Windows PCへ`mkcert`をインストールし、LANアドレスを含む証明書を作成します。
@@ -433,32 +492,51 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 
    `VITE_VOICE_INPUT_TRANSPORT`と`VAYRIA_STT_WS_URL`は、各worktreeの`.env.exhibition.local`へ残します。
 
-5. AivisSpeechをWindows PCで起動します。
-   AivisSpeechは今回の起動コマンドでは起動しません。
-   `AIVIS_BASE_URL`で設定した既存のサービスを使用します。
+5. AivisSpeechは統合ランチャーから自動起動します。
+   単独で起動する場合は `npm run aivis:start` または
+   `pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1` を使います。
+   インストール先を明示する場合は、先に
+   `$env:VAYRIA_AIVIS_INSTALL_PATH`を設定してください。
+   `AIVIS_BASE_URL`は引き続き `http://127.0.0.1:10101` を使用します。
 
 6. 対象worktreeで、Python STTとexhibitionフロントを起動します。
 
    ```powershell
-   npm run exhibition:start
+   op run --env-file .env.1password -- npm run exhibition:start
    ```
 
-   このコマンドは、Python STTを別のPowerShell窓で起動します。
-   exhibitionフロントは、現在のPowerShell窓で起動します。
-   Python STTが`127.0.0.1:8787`で待ち受けた後に、フロントを起動します。
-   フロントを`Ctrl+C`で停止すると、このコマンドが起動したPython STTも停止します。
-   既に`8787`番ポートが使用中の場合は、既存プロセスを停止せずにエラーを表示します。
+   このコマンドは、AivisSpeech CLIとuv経由のPython STTを別のPowerShell窓で起動します。
+   `op run`がVite/npmプロセスへだけOpenAI API keyを注入します。
+   AivisSpeechがzonokoを提供し、Python STTが`127.0.0.1:8787`で待ち受けた後、
+   exhibitionフロントを現在のPowerShell窓でnpm起動します。
+   フロントを`Ctrl+C`で停止すると、このコマンドが起動したAivisSpeechとPython STTも停止します。
+   既に正常なAivisSpeechが起動中の場合は再利用し、そのプロセスは停止しません。
+   AivisSpeechが別のプロセスで10101番を使用している場合や、既に8787番ポートが使用中の場合は、
+   既存プロセスを停止せずにエラーを表示します。
 
-   手動で起動する場合は、次の2つのPowerShell窓を使用します。
+   手動で起動する場合は、次の3つのPowerShell窓を使用します。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1
+   ```
 
    ```powershell
    Push-Location tools/stt
-   uv run python -m vayria_stt.server
+   $env:Path = "$env:USERPROFILE\.vayria\cuda12;$env:Path"
+   uv run --no-cache python -m vayria_stt.server `
+     --model small `
+     --device cuda `
+     --compute-type float16 `
+     --hotwords "Vayria GPT-Live Codex" `
+     --require-primary-profile `
+     --fallback-model tiny `
+     --fallback-device cpu `
+     --fallback-compute-type int8
    Pop-Location
    ```
 
    ```powershell
-   npm run dev:exhibition
+   op run --env-file .env.1password -- npm run dev:exhibition
    ```
 
 7. Vite が表示する `Network` URLを`https`でiPadから開きます。
@@ -540,10 +618,10 @@ Windows ファイアウォールは、プライベートネットワーク上の
 展示音声入力は`getUserMedia()`を使用します。HTTPSページでマイク許可を与えてください。
 Pythonサービスは`127.0.0.1`だけで待ち受けます。iPadからPythonポートへ直接接続しません。
 
-`.env.local`、`public/avatar/*.vrm`、生成途中の motion asset は Git の追跡対象外です。
+`.env.local`、`.env.1password`、`public/avatar/*.vrm`、生成途中の motion asset は Git の追跡対象外です。
 `.env.exhibition` と `.env.exhibition.local` も Git の追跡対象外です。
 VRMの正本もGitリポジトリの外に置きます。`.worktreeinclude`には追加しません。
-API key と AivisSpeech の設定は Vite の Node middleware だけが読みます。
+API keyは`op run`からViteのNode middlewareへ一時的に渡し、AivisSpeechの設定はNode middlewareだけが読みます。
 ブラウザー bundle には埋め込みません。
 
 ## 感情マッピング
