@@ -319,6 +319,46 @@ test('autonomous response contract separates outward action from internal delta'
     { operation: 'resolve', reasonId: 'reason-1' },
   ]);
 
+  const noisyCreate = parseAutonomousAssistantResponse(
+    JSON.stringify({
+      externalAction: 'none',
+      text: '',
+      emotion: 'neutral',
+      activatedCards: [],
+      usedReasonIds: [],
+      internalDelta: {
+        reasonUpdates: [
+          {
+            operation: 'create',
+            kind: 'new_association',
+            content: '新しい連想',
+            semanticKey: 'association:new',
+            salience: 0.5,
+            reasonId: 'unused-reason-id',
+            parentReasonId: null,
+            salienceDelta: 0.2,
+            cause: 'floor_unavailable',
+            wakeOn: ['floor_available'],
+            targetReasonId: 'unused-target-id',
+          },
+        ],
+      },
+    }),
+    AUTONOMY_CANDIDATE,
+    [],
+    null,
+  );
+  assert.deepEqual(noisyCreate.internalDelta?.reasonUpdates, [
+    {
+      operation: 'create',
+      kind: 'new_association',
+      content: '新しい連想',
+      semanticKey: 'association:new',
+      salience: 0.5,
+      parentReasonId: null,
+    },
+  ]);
+
   assert.throws(
     () =>
       parseAutonomousAssistantResponse(
@@ -372,6 +412,19 @@ test('autonomous reason updates reject unknown, duplicate, and oversized mutatio
         ],
       }),
     /must not duplicate a reason/,
+  );
+  assert.throws(
+    () =>
+      response({
+        reasonUpdates: [
+          {
+            operation: 'resolve',
+            reasonId: 'reason-1',
+            unsupportedField: 'reject this',
+          },
+        ],
+      }),
+    /unsupported field/,
   );
   assert.throws(
     () =>

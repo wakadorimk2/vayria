@@ -129,6 +129,19 @@ const MAX_TOPIC_TURNS = 100;
 const MAX_VIEWER_TURNS_SINCE = 100;
 const MAX_EVENT_TURN_ID_LENGTH = 128;
 const MAX_EVENT_REASON_LENGTH = 120;
+const AUTONOMY_REASON_UPDATE_FIELDS = new Set([
+  'operation',
+  'kind',
+  'content',
+  'semanticKey',
+  'salience',
+  'reasonId',
+  'parentReasonId',
+  'salienceDelta',
+  'cause',
+  'wakeOn',
+  'targetReasonId',
+]);
 const INTERACTIVE_POLICY_ACTIONS = [
   'listen',
   'backchannel',
@@ -1441,19 +1454,11 @@ function readReasonUpdates(
   const touchedIds = new Set<string>();
   const createdSemanticKeys = new Set<string>();
   const updates: ReasonUpdate[] = [];
-  const assertOnlyOperationFields = (
+  const assertKnownReasonUpdateFields = (
     update: Record<string, unknown>,
-    allowedFields: readonly string[],
     message: string,
   ) => {
-    if (
-      Object.keys(update).some(
-        (key) =>
-          !allowedFields.includes(key) &&
-          update[key] !== null &&
-          update[key] !== undefined,
-      )
-    ) {
+    if (Object.keys(update).some((key) => !AUTONOMY_REASON_UPDATE_FIELDS.has(key))) {
       throw new CardContractError(message);
     }
   };
@@ -1479,9 +1484,8 @@ function readReasonUpdates(
       return { reasonId, reason };
     };
     if (operation === 'create') {
-      assertOnlyOperationFields(
+      assertKnownReasonUpdateFields(
         update,
-        ['operation', 'kind', 'content', 'semanticKey', 'salience', 'parentReasonId'],
         'create reason update contains an unsupported field.',
       );
       if (!isCandidateReasonKind(update.kind)) {
@@ -1520,9 +1524,8 @@ function readReasonUpdates(
       continue;
     }
     if (operation === 'reinforce') {
-      assertOnlyOperationFields(
+      assertKnownReasonUpdateFields(
         update,
-        ['operation', 'reasonId', 'content', 'salienceDelta'],
         'reinforce reason update contains an unsupported field.',
       );
       const { reasonId, reason } = requireReason();
@@ -1550,9 +1553,8 @@ function readReasonUpdates(
       continue;
     }
     if (operation === 'resolve' || operation === 'expire') {
-      assertOnlyOperationFields(
+      assertKnownReasonUpdateFields(
         update,
-        ['operation', 'reasonId'],
         'reason status update contains an unsupported field.',
       );
       const { reasonId, reason } = requireReason();
@@ -1563,9 +1565,8 @@ function readReasonUpdates(
       continue;
     }
     if (operation === 'defer') {
-      assertOnlyOperationFields(
+      assertKnownReasonUpdateFields(
         update,
-        ['operation', 'reasonId', 'cause', 'wakeOn'],
         'defer reason update contains an unsupported field.',
       );
       const { reasonId, reason } = requireReason();
@@ -1580,9 +1581,8 @@ function readReasonUpdates(
       continue;
     }
     if (operation === 'reactivate') {
-      assertOnlyOperationFields(
+      assertKnownReasonUpdateFields(
         update,
-        ['operation', 'reasonId', 'salienceDelta'],
         'reactivate reason update contains an unsupported field.',
       );
       const { reasonId, reason } = requireReason();
@@ -1603,9 +1603,10 @@ function readReasonUpdates(
       continue;
     }
     if (operation === 'merge') {
-      if (Object.keys(update).some((key) => !['operation', 'reasonId', 'targetReasonId'].includes(key))) {
-        throw new CardContractError('merge reason update contains an unsupported field.');
-      }
+      assertKnownReasonUpdateFields(
+        update,
+        'merge reason update contains an unsupported field.',
+      );
       const { reasonId } = requireReason();
       const targetReasonId = readBoundedText(update.targetReasonId, 'targetReasonId', 128);
       const target = offeredReasons.get(targetReasonId);
@@ -2554,6 +2555,13 @@ async function generateReply(
   const internalDeltaInstruction = [
     'Every assistant response must include internalDelta with a reasonUpdates array.',
     'Use internalDelta for bounded state changes only. Do not put prompt text, history, or spoken content into it.',
+    'Each reason update has the same fixed fields. Set fields that do not belong to the selected operation to null.',
+    'For create, use kind, content, semanticKey, salience, and parentReasonId. Set reasonId, salienceDelta, cause, wakeOn, and targetReasonId to null.',
+    'For reinforce, use reasonId, content, and salienceDelta. Set kind, semanticKey, salience, parentReasonId, cause, wakeOn, and targetReasonId to null.',
+    'For resolve or expire, use reasonId only. Set kind, content, semanticKey, salience, parentReasonId, salienceDelta, cause, wakeOn, and targetReasonId to null.',
+    'For defer, use reasonId, cause, and wakeOn. Set kind, content, semanticKey, salience, parentReasonId, salienceDelta, and targetReasonId to null.',
+    'For reactivate, use reasonId and salienceDelta. Set kind, content, semanticKey, salience, parentReasonId, cause, wakeOn, and targetReasonId to null.',
+    'For merge, use reasonId and targetReasonId. Set kind, content, semanticKey, salience, parentReasonId, salienceDelta, cause, and wakeOn to null.',
     mode === 'autonomous'
       ? 'For autonomous updates, use only reason IDs from the offered candidate and keep each parent in the same causal episode.'
       : 'For manual and voice updates, leave reasonUpdates empty unless a new root internal reason is clearly needed.',
