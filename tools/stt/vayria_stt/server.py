@@ -21,6 +21,7 @@ from .vad import (
     FRAME_DURATION_MS,
     PcmUtteranceDetector,
     SAMPLE_RATE,
+    SpeechClassifier,
     WebRtcSpeechClassifier,
 )
 
@@ -29,6 +30,7 @@ SUPPORTED_FORMAT = "pcm_s16le"
 SUPPORTED_CHUNK_MS = 200
 END_SILENCE_MS_VALUES = (400, 600)
 DEFAULT_END_SILENCE_MS = 600
+CONTROL_MESSAGE_TYPES = {"speech_started", "speech_ended", "stop"}
 
 
 class WireProtocolError(Exception):
@@ -92,6 +94,16 @@ def _parse_start(payload: Any) -> StreamConfig:
         diagnostics=diagnostics,
         end_silence_ms=end_silence_ms,
     )
+
+
+def _parse_control(payload: Any) -> str:
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"type"}
+        or payload.get("type") not in CONTROL_MESSAGE_TYPES
+    ):
+        raise WireProtocolError("invalid-control-message")
+    return payload["type"]
 
 
 async def _send_event(connection: ServerConnection, payload: dict[str, Any]) -> None:
@@ -178,6 +190,7 @@ async def handle_connection(
     connection: ServerConnection,
     *,
     transcriber: Transcriber,
+    classifier: SpeechClassifier | None = None,
 ) -> None:
     detector: PcmUtteranceDetector | None = None
     worker: asyncio.Task[None] | None = None
@@ -192,7 +205,7 @@ async def handle_connection(
             raise WireProtocolError("invalid-start-message") from error
         config = _parse_start(start_payload)
         detector = PcmUtteranceDetector(
-            classifier=WebRtcSpeechClassifier(),
+            classifier=classifier or WebRtcSpeechClassifier(),
             end_silence_frame_count=config.end_silence_ms // FRAME_DURATION_MS,
         )
         queue = asyncio.Queue()
@@ -218,34 +231,62 @@ async def handle_connection(
                 )
         await _send_event(connection, {"type": "listening_started", "at": _timestamp()})
 
-        async for message in connection:
-            if isinstance(message, str):
-                if len(message.encode()) > MAX_MESSAGE_BYTES:
-                    raise WireProtocolError("message-too-large")
-                try:
-                    control = json.loads(message)
-                except json.JSONDecodeError as error:
-                    raise WireProtocolError("invalid-control-message") from error
-                if control != {"type": "stop"}:
-                    raise WireProtocolError("invalid-control-message")
-                for event in detector.flush():
-                    await _handle_detector_event(
-                        connection,
-                        queue,
-                        event,
-                        diagnostics=config.diagnostics,
-                    )
-                break
+        client_boundary_active = False
+        server_segment_active = False
 
-            if not isinstance(message, bytes) or len(message) > MAX_MESSAGE_BYTES:
-                raise WireProtocolError("invalid-pcm-frame")
-            for event in detector.feed(message):
+        async def handle_detector_events(events) -> None:
+            nonlocal server_segment_active
+            for event in events:
+                if event.type == "speech_started":
+                    server_segment_active = True
+                elif event.type == "utterance_finalized":
+                    server_segment_active = False
                 await _handle_detector_event(
                     connection,
                     queue,
                     event,
                     diagnostics=config.diagnostics,
                 )
+
+        async def flush_detector() -> None:
+            nonlocal client_boundary_active, server_segment_active
+            await handle_detector_events(detector.flush())
+            client_boundary_active = False
+            server_segment_active = False
+
+        while True:
+            try:
+                message = await asyncio.wait_for(
+                    connection.recv(),
+                    timeout=(config.end_silence_ms / 1_000)
+                    if client_boundary_active or server_segment_active
+                    else None,
+                )
+            except asyncio.TimeoutError:
+                # A missing browser boundary must not leave a segment pending.
+                # An idle session remains open because no timeout is armed then.
+                await flush_detector()
+                continue
+
+            if isinstance(message, str):
+                if len(message.encode()) > MAX_MESSAGE_BYTES:
+                    raise WireProtocolError("message-too-large")
+                try:
+                    control_type = _parse_control(json.loads(message))
+                except json.JSONDecodeError as error:
+                    raise WireProtocolError("invalid-control-message") from error
+                if control_type == "speech_started":
+                    client_boundary_active = True
+                    continue
+                if control_type == "speech_ended":
+                    await flush_detector()
+                    continue
+                await flush_detector()
+                break
+
+            if not isinstance(message, bytes) or len(message) > MAX_MESSAGE_BYTES:
+                raise WireProtocolError("invalid-pcm-frame")
+            await handle_detector_events(detector.feed(message))
 
         if queue is not None:
             await queue.join()

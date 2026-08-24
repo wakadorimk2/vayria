@@ -154,6 +154,37 @@ speech終了はthreshold未満3チャンクです。
 candidate rejectはnoise floor未満2チャンクです。
 ゲートはPCMの音量を加工しません。
 
+### Adaptive RMS VADとPython WebRTC VADの責務
+
+ProcessedとExhibition Mixでは、ブラウザーのAdaptive RMS VADがPCM送信区間を決めます。
+ブラウザーは、最初のpre-roll PCMより前に`{"type":"speech_started"}`を送ります。
+ブラウザーは、最後のhangover PCMより後に`{"type":"speech_ended"}`を送ります。
+この2つの制御メッセージとPCMは、同じWebSocket上で送信順を維持します。
+
+Python側のWebRTC VADは、受信したPCMの音声判定を担当します。
+Python側はWebRTC VADの判定で既存の`speech_started`を発行します。
+`speech_ended`を受信すると、Python側は現在の`PcmUtteranceDetector`をflushします。
+flushは既存の`speech_ended`、`stt_queued`、`utterance_finalized`を発行します。
+flush後もWebSocketセッションは継続します。
+
+ブラウザーの終了境界が欠落した場合は、`endSilenceMs`を基準にPython側がfallback flushします。
+音声区間がないアイドル状態では、fallback timerでセッションを停止しません。
+重複した終了境界や、自然終了後に遅れて届いた終了境界は無視します。
+この同期処理は、RMS、VAD score、noise floor、effective thresholdの計算を変更しません。
+
+### 発話終了同期の確認手順
+
+1. `Processed / mild`または`Exhibition Mix / mild`を開始します。
+2. Audio Labのイベントまたはサーバーログで、`speech_started`、PCM、`speech_ended`の順を確認します。
+3. 発話を止めた後に、画面が「発話を検知しました」で停止しないことを確認します。
+4. `speech_ended`の後に`stt_queued`と`utterance_finalized`が続くことを確認します。
+5. 終了境界を送らないテストでは、`400ms`または`600ms`後にfallback flushが発生することを確認します。
+6. flush後に次の発話を行い、同じWebSocketセッションで応答することを確認します。
+7. `audioPreset=off`と`Baseline`では、既存のPCM受信とPython側VAD経路を比較します。
+
+ブラウザー adapterまたはPython STTサービスを更新した場合は、両方を同じコミットへ揃えます。
+その後、Python STTサービスを再起動し、展示ページを再読み込みします。
+
 ## 展示画面のマイク感度表示
 
 通常の`exhibition`画面では、右上にマイクと視線追従の状態を表示します。

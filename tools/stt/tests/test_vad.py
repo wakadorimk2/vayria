@@ -47,6 +47,22 @@ def test_six_hundred_ms_silence_finalizes_once() -> None:
     assert detector.flush() == []
 
 
+def test_boundary_flush_finalizes_active_segment_once() -> None:
+    detector = PcmUtteranceDetector(
+        classifier=SequenceClassifier([True, True]),
+    )
+
+    events = detector.feed(frame(1) + frame(2))
+    assert [event.type for event in events] == ["speech_started"]
+
+    flushed = detector.flush()
+    assert [event.type for event in flushed] == [
+        "speech_ended",
+        "utterance_finalized",
+    ]
+    assert detector.flush() == []
+
+
 def test_four_hundred_ms_silence_finalizes_once() -> None:
     classifier = SequenceClassifier([True, True] + [False] * 20)
     detector = PcmUtteranceDetector(

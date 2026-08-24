@@ -666,6 +666,16 @@ test('remote PCM adapter validates the first AudioWorklet frame before activatio
     assert.equal(health.at(-1)?.pcmFrameCount, 1);
     assert.ok(events.some((event) => event.type === 'listening_started'));
     assert.ok(environment.sockets[0]?.sent.some((value) => value instanceof ArrayBuffer));
+    assert.equal(
+      environment.sockets[0]?.sent.some(
+        (value) =>
+          typeof value === 'string' &&
+          ['speech_started', 'speech_ended'].includes(
+            (JSON.parse(value) as { type?: string }).type ?? '',
+          ),
+      ),
+      false,
+    );
 
     await adapter.stop();
     adapter.dispose();
@@ -725,6 +735,56 @@ test('processed remote adapter gates low-level noise but forwards speech-level a
           diagnostic.effectiveThreshold !== null,
       ),
     );
+    environment.worklets[0]!.emit(makePcmChunk(0.01));
+    environment.worklets[0]!.emit(makePcmChunk(0.01));
+    environment.worklets[0]!.emit(makePcmChunk(0.01));
+
+    const sentSequence =
+      socket?.sent.map((value) => {
+        if (value instanceof ArrayBuffer) return 'pcm';
+        if (typeof value !== 'string') return 'other';
+        return (JSON.parse(value) as { type?: string }).type ?? 'json';
+      }) ?? [];
+    const speechStartedIndex = sentSequence.indexOf('speech_started');
+    const firstPcmIndex = sentSequence.indexOf('pcm');
+    const speechEndedIndex = sentSequence.indexOf('speech_ended');
+    assert.ok(speechStartedIndex >= 0);
+    assert.ok(firstPcmIndex > speechStartedIndex);
+    assert.ok(speechEndedIndex > firstPcmIndex);
+
+    await adapter.stop();
+    adapter.dispose();
+  } finally {
+    environment.restore();
+  }
+});
+
+test('off preset forwards PCM without browser speech boundary controls', async () => {
+  const environment = installRemoteBrowserEnvironment();
+  try {
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'processed',
+      audioPreset: 'off',
+      onEvent: () => undefined,
+    });
+
+    const startPromise = adapter.start();
+    await waitForRemoteCondition(() => environment.worklets.length === 1);
+    environment.worklets[0]!.emit(makePcmChunk(0.08));
+    assert.equal(await startPromise, true);
+    environment.worklets[0]!.emit(makePcmChunk(0));
+
+    const controlTypes =
+      environment.sockets[0]?.sent.flatMap((value) => {
+        if (typeof value !== 'string') return [];
+        const type = (JSON.parse(value) as { type?: string }).type;
+        return type === 'speech_started' || type === 'speech_ended'
+          ? [type]
+          : [];
+      }) ?? [];
+    assert.deepEqual(controlTypes, []);
+    assert.ok(environment.sockets[0]?.sent.some((value) => value instanceof ArrayBuffer));
+
     await adapter.stop();
     adapter.dispose();
   } finally {
