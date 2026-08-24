@@ -202,6 +202,46 @@ function getVoiceErrorMessage(code: string | null): string {
   }
 }
 
+function MicrophoneIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="control-icon"
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm6-3a6 6 0 0 1-12 0m6 6v4m-3 0h6"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="control-icon"
+      viewBox="0 0 24 24"
+      focusable="false"
+    >
+      <path
+        d="M3 12s3.2-5 9-5 9 5 9 5-3.2 5-9 5-9-5-9-5Zm9-2.25A2.25 2.25 0 1 0 12 14.25 2.25 2.25 0 0 0 12 9.75Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
 type ExhibitionPresentationState = 'idle' | 'selecting' | 'reacting';
 
 const AUDIO_SETTINGS_STORAGE_KEY = 'vayria.audio-settings.v1';
@@ -2080,7 +2120,10 @@ export default function App() {
                     title={`${exhibitionAudioActionLabel}します`}
                     type="button"
                   >
-                    {exhibitionAudioActionLabel}
+                    <MicrophoneIcon />
+                    <span className="visually-hidden">
+                      {exhibitionAudioActionLabel}
+                    </span>
                   </button>
                 )}
                 <div
@@ -2100,11 +2143,14 @@ export default function App() {
                     title={cameraAttentionStatusMessage || '視線追従を有効化します'}
                     type="button"
                   >
-                    {cameraAttentionStatus === 'starting'
-                      ? '視線追従を準備中…'
-                      : cameraAttentionEnabled
-                        ? '視線追従を停止'
-                        : '視線追従を有効化'}
+                    <EyeIcon />
+                    <span className="visually-hidden">
+                      {cameraAttentionStatus === 'starting'
+                        ? '視線追従を準備中…'
+                        : cameraAttentionEnabled
+                          ? '視線追従を停止'
+                          : '視線追従を有効化'}
+                    </span>
                   </button>
                   {cameraAttentionStatusMessage &&
                     cameraAttentionStatus !== 'idle' && (
