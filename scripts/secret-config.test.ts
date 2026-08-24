@@ -92,6 +92,13 @@ test('legacy environment configuration remains supported', () => {
   );
 });
 
+test('process environment can provide the injected API key', () => {
+  assert.equal(
+    resolveOpenAiApiKey({}, { OPENAI_API_KEY: 'sk-test-process-key' }),
+    'sk-test-process-key',
+  );
+});
+
 test('a configured but missing secret file fails without exposing its path or contents', () => {
   assert.throws(
     () =>
