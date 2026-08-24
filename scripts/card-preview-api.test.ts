@@ -286,6 +286,39 @@ test('autonomous response contract separates outward action from internal delta'
   assert.equal(none.text, '');
   assert.equal(none.internalDelta?.reasonUpdates.length, 1);
 
+  const strictNullableUpdate = parseAutonomousAssistantResponse(
+    JSON.stringify({
+      externalAction: 'none',
+      text: '',
+      emotion: 'neutral',
+      activatedCards: [],
+      usedReasonIds: [],
+      internalDelta: {
+        reasonUpdates: [
+          {
+            operation: 'resolve',
+            kind: null,
+            content: null,
+            semanticKey: null,
+            salience: null,
+            reasonId: 'reason-1',
+            parentReasonId: null,
+            salienceDelta: null,
+            cause: null,
+            wakeOn: null,
+            targetReasonId: null,
+          },
+        ],
+      },
+    }),
+    AUTONOMY_CANDIDATE,
+    [],
+    null,
+  );
+  assert.deepEqual(strictNullableUpdate.internalDelta?.reasonUpdates, [
+    { operation: 'resolve', reasonId: 'reason-1' },
+  ]);
+
   assert.throws(
     () =>
       parseAutonomousAssistantResponse(

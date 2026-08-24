@@ -1441,6 +1441,22 @@ function readReasonUpdates(
   const touchedIds = new Set<string>();
   const createdSemanticKeys = new Set<string>();
   const updates: ReasonUpdate[] = [];
+  const assertOnlyOperationFields = (
+    update: Record<string, unknown>,
+    allowedFields: readonly string[],
+    message: string,
+  ) => {
+    if (
+      Object.keys(update).some(
+        (key) =>
+          !allowedFields.includes(key) &&
+          update[key] !== null &&
+          update[key] !== undefined,
+      )
+    ) {
+      throw new CardContractError(message);
+    }
+  };
   for (const value of updateValues) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new CardContractError('reason update must be an object.');
@@ -1463,14 +1479,11 @@ function readReasonUpdates(
       return { reasonId, reason };
     };
     if (operation === 'create') {
-      if (
-        Object.keys(update).some(
-          (key) =>
-            !['operation', 'kind', 'content', 'semanticKey', 'salience', 'parentReasonId'].includes(key),
-        )
-      ) {
-        throw new CardContractError('create reason update contains an unsupported field.');
-      }
+      assertOnlyOperationFields(
+        update,
+        ['operation', 'kind', 'content', 'semanticKey', 'salience', 'parentReasonId'],
+        'create reason update contains an unsupported field.',
+      );
       if (!isCandidateReasonKind(update.kind)) {
         throw new CardContractError('create reason update kind is invalid.');
       }
@@ -1507,19 +1520,20 @@ function readReasonUpdates(
       continue;
     }
     if (operation === 'reinforce') {
-      if (
-        Object.keys(update).some(
-          (key) => !['operation', 'reasonId', 'content', 'salienceDelta'].includes(key),
-        )
-      ) {
-        throw new CardContractError('reinforce reason update contains an unsupported field.');
-      }
+      assertOnlyOperationFields(
+        update,
+        ['operation', 'reasonId', 'content', 'salienceDelta'],
+        'reinforce reason update contains an unsupported field.',
+      );
       const { reasonId, reason } = requireReason();
       const content =
-        update.content === undefined
+        update.content === undefined || update.content === null
           ? undefined
           : readBoundedText(update.content, 'reason content');
-      const salienceDelta = update.salienceDelta;
+      const salienceDelta =
+        update.salienceDelta === undefined || update.salienceDelta === null
+          ? undefined
+          : update.salienceDelta;
       if (
         salienceDelta !== undefined &&
         (typeof salienceDelta !== 'number' ||
@@ -1536,9 +1550,11 @@ function readReasonUpdates(
       continue;
     }
     if (operation === 'resolve' || operation === 'expire') {
-      if (Object.keys(update).some((key) => !['operation', 'reasonId'].includes(key))) {
-        throw new CardContractError('reason status update contains an unsupported field.');
-      }
+      assertOnlyOperationFields(
+        update,
+        ['operation', 'reasonId'],
+        'reason status update contains an unsupported field.',
+      );
       const { reasonId, reason } = requireReason();
       if (reason.status !== 'active') {
         throw new CardContractError('reason status transition is invalid.');
@@ -1547,9 +1563,11 @@ function readReasonUpdates(
       continue;
     }
     if (operation === 'defer') {
-      if (Object.keys(update).some((key) => !['operation', 'reasonId', 'cause', 'wakeOn'].includes(key))) {
-        throw new CardContractError('defer reason update contains an unsupported field.');
-      }
+      assertOnlyOperationFields(
+        update,
+        ['operation', 'reasonId', 'cause', 'wakeOn'],
+        'defer reason update contains an unsupported field.',
+      );
       const { reasonId, reason } = requireReason();
       if (reason.status !== 'active' || !isAutonomyDeferCause(update.cause)) {
         throw new CardContractError('defer reason update is invalid.');
@@ -1562,14 +1580,19 @@ function readReasonUpdates(
       continue;
     }
     if (operation === 'reactivate') {
-      if (Object.keys(update).some((key) => !['operation', 'reasonId', 'salienceDelta'].includes(key))) {
-        throw new CardContractError('reactivate reason update contains an unsupported field.');
-      }
+      assertOnlyOperationFields(
+        update,
+        ['operation', 'reasonId', 'salienceDelta'],
+        'reactivate reason update contains an unsupported field.',
+      );
       const { reasonId, reason } = requireReason();
       if (reason.status !== 'deferred' && reason.status !== 'expired') {
         throw new CardContractError('reactivate reason status is invalid.');
       }
-      const salienceDelta = update.salienceDelta;
+      const salienceDelta =
+        update.salienceDelta === undefined || update.salienceDelta === null
+          ? undefined
+          : update.salienceDelta;
       if (
         salienceDelta !== undefined &&
         (typeof salienceDelta !== 'number' || !Number.isFinite(salienceDelta) || salienceDelta < -1 || salienceDelta > 1)
@@ -2338,22 +2361,40 @@ async function generateReply(
         type: 'string',
         enum: ['create', 'reinforce', 'resolve', 'expire', 'defer', 'reactivate', 'merge'],
       },
-      kind: { type: 'string', enum: CANDIDATE_REASON_KINDS },
-      content: { type: 'string' },
-      semanticKey: { type: 'string' },
-      salience: { type: 'number' },
-      reasonId: { type: 'string' },
+      kind: {
+        type: ['string', 'null'],
+        enum: [...CANDIDATE_REASON_KINDS, null],
+      },
+      content: { type: ['string', 'null'] },
+      semanticKey: { type: ['string', 'null'] },
+      salience: { type: ['number', 'null'] },
+      reasonId: { type: ['string', 'null'] },
       parentReasonId: { type: ['string', 'null'] },
-      salienceDelta: { type: 'number' },
-      cause: { type: 'string', enum: AUTONOMY_DEFER_CAUSES },
+      salienceDelta: { type: ['number', 'null'] },
+      cause: {
+        type: ['string', 'null'],
+        enum: [...AUTONOMY_DEFER_CAUSES, null],
+      },
       wakeOn: {
-        type: 'array',
+        type: ['array', 'null'],
         items: { type: 'string', enum: AUTONOMY_WAKE_CONDITIONS },
         maxItems: AUTONOMY_WAKE_CONDITIONS.length,
       },
-      targetReasonId: { type: 'string' },
+      targetReasonId: { type: ['string', 'null'] },
     },
-    required: ['operation'],
+    required: [
+      'operation',
+      'kind',
+      'content',
+      'semanticKey',
+      'salience',
+      'reasonId',
+      'parentReasonId',
+      'salienceDelta',
+      'cause',
+      'wakeOn',
+      'targetReasonId',
+    ],
     additionalProperties: false,
   };
   const responseProperties = {
