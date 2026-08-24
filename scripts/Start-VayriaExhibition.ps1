@@ -500,23 +500,29 @@ function Wait-ForListeningPort {
 
 function Test-ViteReady {
   $scheme = if ($script:effectiveHttps) { 'https' } else { 'http' }
-  $uri = "$($scheme)://127.0.0.1`:$($script:effectiveVitePort)/"
-  $requestParameters = @{
-    Uri         = $uri
-    TimeoutSec  = 2
-    ErrorAction = 'Stop'
-  }
-  if ($script:effectiveHttps) {
-    $requestParameters.SkipCertificateCheck = $true
+  foreach ($probeHost in @('127.0.0.1', 'localhost')) {
+    $uri = "$($scheme)://$probeHost`:$($script:effectiveVitePort)/"
+    $requestParameters = @{
+      Uri         = $uri
+      TimeoutSec  = 2
+      ErrorAction = 'Stop'
+    }
+    if ($script:effectiveHttps) {
+      $requestParameters.SkipCertificateCheck = $true
+    }
+
+    try {
+      $response = Invoke-WebRequest @requestParameters
+      if ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500) {
+        return $true
+      }
+    }
+    catch {
+      continue
+    }
   }
 
-  try {
-    $response = Invoke-WebRequest @requestParameters
-    return [int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500
-  }
-  catch {
-    return $false
-  }
+  return $false
 }
 
 function Wait-ForViteReady {
