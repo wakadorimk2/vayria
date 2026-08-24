@@ -1829,13 +1829,14 @@ input {
   }
 }
 
-/* Vayria salon polish: make the frame legible without competing with the face and hand. */
+/* Vayria salon polish: Civ-inspired ornament with a restrained glass surface. */
 .app-shell {
   --vayria-frame-inset: clamp(0.45rem, 0.8vw, 0.8rem);
-  --vayria-frame-width: clamp(3px, 0.3vw, 5px);
-  --vayria-frame-inner-gap: clamp(2px, 0.24vw, 4px);
+  --vayria-frame-width: clamp(1px, 0.12vw, 2px);
+  --vayria-frame-inner-gap: clamp(3px, 0.35vw, 5px);
+  --vayria-frame-ornament-length: clamp(0.75rem, 1.4vw, 1.1rem);
   --vayria-frame-gold: #d6b875;
-  --vayria-frame-outer: #b18e52;
+  --vayria-frame-outer: rgb(199 168 107 / 78%);
   --vayria-frame-highlight: #f1dfad;
   --vayria-frame-shadow: #80633f;
   position: relative;
@@ -1848,11 +1849,28 @@ input {
   inset: var(--vayria-frame-inset);
   border: var(--vayria-frame-width) solid var(--vayria-frame-outer);
   border-radius: clamp(0.7rem, 1.2vw, 1.1rem);
+  background:
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) left top /
+      var(--vayria-frame-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) left top /
+      1px var(--vayria-frame-ornament-length) no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) right top /
+      var(--vayria-frame-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) right top /
+      1px var(--vayria-frame-ornament-length) no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) left bottom /
+      var(--vayria-frame-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) left bottom /
+      1px var(--vayria-frame-ornament-length) no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) right bottom /
+      var(--vayria-frame-ornament-length) 1px no-repeat,
+    linear-gradient(var(--vayria-frame-gold), var(--vayria-frame-gold)) right bottom /
+      1px var(--vayria-frame-ornament-length) no-repeat;
+  background-origin: border-box;
   box-shadow:
     0 0 0 1px var(--vayria-frame-shadow),
-    0 0 16px rgb(214 184 117 / 16%),
-    inset 0 1px 0 rgb(244 239 230 / 30%),
-    inset 0 -1px 0 rgb(80 58 36 / 30%);
+    0 0 12px rgb(199 168 107 / 10%),
+    inset 0 1px 0 rgb(244 239 230 / 24%);
   content: "";
   pointer-events: none;
 }
@@ -1863,11 +1881,24 @@ input {
   inset: calc(
     var(--vayria-frame-inset) + var(--vayria-frame-width) + var(--vayria-frame-inner-gap)
   );
-  border: 1px solid var(--vayria-frame-highlight);
+  border: 1px solid rgb(214 184 117 / 76%);
   border-radius: clamp(0.5rem, 1vw, 0.9rem);
+  background:
+    radial-gradient(
+        circle,
+        var(--vayria-frame-highlight) 0 1.5px,
+        transparent 1.8px
+      )
+      center top / 0.5rem 0.5rem no-repeat,
+    radial-gradient(
+        circle,
+        var(--vayria-frame-highlight) 0 1.5px,
+        transparent 1.8px
+      )
+      center bottom / 0.5rem 0.5rem no-repeat;
   box-shadow:
-    inset 0 0 8px rgb(244 239 230 / 15%),
-    0 0 7px rgb(214 184 117 / 12%);
+    inset 0 0 7px rgb(244 239 230 / 12%),
+    0 0 6px rgb(214 184 117 / 8%);
   content: "";
   pointer-events: none;
 }
@@ -1944,8 +1975,9 @@ input {
 @media (max-width: 720px) {
   .app-shell {
     --vayria-frame-inset: 0.35rem;
-    --vayria-frame-width: clamp(2px, 0.3vw, 3px);
+    --vayria-frame-width: 1px;
     --vayria-frame-inner-gap: 2px;
+    --vayria-frame-ornament-length: 0.7rem;
   }
 
   .app-shell::before {
@@ -1958,5 +1990,136 @@ input {
 
   .app-shell[data-app-mode="exhibition"] .reply {
     max-width: calc(100vw - 2.5rem);
+  }
+}
+
+/* Vayria salon second pass: keep utility chrome quiet and tactile. */
+.audio-controls {
+  gap: 0.2rem;
+  padding: 0.22rem;
+  border-color: rgb(244 239 230 / 11%);
+  background: rgb(23 23 37 / 32%);
+  box-shadow: 0 5px 16px rgb(5 6 17 / 12%);
+}
+
+.audio-unlock-button,
+.attention-button {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-color: rgb(214 184 117 / 42%);
+  background: rgb(31 27 49 / 58%);
+  box-shadow: 0 3px 9px rgb(5 6 17 / 12%);
+}
+
+.attention-button {
+  border-color: rgb(214 166 184 / 30%);
+}
+
+.audio-unlock-button:hover,
+.audio-unlock-button:focus-visible,
+.attention-button:hover,
+.attention-button:focus-visible {
+  border-color: rgb(214 184 117 / 70%);
+  background: rgb(91 60 98 / 58%);
+  box-shadow: 0 4px 12px rgb(10 9 24 / 20%);
+}
+
+.attention-status {
+  border-color: rgb(214 184 117 / 24%);
+  background: rgb(23 23 37 / 72%);
+  box-shadow: 0 8px 18px rgb(5 6 17 / 16%);
+}
+
+.conversation {
+  gap: 0.55rem;
+  padding: 0.6rem clamp(1rem, 4vw, 3rem) 0.75rem;
+  border-top: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.conversation-copy {
+  width: min(100%, 48rem);
+  min-height: 0;
+  margin-inline: auto;
+  padding: 0.38rem 0.78rem;
+  border: 1px solid rgb(244 239 230 / 11%);
+  border-radius: 0.95rem;
+  background:
+    linear-gradient(180deg, rgb(244 239 230 / 7%), rgb(23 23 37 / 20%)),
+    rgb(23 23 37 / 22%);
+  box-shadow:
+    0 8px 20px rgb(5 6 17 / 10%),
+    inset 0 1px 0 rgb(255 255 255 / 10%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.conversation .reply {
+  font-size: clamp(0.95rem, 1.8vw, 1.15rem);
+  line-height: 1.45;
+}
+
+.conversation .status {
+  color: rgb(244 239 230 / 54%);
+  font-size: 0.72rem;
+  letter-spacing: 0.035em;
+}
+
+.conversation .conversation-error {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.34rem 0.62rem;
+  border: 1px solid rgb(240 184 183 / 48%);
+  border-radius: 0.65rem;
+  background: rgb(82 26 31 / 60%);
+  box-shadow: 0 5px 14px rgb(31 8 13 / 18%);
+}
+
+.message-form input {
+  border-color: rgb(214 166 184 / 18%);
+  background: rgb(31 27 49 / 50%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation-copy {
+  width: fit-content;
+  max-width: min(72vw, 34rem);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.app-shell[data-app-mode="exhibition"] .reply {
+  border-color: rgb(214 184 117 / 28%);
+  background:
+    linear-gradient(180deg, rgb(244 239 230 / 8%), rgb(23 23 37 / 24%)),
+    rgb(23 23 37 / 18%);
+  box-shadow:
+    0 5px 16px rgb(8 8 21 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 11%);
+}
+
+.app-shell[data-app-mode="exhibition"] .status {
+  color: rgb(244 239 230 / 50%);
+  font-size: clamp(0.68rem, 1.1vw, 0.78rem);
+}
+
+.app-shell[data-app-mode="exhibition"] .conversation-error {
+  border-color: rgb(240 184 183 / 58%);
+  background: rgb(82 26 31 / 72%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audio-unlock-button,
+  .attention-button,
+  .conversation-copy,
+  .message-form input {
+    transition: none;
   }
 }
