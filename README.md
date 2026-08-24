@@ -501,15 +501,18 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 
 6. 対象worktreeで、Python STTとexhibitionフロントを起動します。
 
+   展示当日の短い手順は[`docs/exhibition-quickstart.md`](docs/exhibition-quickstart.md)を参照してください。
+
    ```powershell
    op run --env-file .env.1password -- npm run exhibition:start
    ```
 
-   このコマンドは、AivisSpeech CLIとuv経由のPython STTを別のPowerShell窓で起動します。
+   このコマンドは、AivisSpeech、uv経由のPython STT、ViteをWindows Terminalのタブで起動します。
+   Windows Terminalがない場合は、PowerShell別窓へフォールバックします。
    `op run`がVite/npmプロセスへだけOpenAI API keyを注入します。
    AivisSpeechがzonokoを提供し、Python STTが`127.0.0.1:8787`で待ち受けた後、
-   exhibitionフロントを現在のPowerShell窓でnpm起動します。
-   フロントを`Ctrl+C`で停止すると、このコマンドが起動したAivisSpeechとPython STTも停止します。
+   exhibitionフロントを起動します。
+   制御タブを`Ctrl+C`で停止すると、このコマンドが起動したサービスの親子プロセスも停止します。
    既に正常なAivisSpeechが起動中の場合は再利用し、そのプロセスは停止しません。
    AivisSpeechが別のプロセスで10101番を使用している場合や、既に8787番ポートが使用中の場合は、
    既存プロセスを停止せずにエラーを表示します。
@@ -523,7 +526,7 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    ```powershell
    Push-Location tools/stt
    $env:Path = "$env:USERPROFILE\.vayria\cuda12;$env:Path"
-   uv run --no-cache python -m vayria_stt.server `
+   uv run --no-sync --no-cache python -m vayria_stt.server `
      --model small `
      --device cuda `
      --compute-type float16 `
