@@ -1325,8 +1325,8 @@ test('exhibition audio presets resolve query over environment and expose gate se
       noiseFloorMultiplier: 2.5,
     },
   );
-  assert.equal(getExhibitionAudioPresetConfig('mild').defaultVadThreshold, 0.02);
-  assert.equal(getExhibitionAudioPresetConfig('mild').noiseFloorMultiplier, 2.5);
+  assert.equal(getExhibitionAudioPresetConfig('mild').defaultVadThreshold, 0.015);
+  assert.equal(getExhibitionAudioPresetConfig('mild').noiseFloorMultiplier, 2.0);
   assert.equal(
     getExhibitionAudioPresetConfig('aggressive').defaultVadThreshold,
     0.04,

@@ -99,7 +99,7 @@ CUDAの実ロードに失敗した場合だけfallbackします。
 Presetの役割は次です。
 
 - `off`: AEC、NS、AGCとブラウザー側適応RMSゲートを無効にします。PCMはPython WebRTC VADへ送ります。Python VADとbarge-inは有効です。
-- `mild`: AECとNSを要求します。AGCは要求しません。threshold初期値は`0.02`です。noise floor倍率は`2.5`です。
+- `mild`: AECとNSを要求します。AGCは要求しません。threshold初期値は`0.015`です。noise floor倍率は`2.0`です。
 - `aggressive`: AEC、NS、AGCを要求します。threshold初期値は`0.04`です。noise floor倍率は`3.0`です。
 
 ブラウザーはAEC、NS、AGCの処理強度を指定できません。
@@ -122,7 +122,7 @@ Audio Labパネルの操作順は次です。
 
 Mode変更は、マイク入力中はできません。
 VAD thresholdは、音声入力中も変更できます。
-初期値は`0.02`です。
+`mild`の初期値は`0.015`です。
 UIの範囲は`0.005`から`0.2`です。
 比較を始めるときは、まず初期Modeの`Processed`を確認します。
 既存経路との比較では、マイクを停止してから`Baseline`を選びます。
@@ -146,13 +146,33 @@ Mode Dは展示環境向けの実験的な組み合わせです。
 初期のnoise floorは`0.005`です。
 noise floorの更新係数は`0.05`です。
 effective thresholdは`max(user threshold, noise floor * preset倍率)`です。
-`mild`の倍率は`2.5`です。
+`mild`の倍率は`2.0`です。
 `aggressive`の倍率は`3.0`です。
 `off`はブラウザー側ゲートを使わないため、noise floorとeffective thresholdはUnavailableです。
 speech開始は1チャンクです。
 speech終了はthreshold未満3チャンクです。
 candidate rejectはnoise floor未満2チャンクです。
 ゲートはPCMの音量を加工しません。
+
+## 展示画面のマイク感度表示
+
+通常の`exhibition`画面では、右上にマイクと視線追従の状態を表示します。
+状態はアイコンと`ON` / `OFF`で確認できます。
+
+マイク入力中は、右上の「マイク感度」パネルを確認します。
+バーは取得したRMS入力レベルです。
+バー上のマーカーは、実際に使われる`effective threshold`です。
+`入力`がマーカーより低い場合は、声が反応ラインへ届いていません。
+`聞き取り中`または`判定中`へ変わらない場合は、感度スライダーを左の「敏感」へ動かします。
+
+この表示は実ゲイン値ではありません。
+ブラウザーやOSが適用するマイクゲインは、安定して取得または制御できないためです。
+展示画面では、実測入力レベルと反応ラインを「マイク感度」として表示します。
+
+入力バーが動かない場合は、まずHTTPS、マイク権限、端末の入力先を確認します。
+次に`?audioPreset=off`で再読み込みし、AECとNSを無効にした状態で比較します。
+`off`でだけ入力バーが動く場合は、ブラウザーまたは端末のノイズ抑制が入力を抑えている可能性があります。
+`off`でも入力バーが動かない場合は、VAD閾値ではなくマイク捕捉、権限、接続の問題を疑います。
 
 全ModeでTTS再生中にspeech startを検出すると、`barge_in_candidate`へ遷移します。
 候補中は、TTS音量だけを20msで約`0.12`へ下げます。
