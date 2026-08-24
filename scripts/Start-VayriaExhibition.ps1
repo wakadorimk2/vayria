@@ -2,6 +2,8 @@
 param(
   [string]$WorktreePath = (Get-Location).Path,
 
+  [string]$AivisInstallPath = '',
+
   [ValidateSet('tiny', 'base', 'small')]
   [string]$SttModel = 'small',
 
@@ -469,6 +471,12 @@ try {
         '-PidFile'
         $aivisPidFile
       )
+      if (-not [string]::IsNullOrWhiteSpace($AivisInstallPath)) {
+        $aivisArguments += @(
+          '-AivisInstallPath'
+          $AivisInstallPath
+        )
+      }
 
       Write-Output "Starting AivisSpeech in a separate PowerShell window on $aivisHost`:$aivisPort."
       $aivisProcess = Start-Process `

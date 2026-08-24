@@ -187,15 +187,31 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
 3. zonoko モデルを追加した AivisSpeech CLIを起動します。
 
-   CLIは次の固定パスから起動します。
+   ランチャーは次の優先順位でAivisSpeechのインストール先を選びます。
 
-   ```text
-   C:\Users\<Windowsユーザー名>\.vayria\apps\AivisSpeech-1.1.0-dev\AivisSpeech\AivisSpeech-Engine\run.exe
-   ```
+   1. `-AivisInstallPath`引数
+   2. `VAYRIA_AIVIS_INSTALL_PATH`環境変数
+   3. `%USERPROFILE%\.vayria\apps\AivisSpeech-1.1.0-dev`
+   4. `%LOCALAPPDATA%\Programs\AivisSpeech`
+
+   現在のPCの通常インストールを使う場合は、次のように設定できます。
 
    ```powershell
+   $env:VAYRIA_AIVIS_INSTALL_PATH = "$env:LOCALAPPDATA\Programs\AivisSpeech"
    pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1
    ```
+
+   一時的に引数で指定することもできます。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1 `
+     -AivisInstallPath "$env:LOCALAPPDATA\Programs\AivisSpeech"
+   ```
+
+   ランチャーはインストール先から`run.exe`を解決します。
+   `.vayria`配下のポータブル配置と、`%LOCALAPPDATA%\Programs\AivisSpeech`配下の通常配置に対応します。
+   `VAYRIA_AIVIS_INSTALL_PATH`はPowerShellランチャーが読む値です。
+   `.env.local`はViteのNode設定であり、PowerShellランチャーへ自動継承されないため、インストール先には使いません。
 
    起動スクリプトは `http://127.0.0.1:10101/speakers` でzonokoの存在を確認します。
    既にzonokoを提供するAivisが起動中なら再利用します。
@@ -453,6 +469,8 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 5. AivisSpeechは統合ランチャーから自動起動します。
    単独で起動する場合は `npm run aivis:start` または
    `pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1` を使います。
+   インストール先を明示する場合は、先に
+   `$env:VAYRIA_AIVIS_INSTALL_PATH`を設定してください。
    `AIVIS_BASE_URL`は引き続き `http://127.0.0.1:10101` を使用します。
 
 6. 対象worktreeで、Python STTとexhibitionフロントを起動します。

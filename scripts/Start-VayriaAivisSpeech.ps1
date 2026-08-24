@@ -1,5 +1,7 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
+  [string]$AivisInstallPath = '',
+
   [switch]$AivisWindow,
 
   [string]$PidFile,
@@ -14,9 +16,82 @@ $ProgressPreference = 'SilentlyContinue'
 $aivisHost = '127.0.0.1'
 $aivisPort = 10101
 $aivisBaseUrl = "http://$aivisHost`:$aivisPort"
-$enginePath = Join-Path `
-  $env:USERPROFILE `
-  '.vayria\apps\AivisSpeech-1.1.0-dev\AivisSpeech\AivisSpeech-Engine\run.exe'
+
+function Get-AivisEngineCandidates {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$InstallPath
+  )
+
+  $normalizedInstallPath = [IO.Path]::GetFullPath($InstallPath)
+  if ([IO.Path]::GetFileName($normalizedInstallPath) -ieq 'run.exe') {
+    return @($normalizedInstallPath)
+  }
+
+  return @(
+    (Join-Path $normalizedInstallPath 'run.exe'),
+    (Join-Path $normalizedInstallPath 'AivisSpeech-Engine\run.exe'),
+    (Join-Path $normalizedInstallPath 'AivisSpeech\AivisSpeech-Engine\run.exe'),
+    (Join-Path $normalizedInstallPath 'AivisSpeech\AivisSpeech Engine\run.exe')
+  )
+}
+
+function Resolve-AivisEnginePath {
+  param(
+    [string]$ConfiguredInstallPath,
+
+    [string]$EnvironmentInstallPath
+  )
+
+  $installPaths = @()
+  $pathSource = 'automatic discovery'
+  if (-not [string]::IsNullOrWhiteSpace($ConfiguredInstallPath)) {
+    $installPaths = @($ConfiguredInstallPath)
+    $pathSource = '-AivisInstallPath'
+  }
+  elseif (-not [string]::IsNullOrWhiteSpace($EnvironmentInstallPath)) {
+    $installPaths = @($EnvironmentInstallPath)
+    $pathSource = 'VAYRIA_AIVIS_INSTALL_PATH'
+  }
+  else {
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+      $installPaths += Join-Path $env:USERPROFILE '.vayria\apps\AivisSpeech-1.1.0-dev'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+      $installPaths += Join-Path $env:LOCALAPPDATA 'Programs\AivisSpeech'
+    }
+  }
+
+  $candidates = @()
+  foreach ($installPath in $installPaths) {
+    if ([string]::IsNullOrWhiteSpace($installPath)) {
+      continue
+    }
+    if (-not [IO.Path]::IsPathRooted($installPath)) {
+      throw "AivisInstallPath must be an absolute path: $installPath"
+    }
+    $candidates += @(Get-AivisEngineCandidates -InstallPath $installPath)
+  }
+
+  $resolvedCandidate = $candidates |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+  if ($null -ne $resolvedCandidate) {
+    return (Resolve-Path -LiteralPath $resolvedCandidate -ErrorAction Stop).Path
+  }
+
+  $candidateText = if ($candidates.Count -gt 0) {
+    $candidates -join [Environment]::NewLine
+  }
+  else {
+    '(none)'
+  }
+  throw "AivisSpeech Engine was not found. Source: $pathSource. Checked candidates:`n$candidateText"
+}
+
+$enginePath = Resolve-AivisEnginePath `
+  -ConfiguredInstallPath $AivisInstallPath `
+  -EnvironmentInstallPath $env:VAYRIA_AIVIS_INSTALL_PATH
 $engineDirectory = Split-Path -Parent $enginePath
 $engineArguments = @(
   '--host'
@@ -31,7 +106,7 @@ $engineArguments = @(
 
 function Assert-EngineFile {
   if (-not (Test-Path -LiteralPath $enginePath -PathType Leaf)) {
-    throw "AivisSpeech Engine was not found at the fixed path: $enginePath. Reinstall or move the GUI package to the configured .vayria path."
+    throw "Resolved AivisSpeech Engine was not found: $enginePath"
   }
 }
 
@@ -124,7 +199,7 @@ if (Test-AivisReady) {
 }
 
 if (Test-ListeningPort) {
-  throw "AivisSpeech port $aivisPort is already in use, but zonoko is not available at $aivisBaseUrl/speakers. Stop the conflicting process or use the fixed AivisSpeech Engine installation."
+  throw "AivisSpeech port $aivisPort is already in use, but zonoko is not available at $aivisBaseUrl/speakers. Stop the conflicting process or check the configured AivisSpeech installation."
 }
 
 $aivisProcess = $null
@@ -135,7 +210,7 @@ try {
     $exitCode = 0
   }
   else {
-    Write-Output "Starting AivisSpeech Engine from the fixed path: $enginePath"
+    Write-Output "Starting AivisSpeech Engine from: $enginePath"
     $aivisProcess = Start-Process `
       -FilePath $enginePath `
       -WorkingDirectory $engineDirectory `
