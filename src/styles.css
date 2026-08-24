@@ -1829,8 +1829,15 @@ input {
   }
 }
 
-/* Vayria salon polish: keep the frame quiet and let the face and hand lead. */
+/* Vayria salon polish: make the frame legible without competing with the face and hand. */
 .app-shell {
+  --vayria-frame-inset: clamp(0.45rem, 0.8vw, 0.8rem);
+  --vayria-frame-width: clamp(3px, 0.3vw, 5px);
+  --vayria-frame-inner-gap: clamp(2px, 0.24vw, 4px);
+  --vayria-frame-gold: #d6b875;
+  --vayria-frame-outer: #b18e52;
+  --vayria-frame-highlight: #f1dfad;
+  --vayria-frame-shadow: #80633f;
   position: relative;
   isolation: isolate;
 }
@@ -1838,13 +1845,29 @@ input {
 .app-shell::before {
   position: absolute;
   z-index: 40;
-  inset: clamp(0.45rem, 0.8vw, 0.8rem);
-  border: clamp(1px, 0.14vw, 2px) solid rgb(199 168 107 / 58%);
+  inset: var(--vayria-frame-inset);
+  border: var(--vayria-frame-width) solid var(--vayria-frame-outer);
   border-radius: clamp(0.7rem, 1.2vw, 1.1rem);
   box-shadow:
-    inset 0 0 0 1px rgb(244 239 230 / 14%),
-    inset 0 0 18px rgb(199 168 107 / 8%),
-    0 0 12px rgb(199 168 107 / 11%);
+    0 0 0 1px var(--vayria-frame-shadow),
+    0 0 16px rgb(214 184 117 / 16%),
+    inset 0 1px 0 rgb(244 239 230 / 30%),
+    inset 0 -1px 0 rgb(80 58 36 / 30%);
+  content: "";
+  pointer-events: none;
+}
+
+.app-shell::after {
+  position: absolute;
+  z-index: 41;
+  inset: calc(
+    var(--vayria-frame-inset) + var(--vayria-frame-width) + var(--vayria-frame-inner-gap)
+  );
+  border: 1px solid var(--vayria-frame-highlight);
+  border-radius: clamp(0.5rem, 1vw, 0.9rem);
+  box-shadow:
+    inset 0 0 8px rgb(244 239 230 / 15%),
+    0 0 7px rgb(214 184 117 / 12%);
   content: "";
   pointer-events: none;
 }
@@ -1919,10 +1942,18 @@ input {
 }
 
 @media (max-width: 720px) {
+  .app-shell {
+    --vayria-frame-inset: 0.35rem;
+    --vayria-frame-width: clamp(2px, 0.3vw, 3px);
+    --vayria-frame-inner-gap: 2px;
+  }
+
   .app-shell::before {
-    inset: 0.35rem;
-    border-width: 1px;
     border-radius: 0.7rem;
+  }
+
+  .app-shell::after {
+    border-radius: 0.55rem;
   }
 
   .app-shell[data-app-mode="exhibition"] .reply {
