@@ -199,6 +199,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
    起動スクリプトは `http://127.0.0.1:10101/speakers` でzonokoの存在を確認します。
    既にzonokoを提供するAivisが起動中なら再利用します。
+   初回起動ではCPU起動とWindows側の処理により、Aivisの起動確認まで最大60秒待機します。
    GUI版AivisSpeechとCLIは同じ10101番ポートを使うため、同時に起動しません。
    APIの詳細は `http://127.0.0.1:10101/docs` でも確認できます。
 

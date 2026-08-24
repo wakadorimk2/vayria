@@ -37,6 +37,7 @@ $aivisHost = '127.0.0.1'
 $aivisPort = 10101
 $aivisBaseUrl = "http://$aivisHost`:$aivisPort"
 $aivisStartupTimeoutSeconds = 30
+$aivisPidFileTimeoutSeconds = 60
 $launcherMutexName = 'Vayria.ExhibitionLauncher'
 $sttHotwordsArgument = '"' + $SttHotwords.Replace('"', '\"') + '"'
 
@@ -481,7 +482,7 @@ try {
       $aivisRunProcessId = Wait-ForPidFile `
         -Path $aivisPidFile `
         -Process $aivisProcess `
-        -TimeoutSeconds 5 `
+        -TimeoutSeconds $aivisPidFileTimeoutSeconds `
         -Description 'AivisSpeech PowerShell window'
 
       Wait-ForAivisReady -Process $aivisProcess
