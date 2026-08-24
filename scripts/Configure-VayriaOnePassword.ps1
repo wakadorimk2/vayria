@@ -2,6 +2,8 @@
 param(
   [string]$ReferenceFile = (Join-Path $env:USERPROFILE '.vayria\vayria-op.env'),
 
+  [string]$SecretReference,
+
   [string]$Vault,
 
   [string]$Item,
@@ -27,23 +29,6 @@ function Resolve-OpCommand {
   throw '1Password CLI (op.exe) was not found.'
 }
 
-function Invoke-OpJson {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Command,
-
-    [Parameter(Mandatory = $true)]
-    [string[]]$Arguments
-  )
-
-  $json = & $Command @Arguments
-  if ($LASTEXITCODE -ne 0) {
-    throw "1Password CLI command failed: op $($Arguments -join ' ')"
-  }
-
-  return ($json -join [Environment]::NewLine) | ConvertFrom-Json
-}
-
 if (-not [IO.Path]::IsPathRooted($ReferenceFile)) {
   throw 'ReferenceFile must be an absolute path.'
 }
@@ -63,36 +48,43 @@ if ($LASTEXITCODE -ne 0) {
   throw '1Password is not signed in. Run `op signin` after enabling desktop app integration, then run this script again.'
 }
 
-$items = Invoke-OpJson -Command $opCommand -Arguments @('item', 'list', '--format', 'json')
-if (@($items).Count -gt 0) {
-  Write-Output 'Available 1Password items (metadata only; secret values are not read):'
-  @($items) |
-    Select-Object id, title, category, @{Name = 'vault'; Expression = { $_.vault.name }} |
-    Format-Table -AutoSize |
-    Out-String |
-    Write-Output
-}
+if ([string]::IsNullOrWhiteSpace($SecretReference)) {
+  if ([string]::IsNullOrWhiteSpace($Vault) -and
+      [string]::IsNullOrWhiteSpace($Item) -and
+      [string]::IsNullOrWhiteSpace($Field)) {
+    $SecretReference = Read-Host 'Paste the 1Password secret reference for the OpenAI key (op://vault/item/field)'
+  } else {
+    if ([string]::IsNullOrWhiteSpace($Vault)) {
+      $Vault = Read-Host 'Vault name or ID containing the OpenAI key'
+    }
+    if ([string]::IsNullOrWhiteSpace($Item)) {
+      $Item = Read-Host 'Item name or ID containing the OpenAI key'
+    }
+    if ([string]::IsNullOrWhiteSpace($Field)) {
+      $Field = Read-Host 'Field name or ID containing the OpenAI key (for example, credential)'
+    }
 
-if ([string]::IsNullOrWhiteSpace($Vault)) {
-  $Vault = Read-Host 'Vault name or ID containing the OpenAI key'
-}
-if ([string]::IsNullOrWhiteSpace($Item)) {
-  $Item = Read-Host 'Item name or ID containing the OpenAI key'
-}
-if ([string]::IsNullOrWhiteSpace($Field)) {
-  $Field = Read-Host 'Field name or ID containing the OpenAI key (for example, credential)'
-}
-
-foreach ($part in @(@{Name = 'Vault'; Value = $Vault }, @{Name = 'Item'; Value = $Item }, @{Name = 'Field'; Value = $Field })) {
-  if ([string]::IsNullOrWhiteSpace($part.Value) -or $part.Value.Contains("`r") -or $part.Value.Contains("`n") -or $part.Value.Contains('/')) {
-    throw "$($part.Name) must be a non-empty 1Password reference component without slashes or newlines."
+    $SecretReference = "op://$Vault/$Item/$Field"
   }
 }
 
-$secretReference = "op://$Vault/$Item/$Field"
-$content = @(
-  "OPENAI_API_KEY=$secretReference"
-) -join [Environment]::NewLine
+$SecretReference = $SecretReference.Trim()
+if (-not $SecretReference.StartsWith('op://', [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'The secret reference must start with op://.'
+}
+
+$referenceComponents = $SecretReference.Substring(5).Split('/')
+if ($referenceComponents.Count -ne 3) {
+  throw 'The secret reference must have the form op://vault/item/field.'
+}
+
+foreach ($component in $referenceComponents) {
+  if ([string]::IsNullOrWhiteSpace($component) -or $component.Contains("`r") -or $component.Contains("`n")) {
+    throw 'The secret reference must contain non-empty vault, item, and field components.'
+  }
+}
+
+$content = "OPENAI_API_KEY=$SecretReference"
 
 New-Item -ItemType Directory -Path $referenceDirectory -Force | Out-Null
 Set-Content -LiteralPath $resolvedReferenceFile -Value ($content + [Environment]::NewLine) -Encoding utf8NoBOM

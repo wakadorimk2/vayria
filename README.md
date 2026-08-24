@@ -243,7 +243,9 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    pwsh -NoProfile -File .\scripts\Configure-VayriaOnePassword.ps1
    ```
 
-   スクリプトは項目のメタデータを表示し、Vault・Item・Fieldを尋ねます。
+   1PasswordアプリでOpenAI API keyフィールドのメニューからSecret Referenceをコピーし、
+   スクリプトのプロンプトへ貼り付けます。
+   スクリプトは項目一覧を取得しません。
    `%USERPROFILE%\.vayria\vayria-op.env`へ保存されるのは次の`op://`参照だけです。
    API key本体は保存・表示しません。
 
