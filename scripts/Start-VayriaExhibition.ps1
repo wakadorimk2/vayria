@@ -24,6 +24,12 @@ param(
   [ValidateSet('auto', 'float16', 'int8', 'int8_float16')]
   [string]$SttFallbackComputeType = 'int8',
 
+  [ValidateSet('Auto', 'WindowsTerminal', 'PowerShellWindow')]
+  [string]$TerminalMode = 'Auto',
+
+  [string]$LogDirectory = '',
+
+  # Internal entry point used by Start-VayriaExhibitionTab.ps1.
   [switch]$SttWindow,
 
   [string]$SttPidFile
@@ -34,14 +40,13 @@ $ProgressPreference = 'SilentlyContinue'
 
 $sttHost = '127.0.0.1'
 $sttPort = 8787
-$sttStartupTimeoutSeconds = 30
+$sttStartupTimeoutSeconds = 60
 $aivisHost = '127.0.0.1'
 $aivisPort = 10101
 $aivisBaseUrl = "http://$aivisHost`:$aivisPort"
-$aivisStartupTimeoutSeconds = 30
-$aivisPidFileTimeoutSeconds = 60
+$aivisStartupTimeoutSeconds = 60
+$viteStartupTimeoutSeconds = 30
 $launcherMutexName = 'Vayria.ExhibitionLauncher'
-$sttHotwordsArgument = '"' + $SttHotwords.Replace('"', '\"') + '"'
 
 function Resolve-RequiredCommand {
   param(
@@ -51,7 +56,7 @@ function Resolve-RequiredCommand {
 
   $command = Get-Command $Name -CommandType Application -ErrorAction Stop |
     Select-Object -First 1
-  if (-not $command) {
+  if ($null -eq $command) {
     throw "Required command was not found: $Name"
   }
 
@@ -72,55 +77,184 @@ function Assert-RequiredFile {
   }
 }
 
+function Resolve-RequiredDirectory {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Description
+  )
+
+  $resolved = [IO.Path]::GetFullPath($Path)
+  if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
+    throw "$Description was not found: $resolved"
+  }
+
+  return $resolved
+}
+
+function Get-EnvironmentFileValue {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Name
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return $null
+  }
+
+  $pattern = '^\s*(?:export\s+)?' + [Regex]::Escape($Name) + '\s*=\s*(.*?)\s*$'
+  $match = Select-String -LiteralPath $Path -Pattern $pattern -Encoding utf8 |
+    Select-Object -First 1
+  if ($null -eq $match) {
+    return $null
+  }
+
+  $value = $match.Matches[0].Groups[1].Value.Trim()
+  if ($value.Length -ge 2 -and
+      (($value.StartsWith('"') -and $value.EndsWith('"')) -or
+       ($value.StartsWith("'") -and $value.EndsWith("'")))) {
+    $value = $value.Substring(1, $value.Length - 2)
+  }
+
+  $commentIndex = $value.IndexOf(' #', [StringComparison]::Ordinal)
+  if ($commentIndex -ge 0) {
+    $value = $value.Substring(0, $commentIndex).Trim()
+  }
+
+  return $value
+}
+
+function Get-EffectiveEnvironmentValue {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name,
+
+    [Parameter(Mandatory = $true)]
+    [string]$LocalEnvironmentFile,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ExhibitionEnvironmentFile
+  )
+
+  $processValue = [Environment]::GetEnvironmentVariable($Name)
+  if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+    return $processValue.Trim()
+  }
+
+  $exhibitionValue = Get-EnvironmentFileValue `
+    -Path $ExhibitionEnvironmentFile `
+    -Name $Name
+  if ($null -ne $exhibitionValue) {
+    return $exhibitionValue
+  }
+
+  return Get-EnvironmentFileValue -Path $LocalEnvironmentFile -Name $Name
+}
+
+function Test-TruthyValue {
+  param(
+    [string]$Value
+  )
+
+  return @('1', 'true', 'yes', 'on') -contains ($Value ?? '').Trim().ToLowerInvariant()
+}
+
 function Test-ListeningPort {
   param(
     [Parameter(Mandatory = $true)]
     [int]$Port,
 
-    [string]$HostName = $sttHost
+    [string]$HostName = '127.0.0.1'
   )
 
+  $client = [Net.Sockets.TcpClient]::new()
   try {
-    return [bool](Test-NetConnection `
-        -ComputerName $HostName `
-        -Port $Port `
-        -InformationLevel Quiet `
-        -WarningAction SilentlyContinue)
+    $connectTask = $client.ConnectAsync($HostName, $Port)
+    if (-not $connectTask.Wait(250)) {
+      return $false
+    }
+    return $client.Connected
   }
   catch {
     return $false
   }
+  finally {
+    $client.Dispose()
+  }
 }
 
-function Wait-ForListeningPort {
+function Get-AivisEngineCandidates {
   param(
     [Parameter(Mandatory = $true)]
-    [int]$Port,
-
-    [Parameter(Mandatory = $true)]
-    [System.Diagnostics.Process]$Process,
-
-    [Parameter(Mandatory = $true)]
-    [int]$TimeoutSeconds,
-
-    [string]$HostName = $sttHost
+    [string]$InstallPath
   )
 
-  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-  while ((Get-Date) -lt $deadline) {
-    $Process.Refresh()
-    if ($Process.HasExited) {
-      throw "Python STT process exited before port $Port became available."
-    }
-
-    if (Test-ListeningPort -HostName $HostName -Port $Port) {
-      return
-    }
-
-    Start-Sleep -Milliseconds 250
+  $normalizedInstallPath = [IO.Path]::GetFullPath($InstallPath)
+  if ([IO.Path]::GetFileName($normalizedInstallPath) -ieq 'run.exe') {
+    return @($normalizedInstallPath)
   }
 
-  throw "Python STT did not start listening on port $Port within $TimeoutSeconds seconds."
+  return @(
+    (Join-Path $normalizedInstallPath 'run.exe'),
+    (Join-Path $normalizedInstallPath 'AivisSpeech-Engine\run.exe'),
+    (Join-Path $normalizedInstallPath 'AivisSpeech\AivisSpeech-Engine\run.exe'),
+    (Join-Path $normalizedInstallPath 'AivisSpeech\AivisSpeech Engine\run.exe')
+  )
+}
+
+function Resolve-AivisEnginePath {
+  param(
+    [string]$ConfiguredInstallPath,
+
+    [string]$EnvironmentInstallPath
+  )
+
+  $installPaths = @()
+  if (-not [string]::IsNullOrWhiteSpace($ConfiguredInstallPath)) {
+    $installPaths = @($ConfiguredInstallPath)
+  }
+  elseif (-not [string]::IsNullOrWhiteSpace($EnvironmentInstallPath)) {
+    $installPaths = @($EnvironmentInstallPath)
+  }
+  else {
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+      $installPaths += Join-Path $env:USERPROFILE '.vayria\apps\AivisSpeech-1.1.0-dev'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+      $installPaths += Join-Path $env:LOCALAPPDATA 'Programs\AivisSpeech'
+    }
+  }
+
+  $candidates = @()
+  foreach ($installPath in $installPaths) {
+    if ([string]::IsNullOrWhiteSpace($installPath)) {
+      continue
+    }
+    if (-not [IO.Path]::IsPathRooted($installPath)) {
+      throw "AivisInstallPath must be an absolute path: $installPath"
+    }
+    $candidates += @(Get-AivisEngineCandidates -InstallPath $installPath)
+  }
+
+  $resolvedCandidate = $candidates |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+  if ($null -ne $resolvedCandidate) {
+    return (Resolve-Path -LiteralPath $resolvedCandidate -ErrorAction Stop).Path
+  }
+
+  $candidateText = if ($candidates.Count -gt 0) {
+    $candidates -join [Environment]::NewLine
+  }
+  else {
+    '(none)'
+  }
+  throw "AivisSpeech Engine was not found. Checked candidates:`n$candidateText"
 }
 
 function Get-AivisSpeakers {
@@ -140,269 +274,917 @@ function Test-AivisReady {
   return [bool](@($speakers | Where-Object { $_.name -eq 'zonoko' }).Count)
 }
 
-function Wait-ForAivisReady {
+function Test-ProcessAlive {
   param(
-    [Parameter(Mandatory = $true)]
-    [System.Diagnostics.Process]$Process
+    [int]$ProcessId
   )
 
-  $deadline = (Get-Date).AddSeconds($aivisStartupTimeoutSeconds)
+  if ($ProcessId -le 0) {
+    return $false
+  }
+
+  try {
+    $process = [Diagnostics.Process]::GetProcessById($ProcessId)
+    $process.Refresh()
+    return -not $process.HasExited
+  }
+  catch {
+    return $false
+  }
+}
+
+function Get-ProcessCommandLine {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int]$ProcessId
+  )
+
+  try {
+    $process = Get-CimInstance `
+      -ClassName Win32_Process `
+      -Filter "ProcessId = $ProcessId" `
+      -ErrorAction Stop
+    return [string]$process.CommandLine
+  }
+  catch {
+    return ''
+  }
+}
+
+function Test-SessionProcess {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int]$ProcessId
+  )
+
+  if (-not (Test-ProcessAlive -ProcessId $ProcessId)) {
+    return $false
+  }
+
+  $commandLine = Get-ProcessCommandLine -ProcessId $ProcessId
+  return -not [string]::IsNullOrWhiteSpace($commandLine) -and
+    $commandLine.Contains($script:sessionId, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Stop-ProcessTree {
+  param(
+    [int]$ProcessId
+  )
+
+  if ($ProcessId -le 0 -or -not (Test-SessionProcess -ProcessId $ProcessId)) {
+    return
+  }
+
+  $windowsDirectory = [Environment]::GetEnvironmentVariable('WINDIR')
+  if ([string]::IsNullOrWhiteSpace($windowsDirectory)) {
+    $windowsDirectory = [Environment]::GetEnvironmentVariable('SystemRoot')
+  }
+  $taskkillPath = Join-Path $windowsDirectory 'System32\taskkill.exe'
+  if (Test-Path -LiteralPath $taskkillPath -PathType Leaf) {
+    $taskkillArguments = @('/PID', "$ProcessId", '/T', '/F')
+    & $taskkillPath @taskkillArguments *> $null
+    $taskkillExitCode = $LASTEXITCODE
+    if ($taskkillExitCode -ne 0) {
+      Write-ControllerMessage "[WARN][Cleanup] taskkill.exe exit code $taskkillExitCode for PID $ProcessId."
+    }
+    return
+  }
+
+  try {
+    Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+  }
+  catch {
+    Write-ControllerMessage "[WARN][Cleanup] Could not stop PID $ProcessId. $($_.Exception.Message)"
+  }
+}
+
+function Read-RoleRecord {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RoleSlug
+  )
+
+  $path = Join-Path $script:sessionDirectory "$RoleSlug.tab.pid.json"
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    return $null
+  }
+
+  try {
+    $record = Get-Content -Raw -LiteralPath $path -ErrorAction Stop |
+      ConvertFrom-Json -ErrorAction Stop
+    if ($record.sessionId -ne $script:sessionId) {
+      return $null
+    }
+    return $record
+  }
+  catch {
+    return $null
+  }
+}
+
+function Read-RoleStatus {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RoleSlug
+  )
+
+  $path = Join-Path $script:sessionDirectory "$RoleSlug.status.json"
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    return $null
+  }
+
+  try {
+    $status = Get-Content -Raw -LiteralPath $path -ErrorAction Stop |
+      ConvertFrom-Json -ErrorAction Stop
+    if ($status.sessionId -ne $script:sessionId) {
+      return $null
+    }
+    return $status
+  }
+  catch {
+    return $null
+  }
+}
+
+function Assert-RoleAlive {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RoleSlug
+  )
+
+  $status = Read-RoleStatus -RoleSlug $RoleSlug
+  if ($null -ne $status -and $status.state -in @('failed', 'exited', 'stopped')) {
+    throw "$RoleSlug tab stopped with exit code $($status.exitCode). $($status.message)"
+  }
+
+  $record = Read-RoleRecord -RoleSlug $RoleSlug
+  if ($null -eq $record) {
+    throw "$RoleSlug tab did not record its process ID."
+  }
+  if (-not (Test-ProcessAlive -ProcessId ([int]$record.processId))) {
+    throw "$RoleSlug tab process $($record.processId) is not running."
+  }
+}
+
+function Wait-ForRoleProcess {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RoleSlug,
+
+    [int]$TimeoutSeconds = 20
+  )
+
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
-    $Process.Refresh()
-    if ($Process.HasExited) {
-      throw "AivisSpeech PowerShell window exited before $aivisBaseUrl/speakers became ready."
+    $status = Read-RoleStatus -RoleSlug $RoleSlug
+    if ($null -ne $status -and $status.state -in @('failed', 'exited', 'stopped')) {
+      throw "$RoleSlug tab failed before readiness. $($status.message)"
     }
 
-    if (Test-AivisReady) {
+    $record = Read-RoleRecord -RoleSlug $RoleSlug
+    if ($null -ne $record -and (Test-ProcessAlive -ProcessId ([int]$record.processId))) {
       return
     }
 
     Start-Sleep -Milliseconds 250
   }
 
-  throw "AivisSpeech Engine did not expose zonoko at $aivisBaseUrl/speakers within $aivisStartupTimeoutSeconds seconds."
+  throw "$RoleSlug tab did not record a running process within $TimeoutSeconds seconds."
 }
 
-function Stop-StartedProcess {
+function Wait-ForAivisReady {
   param(
     [Parameter(Mandatory = $true)]
-    [int]$RootProcessId
+    [string]$RoleSlug
   )
 
-  $taskkillPath = Join-Path $env:WINDIR 'System32\taskkill.exe'
-  try {
-    if (Test-Path -LiteralPath $taskkillPath -PathType Leaf) {
-      & $taskkillPath /PID $RootProcessId /T /F *> $null
-      if ($LASTEXITCODE -ne 0) {
-        throw "taskkill.exe returned exit code $LASTEXITCODE"
-      }
+  $deadline = (Get-Date).AddSeconds($aivisStartupTimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-AivisReady) {
+      return
     }
-    else {
-      Stop-Process -Id $RootProcessId -Force -ErrorAction Stop
-    }
+    Assert-RoleAlive -RoleSlug $RoleSlug
+    Start-Sleep -Milliseconds 250
   }
-  catch {
-    Write-Warning "Could not stop the started process tree with root PID $RootProcessId. $($_.Exception.Message)"
-  }
+
+  throw "AivisSpeech did not expose zonoko at $aivisBaseUrl/speakers within $aivisStartupTimeoutSeconds seconds."
 }
 
-function Wait-ForPidFile {
+function Wait-ForListeningPort {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$Path,
+    [string]$RoleSlug,
 
     [Parameter(Mandatory = $true)]
-    [System.Diagnostics.Process]$Process,
+    [int]$Port,
 
     [Parameter(Mandatory = $true)]
     [int]$TimeoutSeconds,
 
-    [string]$Description = 'child process'
+    [string]$HostName = '127.0.0.1',
+
+    [string]$Description = 'service'
   )
 
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
-    $Process.Refresh()
-    if ($Process.HasExited) {
-      throw "$Description exited before it recorded the process ID."
+    if (Test-ListeningPort -HostName $HostName -Port $Port) {
+      return
     }
-
-    if (Test-Path -LiteralPath $Path -PathType Leaf) {
-      $rawProcessId = (Get-Content -Raw -LiteralPath $Path -ErrorAction SilentlyContinue).Trim()
-      [int]$processId = 0
-      if ([int]::TryParse($rawProcessId, [ref]$processId) -and $processId -gt 0) {
-        return $processId
-      }
-    }
-
-    Start-Sleep -Milliseconds 100
+    Assert-RoleAlive -RoleSlug $RoleSlug
+    Start-Sleep -Milliseconds 250
   }
 
-  throw "$Description did not record a process ID within $TimeoutSeconds seconds."
+  throw "$HostName`:$Port did not become ready within $TimeoutSeconds seconds."
 }
 
-function Stop-StartedPython {
+function Test-ViteReady {
+  $scheme = if ($script:effectiveHttps) { 'https' } else { 'http' }
+  $uri = "$($scheme)://127.0.0.1`:$($script:effectiveVitePort)/"
+  $requestParameters = @{
+    Uri         = $uri
+    TimeoutSec  = 2
+    ErrorAction = 'Stop'
+  }
+  if ($script:effectiveHttps) {
+    $requestParameters.SkipCertificateCheck = $true
+  }
+
+  try {
+    $response = Invoke-WebRequest @requestParameters
+    return [int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500
+  }
+  catch {
+    return $false
+  }
+}
+
+function Wait-ForViteReady {
+  $deadline = (Get-Date).AddSeconds($viteStartupTimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-ViteReady) {
+      return
+    }
+    Assert-RoleAlive -RoleSlug 'vite'
+    Start-Sleep -Milliseconds 250
+  }
+
+  throw "Vite did not serve the exhibition page on port $($script:effectiveVitePort) within $viteStartupTimeoutSeconds seconds."
+}
+
+function Write-ControllerMessage {
   param(
     [Parameter(Mandatory = $true)]
-    [int]$ProcessId
+    [string]$Message
   )
 
-  Stop-StartedProcess -RootProcessId $ProcessId
+  if (-not [string]::IsNullOrWhiteSpace($script:controllerLogPath)) {
+    Add-Content -LiteralPath $script:controllerLogPath `
+      -Value "$(Get-Date -Format o) $Message" `
+      -Encoding utf8
+  }
+  Write-Output $Message
 }
 
-function Remove-PidFile {
+function Write-StageStart {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Stage,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Message
+  )
+
+  Write-ControllerMessage "[START][$Stage] $Message"
+}
+
+function Write-StageOk {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Stage,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Message
+  )
+
+  Write-ControllerMessage "[OK][$Stage] $Message"
+}
+
+function Write-StageFail {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Stage,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Message
+  )
+
+  Write-ControllerMessage "[FAIL] $Stage"
+  Write-ControllerMessage "Reason: $Message"
+
+  $roleSlug = switch ($Stage) {
+    'AivisSpeech' { 'aivisspeech' }
+    'STT' { 'stt' }
+    'Vite' { 'vite' }
+    default { '' }
+  }
+  if (-not [string]::IsNullOrWhiteSpace($roleSlug) -and
+      -not [string]::IsNullOrWhiteSpace($script:resolvedLogDirectory)) {
+    Write-ControllerMessage "stdout: $(Join-Path $script:resolvedLogDirectory "$roleSlug.stdout.log")"
+    Write-ControllerMessage "stderr: $(Join-Path $script:resolvedLogDirectory "$roleSlug.stderr.log")"
+  }
+  Write-ControllerMessage 'Action: inspect the logs, then press Ctrl+C in the control tab.'
+}
+
+function Test-SecretConfiguration {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LocalEnvironmentFile,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ExhibitionEnvironmentFile
+  )
+
+  $processApiKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY')
+  if (-not [string]::IsNullOrWhiteSpace($processApiKey)) {
+    return
+  }
+
+  $secretFile = Get-EffectiveEnvironmentValue `
+    -Name 'VAYRIA_SECRET_FILE' `
+    -LocalEnvironmentFile $LocalEnvironmentFile `
+    -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
+  if ([string]::IsNullOrWhiteSpace($secretFile)) {
+    throw 'No OpenAI secret source was configured. Use op run or configure VAYRIA_SECRET_FILE.'
+  }
+  if (-not [IO.Path]::IsPathRooted($secretFile)) {
+    throw 'VAYRIA_SECRET_FILE must be an absolute path.'
+  }
+
+  $resolvedSecretFile = [IO.Path]::GetFullPath($secretFile)
+  if (-not (Test-Path -LiteralPath $resolvedSecretFile -PathType Leaf)) {
+    throw "VAYRIA_SECRET_FILE was not found: $resolvedSecretFile"
+  }
+
+  $hasApiKey = $false
+  foreach ($line in (Get-Content -LiteralPath $resolvedSecretFile -ErrorAction Stop)) {
+    if ($line -match '^\s*(?:export\s+)?OPENAI_API_KEY\s*=\s*(.*?)\s*$') {
+      $value = $Matches[1].Trim()
+      if ($value.Length -ge 2 -and
+          (($value.StartsWith('"') -and $value.EndsWith('"')) -or
+           ($value.StartsWith("'") -and $value.EndsWith("'")))) {
+        $value = $value.Substring(1, $value.Length - 2)
+      }
+      if (-not [string]::IsNullOrWhiteSpace($value)) {
+        $hasApiKey = $true
+        break
+      }
+    }
+  }
+
+  if (-not $hasApiKey) {
+    throw 'VAYRIA_SECRET_FILE does not contain a non-empty OPENAI_API_KEY.'
+  }
+}
+
+function Test-HttpsConfiguration {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LocalEnvironmentFile,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ExhibitionEnvironmentFile
+  )
+
+  $httpsEnabled = Test-TruthyValue (Get-EffectiveEnvironmentValue `
+      -Name 'VAYRIA_HTTPS' `
+      -LocalEnvironmentFile $LocalEnvironmentFile `
+      -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile)
+  $script:effectiveHttps = $httpsEnabled
+  if (-not $httpsEnabled) {
+    return
+  }
+
+  $configFile = Get-EffectiveEnvironmentValue `
+    -Name 'VAYRIA_HTTPS_CONFIG_FILE' `
+    -LocalEnvironmentFile $LocalEnvironmentFile `
+    -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
+  $certificateFile = Get-EffectiveEnvironmentValue `
+    -Name 'VAYRIA_HTTPS_CERT_FILE' `
+    -LocalEnvironmentFile $LocalEnvironmentFile `
+    -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
+  $privateKeyFile = Get-EffectiveEnvironmentValue `
+    -Name 'VAYRIA_HTTPS_KEY_FILE' `
+    -LocalEnvironmentFile $LocalEnvironmentFile `
+    -ExhibitionEnvironmentFile $ExhibitionEnvironmentFile
+
+  if (-not [string]::IsNullOrWhiteSpace($configFile)) {
+    if (-not [IO.Path]::IsPathRooted($configFile)) {
+      throw 'VAYRIA_HTTPS_CONFIG_FILE must be an absolute path.'
+    }
+    $resolvedConfigFile = [IO.Path]::GetFullPath($configFile)
+    if (-not (Test-Path -LiteralPath $resolvedConfigFile -PathType Leaf)) {
+      throw "VAYRIA_HTTPS_CONFIG_FILE was not found: $resolvedConfigFile"
+    }
+    $certificateFile = Get-EnvironmentFileValue -Path $resolvedConfigFile -Name 'VAYRIA_HTTPS_CERT_FILE'
+    $privateKeyFile = Get-EnvironmentFileValue -Path $resolvedConfigFile -Name 'VAYRIA_HTTPS_KEY_FILE'
+  }
+
+  if ([string]::IsNullOrWhiteSpace($certificateFile) -or
+      [string]::IsNullOrWhiteSpace($privateKeyFile)) {
+    throw 'HTTPS requires VAYRIA_HTTPS_CERT_FILE and VAYRIA_HTTPS_KEY_FILE.'
+  }
+  if (-not (Test-Path -LiteralPath $certificateFile -PathType Leaf)) {
+    throw "HTTPS certificate was not found: $certificateFile"
+  }
+  if (-not (Test-Path -LiteralPath $privateKeyFile -PathType Leaf)) {
+    throw "HTTPS private key was not found: $privateKeyFile"
+  }
+}
+
+function Test-Preflight {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ResolvedWorktree
+  )
+
+  $packageFile = Join-Path $ResolvedWorktree 'package.json'
+  $localEnvironmentFile = Join-Path $ResolvedWorktree '.env.local'
+  $exhibitionEnvironmentFile = Join-Path $ResolvedWorktree '.env.exhibition.local'
+  $aivisScriptFile = Join-Path $ResolvedWorktree 'scripts\Start-VayriaAivisSpeech.ps1'
+  $watcherScriptFile = Join-Path $ResolvedWorktree 'scripts\Watch-VayriaExhibition.ps1'
+  $tabScriptFile = Join-Path $ResolvedWorktree 'scripts\Start-VayriaExhibitionTab.ps1'
+  $sttDirectory = Join-Path $ResolvedWorktree 'tools\stt'
+  $sttProjectFile = Join-Path $sttDirectory 'pyproject.toml'
+  $sttLockFile = Join-Path $sttDirectory 'uv.lock'
+  $vitePackageDirectory = Join-Path $ResolvedWorktree 'node_modules\vite'
+
+  Assert-RequiredFile -Path $packageFile -Description 'Vayria package.json'
+  Assert-RequiredFile -Path $localEnvironmentFile -Description 'Vayria local environment file'
+  Assert-RequiredFile -Path $exhibitionEnvironmentFile -Description 'Vayria exhibition environment file'
+  Assert-RequiredFile -Path $aivisScriptFile -Description 'Vayria AivisSpeech launcher'
+  Assert-RequiredFile -Path $watcherScriptFile -Description 'Vayria exhibition cleanup watcher'
+  Assert-RequiredFile -Path $tabScriptFile -Description 'Vayria exhibition tab launcher'
+  Assert-RequiredFile -Path $sttProjectFile -Description 'Vayria STT project file'
+  Assert-RequiredFile -Path $sttLockFile -Description 'Vayria STT lock file'
+  if (-not (Test-Path -LiteralPath $vitePackageDirectory -PathType Container)) {
+    throw "Vite dependency was not found: $vitePackageDirectory"
+  }
+
+  $script:resolvedCommands = @{}
+  foreach ($commandName in @('pwsh.exe', 'node.exe', 'npm.cmd', 'uv.exe')) {
+    $script:resolvedCommands[$commandName] = Resolve-RequiredCommand -Name $commandName
+  }
+
+  $script:effectiveVitePort = 5187
+  $rawPort = Get-EffectiveEnvironmentValue `
+    -Name 'VAYRIA_PORT' `
+    -LocalEnvironmentFile $localEnvironmentFile `
+    -ExhibitionEnvironmentFile $exhibitionEnvironmentFile
+  if (-not [string]::IsNullOrWhiteSpace($rawPort)) {
+    $parsedPort = 0
+    if (-not [int]::TryParse($rawPort, [ref]$parsedPort) -or
+        $parsedPort -lt 1 -or $parsedPort -gt 65535) {
+      throw "VAYRIA_PORT must be an integer from 1 to 65535: $rawPort"
+    }
+    $script:effectiveVitePort = $parsedPort
+  }
+
+  $appMode = Get-EffectiveEnvironmentValue `
+    -Name 'VITE_APP_MODE' `
+    -LocalEnvironmentFile $localEnvironmentFile `
+    -ExhibitionEnvironmentFile $exhibitionEnvironmentFile
+  if ($appMode -ne 'exhibition') {
+    throw "VITE_APP_MODE must be exhibition: $appMode"
+  }
+
+  Test-SecretConfiguration `
+    -LocalEnvironmentFile $localEnvironmentFile `
+    -ExhibitionEnvironmentFile $exhibitionEnvironmentFile
+  Test-HttpsConfiguration `
+    -LocalEnvironmentFile $localEnvironmentFile `
+    -ExhibitionEnvironmentFile $exhibitionEnvironmentFile
+
+  $cudaRuntimePath = Join-Path $env:USERPROFILE '.vayria\cuda12'
+  if ($SttDevice -eq 'cuda' -or $SttFallbackDevice -eq 'cuda') {
+    if (-not (Test-Path -LiteralPath $cudaRuntimePath -PathType Container)) {
+      throw "Vayria CUDA runtime was not found: $cudaRuntimePath"
+    }
+    $env:Path = $cudaRuntimePath + ';' + $env:Path
+  }
+
+  $uvCheckArguments = @(
+    'run'
+    '--no-sync'
+    '--no-cache'
+    'python'
+    '-c'
+    'import faster_whisper, websockets, webrtcvad; print("stt-dependencies-ok")'
+  )
+  Push-Location -LiteralPath $sttDirectory
+  try {
+    $uvCheckOutput = & $script:resolvedCommands['uv.exe'] @uvCheckArguments 2>&1 |
+      Out-String
+    $uvCheckExitCode = $LASTEXITCODE
+  }
+  finally {
+    Pop-Location
+  }
+  if ($uvCheckExitCode -ne 0) {
+    throw "STT dependency check failed with exit code $uvCheckExitCode. $($uvCheckOutput.Trim())"
+  }
+
+  $script:aivisAlreadyReady = Test-AivisReady
+  if (-not $script:aivisAlreadyReady) {
+    if (Test-ListeningPort -HostName $aivisHost -Port $aivisPort) {
+      throw "AivisSpeech port $aivisPort is already in use, but zonoko is not available at $aivisBaseUrl/speakers."
+    }
+    Resolve-AivisEnginePath `
+      -ConfiguredInstallPath $AivisInstallPath `
+      -EnvironmentInstallPath $env:VAYRIA_AIVIS_INSTALL_PATH | Out-Null
+  }
+
+  if (Test-ListeningPort -HostName $sttHost -Port $sttPort) {
+    throw "STT port $sttPort is already in use. Stop the existing process before starting exhibition."
+  }
+  if (Test-ListeningPort -HostName '127.0.0.1' -Port $script:effectiveVitePort) {
+    throw "Vite port $script:effectiveVitePort is already in use. Stop the existing process before starting exhibition."
+  }
+
+  $wtCommand = Get-Command wt.exe -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+  if ($TerminalMode -eq 'WindowsTerminal' -and $null -eq $wtCommand) {
+    throw 'Windows Terminal was requested, but wt.exe was not found.'
+  }
+  if ($TerminalMode -eq 'Auto' -and $null -ne $wtCommand) {
+    $script:resolvedTerminalMode = 'WindowsTerminal'
+    $script:resolvedCommands['wt.exe'] = $wtCommand.Source
+  }
+  elseif ($TerminalMode -eq 'WindowsTerminal') {
+    $script:resolvedTerminalMode = 'WindowsTerminal'
+    $script:resolvedCommands['wt.exe'] = $wtCommand.Source
+  }
+  else {
+    $script:resolvedTerminalMode = 'PowerShellWindow'
+  }
+}
+
+function Get-RoleSlug {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Role
+  )
+
+  switch ($Role) {
+    'AivisSpeech' { return 'aivisspeech' }
+    'Stt' { return 'stt' }
+    'Vite' { return 'vite' }
+    default { throw "Unknown exhibition role: $Role" }
+  }
+}
+
+function Get-RoleTitle {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Role
+  )
+
+  switch ($Role) {
+    'AivisSpeech' { return 'AivisSpeech' }
+    'Stt' { return 'STT' }
+    'Vite' { return 'Vite' }
+    default { throw "Unknown exhibition role: $Role" }
+  }
+}
+
+function Get-TabWorkingDirectory {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Role
+  )
+
+  if ($Role -eq 'Stt') {
+    return Join-Path $script:resolvedWorktree 'tools\stt'
+  }
+  return $script:resolvedWorktree
+}
+
+function Get-TabArguments {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Role,
+
+    [string]$StartAfterFile
+  )
+
+  $tabScriptFile = Join-Path $script:resolvedWorktree 'scripts\Start-VayriaExhibitionTab.ps1'
+  $arguments = @(
+    '-NoProfile'
+    '-NoExit'
+    '-File'
+    $tabScriptFile
+    '-Role'
+    $Role
+    '-WorktreePath'
+    $script:resolvedWorktree
+    '-SessionId'
+    $script:sessionId
+    '-SessionDirectory'
+    $script:sessionDirectory
+    '-LogDirectory'
+    $script:resolvedLogDirectory
+    '-SttModel'
+    $SttModel
+    '-SttDevice'
+    $SttDevice
+    '-SttComputeType'
+    $SttComputeType
+    '-SttHotwords'
+    $SttHotwords
+    '-SttFallbackModel'
+    $SttFallbackModel
+    '-SttFallbackDevice'
+    $SttFallbackDevice
+    '-SttFallbackComputeType'
+    $SttFallbackComputeType
+  )
+  if (-not [string]::IsNullOrWhiteSpace($AivisInstallPath)) {
+    $arguments += @('-AivisInstallPath', $AivisInstallPath)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($StartAfterFile)) {
+    $arguments += @('-StartAfterFile', $StartAfterFile)
+  }
+  return $arguments
+}
+
+function Start-ExhibitionTabs {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Roles
+  )
+
+  $tabSpecs = @()
+  foreach ($role in $Roles) {
+    $gateFile = switch ($role) {
+      'AivisSpeech' { '' }
+      'Stt' { $script:aivisReadyGateFile }
+      'Vite' { $script:sttReadyGateFile }
+    }
+    $tabSpecs += [pscustomobject]@{
+      Role              = $role
+      Title             = Get-RoleTitle -Role $role
+      WorkingDirectory  = Get-TabWorkingDirectory -Role $role
+      Arguments         = Get-TabArguments -Role $role -StartAfterFile $gateFile
+    }
+  }
+
+  if ($script:resolvedTerminalMode -eq 'WindowsTerminal') {
+    $wtArguments = @()
+    $isFirst = $true
+    foreach ($spec in $tabSpecs) {
+      if (-not $isFirst) {
+        $wtArguments += ';'
+      }
+      $wtArguments += @(
+        'new-tab'
+        '--title'
+        "Vayria - $($spec.Title)"
+        '--suppressApplicationTitle'
+        '--startingDirectory'
+        $spec.WorkingDirectory
+        $script:resolvedCommands['pwsh.exe']
+      )
+      $wtArguments += $spec.Arguments
+      $isFirst = $false
+    }
+
+    try {
+      & $script:resolvedCommands['wt.exe'] @wtArguments
+      $wtExitCode = $LASTEXITCODE
+      if ($wtExitCode -ne 0) {
+        throw "wt.exe failed with exit code $wtExitCode."
+      }
+      return
+    }
+    catch {
+      if ($TerminalMode -ne 'Auto') {
+        throw
+      }
+      $script:resolvedTerminalMode = 'PowerShellWindow'
+      Write-ControllerMessage "[WARN][Runtime] Windows Terminal could not be started. Falling back to PowerShell windows. $($_.Exception.Message)"
+    }
+  }
+
+  foreach ($spec in $tabSpecs) {
+    $quotedArguments = @($spec.Arguments | ForEach-Object {
+        $argument = [string]$_
+        if ($argument.Contains('"')) {
+          $argument = $argument.Replace('"', '\"')
+        }
+        if ($argument -match '\s') {
+          return '"' + $argument + '"'
+        }
+        return $argument
+      })
+    $windowProcess = Start-Process `
+      -FilePath $script:resolvedCommands['pwsh.exe'] `
+      -WorkingDirectory $spec.WorkingDirectory `
+      -ArgumentList $quotedArguments `
+      -WindowStyle Normal `
+      -PassThru
+    $script:fallbackWindowProcesses += $windowProcess
+  }
+}
+
+function Start-CleanupWatcher {
+  $watcherScriptFile = Join-Path $script:resolvedWorktree 'scripts\Watch-VayriaExhibition.ps1'
+  $watcherArguments = @(
+    '-NoProfile'
+    '-File'
+    $watcherScriptFile
+    '-ParentProcessId'
+    "$PID"
+    '-SessionDirectory'
+    $script:sessionDirectory
+    '-SessionId'
+    $script:sessionId
+  )
+
+  $quotedWatcherArguments = @($watcherArguments | ForEach-Object {
+      $argument = [string]$_
+      if ($argument.Contains('"')) {
+        $argument = $argument.Replace('"', '\"')
+      }
+      if ($argument -match '\s') {
+        return '"' + $argument + '"'
+      }
+      return $argument
+    })
+
+  $script:watcherProcess = Start-Process `
+    -FilePath $script:resolvedCommands['pwsh.exe'] `
+    -WorkingDirectory $script:resolvedWorktree `
+    -ArgumentList $quotedWatcherArguments `
+    -WindowStyle Hidden `
+    -RedirectStandardOutput (Join-Path $script:resolvedLogDirectory 'watcher.stdout.log') `
+    -RedirectStandardError (Join-Path $script:resolvedLogDirectory 'watcher.stderr.log') `
+    -PassThru
+}
+
+function Set-ReadyGate {
   param(
     [Parameter(Mandatory = $true)]
     [string]$Path
   )
 
-  if (Test-Path -LiteralPath $Path -PathType Leaf) {
-    try {
-      Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
-    }
-    catch {
-      Write-Warning "Could not remove the temporary Python STT process ID file: $Path"
-    }
-  }
+  Set-Content -LiteralPath $Path -Value (Get-Date -Format o) -Encoding ascii
 }
 
-function Stop-LauncherChildren {
+function Stop-SessionProcesses {
   if ($script:cleanupStarted) {
     return
   }
-
   $script:cleanupStarted = $true
+
+  Write-ControllerMessage '[START][Cleanup] Stopping Vayria exhibition process trees.'
+  if (Test-Path -LiteralPath $script:sessionDirectory -PathType Container) {
+    foreach ($role in @('aivisspeech', 'stt', 'vite')) {
+      $record = Read-RoleRecord -RoleSlug $role
+      if ($null -ne $record) {
+        $processId = [int]$record.processId
+        if (Test-SessionProcess -ProcessId $processId) {
+          Write-ControllerMessage "[INFO][Cleanup] Stopping $role root PID $processId."
+          Stop-ProcessTree -ProcessId $processId
+        }
+      }
+    }
+  }
+
+  foreach ($windowProcess in $script:fallbackWindowProcesses) {
+    try {
+      $windowProcess.Refresh()
+      if (-not $windowProcess.HasExited -and
+          (Test-SessionProcess -ProcessId $windowProcess.Id)) {
+        Write-ControllerMessage "[INFO][Cleanup] Stopping fallback window root PID $($windowProcess.Id)."
+        Stop-ProcessTree -ProcessId $windowProcess.Id
+      }
+    }
+    catch {
+      Write-ControllerMessage "[WARN][Cleanup] Could not inspect fallback window PID $($windowProcess.Id). $($_.Exception.Message)"
+    }
+  }
 
   if ($null -ne $script:watcherProcess) {
     try {
       $script:watcherProcess.Refresh()
       if (-not $script:watcherProcess.HasExited) {
-        Stop-StartedProcess -RootProcessId $script:watcherProcess.Id
+        Stop-Process -Id $script:watcherProcess.Id -Force -ErrorAction Stop
       }
     }
     catch {
-      Write-Warning "Could not stop the Vayria exhibition cleanup watcher. $($_.Exception.Message)"
+      Write-ControllerMessage "[WARN][Cleanup] Could not stop the cleanup watcher. $($_.Exception.Message)"
     }
   }
 
-  if ($null -ne $script:frontendProcess) {
-    try {
-      $script:frontendProcess.Refresh()
-      if (-not $script:frontendProcess.HasExited) {
-        Write-Output "Stopping npm frontend process tree with root PID $($script:frontendProcess.Id)."
-        Stop-StartedProcess -RootProcessId $script:frontendProcess.Id
-      }
-    }
-    catch {
-      Write-Warning "Could not stop the npm frontend process tree. $($_.Exception.Message)"
-    }
-  }
-
-  if ($script:sttProcessId -gt 0) {
-    Write-Output "Stopping Python STT process tree with root PID $script:sttProcessId."
-    Stop-StartedPython -ProcessId $script:sttProcessId
-  }
-
-  if ($null -ne $script:sttProcess) {
-    try {
-      $script:sttProcess.Refresh()
-      if (-not $script:sttProcess.HasExited) {
-        Write-Output "Stopping Python STT PowerShell window with PID $($script:sttProcess.Id)."
-        Stop-StartedProcess -RootProcessId $script:sttProcess.Id
-      }
-    }
-    catch {
-      Write-Warning "Could not stop the Python STT PowerShell window. $($_.Exception.Message)"
+  foreach ($path in @(
+      $script:aivisReadyGateFile
+      $script:sttReadyGateFile
+      (Join-Path $script:sessionDirectory 'aivisspeech.tab.pid.json')
+      (Join-Path $script:sessionDirectory 'stt.tab.pid.json')
+      (Join-Path $script:sessionDirectory 'vite.tab.pid.json')
+      (Join-Path $script:sessionDirectory 'aivisspeech.child.pid.json')
+      (Join-Path $script:sessionDirectory 'stt.child.pid.json')
+    )) {
+    if (-not [string]::IsNullOrWhiteSpace($path) -and
+        (Test-Path -LiteralPath $path -PathType Leaf)) {
+      Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
     }
   }
 
-  if ($script:aivisRunProcessId -gt 0) {
-    Write-Output "Stopping AivisSpeech process with PID $script:aivisRunProcessId."
-    Stop-StartedProcess -RootProcessId $script:aivisRunProcessId
-  }
-
-  if ($null -ne $script:aivisProcess) {
-    try {
-      $script:aivisProcess.Refresh()
-      if (-not $script:aivisProcess.HasExited) {
-        Write-Output "Stopping AivisSpeech PowerShell window with PID $($script:aivisProcess.Id)."
-        Stop-StartedProcess -RootProcessId $script:aivisProcess.Id
-      }
-    }
-    catch {
-      Write-Warning "Could not stop the AivisSpeech PowerShell window. $($_.Exception.Message)"
-    }
-  }
-
-  Remove-PidFile -Path $script:aivisPidFile
-  Remove-PidFile -Path $script:sttPidFile
-  Remove-PidFile -Path $script:frontendPidFile
+  Write-ControllerMessage '[OK][Cleanup] Cleanup completed.'
 }
 
-$resolvedWorktree = (Resolve-Path -LiteralPath $WorktreePath -ErrorAction Stop).Path
+$resolvedWorktree = Resolve-RequiredDirectory -Path $WorktreePath -Description 'Vayria worktree'
 $packageFile = Join-Path $resolvedWorktree 'package.json'
 $localEnvironmentFile = Join-Path $resolvedWorktree '.env.local'
 $exhibitionEnvironmentFile = Join-Path $resolvedWorktree '.env.exhibition.local'
-$aivisScriptFile = Join-Path $resolvedWorktree 'scripts\Start-VayriaAivisSpeech.ps1'
-$watcherScriptFile = Join-Path $resolvedWorktree 'scripts\Watch-VayriaExhibition.ps1'
 $sttDirectory = Join-Path $resolvedWorktree 'tools\stt'
-$sttProjectFile = Join-Path $sttDirectory 'pyproject.toml'
 $cudaRuntimePath = Join-Path $env:USERPROFILE '.vayria\cuda12'
-
-Assert-RequiredFile -Path $packageFile -Description 'Vayria package.json'
-Assert-RequiredFile -Path $localEnvironmentFile -Description 'Vayria local environment file'
-Assert-RequiredFile -Path $exhibitionEnvironmentFile -Description 'Vayria exhibition environment file'
-Assert-RequiredFile -Path $aivisScriptFile -Description 'Vayria AivisSpeech launcher'
-Assert-RequiredFile -Path $watcherScriptFile -Description 'Vayria exhibition cleanup watcher'
-Assert-RequiredFile -Path $sttProjectFile -Description 'Vayria STT project file'
-
-if ($SttDevice -eq 'cuda' -or $SttFallbackDevice -eq 'cuda') {
-  if (-not (Test-Path -LiteralPath $cudaRuntimePath -PathType Container)) {
-    throw "Vayria CUDA runtime was not found: $cudaRuntimePath"
-  }
-
-  # Keep the CUDA DLL lookup scoped to the exhibition launcher and its child
-  # processes instead of adding third-party DLLs to the persistent user PATH.
-  $env:Path = $cudaRuntimePath + ';' + $env:Path
-}
-
-$pwshCommand = Resolve-RequiredCommand -Name 'pwsh.exe'
-$uvCommand = Resolve-RequiredCommand -Name 'uv.exe'
-$npmCommand = Resolve-RequiredCommand -Name 'npm.cmd'
+$script:resolvedWorktree = $resolvedWorktree
+$script:controllerLogPath = ''
+$script:sessionId = ''
+$script:sessionDirectory = ''
+$script:resolvedLogDirectory = ''
+$script:aivisReadyGateFile = ''
+$script:sttReadyGateFile = ''
+$script:watcherProcess = $null
+$script:fallbackWindowProcesses = @()
+$script:cleanupStarted = $false
+$script:currentStage = 'Preflight'
+$exitCode = 1
 
 if ($SttWindow) {
+  $sttProjectFile = Join-Path $sttDirectory 'pyproject.toml'
+  Assert-RequiredFile -Path $sttProjectFile -Description 'Vayria STT project file'
+  $uvCommand = Resolve-RequiredCommand -Name 'uv.exe'
+
   if ([string]::IsNullOrWhiteSpace($SttPidFile)) {
     throw 'SttPidFile is required for the internal STT window.'
   }
   if (-not [IO.Path]::IsPathRooted($SttPidFile)) {
     throw 'SttPidFile must be an absolute path.'
   }
-
   $resolvedSttPidFile = [IO.Path]::GetFullPath($SttPidFile)
-  $sttExitCode = 1
+
+  if ($SttDevice -eq 'cuda' -or $SttFallbackDevice -eq 'cuda') {
+    if (-not (Test-Path -LiteralPath $cudaRuntimePath -PathType Container)) {
+      throw "Vayria CUDA runtime was not found: $cudaRuntimePath"
+    }
+    $env:Path = $cudaRuntimePath + ';' + $env:Path
+  }
+
+  $sttHotwordsArgument = '"' + $SttHotwords.Replace('"', '\"') + '"'
+  $sttArguments = @(
+    '-m'
+    'vayria_stt.server'
+    '--host'
+    $sttHost
+    '--port'
+    "$sttPort"
+    '--model'
+    $SttModel
+    '--device'
+    $SttDevice
+    '--compute-type'
+    $SttComputeType
+    '--hotwords'
+    $sttHotwordsArgument
+    '--require-primary-profile'
+    '--fallback-model'
+    $SttFallbackModel
+    '--fallback-device'
+    $SttFallbackDevice
+    '--fallback-compute-type'
+    $SttFallbackComputeType
+  )
+  $uvArguments = @('run', '--no-sync', '--no-cache', 'python') + $sttArguments
   $uvProcess = $null
+  $sttExitCode = 1
   try {
     try {
-      $Host.UI.RawUI.WindowTitle = 'Vayria STT'
+      $Host.UI.RawUI.WindowTitle = 'Vayria - STT'
     }
     catch {
       # A non-interactive host may not expose a writable window title.
     }
 
-    $sttArguments = @(
-      '-m'
-      'vayria_stt.server'
-      '--host'
-      $sttHost
-      '--port'
-      $sttPort
-      '--model'
-      $SttModel
-      '--device'
-      $SttDevice
-      '--compute-type'
-      $SttComputeType
-      '--hotwords'
-      $sttHotwordsArgument
-      '--require-primary-profile'
-      '--fallback-model'
-      $SttFallbackModel
-      '--fallback-device'
-      $SttFallbackDevice
-      '--fallback-compute-type'
-      $SttFallbackComputeType
-    )
-    $uvArguments = @(
-      'run'
-      '--no-cache'
-      'python'
-    ) + $sttArguments
     $uvProcess = Start-Process `
       -FilePath $uvCommand `
       -WorkingDirectory $sttDirectory `
       -ArgumentList $uvArguments `
       -NoNewWindow `
       -PassThru
+    # Keep the legacy STT PID file format for existing manual watcher calls.
     Set-Content -LiteralPath $resolvedSttPidFile -Value $uvProcess.Id -Encoding ascii
     $uvProcess.WaitForExit()
     $sttExitCode = $uvProcess.ExitCode
@@ -415,191 +1197,159 @@ if ($SttWindow) {
     if ($null -ne $uvProcess) {
       $uvProcess.Refresh()
       if (-not $uvProcess.HasExited) {
-        Stop-StartedPython -ProcessId $uvProcess.Id
+        try {
+          Stop-Process -Id $uvProcess.Id -Force -ErrorAction Stop
+        }
+        catch {
+          Write-Warning "Could not stop the Python STT process. $($_.Exception.Message)"
+        }
       }
     }
-    Remove-PidFile -Path $resolvedSttPidFile
+    if (Test-Path -LiteralPath $resolvedSttPidFile -PathType Leaf) {
+      Remove-Item -LiteralPath $resolvedSttPidFile -Force -ErrorAction SilentlyContinue
+    }
   }
-
   exit $sttExitCode
 }
 
-$action = "start AivisSpeech on $aivisHost`:$aivisPort, uv STT on $sttHost`:$sttPort, and run npm run dev:exhibition"
-$exitCode = 1
-$aivisProcess = $null
-$aivisRunProcessId = 0
-$aivisPidFile = Join-Path ([IO.Path]::GetTempPath()) "vayria-aivis-$([guid]::NewGuid().ToString('N')).pid"
-$sttProcess = $null
-$sttProcessId = 0
-$sttPidFile = Join-Path ([IO.Path]::GetTempPath()) "vayria-stt-$([guid]::NewGuid().ToString('N')).pid"
-$frontendPidFile = Join-Path ([IO.Path]::GetTempPath()) "vayria-frontend-$([guid]::NewGuid().ToString('N')).pid"
-$watcherProcess = $null
-$frontendProcess = $null
-$cleanupStarted = $false
-$launcherMutex = [Threading.Mutex]::new($false, $launcherMutexName)
-$mutexAcquired = $false
-
 try {
-  if (-not $PSCmdlet.ShouldProcess($resolvedWorktree, $action)) {
-    Write-Output "WhatIf: $action in $resolvedWorktree"
+  Write-StageStart -Stage 'Preflight' -Message 'Checking commands, files, configuration, dependencies, ports, and runtime mode.'
+  Test-Preflight -ResolvedWorktree $resolvedWorktree
+  Write-StageOk -Stage 'Preflight' -Message "Preflight passed. Terminal mode: $script:resolvedTerminalMode. Vite port: $script:effectiveVitePort."
+
+  if (-not $PSCmdlet.ShouldProcess($resolvedWorktree, 'start Vayria exhibition runtime')) {
+    Write-ControllerMessage "WhatIf: start Vayria exhibition runtime in $resolvedWorktree."
     $exitCode = 0
   }
   else {
-    try {
-      $mutexAcquired = $launcherMutex.WaitOne(0)
-    }
-    catch [Threading.AbandonedMutexException] {
-      $mutexAcquired = $true
-    }
+    $script:sessionId = [Guid]::NewGuid().ToString('N')
+    $script:sessionDirectory = Join-Path ([IO.Path]::GetTempPath()) "vayria-exhibition-$script:sessionId"
+    New-Item -ItemType Directory -Path $script:sessionDirectory -Force | Out-Null
 
-    if (-not $mutexAcquired) {
-      throw 'Another Vayria exhibition launcher is already running.'
+    if ([string]::IsNullOrWhiteSpace($LogDirectory)) {
+      $runId = "$(Get-Date -Format 'yyyyMMdd-HHmmss')-$($script:sessionId.Substring(0, 8))"
+      $script:resolvedLogDirectory = Join-Path `
+        $resolvedWorktree `
+        (Join-Path 'logs\exhibition' $runId)
     }
-
-    if (Test-AivisReady) {
-      Write-Output "Reusing healthy AivisSpeech Engine at $aivisBaseUrl (zonoko is available)."
-    }
-    elseif (Test-ListeningPort -HostName $aivisHost -Port $aivisPort) {
-      throw "AivisSpeech port $aivisPort is already in use, but zonoko is not available at $aivisBaseUrl/speakers. Stop the conflicting process before starting exhibition."
+    elseif ([IO.Path]::IsPathRooted($LogDirectory)) {
+      $script:resolvedLogDirectory = [IO.Path]::GetFullPath($LogDirectory)
     }
     else {
-      $aivisArguments = @(
-        '-NoProfile'
-        '-NoExit'
-        '-File'
-        $aivisScriptFile
-        '-AivisWindow'
-        '-PidFile'
-        $aivisPidFile
-      )
-      if (-not [string]::IsNullOrWhiteSpace($AivisInstallPath)) {
-        $aivisArguments += @(
-          '-AivisInstallPath'
-          $AivisInstallPath
-        )
+      $script:resolvedLogDirectory = [IO.Path]::GetFullPath((Join-Path $resolvedWorktree $LogDirectory))
+    }
+    New-Item -ItemType Directory -Path $script:resolvedLogDirectory -Force | Out-Null
+    $script:controllerLogPath = Join-Path $script:resolvedLogDirectory 'controller.log'
+    $script:aivisReadyGateFile = Join-Path $script:sessionDirectory 'aivisspeech.ready'
+    $script:sttReadyGateFile = Join-Path $script:sessionDirectory 'stt.ready'
+    foreach ($roleSlug in @('aivisspeech', 'stt', 'vite')) {
+      foreach ($stream in @('stdout', 'stderr')) {
+        Set-Content `
+          -LiteralPath (Join-Path $script:resolvedLogDirectory "$roleSlug.$stream.log") `
+          -Value '' `
+          -Encoding utf8
+      }
+    }
+    Write-ControllerMessage "[INFO][Runtime] Logs: $script:resolvedLogDirectory"
+    Write-ControllerMessage "[INFO][Runtime] Session: $script:sessionId"
+
+    $launcherMutex = [Threading.Mutex]::new($false, $launcherMutexName)
+    $mutexAcquired = $false
+    try {
+      try {
+        $mutexAcquired = $launcherMutex.WaitOne(0)
+      }
+      catch [Threading.AbandonedMutexException] {
+        $mutexAcquired = $true
+      }
+      if (-not $mutexAcquired) {
+        throw 'Another Vayria exhibition launcher is already running.'
       }
 
-      Write-Output "Starting AivisSpeech in a separate PowerShell window on $aivisHost`:$aivisPort."
-      $aivisProcess = Start-Process `
-        -FilePath $pwshCommand `
-        -WorkingDirectory (Split-Path -Parent $aivisScriptFile) `
-        -ArgumentList $aivisArguments `
-        -WindowStyle Normal `
-        -PassThru
+      $script:currentStage = 'Runtime'
+      Write-StageStart -Stage 'Runtime' -Message 'Starting cleanup watcher and exhibition tabs.'
+      Start-CleanupWatcher
 
-      $aivisRunProcessId = Wait-ForPidFile `
-        -Path $aivisPidFile `
-        -Process $aivisProcess `
-        -TimeoutSeconds $aivisPidFileTimeoutSeconds `
-        -Description 'AivisSpeech PowerShell window'
+      $roles = @('Stt', 'Vite')
+      if (-not $script:aivisAlreadyReady) {
+        $roles = @('AivisSpeech') + $roles
+      }
+      else {
+        Set-ReadyGate -Path $script:aivisReadyGateFile
+        Write-ControllerMessage "[OK][AivisSpeech] Reusing healthy AivisSpeech Engine at $aivisBaseUrl."
+      }
 
-      Wait-ForAivisReady -Process $aivisProcess
-      Write-Output 'AivisSpeech Engine is ready with zonoko.'
+      Start-ExhibitionTabs -Roles $roles
+      foreach ($role in $roles) {
+        Wait-ForRoleProcess -RoleSlug (Get-RoleSlug -Role $role)
+      }
+      Write-StageOk -Stage 'Runtime' -Message 'Exhibition tabs were dispatched.'
+
+      if (-not $script:aivisAlreadyReady) {
+        $script:currentStage = 'AivisSpeech'
+        Write-StageStart -Stage 'AivisSpeech' -Message 'Waiting for zonoko at 127.0.0.1:10101.'
+        Wait-ForAivisReady -RoleSlug 'aivisspeech'
+        Set-ReadyGate -Path $script:aivisReadyGateFile
+        Write-StageOk -Stage 'AivisSpeech' -Message 'AivisSpeech is ready with zonoko.'
+      }
+
+      $script:currentStage = 'STT'
+      Write-StageStart -Stage 'STT' -Message 'Waiting for Python STT on 127.0.0.1:8787.'
+      Wait-ForListeningPort `
+        -RoleSlug 'stt' `
+        -Port $sttPort `
+        -TimeoutSeconds $sttStartupTimeoutSeconds `
+        -HostName $sttHost `
+        -Description 'Python STT'
+      Set-ReadyGate -Path $script:sttReadyGateFile
+      Write-StageOk -Stage 'STT' -Message 'Python STT is listening.'
+
+      $script:currentStage = 'Vite'
+      Write-StageStart -Stage 'Vite' -Message "Waiting for exhibition Vite on port $script:effectiveVitePort."
+      Wait-ForViteReady
+      Write-StageOk -Stage 'Vite' -Message "Vite is serving the exhibition page on port $script:effectiveVitePort."
+
+      $script:currentStage = 'Running'
+      Write-StageOk -Stage 'Running' -Message 'Vayria exhibition is running. Press Ctrl+C in this control tab to stop owned processes.'
+      Write-ControllerMessage "[INFO][Running] A service tab Ctrl+C stops that service only."
+      Write-ControllerMessage "[INFO][Running] Logs: $script:resolvedLogDirectory"
+
+      $lastStates = @{}
+      while ($true) {
+        foreach ($role in @('aivisspeech', 'stt', 'vite')) {
+          $status = Read-RoleStatus -RoleSlug $role
+          if ($null -eq $status) {
+            continue
+          }
+          $state = [string]$status.state
+          if (-not $lastStates.ContainsKey($role) -or $lastStates[$role] -ne $state) {
+            $lastStates[$role] = $state
+            Write-ControllerMessage "[INFO][Running] $role state: $state."
+          }
+        }
+        Start-Sleep -Seconds 1
+      }
     }
-
-    if (Test-ListeningPort -HostName $sttHost -Port $sttPort) {
-      throw "Port $sttPort is already in use. Stop the existing process before starting exhibition."
+    finally {
+      if ($mutexAcquired) {
+        $launcherMutex.ReleaseMutex()
+      }
+      $launcherMutex.Dispose()
     }
-
-    $scriptPath = [IO.Path]::GetFullPath($PSCommandPath)
-    $sttArguments = @(
-      '-NoProfile'
-      '-NoExit'
-      '-File'
-      $scriptPath
-      '-WorktreePath'
-      $resolvedWorktree
-      '-SttWindow'
-      '-SttPidFile'
-      $sttPidFile
-      '-SttModel'
-      $SttModel
-      '-SttDevice'
-      $SttDevice
-      '-SttComputeType'
-      $SttComputeType
-      '-SttHotwords'
-      $sttHotwordsArgument
-      '-SttFallbackModel'
-      $SttFallbackModel
-      '-SttFallbackDevice'
-      $SttFallbackDevice
-      '-SttFallbackComputeType'
-      $SttFallbackComputeType
-    )
-
-    Write-Output "Starting Python STT with uv in a separate PowerShell window on $sttHost`:$sttPort."
-    $sttProcess = Start-Process `
-      -FilePath $pwshCommand `
-      -WorkingDirectory $sttDirectory `
-      -ArgumentList $sttArguments `
-      -WindowStyle Normal `
-      -PassThru
-
-    $sttProcessId = Wait-ForPidFile `
-      -Path $sttPidFile `
-      -Process $sttProcess `
-      -TimeoutSeconds 5 `
-      -Description 'Python STT PowerShell window'
-
-    Wait-ForListeningPort `
-      -Port $sttPort `
-      -Process $sttProcess `
-      -TimeoutSeconds $sttStartupTimeoutSeconds `
-      -HostName $sttHost
-
-    Write-Output 'Python STT is ready through uv.'
-    $watcherArguments = @(
-      '-NoProfile'
-      '-File'
-      $watcherScriptFile
-      '-ParentProcessId'
-      $PID
-      '-FrontendPidFile'
-      $frontendPidFile
-      '-AivisProcessId'
-      $aivisRunProcessId
-      '-AivisWindowProcessId'
-      $(if ($null -ne $aivisProcess) { $aivisProcess.Id } else { 0 })
-      '-SttProcessId'
-      $sttProcessId
-      '-SttWindowProcessId'
-      $sttProcess.Id
-      '-AivisPidFile'
-      $aivisPidFile
-      '-SttPidFile'
-      $sttPidFile
-    )
-    $watcherProcess = Start-Process `
-      -FilePath $pwshCommand `
-      -WorkingDirectory (Split-Path -Parent $watcherScriptFile) `
-      -ArgumentList $watcherArguments `
-      -WindowStyle Hidden `
-      -PassThru
-
-    Write-Output 'Starting exhibition frontend in the current PowerShell window.'
-    $frontendProcess = Start-Process `
-      -FilePath $npmCommand `
-      -WorkingDirectory $resolvedWorktree `
-      -ArgumentList @('run', 'dev:exhibition') `
-      -NoNewWindow `
-      -PassThru
-    Set-Content -LiteralPath $frontendPidFile -Value $frontendProcess.Id -Encoding ascii
-    $frontendProcess.WaitForExit()
-    $exitCode = $frontendProcess.ExitCode
   }
 }
 catch {
-  Write-Error $_
+  $failureMessage = $_.Exception.Message
+  Write-StageFail -Stage $script:currentStage -Message $failureMessage
+  if (-not [string]::IsNullOrWhiteSpace($script:resolvedLogDirectory)) {
+    Write-ControllerMessage "[INFO][$script:currentStage] Logs: $script:resolvedLogDirectory"
+  }
   $exitCode = 1
 }
 finally {
-  Stop-LauncherChildren
-
-  if ($mutexAcquired) {
-    $launcherMutex.ReleaseMutex()
+  if (-not [string]::IsNullOrWhiteSpace($script:sessionDirectory)) {
+    Stop-SessionProcesses
   }
-  $launcherMutex.Dispose()
 }
 
 exit $exitCode
