@@ -1,0 +1,6 @@
+[mcp_servers.codebase-memory-mcp]
+command = 'C:\Users\wakad\AppData\Local\Programs\codebase-memory-mcp\codebase-memory-mcp.exe'
+args = []
+cwd = 'C:\Users\wakad\projects\vayria'
+default_tools_approval_mode = "writes"
+env = { CBM_RUNTIME_DIR = 'C:\Users\wakad\codebase-memory-mcp-runtime', CBM_CACHE_DIR = 'C:\Users\wakad\codebase-memory-mcp-cache' }
