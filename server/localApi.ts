@@ -112,6 +112,13 @@ import {
   appendRouterEvent,
   readRouterEvent,
 } from './routerStore.js';
+import type { InternetConnectivityProbe } from './internetConnectivity.js';
+import type { ExhibitionNetworkRuntime } from './exhibitionNetwork.js';
+import type {
+  NetworkAvailability,
+  VayriaAppMode,
+  VayriaHealthResponse,
+} from '../src/networkState.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -124,6 +131,7 @@ const MAX_HISTORY_ITEMS = 10;
 const CHAT_PATH = '/api/chat';
 const CARD_PREVIEW_PATH = '/api/card-preview';
 const TTS_PATH = '/api/tts';
+const HEALTH_PATH = '/api/health';
 const EVENTS_PATH = '/api/events';
 const VOICE_LAB_EVENTS_PATH = '/api/voice-lab/events';
 const ROUTER_EVENTS_PATH = '/api/router/events';
@@ -199,6 +207,36 @@ export interface LocalApiConfig {
   playcheckRoot?: string;
   exhibitionCaptureEnabled?: boolean;
   exhibitionCapture?: ExhibitionCaptureWriter;
+  mode?: VayriaAppMode;
+  port?: number;
+  httpsEnabled?: boolean;
+  exhibitionNetwork?: ExhibitionNetworkRuntime;
+  internetConnectivity?: InternetConnectivityProbe;
+}
+
+export function createHealthResponse(
+  config: LocalApiConfig,
+  internet: NetworkAvailability,
+): VayriaHealthResponse {
+  const mode = config.mode ?? 'local';
+  const response: VayriaHealthResponse = {
+    ok: true,
+    service: 'vayria',
+    mode,
+    network: {
+      localNetwork: 'available',
+      internet,
+    },
+  };
+
+  if (mode === 'exhibition' && config.exhibitionNetwork) {
+    response.access = config.exhibitionNetwork.getAccess(
+      config.port,
+      config.httpsEnabled,
+    );
+  }
+
+  return response;
 }
 
 interface AivisTtsSettings {
@@ -3329,6 +3367,25 @@ async function handleRequest(
     request.url ?? '/',
     'http://127.0.0.1',
   ).pathname;
+
+  if (pathname === HEALTH_PATH) {
+    if (request.method !== 'GET') {
+      sendJson(response, 405, { error: 'Method not allowed.' });
+      return;
+    }
+
+    let internet: NetworkAvailability = 'unavailable';
+    try {
+      internet =
+        (await config.internetConnectivity?.check()) ?? 'unavailable';
+    } catch {
+      // Internet probing is deliberately best effort. Local health remains 200.
+      internet = 'unavailable';
+    }
+    sendJson(response, 200, createHealthResponse(config, internet));
+    return;
+  }
+
   const requestId = randomUUID();
   const headerTurnId = readTurnIdHeader(request);
   const isProviderRequest =
@@ -3787,6 +3844,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
           'http://127.0.0.1',
         ).pathname;
         if (
+          pathname !== HEALTH_PATH &&
           pathname !== CHAT_PATH &&
           pathname !== CARD_PREVIEW_PATH &&
           pathname !== TTS_PATH &&
