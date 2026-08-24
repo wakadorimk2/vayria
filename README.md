@@ -112,11 +112,10 @@ Vayria音声をB1へ戻すと、Vayria自身の発話をSTTが再認識する可
 OpenAI API keyは`.env.local`へ保存せず、1Passwordから起動プロセスへ注入します。
 
 ```powershell
-op run --env-file .env.1password -- npm run exhibition
+op run --env-file .env.1password -- npm run exhibition:start
 ```
 
-`npm run exhibition`は`npm run exhibition:start`の短縮名です。既存の
-`npm run exhibition:start`も互換のため利用できます。`op run`を付けない起動は、別途プロセス環境または
+`npm run exhibition`は`npm run exhibition:start`の短縮名です。`op run`を付けない起動は、別途プロセス環境または
 `VAYRIA_SECRET_FILE`を設定している場合の互換経路です。
 
 マイク、ChatGPT音声、Vayria音声を個別に再生し、Vayriaの音声メーターで経路を確認します。
@@ -510,16 +509,22 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 
 7. 対象worktreeで、Python STTとexhibitionフロントを起動します。
 
+   展示当日の短い手順は[`docs/exhibition-quickstart.md`](docs/exhibition-quickstart.md)を参照してください。
+
    ```powershell
-   op run --env-file .env.1password -- npm run exhibition
+   op run --env-file .env.1password -- npm run exhibition:start
    ```
 
-   このコマンドは、HotspotアダプタのIPv4を毎回検出してから、AivisSpeech CLIとuv経由のPython STTを別のPowerShell窓で起動します。
+   `npm run exhibition`は上記コマンドの短縮名です。`op run`を付けない起動は、別途プロセス環境または`VAYRIA_SECRET_FILE`を設定している場合の互換経路です。
+   このコマンドは、HotspotアダプタのIPv4を毎回検出してから、検出したインターフェースだけへ展示フロントをbindします。
+   Windows Terminalがある場合は、制御タブ、AivisSpeechタブ、STTタブ、Viteタブを1つのウィンドウへ作成します。
+   Windows Terminalがない場合は、サービスごとのPowerShell別窓を使用します。
    `op run`がVite/npmプロセスへだけOpenAI API keyを注入します。
    AivisSpeechがzonokoを提供し、Python STTが`127.0.0.1:8787`で待ち受けた後、
-   exhibitionフロントを現在のPowerShell窓でnpm起動します。
+   exhibitionフロントを起動します。
    起動ログに表示された`https://vayria.local:5187`をiPadで開きます。mDNSが使えない場合は、診断でfallback IPが証明書SANに含まれることを確認できたときだけfallback URLを使います。iPadは会場Wi-Fiへ接続せず、`Vayria-Exhibition`だけに接続します。
-   フロントを`Ctrl+C`で停止すると、このコマンドが起動したAivisSpeechとPython STTも停止します。
+   制御タブで`Ctrl+C`を押すと、このコマンドが起動したサービスの親子プロセスを停止します。
+   サービスタブで`Ctrl+C`を押すと、そのサービスだけを停止します。
    既に正常なAivisSpeechが起動中の場合は再利用し、そのプロセスは停止しません。
    AivisSpeechが別のプロセスで10101番を使用している場合や、既に8787番ポートが使用中の場合は、
    既存プロセスを停止せずにエラーを表示します。
@@ -533,7 +538,7 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    ```powershell
    Push-Location tools/stt
    $env:Path = "$env:USERPROFILE\.vayria\cuda12;$env:Path"
-   uv run --no-cache python -m vayria_stt.server `
+   uv run --no-sync --no-cache python -m vayria_stt.server `
      --model small `
      --device cuda `
      --compute-type float16 `
@@ -549,14 +554,18 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    op run --env-file .env.1password -- npm run dev:exhibition
    ```
 
-7. Vite が表示する `Network` URLを`https`でiPadから開きます。
+   手動起動時は、ViteのbindとHotspot IPが一致していることを`npm run exhibition:check`で確認してください。
+
+8. Vite が表示する主URLを`https`でiPadから開きます。
 
    ```text
-   https://<Windows PC の LAN アドレス>:5187/
+   https://vayria.local:5187/
    ```
 
-iPad と Windows PC は同一 LAN に接続してください。Wi-Fi と Ethernet のどちらも使用できます。
-LAN アドレスはソースへ記述しません。起動時に表示された URL を使用します。
+   mDNSが利用できない場合は、`npm run exhibition:check`でfallback IPが証明書SANに含まれることを確認した場合だけ、起動ログのfallback URLを使用します。
+   fallback IPが証明書SANにない場合は、fallback URLをTLS有効なURLとして表示しません。
+   iPadは`Vayria-Exhibition`だけに接続し、会場Wi-Fiへ接続しません。
+
 実機用のexhibition設定は、worktreeに関係なく`5187`を使用します。
 通常のlocal開発だけが、worker worktreeごとに`5188`から`5210`のポートを使用します。
 
