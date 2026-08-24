@@ -42,6 +42,7 @@ $aivisStartupTimeoutSeconds = 30
 $aivisPidFileTimeoutSeconds = 60
 $launcherMutexName = 'Vayria.ExhibitionLauncher'
 $sttHotwordsArgument = '"' + $SttHotwords.Replace('"', '\"') + '"'
+$networkHelperScript = Join-Path $PSScriptRoot 'VayriaExhibitionNetwork.ps1'
 
 function Resolve-RequiredCommand {
   param(
@@ -424,6 +425,11 @@ if ($SttWindow) {
   exit $sttExitCode
 }
 
+if (-not (Test-Path -LiteralPath $networkHelperScript -PathType Leaf)) {
+  throw "Vayria exhibition network helper was not found: $networkHelperScript"
+}
+. $networkHelperScript
+
 $action = "start AivisSpeech on $aivisHost`:$aivisPort, uv STT on $sttHost`:$sttPort, and run npm run dev:exhibition"
 $exitCode = 1
 $aivisProcess = $null
@@ -438,6 +444,16 @@ $frontendProcess = $null
 $cleanupStarted = $false
 $launcherMutex = [Threading.Mutex]::new($false, $launcherMutexName)
 $mutexAcquired = $false
+$environmentOverrideNames = @(
+  'VAYRIA_EXHIBITION_BIND_HOST'
+  'VAYRIA_EXHIBITION_HOTSPOT_IP'
+  'VAYRIA_EXHIBITION_INTERFACE_ALIAS'
+)
+$originalEnvironmentValues = @{}
+foreach ($name in $environmentOverrideNames) {
+  $originalEnvironmentValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+$environmentOverridesApplied = $false
 
 try {
   if (-not $PSCmdlet.ShouldProcess($resolvedWorktree, $action)) {
@@ -455,6 +471,34 @@ try {
     if (-not $mutexAcquired) {
       throw 'Another Vayria exhibition launcher is already running.'
     }
+
+    $hotspot = Get-VayriaHotspotAdapter
+    if (-not $hotspot.Found) {
+      if ($hotspot.Status -eq 'permission-denied') {
+        throw "Windows could not read the hotspot adapter: $($hotspot.Error) Run the launcher from a PowerShell window with network-adapter read access."
+      }
+      throw "No usable Windows Mobile Hotspot adapter was found. Start-Process 'ms-settings:network-mobilehotspot', turn on SSID Vayria-Exhibition, and run npm run exhibition again."
+    }
+
+    $detectedHotspotIp = $hotspot.Adapter.IPv4
+    $detectedHotspotAlias = $hotspot.Adapter.Name
+    [Environment]::SetEnvironmentVariable(
+      'VAYRIA_EXHIBITION_BIND_HOST',
+      $detectedHotspotIp,
+      'Process'
+    )
+    [Environment]::SetEnvironmentVariable(
+      'VAYRIA_EXHIBITION_HOTSPOT_IP',
+      $detectedHotspotIp,
+      'Process'
+    )
+    [Environment]::SetEnvironmentVariable(
+      'VAYRIA_EXHIBITION_INTERFACE_ALIAS',
+      $detectedHotspotAlias,
+      'Process'
+    )
+    $environmentOverridesApplied = $true
+    Write-Output "Detected exhibition hotspot adapter '$detectedHotspotAlias' with IPv4 $detectedHotspotIp."
 
     if (Test-AivisReady) {
       Write-Output "Reusing healthy AivisSpeech Engine at $aivisBaseUrl (zonoko is available)."
@@ -595,6 +639,18 @@ catch {
 }
 finally {
   Stop-LauncherChildren
+
+  if ($environmentOverridesApplied) {
+    foreach ($name in $environmentOverrideNames) {
+      $originalValue = $originalEnvironmentValues[$name]
+      if ($null -eq $originalValue) {
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+      }
+      else {
+        [Environment]::SetEnvironmentVariable($name, $originalValue, 'Process')
+      }
+    }
+  }
 
   if ($mutexAcquired) {
     $launcherMutex.ReleaseMutex()

@@ -13,6 +13,17 @@ implementations.
 
 The Miko VRM and VRMA files are not distributed with Vayria.
 
+## multicast-dns
+
+- Package: `multicast-dns`
+- Source: https://github.com/mafintosh/multicast-dns
+- License: MIT
+- Usage: Exhibition mode uses the pure-JavaScript mDNS client to advertise
+  `vayria.local` only on the detected Windows Mobile Hotspot interface. The
+  package is optional at runtime: an unavailable or conflicting mDNS socket
+  leaves the dynamic hotspot-IP fallback available.
+- Type definitions: `@types/multicast-dns` (MIT)
+
 ## three.js and @pixiv/three-vrm
 
 - three.js: https://github.com/mrdoob/three.js — MIT License

@@ -78,6 +78,7 @@ import type {
 } from './performer/types';
 import { isContentBearingVoiceMessage } from './performer/runtime';
 import { runtimeConfig } from './runtimeConfig';
+import { useNetworkState } from './useNetworkState';
 import { fetchListeningBackchannels } from './voice/backchannel';
 import type { ListeningBackchannelAudio } from './voice/backchannelPolicy';
 import {
@@ -246,6 +247,54 @@ function EyeIcon() {
   );
 }
 
+function WifiStatusIcon({ unavailable }: { unavailable: boolean }) {
+  return (
+    <svg aria-hidden="true" className="network-status-icon" viewBox="0 0 24 24" focusable="false">
+      <path
+        d="M3 8.5c5-4.5 13-4.5 18 0M6.5 12c3.1-2.8 7.9-2.8 11 0M10 15.5c1.1-1 2.9-1 4 0M12 19h.01"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.7"
+      />
+      {unavailable && (
+        <path
+          d="m4 4 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.9"
+        />
+      )}
+    </svg>
+  );
+}
+
+function InternetStatusIcon({ unavailable }: { unavailable: boolean }) {
+  return (
+    <svg aria-hidden="true" className="network-status-icon" viewBox="0 0 24 24" focusable="false">
+      <path
+        d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-8.5 9h17M12 3c2.2 2.5 3.3 5.5 3.3 9s-1.1 6.5-3.3 9c-2.2-2.5-3.3-5.5-3.3-9S9.8 5.5 12 3Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.55"
+      />
+      {unavailable && (
+        <path
+          d="m4 4 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.9"
+        />
+      )}
+    </svg>
+  );
+}
+
 type ExhibitionPresentationState = 'idle' | 'selecting' | 'reacting';
 
 const EXHIBITION_MICROPHONE_PANEL_ID = 'exhibition-microphone-adjuster';
@@ -357,6 +406,7 @@ export default function App() {
   const [sessionGeneration, setSessionGeneration] = useState(0);
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
+  const networkState = useNetworkState(isExhibitionMode);
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, resetTurn, zones } = cardGame;
   const performer = usePerformerRuntime();
@@ -2221,6 +2271,11 @@ export default function App() {
     setIsAvatarReady(true);
   }, [prepare]);
 
+  const isLocalNetworkAvailable = networkState.localNetwork === 'available';
+  const isInternetAvailable = networkState.internet === 'available';
+  const localNetworkLabel = `Local network: ${isLocalNetworkAvailable ? 'Connected' : 'Unavailable'}`;
+  const internetLabel = `Internet: ${isInternetAvailable ? 'Connected' : 'Unavailable'}`;
+
   return (
     <main
       className="app-shell"
@@ -2230,6 +2285,34 @@ export default function App() {
       {(shouldShowAudioUnlockControl || isExhibitionMode) && (
         <header className="app-title">
           {!isExhibitionMode && <span>Vayria</span>}
+          {isExhibitionMode && (
+            <div
+              aria-label={`展示ネットワーク状態。${localNetworkLabel}。${internetLabel}。`}
+              className="exhibition-network-status"
+              data-internet={networkState.internet}
+              data-local-network={networkState.localNetwork}
+              role="status"
+            >
+              <span
+                aria-label={localNetworkLabel}
+                className="exhibition-network-status__item"
+                data-state={networkState.localNetwork}
+                role="img"
+                title={localNetworkLabel}
+              >
+                <WifiStatusIcon unavailable={!isLocalNetworkAvailable} />
+              </span>
+              <span
+                aria-label={internetLabel}
+                className="exhibition-network-status__item"
+                data-state={networkState.internet}
+                role="img"
+                title={internetLabel}
+              >
+                <InternetStatusIcon unavailable={!isInternetAvailable} />
+              </span>
+            </div>
+          )}
           <div
             className="audio-controls"
             aria-label="音声コントロール"

@@ -108,14 +108,15 @@ Vayria音声をB1へ戻すと、Vayria自身の発話をSTTが再認識する可
 自己認識ループを防ぐため、Vayria音声はB1へ送らないでください。
 
 展示音声入力は、Python STTが`ws://127.0.0.1:8787/stream`で待ち受ける必要があります。
-次のコマンドは、固定パスのAivisSpeech CLI、uv経由のPython STT、npm経由の展示フロントを起動します。
+次のコマンドは、Windows Mobile HotspotのIPv4を実行時に検出し、検出したインターフェースだけへ展示フロントをbindしたうえで、固定パスのAivisSpeech CLI、uv経由のPython STT、npm経由の展示フロントを起動します。
 OpenAI API keyは`.env.local`へ保存せず、1Passwordから起動プロセスへ注入します。
 
 ```powershell
-op run --env-file .env.1password -- npm run exhibition:start
+op run --env-file .env.1password -- npm run exhibition
 ```
 
-`op run`を付けない`npm run exhibition:start`は、別途プロセス環境または
+`npm run exhibition`は`npm run exhibition:start`の短縮名です。既存の
+`npm run exhibition:start`も互換のため利用できます。`op run`を付けない起動は、別途プロセス環境または
 `VAYRIA_SECRET_FILE`を設定している場合の互換経路です。
 
 マイク、ChatGPT音声、Vayria音声を個別に再生し、Vayriaの音声メーターで経路を確認します。
@@ -429,8 +430,10 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 | モード | 用途 | 初期接続先 |
 | --- | --- | --- |
 | `local` | Windows PC 内の開発 | `127.0.0.1:5187` |
-| `exhibition` | Windows PC と iPad の同一 LAN 接続 | `0.0.0.0:5187` 待受け |
+| `exhibition` | Windows PC と iPad の専用Hotspot接続 | 検出したHotspot IPv4:5187 |
 | `public` | 将来の HTTPS 公開 | 今回は公開サーバーを提供しません |
+
+展示モードの主URLは`https://vayria.local:5187`です。mDNSが競合・権限・Firewallなどで利用できない場合は、起動ログと`GET /api/health`に表示される実行時検出のHotspot IPを確認します。fallback IPが証明書SANに含まれない場合は、TLS有効なURLとして表示せず、主URLの復旧または現在のIPを含む証明書の再生成が必要です。Internet断でも`localNetwork`とローカルUIは維持され、`internet`だけが`unavailable`になります。
 
 ### 展示コピー
 
@@ -450,7 +453,7 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    OpenAI API keyは`.env.local`へ書かず、セットアップの1Password手順で構成します。
 2. worktreeのSetup scriptが`.env.exhibition.local`を生成したことを確認します。
    `.env.exhibition.example`の手動コピーは不要です。
-3. Windows PCへ`mkcert`をインストールし、LANアドレスを含む証明書を作成します。
+3. Windows PCへ`mkcert`をインストールし、`vayria.local`、`localhost`、`127.0.0.1`をSANに含む証明書を作成します。
 
    ```powershell
    mkcert -install
@@ -458,10 +461,10 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    mkcert `
      -cert-file 'C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-cert.pem' `
      -key-file 'C:\Users\<Windowsユーザー名>\.vayria\tls\vayria-key.pem' `
-     <Windows PCのLANアドレス> localhost 127.0.0.1
+     vayria.local localhost 127.0.0.1
    ```
 
-   `mkcert -CAROOT`が返すルートCAをiPadへインストールします。
+   `mkcert -CAROOT`が返す公開ルートCA（通常は`rootCA.pem`）だけをiPadへインストールします。`rootCA-key.pem`、証明書の秘密鍵、HTTPS設定ファイルはiPadへコピーしません。
    iPadの「設定 > 一般 > 情報 > 証明書信頼設定」でルートCAを信頼します。
 
 4. 共有HTTPS設定ファイルを一度だけ作成します。
@@ -499,22 +502,29 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    `$env:VAYRIA_AIVIS_INSTALL_PATH`を設定してください。
    `AIVIS_BASE_URL`は引き続き `http://127.0.0.1:10101` を使用します。
 
-6. 対象worktreeで、Python STTとexhibitionフロントを起動します。
+6. Windows SettingsでMobile Hotspotを初回設定します。SSIDは`Vayria-Exhibition`、パスワード、帯域を確認し、展示時にHotspotをONにします。Hotspotの自動ON/OFFやSSID変更はこのリポジトリから行いません。
 
    ```powershell
-   op run --env-file .env.1password -- npm run exhibition:start
+   Start-Process 'ms-settings:network-mobilehotspot'
    ```
 
-   このコマンドは、AivisSpeech CLIとuv経由のPython STTを別のPowerShell窓で起動します。
+7. 対象worktreeで、Python STTとexhibitionフロントを起動します。
+
+   ```powershell
+   op run --env-file .env.1password -- npm run exhibition
+   ```
+
+   このコマンドは、HotspotアダプタのIPv4を毎回検出してから、AivisSpeech CLIとuv経由のPython STTを別のPowerShell窓で起動します。
    `op run`がVite/npmプロセスへだけOpenAI API keyを注入します。
    AivisSpeechがzonokoを提供し、Python STTが`127.0.0.1:8787`で待ち受けた後、
    exhibitionフロントを現在のPowerShell窓でnpm起動します。
+   起動ログに表示された`https://vayria.local:5187`をiPadで開きます。mDNSが使えない場合は、診断でfallback IPが証明書SANに含まれることを確認できたときだけfallback URLを使います。iPadは会場Wi-Fiへ接続せず、`Vayria-Exhibition`だけに接続します。
    フロントを`Ctrl+C`で停止すると、このコマンドが起動したAivisSpeechとPython STTも停止します。
    既に正常なAivisSpeechが起動中の場合は再利用し、そのプロセスは停止しません。
    AivisSpeechが別のプロセスで10101番を使用している場合や、既に8787番ポートが使用中の場合は、
    既存プロセスを停止せずにエラーを表示します。
 
-   手動で起動する場合は、次の3つのPowerShell窓を使用します。
+   手動で起動する場合は、次の3つのPowerShell窓を使用します。手動起動時は、ViteのbindとHotspot IPが一致していることを`npm run exhibition:check`で確認してください。
 
    ```powershell
    pwsh -NoProfile -File .\scripts\Start-VayriaAivisSpeech.ps1
@@ -609,8 +619,20 @@ Ownerも、メモと理由へ発話本文、履歴、API key、個人情報を�
 `playcheckRunId`がある既存のPlaycheckイベントは、従来のraw保存を優先します。
 `public`モードのユーザー入力は今回実装しません。
 
-Windows ファイアウォールは、プライベートネットワーク上の Node.js または Vite に対して TCP `5187`の受信を一度だけ許可してください。
-インターネットへポート転送は設定しないでください。
+展示前に、読み取り専用診断を実行します。
+
+```powershell
+npm run exhibition:check
+```
+
+診断はHTTPS/SAN、bind/port、Hotspotアダプタ/IP、PrivateスコープのFirewall TCP `5187`・UDP `5353`、mDNS、Internet、health、AivisSpeechのzonoko、Python STTを確認します。失敗時は次に行う操作を表示します。`Get-NetFirewallRule`で確認できない場合は、PowerShellを管理者として再実行してください。
+
+Firewallルールを初回だけ手動作成する場合は、診断が表示するHotspotインターフェース名を使い、Privateプロファイルと`LocalSubnet`に限定します。Publicプロファイル全体への許可やInternetへのポート転送は設定しないでください。
+
+```powershell
+New-NetFirewallRule -DisplayName 'Vayria Exhibition TCP 5187 (Private)' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5187 -Profile Private -InterfaceAlias '<Hotspotインターフェース名>' -RemoteAddress LocalSubnet
+New-NetFirewallRule -DisplayName 'Vayria Exhibition mDNS UDP 5353 (Private)' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5353 -Profile Private -InterfaceAlias '<Hotspotインターフェース名>' -RemoteAddress LocalSubnet
+```
 
 `VITE_API_BASE_URL=/` は現在のページと同じ接続先を使用します。別の HTTPS API を使用する場合だけ、`VITE_API_BASE_URL` を変更します。
 

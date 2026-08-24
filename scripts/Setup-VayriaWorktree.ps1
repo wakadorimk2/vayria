@@ -361,6 +361,7 @@ function Ensure-ExhibitionEnvironment {
     'VAYRIA_HTTPS_CERT_FILE='
     'VAYRIA_HTTPS_KEY_FILE='
     '# VAYRIA_HTTPS_CONFIG_FILE is shared from .env.local when configured.'
+    'VAYRIA_MDNS_ENABLED=true'
     'VAYRIA_STT_WS_URL=ws://127.0.0.1:8787/stream'
   )
 
