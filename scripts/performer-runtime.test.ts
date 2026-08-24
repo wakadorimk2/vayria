@@ -10,7 +10,6 @@ import {
   createPerformerStateContext,
   DEFAULT_SPEECH_MOTION_ASSET_ID,
   getEffectIntensity,
-  getNextAutonomousDelay,
   isContentBearingVoiceMessage,
   reducePerformanceResult,
   resolvePerformancePlan,
@@ -233,7 +232,7 @@ test('conversation fast path leaves ambiguous viewer speech for the LLM', () => 
   assert.equal(classifyViewerMessageFastPath('今日は雨だった'), null);
 });
 
-test('conversation fast path maps external stimulus and autonomous skips', () => {
+test('conversation fast path maps external stimulus and admitted autonomous candidates', () => {
   const state = createState();
   assert.deepEqual(
     classifyFastPathAction(
@@ -244,12 +243,12 @@ test('conversation fast path maps external stimulus and autonomous skips', () =>
   );
   assert.deepEqual(
     classifyFastPathAction(
-      { kind: 'idle_tick', elapsedMs: 1_000 },
+      { kind: 'autonomous_candidate', episodeId: 'episode-1', reasonIds: ['reason-1'] },
       state,
       DEFAULT_PERFORMER_PROFILE,
       () => 0.99,
     ),
-    { action: 'wait', backchannelCue: 'none' },
+    { action: 'take_floor', backchannelCue: 'none' },
   );
 });
 
@@ -494,7 +493,7 @@ test('failed results return to idle without applying completed speech state', ()
     planId: 'plan-failed',
     completedAt: 100,
     outcome: 'failed',
-    trigger: 'idle_tick',
+    trigger: 'autonomous_candidate',
     intent: 'speak',
     spokenText: '失敗した返答',
     emotionCue: { emotion: 'angry', intensity: 1 },
@@ -506,21 +505,26 @@ test('failed results return to idle without applying completed speech state', ()
   assert.equal(nextState.lastSpeechAt, previousState.lastSpeechAt);
 });
 
-test('initiative changes autonomous cadence while preserving the initial delay', () => {
+test('initiative does not control autonomous scheduling', () => {
   const state = createState();
-  const lowInitiative = {
-    ...DEFAULT_PERFORMER_PROFILE,
-    initiativeBaseline: 0,
+  const trigger: PerformerTrigger = {
+    kind: 'autonomous_candidate',
+    episodeId: 'episode-1',
+    reasonIds: ['reason-1'],
   };
-  const highInitiative = {
-    ...DEFAULT_PERFORMER_PROFILE,
-    initiativeBaseline: 1,
-  };
-
-  assert.equal(getNextAutonomousDelay(state, highInitiative, true, () => 0.5), 4_000);
-  assert.ok(
-    getNextAutonomousDelay(state, highInitiative, false, () => 0.5) <
-      getNextAutonomousDelay(state, lowInitiative, false, () => 0.5),
+  assert.deepEqual(
+    classifyFastPathAction(trigger, state, {
+      ...DEFAULT_PERFORMER_PROFILE,
+      initiativeBaseline: 0,
+    }),
+    { action: 'take_floor', backchannelCue: 'none' },
+  );
+  assert.deepEqual(
+    classifyFastPathAction(trigger, state, {
+      ...DEFAULT_PERFORMER_PROFILE,
+      initiativeBaseline: 1,
+    }),
+    { action: 'take_floor', backchannelCue: 'none' },
   );
 });
 

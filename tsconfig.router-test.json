@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/router-test",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/router-test.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/router/conversationRouter.ts",
+    "src/router/routerTypes.ts",
+    "server/routerStore.ts",
+    "scripts/router.test.ts"
+  ]
+}

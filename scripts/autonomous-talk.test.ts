@@ -3,16 +3,20 @@ import test from 'node:test';
 import { shouldScheduleAutonomousTalk } from '../src/conversation/useAutonomousTalk.js';
 
 const READY_STATE = {
+  hasCandidate: true,
   isBusy: false,
   isVoiceActivityActive: false,
   isLoopEnabled: true,
-  isWaitingForViewer: false,
   isMuted: false,
   isReady: true,
   isVisible: true,
 };
 
-test('microphone readiness does not disable an idle autonomous candidate', () => {
+test('a candidate is required before autonomous scheduling', () => {
+  assert.equal(
+    shouldScheduleAutonomousTalk({ ...READY_STATE, hasCandidate: false }),
+    false,
+  );
   assert.equal(shouldScheduleAutonomousTalk(READY_STATE), true);
 });
 
@@ -26,10 +30,9 @@ test('viewer speech and STT processing block a new autonomous candidate', () => 
   );
 });
 
-test('busy, settled, muted, hidden, or unready state still blocks scheduling', () => {
+test('busy, muted, hidden, or unready state still blocks scheduling', () => {
   for (const key of [
     'isBusy',
-    'isWaitingForViewer',
     'isMuted',
     'isReady',
     'isVisible',

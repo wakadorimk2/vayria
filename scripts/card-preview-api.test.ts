@@ -12,12 +12,14 @@ import {
   isDirectActionRequestMessage,
   isMetaOnlyActionResponse,
   normalizeVoiceInteractionDecision,
+  parseAutonomousAssistantResponse,
   parseCardPreviewResponse,
   parseConversationActionPolicy,
   parseVoiceAssistantResponse,
   readPerformerStateContext,
   readCardPreviewRequest,
   readConversationEvent,
+  readAutonomyCandidate,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
 import {
@@ -39,6 +41,100 @@ const VALID_PERFORMER_STATE = {
   attentionTarget: 'viewer',
   attentionStrength: 0.8,
 } as const;
+
+const AUTONOMY_CANDIDATE = {
+  episodeId: 'episode-1',
+  decisionEvidenceIds: ['evidence-1'],
+  reasons: [
+    {
+      id: 'reason-1',
+      episodeId: 'episode-1',
+      parentReasonId: null,
+      kind: 'conversation_continuation',
+      content: '雨の話を続ける理由',
+      semanticKey: 'topic:rain',
+      salience: 0.8,
+      status: 'active',
+      deferCause: null,
+      wakeOn: [],
+      decisionEvidenceIds: ['evidence-1'],
+      createdAt: 1,
+      updatedAt: 1,
+      lastEvaluatedEvidenceId: null,
+      mergedIntoReasonId: null,
+    },
+  ],
+} as const;
+
+const AUTONOMY_CANDIDATE_WIRE = {
+  episodeId: AUTONOMY_CANDIDATE.episodeId,
+  decisionEvidenceIds: AUTONOMY_CANDIDATE.decisionEvidenceIds,
+  reasons: [
+    {
+      id: AUTONOMY_CANDIDATE.reasons[0].id,
+      episodeId: AUTONOMY_CANDIDATE.reasons[0].episodeId,
+      parentReasonId: AUTONOMY_CANDIDATE.reasons[0].parentReasonId,
+      kind: AUTONOMY_CANDIDATE.reasons[0].kind,
+      content: AUTONOMY_CANDIDATE.reasons[0].content,
+      semanticKey: AUTONOMY_CANDIDATE.reasons[0].semanticKey,
+      salience: AUTONOMY_CANDIDATE.reasons[0].salience,
+      status: AUTONOMY_CANDIDATE.reasons[0].status,
+      deferCause: AUTONOMY_CANDIDATE.reasons[0].deferCause,
+      wakeOn: AUTONOMY_CANDIDATE.reasons[0].wakeOn,
+      decisionEvidenceIds: AUTONOMY_CANDIDATE.reasons[0].decisionEvidenceIds,
+    },
+  ],
+} as const;
+
+test('autonomy candidate uses the decision evidence contract only', () => {
+  const parsed = readAutonomyCandidate(AUTONOMY_CANDIDATE_WIRE);
+  assert.deepEqual(parsed.decisionEvidenceIds, ['evidence-1']);
+  assert.deepEqual(parsed.reasons[0].decisionEvidenceIds, ['evidence-1']);
+
+  assert.throws(
+    () =>
+      readAutonomyCandidate({
+        ...AUTONOMY_CANDIDATE_WIRE,
+        decisionEvidenceIds: Array.from({ length: 25 }, (_, index) => `e-${index}`),
+      }),
+    /decisionEvidenceIds format is invalid/,
+  );
+  assert.throws(
+    () =>
+      readAutonomyCandidate({
+        ...AUTONOMY_CANDIDATE_WIRE,
+        reasons: [
+          {
+            ...AUTONOMY_CANDIDATE_WIRE.reasons[0],
+            decisionEvidenceIds: ['not-offered'],
+          },
+        ],
+      }),
+    /decisionEvidenceIds must be offered evidence/,
+  );
+  assert.throws(
+    () =>
+      readAutonomyCandidate({
+        ...AUTONOMY_CANDIDATE_WIRE,
+        evidenceHistory: [],
+      }),
+    /unsupported field/,
+  );
+  assert.throws(
+    () =>
+      readAutonomyCandidate({
+        episodeId: 'episode-1',
+        evidenceIds: ['evidence-1'],
+        reasons: [
+          {
+            ...AUTONOMY_CANDIDATE_WIRE.reasons[0],
+            evidenceIds: ['evidence-1'],
+          },
+        ],
+      }),
+    /unsupported field/,
+  );
+});
 
 test('performer state context validates the bounded self-state contract', () => {
   assert.deepEqual(
@@ -204,9 +300,219 @@ test('autonomous director prompt prioritizes the latest viewer intent', () => {
     /latest viewer intent and recent conversation history as the current situation/,
   );
   assert.match(prompt, /give that latest viewer turn priority/);
-  assert.match(prompt, /backchannel or unfinished, silence is acceptable/);
-  assert.match(prompt, /viewer engagement is settled, do not start a new conversational topic/);
+  assert.match(prompt, /backchannel or unfinished, do not force a new topic/);
+  assert.match(prompt, /externalAction for this offered candidate: speak or none/);
+  assert.doesNotMatch(prompt, /silence means/);
   assert.match(prompt, /Use the self state as quiet background context/);
+});
+
+test('autonomous response contract separates outward action from internal delta', () => {
+  assert.deepEqual(
+    parseAutonomousAssistantResponse(
+      JSON.stringify({
+        externalAction: 'speak',
+        text: '雨の音が近いですわ',
+        emotion: 'neutral',
+        activatedCards: [],
+        usedReasonIds: ['reason-1'],
+        internalDelta: { reasonUpdates: [] },
+      }),
+      AUTONOMY_CANDIDATE,
+      [],
+      null,
+    ),
+    {
+      externalAction: 'speak',
+      text: '雨の音が近いですわ',
+      emotion: 'neutral',
+      activatedCards: [],
+      usedReasonIds: ['reason-1'],
+      internalDelta: { reasonUpdates: [] },
+    },
+  );
+
+  const none = parseAutonomousAssistantResponse(
+    JSON.stringify({
+      externalAction: 'none',
+      text: '',
+      emotion: 'joy',
+      activatedCards: [],
+      usedReasonIds: [],
+      internalDelta: {
+        reasonUpdates: [
+          {
+            operation: 'defer',
+            reasonId: 'reason-1',
+            cause: 'floor_unavailable',
+            wakeOn: ['floor_available'],
+          },
+        ],
+      },
+    }),
+    AUTONOMY_CANDIDATE,
+    [],
+    null,
+  );
+  assert.equal(none.externalAction, 'none');
+  assert.equal(none.text, '');
+  assert.equal(none.internalDelta?.reasonUpdates.length, 1);
+
+  const strictNullableUpdate = parseAutonomousAssistantResponse(
+    JSON.stringify({
+      externalAction: 'none',
+      text: '',
+      emotion: 'neutral',
+      activatedCards: [],
+      usedReasonIds: [],
+      internalDelta: {
+        reasonUpdates: [
+          {
+            operation: 'resolve',
+            kind: null,
+            content: null,
+            semanticKey: null,
+            salience: null,
+            reasonId: 'reason-1',
+            parentReasonId: null,
+            salienceDelta: null,
+            cause: null,
+            wakeOn: null,
+            targetReasonId: null,
+          },
+        ],
+      },
+    }),
+    AUTONOMY_CANDIDATE,
+    [],
+    null,
+  );
+  assert.deepEqual(strictNullableUpdate.internalDelta?.reasonUpdates, [
+    { operation: 'resolve', reasonId: 'reason-1' },
+  ]);
+
+  const noisyCreate = parseAutonomousAssistantResponse(
+    JSON.stringify({
+      externalAction: 'none',
+      text: '',
+      emotion: 'neutral',
+      activatedCards: [],
+      usedReasonIds: [],
+      internalDelta: {
+        reasonUpdates: [
+          {
+            operation: 'create',
+            kind: 'new_association',
+            content: '新しい連想',
+            semanticKey: 'association:new',
+            salience: 0.5,
+            reasonId: 'unused-reason-id',
+            parentReasonId: null,
+            salienceDelta: 0.2,
+            cause: 'floor_unavailable',
+            wakeOn: ['floor_available'],
+            targetReasonId: 'unused-target-id',
+          },
+        ],
+      },
+    }),
+    AUTONOMY_CANDIDATE,
+    [],
+    null,
+  );
+  assert.deepEqual(noisyCreate.internalDelta?.reasonUpdates, [
+    {
+      operation: 'create',
+      kind: 'new_association',
+      content: '新しい連想',
+      semanticKey: 'association:new',
+      salience: 0.5,
+      parentReasonId: null,
+    },
+  ]);
+
+  assert.throws(
+    () =>
+      parseAutonomousAssistantResponse(
+        JSON.stringify({
+          externalAction: 'speak',
+          text: '不正な理由ですわ',
+          emotion: 'neutral',
+          activatedCards: [],
+          usedReasonIds: ['unknown-reason'],
+          internalDelta: { reasonUpdates: [] },
+        }),
+        AUTONOMY_CANDIDATE,
+        [],
+        null,
+      ),
+    /offered candidate reasons/,
+  );
+});
+
+test('autonomous reason updates reject unknown, duplicate, and oversized mutations', () => {
+  const response = (internalDelta: unknown) =>
+    parseAutonomousAssistantResponse(
+      JSON.stringify({
+        externalAction: 'none',
+        text: '',
+        emotion: 'neutral',
+        activatedCards: [],
+        usedReasonIds: [],
+        internalDelta,
+      }),
+      AUTONOMY_CANDIDATE,
+      [],
+      null,
+    );
+
+  assert.throws(
+    () =>
+      response({
+        reasonUpdates: [
+          { operation: 'resolve', reasonId: 'unknown-reason' },
+        ],
+      }),
+    /unknown reason/,
+  );
+  assert.throws(
+    () =>
+      response({
+        reasonUpdates: [
+          { operation: 'resolve', reasonId: 'reason-1' },
+          { operation: 'expire', reasonId: 'reason-1' },
+        ],
+      }),
+    /must not duplicate a reason/,
+  );
+  assert.throws(
+    () =>
+      response({
+        reasonUpdates: [
+          {
+            operation: 'resolve',
+            reasonId: 'reason-1',
+            unsupportedField: 'reject this',
+          },
+        ],
+      }),
+    /unsupported field/,
+  );
+  assert.throws(
+    () =>
+      response({
+        reasonUpdates: [
+          {
+            operation: 'create',
+            kind: 'new_association',
+            content: 'x'.repeat(121),
+            semanticKey: 'association:oversized',
+            salience: 0.4,
+            parentReasonId: null,
+          },
+        ],
+      }),
+    /reason content must be 120 characters or fewer/,
+  );
 });
 
 test('voice assistant response accepts only compatible action and cue pairs', () => {

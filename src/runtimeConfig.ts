@@ -69,6 +69,11 @@ function readAudioLabEnabled(search: string): boolean {
   return new URLSearchParams(search).get('audioLab') === '1';
 }
 
+function readRouterEnabled(search: string): boolean {
+  if (!import.meta.env.DEV) return false;
+  return new URLSearchParams(search).get('router') === '1';
+}
+
 function readAudioPreset(search: string): ExhibitionAudioPreset {
   const queryValue = new URLSearchParams(search).get('audioPreset');
   return resolveExhibitionAudioPreset(
@@ -91,6 +96,7 @@ const browserSearch =
 export const runtimeConfig = Object.freeze({
   apiBaseUrl: readApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
   audioLabEnabled: readAudioLabEnabled(browserSearch),
+  routerEnabled: readRouterEnabled(browserSearch),
   audioPreset: readAudioPreset(browserSearch),
   audioEndpointMs: readAudioEndpoint(browserSearch),
   mode,

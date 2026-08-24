@@ -29,6 +29,16 @@ import {
 } from './semanticDialogueHistory';
 import type { AutonomousContext } from './autonomousContext';
 export type { AutonomousContext } from './autonomousContext';
+import type {
+  AutonomyCandidate,
+  AutonomyExternalAction,
+  AutonomyInternalDelta,
+} from './autonomyState';
+export type {
+  AutonomyCandidate,
+  AutonomyExternalAction,
+  AutonomyInternalDelta,
+} from './autonomyState';
 import {
   DEFAULT_PROGRAM_CONTEXT,
   type ProgramContext,
@@ -52,26 +62,20 @@ export type ConversationStatus =
 
 export type ConversationSource = 'manual' | 'voice' | 'autonomous';
 
-export const AUTONOMOUS_ACTIONS = [
-  'continue',
-  'new_topic',
-  'silence',
-] as const;
-
-export type AutonomousAction = (typeof AUTONOMOUS_ACTIONS)[number];
-
 export interface AutonomousDecision {
-  action: AutonomousAction;
-  topic: string;
+  externalAction: AutonomyExternalAction;
+  usedReasonIds: string[];
+  internalDelta: AutonomyInternalDelta;
 }
 
 interface ChatResponse {
-  action?: unknown;
   activatedCards: unknown;
   backchannelCue?: unknown;
   emotion: unknown;
   text: string;
-  topic?: unknown;
+  externalAction?: unknown;
+  usedReasonIds?: unknown;
+  internalDelta?: unknown;
   interactionAction?: unknown;
 }
 
@@ -84,6 +88,20 @@ export interface PerformanceContextPayload {
   callbackTendency: number;
   fragmentation: number;
   semanticBiases: string[];
+}
+
+export interface AutonomyEvidenceContext {
+  episodeId: string;
+  evidenceId: string;
+  reasonIds: readonly string[];
+}
+
+export interface AutonomyDeltaContext {
+  source: ConversationSource;
+  episodeId: string | null;
+  evidenceId: string;
+  reasonIds: readonly string[];
+  resolvesReason: boolean;
 }
 
 interface ConversationOptions {
@@ -102,6 +120,10 @@ interface ConversationOptions {
   onPerformanceResult?: (result: PerformanceResult) => void;
   onInteractionAction?: (decision: ConversationActionDecision) => void;
   onInteractionTimelineEvent?: (event: InteractionTimelineEvent) => void;
+  onAutonomyDelta?: (
+    delta: AutonomyInternalDelta,
+    context: AutonomyDeltaContext,
+  ) => void;
 }
 
 interface ErrorResponse {
@@ -145,37 +167,73 @@ function readActivatedCards(value: unknown, allowEmpty = false): string[] {
   return value;
 }
 
-function isAutonomousAction(value: unknown): value is AutonomousAction {
-  return (
-    typeof value === 'string' &&
-    (AUTONOMOUS_ACTIONS as readonly string[]).includes(value)
-  );
+function readAutonomyInternalDelta(value: unknown): AutonomyInternalDelta {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('AI のinternalDelta形式が正しくありません。');
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) => key !== 'reasonUpdates') ||
+    !Array.isArray(record.reasonUpdates)
+  ) {
+    throw new Error('AI のreasonUpdates形式が正しくありません。');
+  }
+  return { reasonUpdates: record.reasonUpdates as AutonomyInternalDelta['reasonUpdates'] };
+}
+
+function serializeAutonomyCandidate(candidate: AutonomyCandidate) {
+  return {
+    episodeId: candidate.episodeId,
+    decisionEvidenceIds: [...candidate.decisionEvidenceIds],
+    reasons: candidate.reasons.map((reason) => ({
+      id: reason.id,
+      episodeId: reason.episodeId,
+      parentReasonId: reason.parentReasonId,
+      kind: reason.kind,
+      content: reason.content,
+      semanticKey: reason.semanticKey,
+      salience: reason.salience,
+      status: reason.status,
+      deferCause: reason.deferCause,
+      wakeOn: [...reason.wakeOn],
+      decisionEvidenceIds: [...reason.decisionEvidenceIds],
+    })),
+  };
 }
 
 function readAutonomousDecision(
   action: unknown,
-  topic: unknown,
-  forcedCardId: string | null,
+  usedReasonIds: unknown,
+  internalDelta: unknown,
+  candidate: AutonomyCandidate,
 ): AutonomousDecision {
-  if (!isAutonomousAction(action)) {
+  if (action !== 'speak' && action !== 'none') {
     throw new Error('AI の自律発話アクション形式が正しくありません。');
   }
-  if (typeof topic !== 'string') {
-    throw new Error('AI の自律発話トピック形式が正しくありません。');
+  if (!Array.isArray(usedReasonIds)) {
+    throw new Error('AI の使用理由形式が正しくありません。');
   }
-
-  const normalizedTopic = topic.trim();
-  if (normalizedTopic.length > 120) {
-    throw new Error('AI の自律発話トピックが長すぎます。');
+  const normalizedUsedReasonIds = usedReasonIds.filter(
+    (reasonId): reasonId is string => typeof reasonId === 'string',
+  );
+  if (
+    normalizedUsedReasonIds.length !== usedReasonIds.length ||
+    new Set(normalizedUsedReasonIds).size !== normalizedUsedReasonIds.length ||
+    normalizedUsedReasonIds.some(
+      (reasonId) => !candidate.reasons.some((reason) => reason.id === reasonId),
+    )
+  ) {
+    throw new Error('AI の使用理由ID形式が正しくありません。');
   }
-  if (action !== 'silence' && !normalizedTopic) {
-    throw new Error('発話する自律応答にはトピックが必要です。');
+  if (action === 'speak' && !normalizedUsedReasonIds.length) {
+    throw new Error('発話する自律応答には使用理由が必要です。');
   }
-  if (action === 'silence' && forcedCardId) {
-    throw new Error('交換カードがある自律応答は沈黙できません。');
-  }
-
-  return { action, topic: normalizedTopic };
+  const delta = readAutonomyInternalDelta(internalDelta);
+  return {
+    externalAction: action,
+    usedReasonIds: normalizedUsedReasonIds,
+    internalDelta: delta,
+  };
 }
 
 function readConversationActionDecision(
@@ -258,6 +316,7 @@ export function useConversation(
   const onPerformancePlanRef = useRef(options.onPerformancePlan);
   const onPerformanceResultRef = useRef(options.onPerformanceResult);
   const onInteractionActionRef = useRef(options.onInteractionAction);
+  const onAutonomyDeltaRef = useRef(options.onAutonomyDelta);
   const characterIdentityRef = useRef(
     options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY,
   );
@@ -271,6 +330,7 @@ export function useConversation(
     onPerformancePlanRef.current = options.onPerformancePlan;
     onPerformanceResultRef.current = options.onPerformanceResult;
     onInteractionActionRef.current = options.onInteractionAction;
+    onAutonomyDeltaRef.current = options.onAutonomyDelta;
     timeline.setListener(options.onInteractionTimelineEvent);
   }, [
     options.onPerformanceCue,
@@ -278,6 +338,7 @@ export function useConversation(
     options.onPerformanceResult,
     options.onInteractionAction,
     options.onInteractionTimelineEvent,
+    options.onAutonomyDelta,
     timeline,
   ]);
 
@@ -493,6 +554,8 @@ export function useConversation(
       voiceMetadata?: VoiceTurnMetadata,
       characterIdentityOverride?: CharacterIdentity,
       programContextOverride?: ProgramContext,
+      autonomyCandidate: AutonomyCandidate | null = null,
+      autonomyEvidenceContext: AutonomyEvidenceContext | null = null,
     ): Promise<ProcessTurnResult> => {
       const eventEmitter = createConversationEventEmitter(turnSource);
       const messageForRequest = message;
@@ -514,6 +577,10 @@ export function useConversation(
       }
 
       if (turnSource === 'autonomous') {
+        if (!autonomyCandidate) {
+          emitTerminalEvent('turn_aborted', { reason: 'missing_candidate' });
+          return { completed: false, decision: null };
+        }
         if (
           isMutedRef.current ||
           ACTIVE_STATUSES.includes(statusRef.current)
@@ -653,6 +720,7 @@ export function useConversation(
                     autonomousContext?.viewerEngagement ?? 'available',
                   lastSelfUtterance: lastSelfUtteranceRef.current,
                   performerState: performerStateContext,
+                  autonomyCandidate: serializeAutonomyCandidate(autonomyCandidate!),
                 }
               : {}),
           }),
@@ -690,11 +758,41 @@ export function useConversation(
         const autonomousDecision =
           turnSource === 'autonomous'
             ? readAutonomousDecision(
-                chatPayload.action,
-                chatPayload.topic,
-                cardContext.forcedCardId,
+                chatPayload.externalAction,
+                chatPayload.usedReasonIds,
+                chatPayload.internalDelta,
+                autonomyCandidate!,
               )
             : null;
+        const internalDelta =
+          turnSource === 'autonomous'
+            ? autonomousDecision?.internalDelta ?? { reasonUpdates: [] }
+            : chatPayload.internalDelta === undefined
+              ? { reasonUpdates: [] }
+              : readAutonomyInternalDelta(chatPayload.internalDelta);
+        const autonomyDeltaContext = {
+          source: turnSource,
+          episodeId:
+            autonomyCandidate?.episodeId ??
+            autonomyEvidenceContext?.episodeId ??
+            null,
+          evidenceId:
+            autonomyCandidate?.decisionEvidenceIds.at(-1) ??
+            autonomyEvidenceContext?.evidenceId ??
+            finalizedVoiceMetadata.segmentId,
+          reasonIds: [
+            ...(autonomousDecision?.externalAction === 'speak'
+              ? autonomousDecision.usedReasonIds
+              : autonomyCandidate
+                ? []
+                : (autonomyEvidenceContext?.reasonIds ?? [])),
+          ],
+          resolvesReason:
+            turnSource === 'autonomous'
+              ? autonomousDecision?.externalAction === 'speak'
+              : interactionDecision === null ||
+                interactionDecision.action === 'take_floor',
+        };
         if (
           (INTERACTIVE_SOURCES.includes(turnSource) &&
             interactionDecision?.action === 'take_floor' &&
@@ -702,10 +800,10 @@ export function useConversation(
           (interactionDecision !== null &&
             interactionDecision.action !== 'take_floor' &&
             responseText) ||
-          (autonomousDecision?.action !== 'silence' &&
+          (autonomousDecision?.externalAction === 'speak' &&
             autonomousDecision !== null &&
             !responseText) ||
-          (autonomousDecision?.action === 'silence' && responseText)
+          (autonomousDecision?.externalAction === 'none' && responseText)
         ) {
           throw new Error('AI の返答形式が正しくありません。');
         }
@@ -720,7 +818,7 @@ export function useConversation(
         ) {
           throw new Error('非発話反応はカードを発動できません。');
         }
-        if (autonomousDecision?.action === 'silence' && activatedCards.length) {
+        if (autonomousDecision?.externalAction === 'none' && activatedCards.length) {
           throw new Error('沈黙する自律応答はカードを発動できません。');
         }
         const brainCardIds = new Set(cardContext.brainCardIds);
@@ -731,6 +829,8 @@ export function useConversation(
           cardContext.forcedCardId &&
           (interactionDecision === null ||
             interactionDecision.action === 'take_floor') &&
+          (autonomousDecision === null ||
+            autonomousDecision.externalAction === 'speak') &&
           !activatedCards.includes(cardContext.forcedCardId)
         ) {
           throw new Error('AI が交換したカードを発動しませんでした。');
@@ -758,6 +858,7 @@ export function useConversation(
             emotionCue: { emotion: 'neutral', intensity: 0 },
           });
           onInteractionActionRef.current?.(interactionDecision);
+          onAutonomyDeltaRef.current?.(internalDelta, autonomyDeltaContext);
           emitTerminalEvent('turn_completed', {
             reason: interactionDecision.action,
             interactionAction: interactionDecision.action,
@@ -771,16 +872,15 @@ export function useConversation(
           onPerformancePlanRef.current?.(plan);
           playback.prepare(plan);
         }
-        if (autonomousDecision?.action === 'silence') {
+        if (autonomousDecision?.externalAction === 'none') {
           onReplyAccepted([]);
+          onAutonomyDeltaRef.current?.(internalDelta, autonomyDeltaContext);
           setConversationState('idle', null);
           emitResult(executionPlan, 'completed', {
-            interactionAction: 'silence',
             emotionCue: { emotion: responseEmotion, intensity: 0 },
           });
           emitTerminalEvent('turn_completed', {
-            reason: 'silence',
-            interactionAction: 'silence',
+            reason: 'no_external_action',
           });
           return { completed: true, decision: autonomousDecision };
         }
@@ -963,6 +1063,7 @@ export function useConversation(
         }
 
         lastSelfUtteranceRef.current = responseText;
+        onAutonomyDeltaRef.current?.(internalDelta, autonomyDeltaContext);
         if (turnSource === 'autonomous') {
           semanticHistory.appendAssistant(responseText);
         }
@@ -1074,6 +1175,7 @@ export function useConversation(
       plan: PerformancePlan,
       characterIdentityOverride?: CharacterIdentity,
       programContextOverride?: ProgramContext,
+      autonomyEvidenceContext?: AutonomyEvidenceContext,
     ) =>
       (
         await processTurn(
@@ -1086,6 +1188,8 @@ export function useConversation(
           undefined,
           characterIdentityOverride,
           programContextOverride,
+          undefined,
+          autonomyEvidenceContext ?? null,
         )
       ).completed,
     [processTurn],
@@ -1100,6 +1204,7 @@ export function useConversation(
       voiceMetadata?: VoiceTurnMetadata,
       characterIdentityOverride?: CharacterIdentity,
       programContextOverride?: ProgramContext,
+      autonomyEvidenceContext?: AutonomyEvidenceContext,
     ) =>
       (
         await processTurn(
@@ -1112,6 +1217,8 @@ export function useConversation(
           voiceMetadata,
           characterIdentityOverride,
           programContextOverride,
+          undefined,
+          autonomyEvidenceContext ?? null,
         )
       ).completed,
     [processTurn],
@@ -1124,6 +1231,7 @@ export function useConversation(
       onReplyAccepted: (activatedCardIds: string[]) => void,
       plan: PerformancePlan,
       programContextOverride?: ProgramContext,
+      autonomyCandidate?: AutonomyCandidate,
     ) => {
       const result = await processTurn(
         'autonomous',
@@ -1135,6 +1243,8 @@ export function useConversation(
         undefined,
         undefined,
         programContextOverride,
+        autonomyCandidate ?? null,
+        null,
       );
       return result.completed ? result.decision : null;
     },

@@ -1122,6 +1122,164 @@ input {
   pointer-events: none;
 }
 
+.conversation-router-panel {
+  position: fixed;
+  z-index: 31;
+  top: 0.75rem;
+  left: 0.75rem;
+  width: min(25rem, calc(100vw - 1.5rem));
+  color: #d8d4cc;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.conversation-router-panel details {
+  overflow: hidden;
+  border: 1px solid rgb(171 179 190 / 30%);
+  border-radius: 0.65rem;
+  background: rgb(17 20 25 / 92%);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 30%);
+  pointer-events: auto;
+}
+
+.conversation-router-panel summary {
+  padding: 0.5rem 0.7rem;
+  color: #bcb8b0;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.conversation-router-panel__body {
+  max-height: calc(100dvh - 4rem);
+  overflow: auto;
+  padding: 0 0.7rem 0.7rem;
+  scrollbar-color: #59616d transparent;
+}
+
+.conversation-router-panel__status-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.3rem;
+  margin: 0.2rem 0 0.5rem;
+}
+
+.conversation-router-panel__status-grid div {
+  min-width: 0;
+  padding: 0.35rem;
+  border: 1px solid rgb(171 179 190 / 16%);
+  border-radius: 0.35rem;
+  background: rgb(33 38 47 / 70%);
+}
+
+.conversation-router-panel__status-grid dt,
+.conversation-router-panel__metrics dt {
+  color: #858d98;
+  font-size: 0.61rem;
+}
+
+.conversation-router-panel__status-grid dd {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
+  color: #d6dbe0;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.conversation-router-panel__hint {
+  margin: 0.1rem 0 0.4rem;
+  color: #9299a3;
+  font-size: 0.66rem;
+}
+
+.conversation-router-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.35rem 0 0.55rem;
+}
+
+.conversation-router-panel__actions button,
+.conversation-router-panel__field select {
+  min-height: 1.8rem;
+  border: 1px solid rgb(171 179 190 / 35%);
+  border-radius: 0.35rem;
+  background: #20252d;
+  color: #e1ddd5;
+  font-size: 0.7rem;
+}
+
+.conversation-router-panel__actions button {
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+}
+
+.conversation-router-panel__actions button:hover,
+.conversation-router-panel__actions button:focus-visible,
+.conversation-router-panel__field select:focus-visible {
+  outline: 1px solid #d4d9df;
+  outline-offset: 1px;
+}
+
+.conversation-router-panel__actions button:disabled,
+.conversation-router-panel__field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.conversation-router-panel__field {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 14rem);
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  padding: 0.3rem 0;
+}
+
+.conversation-router-panel__field select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.2rem 0.35rem;
+}
+
+.conversation-router-panel__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem 0.55rem;
+  margin: 0.55rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgb(171 179 190 / 15%);
+}
+
+.conversation-router-panel__metrics div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.conversation-router-panel__metrics dd {
+  max-width: 11rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #c6ccd3;
+  font-size: 0.64rem;
+  text-align: right;
+}
+
+@media (max-width: 620px) {
+  .conversation-router-panel {
+    top: 0.45rem;
+    left: 0.45rem;
+    width: calc(100vw - 0.9rem);
+  }
+
+  .conversation-router-panel__status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .audio-lab-panel details {
   max-height: inherit;
   overflow: hidden;

@@ -23,6 +23,9 @@ const testFiles = [
   resolve(
     'node_modules/.tmp/performer-test/scripts/autonomous-talk.test.js',
   ),
+  resolve(
+    'node_modules/.tmp/performer-test/scripts/autonomy-state.test.js',
+  ),
 ];
 const result = spawnSync(process.execPath, ['--test', ...testFiles], {
   stdio: 'inherit',

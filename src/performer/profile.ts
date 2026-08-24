@@ -16,7 +16,4 @@ export const DEFAULT_PERFORMER_PROFILE: PerformerProfile = {
   motionExitBlendMs: 400,
   motionPreparationTimeoutMs: 1_200,
   postSpeechHoldMs: 250,
-  autonomousInitialDelayMs: 4_000,
-  autonomousMinDelayMs: 8_000,
-  autonomousMaxDelayMs: 18_000,
 };

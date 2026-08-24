@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  advanceAutonomousContext,
   classifyViewerIntent,
   INITIAL_AUTONOMOUS_CONTEXT,
   recordViewerIntent,
@@ -61,52 +60,4 @@ test('explicit closing settles the conversation until substantive re-entry', () 
   const reopened = recordViewerIntent(afterBackchannel, 'それどう思う？');
   assert.equal(reopened.viewerIntent, 'question');
   assert.equal(reopened.viewerEngagement, 'available');
-});
-
-test('autonomous speech advances viewer-intent age but silence does not', () => {
-  const current = {
-    ...INITIAL_AUTONOMOUS_CONTEXT,
-    topic: '朝ごはん',
-    topicTurns: 3,
-    viewerIntent: 'question' as const,
-    viewerTurnsSince: 4,
-  };
-
-  assert.deepEqual(
-    advanceAutonomousContext(current, {
-      action: 'continue',
-      topic: '朝ごはん',
-    }),
-    {
-      topic: '朝ごはん',
-      topicTurns: 4,
-      viewerIntent: 'question',
-      viewerTurnsSince: 5,
-      viewerEngagement: 'available',
-    },
-  );
-
-  assert.strictEqual(
-    advanceAutonomousContext(current, {
-      action: 'silence',
-      topic: '別の話題',
-    }),
-    current,
-  );
-});
-
-test('viewer-intent age is bounded', () => {
-  const current = {
-    ...INITIAL_AUTONOMOUS_CONTEXT,
-    viewerIntent: 'statement' as const,
-    viewerTurnsSince: 100,
-  };
-
-  assert.equal(
-    advanceAutonomousContext(current, {
-      action: 'new_topic',
-      topic: '夜の話題',
-    }).viewerTurnsSince,
-    100,
-  );
 });

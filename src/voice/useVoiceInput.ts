@@ -35,6 +35,7 @@ export interface UseVoiceInputOptions {
   audioMode?: AudioLabMode;
   audioPreset?: ExhibitionAudioPreset;
   audioEndpointMs?: AudioEndpointMs;
+  audioInputDeviceId?: string;
   vadThreshold?: number;
   ttsPlaying?: boolean;
   onEvent?: (event: VoiceInputEvent) => void;
@@ -118,7 +119,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
 
     const configuredTransport =
       optionsRef.current.transport ?? runtimeConfig.voiceTransport;
-    const adapterConfig = `${audioMode}|${audioPreset}|${audioEndpointMs}|${configuredTransport}`;
+    const audioInputDeviceId = optionsRef.current.audioInputDeviceId?.trim() ?? '';
+    const adapterConfig = `${audioMode}|${audioPreset}|${audioEndpointMs}|${configuredTransport}|${audioInputDeviceId}`;
     const existingAdapter = adapterRef.current;
 
     const disposeAdapter = (adapter: VoiceInputAdapter) => {
@@ -250,6 +252,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         ? createRemotePcmVoiceAdapter({
             ...adapterOptions,
             audioMode,
+            audioInputDeviceId,
             audioPreset:
               optionsRef.current.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET,
             audioEndpointMs,
@@ -277,7 +280,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     return () => {
       scheduleAdapterDispose(adapter);
     };
-  }, [audioMode, audioPreset, audioEndpointMs]);
+  }, [audioMode, audioPreset, audioEndpointMs, options.audioInputDeviceId]);
 
   useEffect(() => {
     adapterRef.current?.setVadThreshold?.(vadThreshold);

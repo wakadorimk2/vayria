@@ -130,8 +130,9 @@ export type PerformerTrigger =
       text: string;
     }
   | {
-      kind: 'idle_tick';
-      elapsedMs: number;
+      kind: 'autonomous_candidate';
+      episodeId: string;
+      reasonIds: readonly string[];
     }
   | {
       kind: 'external_stimulus';
@@ -181,9 +182,6 @@ export interface PerformerProfile {
   motionExitBlendMs: number;
   motionPreparationTimeoutMs: number;
   postSpeechHoldMs: number;
-  autonomousInitialDelayMs: number;
-  autonomousMinDelayMs: number;
-  autonomousMaxDelayMs: number;
 }
 
 export type BehaviorStance =

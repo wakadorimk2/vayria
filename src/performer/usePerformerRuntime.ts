@@ -9,7 +9,6 @@ import {
   createInitialPerformerState,
   createPerformerStateContext,
   decayPerformerState,
-  getNextAutonomousDelay as getDelay,
   reducePerformanceResult,
   resolvePerformancePlan,
   schedulePerformancePlan,
@@ -36,7 +35,6 @@ export function usePerformerRuntime(
   const stateRef = useRef(state);
   const activePlanIdRef = useRef<string | null>(null);
   const planProfileRef = useRef(new Map<string, PerformerProfile>());
-  const autonomousStartedRef = useRef(false);
 
   const updateState = useCallback((nextState: PerformerState) => {
     stateRef.current = nextState;
@@ -101,7 +99,6 @@ export function usePerformerRuntime(
   const resetRuntime = useCallback(() => {
     planProfileRef.current.clear();
     activePlanIdRef.current = null;
-    autonomousStartedRef.current = false;
     updateState(createInitialPerformerState(Date.now(), profileRef.current));
   }, [updateState]);
 
@@ -134,31 +131,11 @@ export function usePerformerRuntime(
     [completePlan],
   );
 
-  const getNextAutonomousDelay = useCallback(
-    (contributions: readonly DirectionContribution[] = []) => {
-      const now = Date.now();
-      const aggregate = aggregateDirectionContributions(contributions, now);
-      const effectiveProfile = applyDirectionModifiers(
-        profileRef.current,
-        aggregate.modifiers,
-      );
-      const nextDelay = getDelay(
-        stateRef.current,
-        effectiveProfile,
-        !autonomousStartedRef.current,
-      );
-      autonomousStartedRef.current = true;
-      return nextDelay;
-    },
-    [],
-  );
-
   return {
     state,
     createPlan,
     completePlan,
     cancelPlan,
-    getNextAutonomousDelay,
     getPerformerStateContext,
     resetRuntime,
     setPhase,
