@@ -89,19 +89,6 @@ function Resolve-ReferenceFile {
   return $resolvedPath
 }
 
-function Assert-OpSession {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Command
-  )
-
-  & $Command whoami *> $null
-  $exitCode = $LASTEXITCODE
-  if ($exitCode -ne 0) {
-    throw '1Password is not signed in. Run op signin after enabling Desktop App Integration.'
-  }
-}
-
 $resolvedReferenceFile = Resolve-ReferenceFile
 $resolvedOpCommand = Resolve-OpCommand
 $resolvedCommand = Resolve-Executable -PathOrName $CommandPath -Description 'Target command'
@@ -112,8 +99,6 @@ if (-not [string]::IsNullOrWhiteSpace($CommandArguments)) {
     -not [string]::IsNullOrWhiteSpace($_)
   })
 }
-
-Assert-OpSession -Command $resolvedOpCommand
 
 $opArguments = @(
   'run'

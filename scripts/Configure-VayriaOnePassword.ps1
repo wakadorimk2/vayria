@@ -69,6 +69,12 @@ if ([string]::IsNullOrWhiteSpace($SecretReference)) {
 }
 
 $SecretReference = $SecretReference.Trim()
+if ($SecretReference.Length -ge 2 -and
+    ((($SecretReference.StartsWith('"')) -and ($SecretReference.EndsWith('"'))) -or
+     (($SecretReference.StartsWith("'")) -and ($SecretReference.EndsWith("'"))))) {
+  $SecretReference = $SecretReference.Substring(1, $SecretReference.Length - 2).Trim()
+}
+
 if (-not $SecretReference.StartsWith('op://', [StringComparison]::OrdinalIgnoreCase)) {
   throw 'The secret reference must start with op://.'
 }
