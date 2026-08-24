@@ -187,6 +187,48 @@ async function postEvent(
   return statusCode;
 }
 
+async function requestRoute(
+  handler: Middleware,
+  options: {
+    method: string;
+    url: string;
+    body?: object;
+  },
+): Promise<{ statusCode: number; body: string }> {
+  const requestBody = options.body === undefined ? [] : [JSON.stringify(options.body)];
+  const request = Object.assign(
+    Readable.from(requestBody),
+    {
+      method: options.method,
+      url: options.url,
+      headers: {},
+    },
+  ) as unknown as IncomingMessage;
+  let statusCode = 0;
+  let body = '';
+  let resolveEnded: () => void = () => undefined;
+  const ended = new Promise<void>((resolve) => {
+    resolveEnded = resolve;
+  });
+  const response = {
+    writeHead(status: number) {
+      statusCode = status;
+    },
+    end(chunk?: string | Buffer) {
+      if (chunk !== undefined) body += chunk.toString();
+      resolveEnded();
+    },
+  } as unknown as ServerResponse;
+  handler(request, response, () => undefined);
+  await Promise.race([
+    ended,
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, 100);
+    }),
+  ]);
+  return { statusCode, body };
+}
+
 function configurePlugin(
   config: Parameters<typeof localApiPlugin>[0],
   fake: FakeServer,
@@ -200,6 +242,81 @@ function configurePlugin(
   ) => void;
   configureServer(fake);
 }
+
+test('health endpoint reports local availability when the Internet probe fails', async () => {
+  const fake = createFakeServer();
+  configurePlugin(
+    {
+      mode: 'exhibition',
+      port: 5187,
+      httpsEnabled: true,
+      internetConnectivity: {
+        async check() {
+          return 'unavailable';
+        },
+        reset() {},
+      },
+      exhibitionNetwork: {
+        start() {},
+        stop() {},
+        getAccess() {
+          return {
+            hostname: 'vayria.local',
+            port: 5187,
+            scheme: 'https',
+            primaryUrl: 'https://vayria.local:5187',
+            fallbackUrl: 'https://192.168.137.2:5187',
+            fallbackTlsValid: true,
+            recommendedUrl: 'https://vayria.local:5187',
+            mdns: 'available',
+            hotspotIp: '192.168.137.2',
+          };
+        },
+        getHotspotAddress() {
+          return { interfaceName: 'Local Area Connection* 12', address: '192.168.137.2' };
+        },
+        getMdnsStatus() {
+          return 'available';
+        },
+      },
+    },
+    fake.server,
+  );
+  assert.equal(fake.handlers.length, 1);
+
+  const health = await requestRoute(fake.handlers[0], {
+    method: 'GET',
+    url: '/api/health',
+  });
+  assert.equal(health.statusCode, 200);
+  assert.deepEqual(JSON.parse(health.body), {
+    ok: true,
+    service: 'vayria',
+    mode: 'exhibition',
+    network: {
+      localNetwork: 'available',
+      internet: 'unavailable',
+    },
+    access: {
+      hostname: 'vayria.local',
+      port: 5187,
+      scheme: 'https',
+      primaryUrl: 'https://vayria.local:5187',
+      fallbackUrl: 'https://192.168.137.2:5187',
+      fallbackTlsValid: true,
+      recommendedUrl: 'https://vayria.local:5187',
+      mdns: 'available',
+      hotspotIp: '192.168.137.2',
+    },
+  });
+
+  const invalidMethod = await requestRoute(fake.handlers[0], {
+    method: 'POST',
+    url: '/api/health',
+    body: {},
+  });
+  assert.equal(invalidMethod.statusCode, 405);
+});
 
 test('exhibition local API captures safe events and keeps Playcheck raw priority', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vayria-local-api-capture-'));

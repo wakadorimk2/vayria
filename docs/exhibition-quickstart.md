@@ -11,6 +11,16 @@ npm run exhibition:start:op
 このコマンドは`%USERPROFILE%\.vayria\vayria-op.env`の`op://`参照を使います。
 API key本体をworktreeへ保存しません。
 
+展示時はWindows Mobile Hotspotを有効にします。
+標準URLは`https://vayria.local:5187/`です。
+接続確認やmDNSの問題がある場合は、次を実行します。
+
+```powershell
+npm run exhibition:check
+```
+
+診断で証明書SANへの適合が確認できた場合だけ、表示されたfallback IP URLを使用します。
+
 起動前に、AivisSpeech、CUDAランタイム、STT依存関係、環境設定、ポートを確認します。
 `npm install`、`uv sync`、環境ファイルのコピーは実行しません。
 

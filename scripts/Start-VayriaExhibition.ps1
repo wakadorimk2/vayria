@@ -47,6 +47,7 @@ $aivisBaseUrl = "http://$aivisHost`:$aivisPort"
 $aivisStartupTimeoutSeconds = 60
 $viteStartupTimeoutSeconds = 30
 $launcherMutexName = 'Vayria.ExhibitionLauncher'
+$networkHelperScript = Join-Path $PSScriptRoot 'VayriaExhibitionNetwork.ps1'
 
 function Resolve-RequiredCommand {
   param(
@@ -500,7 +501,16 @@ function Wait-ForListeningPort {
 
 function Test-ViteReady {
   $scheme = if ($script:effectiveHttps) { 'https' } else { 'http' }
-  foreach ($probeHost in @('127.0.0.1', 'localhost')) {
+  $probeHosts = @(
+    [Environment]::GetEnvironmentVariable('VAYRIA_EXHIBITION_BIND_HOST', 'Process')
+    [Environment]::GetEnvironmentVariable('VAYRIA_EXHIBITION_HOTSPOT_IP', 'Process')
+    '127.0.0.1'
+    'localhost'
+  ) |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+    Select-Object -Unique
+
+  foreach ($probeHost in $probeHosts) {
     $uri = "$($scheme)://$probeHost`:$($script:effectiveVitePort)/"
     $requestParameters = @{
       Uri         = $uri
@@ -1096,6 +1106,16 @@ $script:watcherProcess = $null
 $script:fallbackWindowProcesses = @()
 $script:cleanupStarted = $false
 $script:currentStage = 'Preflight'
+$environmentOverrideNames = @(
+  'VAYRIA_EXHIBITION_BIND_HOST'
+  'VAYRIA_EXHIBITION_HOTSPOT_IP'
+  'VAYRIA_EXHIBITION_INTERFACE_ALIAS'
+)
+$originalEnvironmentValues = @{}
+foreach ($name in $environmentOverrideNames) {
+  $originalEnvironmentValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+$environmentOverridesApplied = $false
 $exitCode = 1
 
 if ($SttWindow) {
@@ -1187,6 +1207,11 @@ if ($SttWindow) {
   exit $sttExitCode
 }
 
+if (-not (Test-Path -LiteralPath $networkHelperScript -PathType Leaf)) {
+  throw "Vayria exhibition network helper was not found: $networkHelperScript"
+}
+. $networkHelperScript
+
 try {
   Write-StageStart -Stage 'Preflight' -Message 'Checking commands, files, configuration, dependencies, ports, and runtime mode.'
   Test-Preflight -ResolvedWorktree $resolvedWorktree
@@ -1241,6 +1266,34 @@ try {
         throw 'Another Vayria exhibition launcher is already running.'
       }
 
+      $hotspot = Get-VayriaHotspotAdapter
+      if (-not $hotspot.Found) {
+        if ($hotspot.Status -eq 'permission-denied') {
+          throw "Windows could not read the hotspot adapter: $($hotspot.Error) Run the launcher from a PowerShell window with network-adapter read access."
+        }
+        throw "No usable Windows Mobile Hotspot adapter was found. Start-Process 'ms-settings:network-mobilehotspot', turn on SSID Vayria-Exhibition, and run npm run exhibition again."
+      }
+
+      $detectedHotspotIp = $hotspot.Adapter.IPv4
+      $detectedHotspotAlias = $hotspot.Adapter.Name
+      [Environment]::SetEnvironmentVariable(
+        'VAYRIA_EXHIBITION_BIND_HOST',
+        $detectedHotspotIp,
+        'Process'
+      )
+      [Environment]::SetEnvironmentVariable(
+        'VAYRIA_EXHIBITION_HOTSPOT_IP',
+        $detectedHotspotIp,
+        'Process'
+      )
+      [Environment]::SetEnvironmentVariable(
+        'VAYRIA_EXHIBITION_INTERFACE_ALIAS',
+        $detectedHotspotAlias,
+        'Process'
+      )
+      $environmentOverridesApplied = $true
+      Write-ControllerMessage "[OK][Network] Detected exhibition hotspot adapter '$detectedHotspotAlias' with IPv4 $detectedHotspotIp."
+
       $script:currentStage = 'Runtime'
       Write-StageStart -Stage 'Runtime' -Message 'Starting cleanup watcher and exhibition tabs.'
       Start-CleanupWatcher
@@ -1253,7 +1306,6 @@ try {
         Set-ReadyGate -Path $script:aivisReadyGateFile
         Write-ControllerMessage "[OK][AivisSpeech] Reusing healthy AivisSpeech Engine at $aivisBaseUrl."
       }
-
       Start-ExhibitionTabs -Roles $roles
       foreach ($role in $roles) {
         Wait-ForRoleProcess -RoleSlug (Get-RoleSlug -Role $role)
@@ -1324,6 +1376,18 @@ catch {
 finally {
   if (-not [string]::IsNullOrWhiteSpace($script:sessionDirectory)) {
     Stop-SessionProcesses
+  }
+
+  if ($environmentOverridesApplied) {
+    foreach ($name in $environmentOverrideNames) {
+      $originalValue = $originalEnvironmentValues[$name]
+      if ($null -eq $originalValue) {
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+      }
+      else {
+        [Environment]::SetEnvironmentVariable($name, $originalValue, 'Process')
+      }
+    }
   }
 }
 

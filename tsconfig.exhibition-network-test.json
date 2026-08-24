@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/exhibition-network-test",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/exhibition-network-test.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "server/certificateSan.ts",
+    "server/exhibitionNetwork.ts",
+    "server/internetConnectivity.ts",
+    "src/networkState.ts",
+    "scripts/exhibition-network.test.ts"
+  ]
+}

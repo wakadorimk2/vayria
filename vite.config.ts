@@ -4,6 +4,11 @@ import { localApiPlugin } from './server/localApi';
 import { resolveOpenAiApiKey } from './server/secretConfig';
 import { resolveHttpsOptions } from './server/httpsConfig';
 import { voiceStreamProxyPlugin } from './server/voiceStreamProxy';
+import {
+  createExhibitionNetworkRuntime,
+  exhibitionNetworkPlugin,
+} from './server/exhibitionNetwork';
+import { createInternetConnectivityProbe } from './server/internetConnectivity';
 
 const DEFAULT_DEV_HOST = '127.0.0.1';
 const DEFAULT_DEV_PORT = 5187;
@@ -28,14 +33,42 @@ function readDevPort(value: string | undefined, variableName: string): number {
   return port;
 }
 
+function readBooleanEnvironment(
+  value: string | undefined,
+  defaultValue: boolean,
+): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return defaultValue;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  throw new Error('VAYRIA_MDNS_ENABLED must be a boolean value.');
+}
+
+function readAppMode(value: string | undefined, viteMode: string):
+  | 'local'
+  | 'exhibition'
+  | 'public' {
+  const normalized = value?.trim();
+  if (normalized === 'local' || normalized === 'exhibition' || normalized === 'public') {
+    return normalized;
+  }
+  return viteMode === 'exhibition' ? 'exhibition' : 'local';
+}
+
 export default defineConfig(({ mode }) => {
   const serverEnvironment = loadEnv(mode, process.cwd(), '');
+  const appMode = readAppMode(serverEnvironment.VITE_APP_MODE, mode);
+  const processExhibitionBindHost =
+    appMode === 'exhibition'
+      ? process.env.VAYRIA_EXHIBITION_BIND_HOST?.trim()
+      : undefined;
   const devHost =
+    processExhibitionBindHost ||
     readEnvironmentValue(
-      serverEnvironment,
-      'VAYRIA_BIND_HOST',
-      'WILDCARD_BIND_HOST',
-    ) || DEFAULT_DEV_HOST;
+        serverEnvironment,
+        'VAYRIA_BIND_HOST',
+        'WILDCARD_BIND_HOST',
+      ) || DEFAULT_DEV_HOST;
   const portVariableName = serverEnvironment.VAYRIA_PORT?.trim()
     ? 'VAYRIA_PORT'
     : 'WILDCARD_PORT';
@@ -43,31 +76,64 @@ export default defineConfig(({ mode }) => {
     readEnvironmentValue(serverEnvironment, 'VAYRIA_PORT', 'WILDCARD_PORT'),
     portVariableName,
   );
+  const httpsOptions = resolveHttpsOptions(serverEnvironment);
+  const internetConnectivity = createInternetConnectivityProbe();
+  const exhibitionNetwork =
+    appMode === 'exhibition'
+      ? createExhibitionNetworkRuntime({
+          mdnsEnabled: readBooleanEnvironment(
+            process.env.VAYRIA_MDNS_ENABLED?.trim() ||
+              serverEnvironment.VAYRIA_MDNS_ENABLED,
+            true,
+          ),
+          preferredIp:
+            process.env.VAYRIA_EXHIBITION_HOTSPOT_IP?.trim() || undefined,
+          preferredInterface:
+            process.env.VAYRIA_EXHIBITION_INTERFACE_ALIAS?.trim() || undefined,
+          httpsCertificate: httpsOptions?.cert,
+        })
+      : undefined;
+
+  const plugins = [
+    react(),
+    localApiPlugin({
+      openAiApiKey: resolveOpenAiApiKey(),
+      aivisBaseUrl: serverEnvironment.AIVIS_BASE_URL,
+      aivisSpeedScale: serverEnvironment.AIVIS_SPEED_SCALE,
+      aivisPitchScale: serverEnvironment.AIVIS_PITCH_SCALE,
+      aivisIntonationScale: serverEnvironment.AIVIS_INTONATION_SCALE,
+      aivisTempoDynamicsScale:
+        serverEnvironment.AIVIS_TEMPO_DYNAMICS_SCALE,
+      playcheckRoot: serverEnvironment.VAYRIA_PLAYCHECK_ROOT,
+      exhibitionCaptureEnabled: appMode === 'exhibition',
+      mode: appMode,
+      port: devPort,
+      httpsEnabled: Boolean(httpsOptions),
+      exhibitionNetwork,
+      internetConnectivity,
+    }),
+    voiceStreamProxyPlugin(
+      serverEnvironment.VAYRIA_STT_WS_URL?.trim() ||
+        'ws://127.0.0.1:8787/stream',
+    ),
+  ];
+  if (exhibitionNetwork) {
+    plugins.push(
+      exhibitionNetworkPlugin(exhibitionNetwork, {
+        bindHost: devHost,
+        port: devPort,
+        httpsEnabled: Boolean(httpsOptions),
+      }),
+    );
+  }
 
   return {
-    plugins: [
-      react(),
-      localApiPlugin({
-        openAiApiKey: resolveOpenAiApiKey(),
-        aivisBaseUrl: serverEnvironment.AIVIS_BASE_URL,
-        aivisSpeedScale: serverEnvironment.AIVIS_SPEED_SCALE,
-        aivisPitchScale: serverEnvironment.AIVIS_PITCH_SCALE,
-        aivisIntonationScale: serverEnvironment.AIVIS_INTONATION_SCALE,
-        aivisTempoDynamicsScale:
-          serverEnvironment.AIVIS_TEMPO_DYNAMICS_SCALE,
-        playcheckRoot: serverEnvironment.VAYRIA_PLAYCHECK_ROOT,
-        exhibitionCaptureEnabled: mode === 'exhibition',
-      }),
-      voiceStreamProxyPlugin(
-        serverEnvironment.VAYRIA_STT_WS_URL?.trim() ||
-          'ws://127.0.0.1:8787/stream',
-      ),
-    ],
+    plugins,
     server: {
       host: devHost,
       port: devPort,
       strictPort: true,
-      https: resolveHttpsOptions(serverEnvironment),
+      https: httpsOptions,
     },
     build: {
       // AudioWorklet modules must be served as JavaScript assets, not data URLs.
