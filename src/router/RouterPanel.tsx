@@ -185,7 +185,7 @@ export function RouterPanel({
           </div>
 
           <label className="conversation-router-panel__field">
-            <span>Remote PCM入力</span>
+            <span>Remote PCM入力（Voicemeeter B1など）</span>
             <select
               value={selectedInputDeviceId}
               disabled={isVoiceInputEnabled}
@@ -201,6 +201,10 @@ export function RouterPanel({
           </label>
           <p className="conversation-router-panel__hint">
             デバイスIDはローカル設定だけに保持します。JSONLには保存しません。
+          </p>
+          <p className="conversation-router-panel__hint">
+            Voicemeeterを使う場合は、マイクとChatGPT音声を送ったB1の録音出力を選びます。
+            Vayria自身の出力はB1へ送りません。
           </p>
 
           <label className="conversation-router-panel__field">

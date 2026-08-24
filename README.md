@@ -77,6 +77,46 @@ PythonサービスはWebRTC VADとfaster-whisperを実行します。
 Audio Labを有効にした開発調査では、raw transcriptを調査ログへ保存します。
 会話には認識された最終文字列だけを渡します。
 
+### Voicemeeterを使う音声入力
+
+Voicemeeterを使う場合は、ブラウザー内で2系統をミックスしません。
+VoicemeeterでマイクとChatGPT音声を混ぜ、1つの録音デバイスとしてVayriaへ送ります。
+
+次の経路を設定します。
+
+1. ウェブマイクをVoicemeeterの物理入力へ接続します。
+2. ChatGPT音声をVoicemeeterの仮想入力へ接続します。
+3. マイクとChatGPT音声の両方でB1を有効にします。
+4. Vayria自身の音声ではB1を無効にします。
+5. ブラウザーの入力デバイスへ、B1の録音出力を設定します。
+
+録音デバイス名は環境により異なります。
+`Voicemeeter Output`または`Voicemeeter Out B1`などの名前を選びます。
+デバイス名を環境変数やコードへハードコードしません。
+
+開発用Routerで選ぶ場合は、次のURLを使います。
+
+```text
+http://127.0.0.1:5187/?router=1&audioLab=1
+```
+
+`Remote PCM入力（Voicemeeter B1など）`でB1の録音出力を選びます。
+音声入力を開始した後はデバイスを変更できません。
+変更時は、いったんマイク入力を停止してください。
+
+Vayria音声をB1へ戻すと、Vayria自身の発話をSTTが再認識する可能性があります。
+自己認識ループを防ぐため、Vayria音声はB1へ送らないでください。
+
+展示音声入力は、Python STTが`ws://127.0.0.1:8787/stream`で待ち受ける必要があります。
+次のコマンドはPython STTを起動してから展示フロントを起動します。
+
+```powershell
+npm run exhibition:start
+```
+
+マイク、ChatGPT音声、Vayria音声を個別に再生し、Vayriaの音声メーターで経路を確認します。
+音声メーターはマイクとChatGPT音声で動き、Vayria自身の音声では動かない状態が期待値です。
+
 音声入力の比較調査は、開発サーバーを起動してURLへ`?audioLab=1`を追加します。
 Audio LabのMode A/B/C/D、固定ケース、JSONLログは
 [`docs/evaluation/voice-audio-lab.md`](docs/evaluation/voice-audio-lab.md)を参照してください。

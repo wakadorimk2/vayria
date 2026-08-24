@@ -110,7 +110,11 @@ test('take floor pauses autonomous processing and let continue uses cooldown', (
 test('Router records turns, interruption decisions, and backchannel repetition without transcript', () => {
   const router = createConversationRouter({ sessionId: 'rt-metrics-test', now: 1_000 });
   router.observe({ type: 'voice_input', event: 'speech_started' }, 1_100);
-  router.observe({ type: 'voice_input', event: 'utterance_finalized' }, 1_250);
+  const finalized = router.observe(
+    { type: 'voice_input', event: 'utterance_finalized' },
+    1_250,
+  );
+  assert.deepEqual(readRouterEvent({ record: finalized.event }), finalized.event);
   const interruption = router.observe(
     { type: 'barge_in_decision', accepted: true },
     1_250,

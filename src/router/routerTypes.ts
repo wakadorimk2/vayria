@@ -192,6 +192,7 @@ export function isRouterReason(value: unknown): value is string {
     [
       'human_take_floor',
       'human_stop_vayria',
+      'human_utterance_finalized',
       'gpt_audio_to_vayria_gate_closed',
       'resume_after_cooldown',
       'router_reset',
