@@ -52,6 +52,7 @@ export class AttentionStateController {
     const cameraActive = isCameraActive(input.cameraEnabled, tracking);
     const cameraReacquiring =
       input.cameraEnabled && tracking?.state === 'Reacquire';
+    const priorityHint = readPriorityHint(input.attention);
 
     if (
       input.explicitTargetActive &&
@@ -82,15 +83,24 @@ export class AttentionStateController {
 
     if (this.state === 'AttendViewer') {
       if (this.viewerSource === 'conversation') {
+        if (priorityHint) {
+          return this.beginPriorityHint(priorityHint, input.attention);
+        }
         return this.beginRecovery(now);
       }
       if (cameraActive) {
         return this.createViewerFrame(input.attention, tracking, 'camera');
       }
+      if (priorityHint) {
+        return this.beginPriorityHint(priorityHint, input.attention);
+      }
       return this.beginRecovery(now);
     }
 
     if (this.state === 'AttendTarget' || this.state === 'Thinking') {
+      if (priorityHint) {
+        return this.beginPriorityHint(priorityHint, input.attention);
+      }
       return this.beginRecovery(now);
     }
 
@@ -100,6 +110,9 @@ export class AttentionStateController {
         this.viewerSource = 'camera';
         this.clearRecovery();
         return this.createViewerFrame(input.attention, tracking, 'camera');
+      }
+      if (priorityHint) {
+        return this.beginPriorityHint(priorityHint, input.attention);
       }
       if (
         this.recoveryStartedAt !== null &&
@@ -120,13 +133,8 @@ export class AttentionStateController {
       return this.createViewerFrame(input.attention, tracking, 'camera');
     }
 
-    const priorityHint = readPriorityHint(input.attention);
     if (this.state === 'Idle' && priorityHint) {
-      this.clearCandidate();
-      this.clearRecovery();
-      this.state = 'AttendTarget';
-      this.viewerSource = null;
-      return this.createPriorityHintFrame(priorityHint, input.attention);
+      return this.beginPriorityHint(priorityHint, input.attention);
     }
 
     const cameraCandidate =
@@ -166,6 +174,17 @@ export class AttentionStateController {
       this.recoveryStartedAt = now;
     }
     return this.createRecoverFrame();
+  }
+
+  private beginPriorityHint(
+    hint: AttentionPriorityHint,
+    attention: Attention,
+  ): AttentionStateFrame {
+    this.clearCandidate();
+    this.clearRecovery();
+    this.state = 'AttendTarget';
+    this.viewerSource = null;
+    return this.createPriorityHintFrame(hint, attention);
   }
 
   private createIdleFrame(): AttentionStateFrame {

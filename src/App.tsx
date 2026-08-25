@@ -434,6 +434,7 @@ export default function App() {
   const [spatialTargetRegistry] = useState(
     () => new SpatialTargetRegistry(),
   );
+  const spatialTargetDisposeTimerRef = useRef<number | null>(null);
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, resetTurn, zones } = cardGame;
   const performer = usePerformerRuntime();
@@ -598,13 +599,25 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (spatialTargetDisposeTimerRef.current !== null) {
+      window.clearTimeout(spatialTargetDisposeTimerRef.current);
+      spatialTargetDisposeTimerRef.current = null;
+    }
     const controller = dragAttentionControllerRef.current;
     return () => {
       controller.end();
       clearCardAttentionTimers();
-      spatialTargetRegistry.dispose();
+      const disposeTimerId = window.setTimeout(() => {
+        if (spatialTargetDisposeTimerRef.current !== disposeTimerId) return;
+        spatialTargetDisposeTimerRef.current = null;
+        spatialTargetRegistry.dispose();
+      }, 0);
+      spatialTargetDisposeTimerRef.current = disposeTimerId;
     };
-  }, [clearCardAttentionTimers, spatialTargetRegistry]);
+  }, [
+    clearCardAttentionTimers,
+    spatialTargetRegistry,
+  ]);
 
   const readAttention: AttentionReader = useCallback(() => {
     const logicalAttention = logicalAttentionRef.current;

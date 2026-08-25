@@ -26,9 +26,33 @@ export interface SpatialTargetSnapshot {
   readonly capturedAt: number;
 }
 
+export const SPATIAL_TARGET_INVALID_GRACE_MS = 100;
+
+export type SpatialTargetInvalidReason =
+  | 'disconnected'
+  | 'invalid-rect';
+
+export type SpatialTargetResolutionReason =
+  | 'valid'
+  | 'last-valid-grace'
+  | 'default-fallback'
+  | 'missing';
+
+export interface SpatialTargetResolution {
+  readonly requested: SpatialTargetSelection;
+  readonly snapshot: SpatialTargetSnapshot | null;
+  readonly valid: boolean;
+  readonly usingLastValid: boolean;
+  readonly reason: SpatialTargetResolutionReason;
+  readonly invalidReason: SpatialTargetInvalidReason | null;
+  readonly invalidSince: number | null;
+}
+
 interface CachedTransientTarget {
-  readonly element: SpatialTargetElement;
-  readonly snapshot: SpatialTargetSnapshot;
+  element: SpatialTargetElement;
+  snapshot: SpatialTargetSnapshot;
+  invalidSince: number | null;
+  invalidReason: SpatialTargetInvalidReason | null;
 }
 
 /**
@@ -147,15 +171,13 @@ export class SpatialTargetRegistry {
   ): boolean {
     if (this.disposed) return false;
     if (element === null || !isConnected(element)) {
-      this.disconnectTransientObserver(kind);
-      this.transientTargets.delete(kind);
+      this.clearTransient(kind);
       return false;
     }
 
     const point = readElementCenter(element);
     if (point === null) {
-      this.disconnectTransientObserver(kind);
-      this.transientTargets.delete(kind);
+      this.clearTransient(kind);
       return false;
     }
 
@@ -170,34 +192,38 @@ export class SpatialTargetRegistry {
         point,
         capturedAt: readNow(),
       },
+      invalidSince: null,
+      invalidReason: null,
     });
     return true;
   }
 
-  refreshTransient(kind: SpatialTargetKind): boolean {
+  refreshTransient(kind: SpatialTargetKind, now = readNow()): boolean {
     if (this.disposed) return false;
     const cached = this.transientTargets.get(kind);
-    if (!cached || !isConnected(cached.element)) {
-      this.disconnectTransientObserver(kind);
-      this.transientTargets.delete(kind);
+    if (!cached) {
+      return false;
+    }
+
+    const timestamp = Number.isFinite(now) ? now : readNow();
+    if (!isConnected(cached.element)) {
+      this.markTransientInvalid(cached, timestamp, 'disconnected');
       return false;
     }
 
     const point = readElementCenter(cached.element);
     if (point === null) {
-      this.disconnectTransientObserver(kind);
-      this.transientTargets.delete(kind);
+      this.markTransientInvalid(cached, timestamp, 'invalid-rect');
       return false;
     }
 
-    this.transientTargets.set(kind, {
-      element: cached.element,
-      snapshot: {
-        selection: { kind, anchor: 'transient' },
-        point,
-        capturedAt: readNow(),
-      },
-    });
+    cached.snapshot = {
+      selection: { kind, anchor: 'transient' },
+      point,
+      capturedAt: timestamp,
+    };
+    cached.invalidSince = null;
+    cached.invalidReason = null;
     return true;
   }
 
@@ -214,20 +240,91 @@ export class SpatialTargetRegistry {
   }
 
   resolve(selection: SpatialTargetSelection): SpatialTargetSnapshot | null {
-    if (this.disposed) return null;
+    return this.resolveWithStatus(selection).snapshot;
+  }
 
-    if (selection.anchor === 'transient') {
-      const transient = this.transientTargets.get(selection.kind);
-      if (transient && isConnected(transient.element)) {
-        return transient.snapshot;
+  resolveWithStatus(
+    selection: SpatialTargetSelection,
+    now = readNow(),
+  ): SpatialTargetResolution {
+    if (this.disposed) {
+      return createResolution(
+        selection,
+        null,
+        false,
+        false,
+        'missing',
+        null,
+        null,
+      );
+    }
+
+    const timestamp = Number.isFinite(now) ? now : readNow();
+    if (selection.anchor === 'default') {
+      return createResolution(
+        selection,
+        this.defaultTargets.get(selection.kind) ?? null,
+        this.defaultTargets.has(selection.kind),
+        false,
+        this.defaultTargets.has(selection.kind) ? 'valid' : 'missing',
+        null,
+        null,
+      );
+    }
+
+    const transient = this.transientTargets.get(selection.kind);
+    if (transient) {
+      if (transient.invalidSince === null && !isConnected(transient.element)) {
+        this.markTransientInvalid(transient, timestamp, 'disconnected');
       }
-      if (transient) {
-        this.disconnectTransientObserver(selection.kind);
-        this.transientTargets.delete(selection.kind);
+
+      if (transient.invalidSince === null) {
+        return createResolution(
+          selection,
+          transient.snapshot,
+          true,
+          false,
+          'valid',
+          null,
+          null,
+        );
+      }
+
+      if (
+        timestamp - transient.invalidSince <=
+        SPATIAL_TARGET_INVALID_GRACE_MS
+      ) {
+        return createResolution(
+          selection,
+          transient.snapshot,
+          false,
+          true,
+          'last-valid-grace',
+          transient.invalidReason,
+          transient.invalidSince,
+        );
       }
     }
 
-    return this.defaultTargets.get(selection.kind) ?? null;
+    const defaultSnapshot = this.defaultTargets.get(selection.kind) ?? null;
+    return createResolution(
+      selection,
+      defaultSnapshot,
+      defaultSnapshot !== null,
+      false,
+      defaultSnapshot !== null ? 'default-fallback' : 'missing',
+      transient?.invalidReason ?? null,
+      transient?.invalidSince ?? null,
+    );
+  }
+
+  private markTransientInvalid(
+    cached: CachedTransientTarget,
+    now: number,
+    reason: SpatialTargetInvalidReason,
+  ): void {
+    cached.invalidSince ??= now;
+    cached.invalidReason = reason;
   }
 
   private observeDefault(
@@ -263,6 +360,26 @@ export class SpatialTargetRegistry {
     observer.disconnect();
     this.transientObservers.delete(kind);
   }
+}
+
+function createResolution(
+  requested: SpatialTargetSelection,
+  snapshot: SpatialTargetSnapshot | null,
+  valid: boolean,
+  usingLastValid: boolean,
+  reason: SpatialTargetResolutionReason,
+  invalidReason: SpatialTargetInvalidReason | null,
+  invalidSince: number | null,
+): SpatialTargetResolution {
+  return {
+    requested,
+    snapshot,
+    valid,
+    usingLastValid,
+    reason,
+    invalidReason,
+    invalidSince,
+  };
 }
 
 function isConnected(element: SpatialTargetElement): boolean {

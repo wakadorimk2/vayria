@@ -305,6 +305,90 @@ test('viewer engagement and explicit chat preempt a drag priority hint', () => {
   });
 });
 
+test('an active priority hint keeps game ownership through release and resumes after overrides', () => {
+  const controller = new AttentionStateController();
+  const hint = createAttention({
+    priorityHint: {
+      target: 'game',
+      salience: 0.85,
+      spatialTarget: { kind: 'game', anchor: 'transient' },
+    },
+  });
+
+  const acquired = controller.update(
+    createInput({
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        target: 'game',
+        strength: 1,
+        spatialTarget: { kind: 'game', anchor: 'transient' },
+      }),
+      explicitTargetActive: true,
+    }),
+  );
+  assert.equal(acquired.target, 'game');
+
+  const released = controller.update(
+    createInput({
+      now: 1,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(released.state, 'AttendTarget');
+  assert.equal(released.target, 'game');
+  assert.notEqual(released.state, 'Recover');
+
+  const viewer = controller.update(
+    createInput({
+      now: 2,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+      viewerEngaged: true,
+    }),
+  );
+  assert.equal(viewer.target, 'viewer');
+
+  const resumedAfterViewer = controller.update(
+    createInput({
+      now: 3,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(resumedAfterViewer.target, 'game');
+
+  const chat = controller.update(
+    createInput({
+      now: 4,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        target: 'chat',
+        strength: 1,
+        spatialTarget: { kind: 'chat', anchor: 'default' },
+        priorityHint: hint.priorityHint,
+      }),
+      explicitTargetActive: true,
+    }),
+  );
+  assert.equal(chat.target, 'chat');
+
+  const resumedAfterChat = controller.update(
+    createInput({
+      now: 5,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(resumedAfterChat.target, 'game');
+});
+
 test('priority hint reselects the card after the existing recovery phase', () => {
   const controller = new AttentionStateController();
   const hint = createAttention({

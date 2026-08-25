@@ -2,10 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PerspectiveCamera, Vector3 } from 'three';
 import {
+  SPATIAL_TARGET_INVALID_GRACE_MS,
   SpatialTargetRegistry,
   type SpatialTargetElement,
 } from '../src/attention/spatialTargetRegistry.js';
 import { SpatialTargetBridge } from '../src/avatar/spatialTargetBridge.js';
+import {
+  SPATIAL_TARGET_WORLD_GRACE_MS,
+  SpatialTargetWorldCache,
+} from '../src/avatar/spatialTargetContinuity.js';
 
 function createElement(
   left: number,
@@ -61,10 +66,75 @@ test('a disconnected transient element resolves to the cached default anchor', (
   registry.captureTransient('game', transientElement);
   transientElement.isConnected = false;
 
-  const snapshot = registry.resolve({ kind: 'game', anchor: 'transient' });
+  const grace = registry.resolveWithStatus(
+    { kind: 'game', anchor: 'transient' },
+    50,
+  );
+  assert.equal(grace.valid, false);
+  assert.equal(grace.usingLastValid, true);
+  assert.equal(grace.reason, 'last-valid-grace');
+  assert.deepEqual(grace.snapshot?.point, { x: 450, y: 50 });
 
-  assert.equal(snapshot?.selection.anchor, 'default');
-  assert.deepEqual(snapshot?.point, { x: 50, y: 50 });
+  const fallback = registry.resolveWithStatus(
+    { kind: 'game', anchor: 'transient' },
+    50 + SPATIAL_TARGET_INVALID_GRACE_MS + 1,
+  );
+
+  assert.equal(fallback.valid, true);
+  assert.equal(fallback.reason, 'default-fallback');
+  assert.equal(fallback.snapshot?.selection.anchor, 'default');
+  assert.deepEqual(fallback.snapshot?.point, { x: 50, y: 50 });
+});
+
+test('an invalid transient rect keeps last valid data until it recovers or expires', () => {
+  const registry = new SpatialTargetRegistry();
+  const defaultElement = createElement(0, 0, 100, 100);
+  const transientElement = createElement(400, 300, 100, 200);
+
+  registry.registerDefault('game', defaultElement);
+  registry.captureTransient('game', transientElement);
+  transientElement.rect.width = 0;
+
+  assert.equal(registry.refreshTransient('game', 0), false);
+  const grace = registry.resolveWithStatus(
+    { kind: 'game', anchor: 'transient' },
+    40,
+  );
+  assert.equal(grace.reason, 'last-valid-grace');
+  assert.deepEqual(grace.snapshot?.point, { x: 450, y: 400 });
+
+  transientElement.rect.width = 100;
+  assert.equal(registry.refreshTransient('game', 80), true);
+  assert.equal(
+    registry.resolveWithStatus({ kind: 'game', anchor: 'transient' }, 80)
+      .reason,
+    'valid',
+  );
+
+  transientElement.rect.width = 0;
+  assert.equal(registry.refreshTransient('game', 80), false);
+  const fallback = registry.resolveWithStatus(
+    { kind: 'game', anchor: 'transient' },
+    80 + SPATIAL_TARGET_INVALID_GRACE_MS + 1,
+  );
+  assert.equal(fallback.reason, 'default-fallback');
+});
+
+test('clearTransient removes the stale transient before the default fallback', () => {
+  const registry = new SpatialTargetRegistry();
+  const defaultElement = createElement(0, 0, 100, 100);
+  const transientElement = createElement(400, 300, 100, 200);
+
+  registry.registerDefault('game', defaultElement);
+  registry.captureTransient('game', transientElement);
+  registry.clearTransient('game');
+
+  const resolution = registry.resolveWithStatus({
+    kind: 'game',
+    anchor: 'transient',
+  });
+  assert.equal(resolution.reason, 'default-fallback');
+  assert.equal(resolution.usingLastValid, false);
 });
 
 test('refreshDefault reads a moved default element only after layout invalidation', () => {
@@ -157,4 +227,47 @@ test('bridge clamps head bias and rejects invalid stage geometry', () => {
     }),
     null,
   );
+});
+
+test('world target cache holds target and head bias across a short bridge failure', () => {
+  const cache = new SpatialTargetWorldCache();
+  const liveTarget = new Vector3(1, 2, 3);
+  const live = {
+    target: liveTarget,
+    headBias: { yawDegrees: 4, pitchDegrees: -2 },
+  };
+
+  const valid = cache.resolve({
+    key: 'game:transient',
+    now: 0,
+    live,
+    liveValid: true,
+    liveReason: 'valid',
+    invalidSince: null,
+  });
+  assert.equal(valid.valid, true);
+  assert.deepEqual(valid.target?.toArray(), [1, 2, 3]);
+
+  const grace = cache.resolve({
+    key: 'game:transient',
+    now: 50,
+    live: null,
+    liveValid: false,
+    liveReason: 'valid',
+    invalidSince: 50,
+  });
+  assert.equal(grace.valid, false);
+  assert.equal(grace.usingLastValid, true);
+  assert.deepEqual(grace.target?.toArray(), [1, 2, 3]);
+  assert.deepEqual(grace.headBias, { yawDegrees: 4, pitchDegrees: -2 });
+
+  const expired = cache.resolve({
+    key: 'game:transient',
+    now: 50 + SPATIAL_TARGET_WORLD_GRACE_MS + 1,
+    live: null,
+    liveValid: false,
+    liveReason: 'valid',
+    invalidSince: 50,
+  });
+  assert.equal(expired.target, null);
 });

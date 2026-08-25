@@ -21,6 +21,7 @@
     "src/attention/spatialTargetRegistry.ts",
     "src/avatar/attentionTarget.ts",
     "src/avatar/spatialTargetBridge.ts",
+    "src/avatar/spatialTargetContinuity.ts",
     "src/avatar/lifeDynamics.ts",
     "src/avatar/blinkExpressions.ts",
     "src/avatar/lifeDynamicsBlinkAdapter.ts",

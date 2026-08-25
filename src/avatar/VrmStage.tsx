@@ -45,6 +45,7 @@ import { LifeDynamicsBlinkAdapter } from './lifeDynamicsBlinkAdapter';
 import { LifeDynamicsLifeAdapter } from './lifeDynamicsLifeAdapter';
 import { LifeDynamicsOrientingAdapter } from './lifeDynamicsOrientingAdapter';
 import { SpatialTargetBridge } from './spatialTargetBridge';
+import { SpatialTargetWorldCache } from './spatialTargetContinuity';
 import type {
   SpatialTargetRect,
   SpatialTargetRegistry,
@@ -87,6 +88,32 @@ function readStageRect(element: HTMLElement): SpatialTargetRect {
     top: rect.top,
     width: rect.width,
     height: rect.height,
+  };
+}
+
+function formatSpatialTargetSelection(
+  selection: SpatialTargetSelection | null,
+): string {
+  return selection === null
+    ? 'none'
+    : `${selection.kind}:${selection.anchor}`;
+}
+
+function toDebugWorld(
+  target: Vector3 | null,
+): { x: number; y: number; z: number } | null {
+  if (
+    target === null ||
+    !Number.isFinite(target.x) ||
+    !Number.isFinite(target.y) ||
+    !Number.isFinite(target.z)
+  ) {
+    return null;
+  }
+  return {
+    x: target.x,
+    y: target.y,
+    z: target.z,
   };
 }
 
@@ -197,6 +224,14 @@ interface LifeDynamicsPocOptions {
   profileId: ReturnType<typeof resolveLifeDynamicsProfileId>;
 }
 
+interface SpatialTargetDebugSnapshot {
+  readonly source: string;
+  readonly world: { x: number; y: number; z: number } | null;
+  readonly valid: boolean;
+  readonly owner: string;
+  readonly releaseReason: string;
+}
+
 function getLifeDynamicsPocOptions(): LifeDynamicsPocOptions {
   if (typeof window === 'undefined') {
     return { enabled: false, debug: false, profileId: '1.0x' };
@@ -254,6 +289,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const [expressionWarning, setExpressionWarning] = useState('');
     const [lifeDynamicsDebugSnapshot, setLifeDynamicsDebugSnapshot] =
       useState<LifeDynamicsSnapshot | null>(null);
+    const [spatialTargetDebugSnapshot, setSpatialTargetDebugSnapshot] =
+      useState<SpatialTargetDebugSnapshot | null>(null);
     const loadedVrmRef = useRef<VRM | null>(null);
     const lifeDynamicsRef = useRef<LifeDynamics | null>(null);
     const lifeDynamicsBlinkAdapterRef =
@@ -726,6 +763,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       const attentionEngagementController =
         new AttentionEngagementController();
       const spatialTargetBridge = new SpatialTargetBridge();
+      const spatialTargetWorldCache = new SpatialTargetWorldCache();
       const viewerCameraForward = new Vector3();
       const viewerCameraRight = new Vector3();
       const viewerCameraUp = new Vector3();
@@ -1004,11 +1042,44 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           let spatialHeadPitchBias = 0;
           let resolvedSpatialTargetKey: string | null = null;
           let performanceGazeTarget: Vector3 | null = null;
+          let spatialTargetDebug: SpatialTargetDebugSnapshot = {
+            source:
+              attentionFrame.target === 'viewer'
+                ? 'viewer'
+                : attentionFrame.target === 'none'
+                  ? 'none'
+                  : `${attentionFrame.target}:default`,
+            world: null,
+            valid: false,
+            owner:
+              attentionFrame.target === 'none'
+                ? 'none'
+                : attentionFrame.target,
+            releaseReason:
+              attentionFrame.target === 'none' ? 'released' : 'none',
+          };
+          const hasSpatialHint =
+            attention.priorityHint?.spatialTarget?.kind === 'game' ||
+            attention.priorityHint?.spatialTarget?.kind === 'chat';
+          const hasSpatialOwnership =
+            attentionFrame.target === 'game' ||
+            attentionFrame.target === 'chat' ||
+            hasSpatialHint;
+          if (!hasSpatialOwnership) {
+            spatialTargetWorldCache.clear();
+          }
           if (attentionFrame.state === 'Thinking') {
             idleGazeController?.getNeutralTarget(thinkingGazeTarget);
             thinkingGazeTarget.x += gazeModelHeight * 0.035;
             thinkingGazeTarget.y += gazeModelHeight * 0.018;
             performanceGazeTarget = thinkingGazeTarget;
+            spatialTargetDebug = {
+              source: 'thinking',
+              world: toDebugWorld(performanceGazeTarget),
+              valid: true,
+              owner: 'none',
+              releaseReason: 'none',
+            };
           } else if (attentionFrame.state === 'AttendViewer') {
             if (visualAttention.eyePosition && loadedVrm.lookAt) {
               camera.updateMatrixWorld(true);
@@ -1036,6 +1107,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             } else if (viewerEngaged) {
               performanceGazeTarget = camera.position;
             }
+            spatialTargetDebug = {
+              source: 'viewer',
+              world: toDebugWorld(performanceGazeTarget),
+              valid: performanceGazeTarget !== null,
+              owner: 'viewer',
+              releaseReason:
+                performanceGazeTarget === null ? 'camera-invalid' : 'none',
+            };
           } else if (attentionFrame.state === 'AttendTarget') {
             const spatialSelection: SpatialTargetSelection | null =
               attentionFrame.target === 'game' ||
@@ -1045,15 +1124,21 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   : { kind: attentionFrame.target, anchor: 'default' }
                 : null;
             if (spatialSelection) {
-              resolvedSpatialTargetKey = `${spatialSelection.kind}:${spatialSelection.anchor}`;
+              const requestedSpatialTargetKey = formatSpatialTargetSelection(
+                spatialSelection,
+              );
+              resolvedSpatialTargetKey = requestedSpatialTargetKey;
               camera.updateMatrixWorld(true);
               if (loadedVrm.lookAt) {
                 loadedVrm.lookAt.getLookAtWorldPosition(lookAtWorldPosition);
               } else {
                 lookAtWorldPosition.copy(lifeDynamicsNeutralTarget);
               }
-              const spatialSnapshot =
-                spatialTargetRegistry?.resolve(spatialSelection) ?? null;
+              const spatialLookup = spatialTargetRegistry?.resolveWithStatus(
+                spatialSelection,
+                performance.now(),
+              );
+              const spatialSnapshot = spatialLookup?.snapshot ?? null;
               const spatialResolution = spatialSnapshot
                 ? spatialTargetBridge.resolve({
                     camera,
@@ -1063,13 +1148,47 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                     stageRect,
                   })
                 : null;
-              if (spatialResolution && spatialSnapshot) {
-                performanceGazeTarget = spatialResolution.target;
-                spatialHeadYawBias = spatialResolution.headBias.yawDegrees;
-                spatialHeadPitchBias = spatialResolution.headBias.pitchDegrees;
-                resolvedSpatialTargetKey = `${spatialSnapshot.selection.kind}:${spatialSnapshot.selection.anchor}`;
+              if (spatialTargetRegistry) {
+                const resolvedSpatialTargetKeyFromSnapshot =
+                  formatSpatialTargetSelection(
+                    spatialSnapshot?.selection ?? spatialSelection,
+                  );
+                resolvedSpatialTargetKey =
+                  resolvedSpatialTargetKeyFromSnapshot;
+                const worldResolution = spatialTargetWorldCache.resolve({
+                  key: resolvedSpatialTargetKeyFromSnapshot,
+                  now: performance.now(),
+                  live: spatialResolution,
+                  liveValid:
+                    spatialLookup?.valid === true &&
+                    spatialResolution !== null,
+                  liveReason: spatialLookup?.reason ?? 'missing',
+                  invalidSince: spatialLookup?.invalidSince ?? null,
+                });
+                performanceGazeTarget = worldResolution.target;
+                spatialHeadYawBias = worldResolution.headBias.yawDegrees;
+                spatialHeadPitchBias = worldResolution.headBias.pitchDegrees;
+                spatialTargetDebug = {
+                  source: resolvedSpatialTargetKeyFromSnapshot,
+                  world: toDebugWorld(worldResolution.target),
+                  valid: worldResolution.valid,
+                  owner: attentionFrame.target,
+                  releaseReason:
+                    spatialSnapshot === null
+                      ? spatialLookup?.reason ?? 'registry-unavailable'
+                      : spatialResolution === null
+                        ? 'bridge-invalid'
+                        : worldResolution.reason,
+                };
               } else {
-                performanceGazeTarget = camera.position;
+                performanceGazeTarget = lifeDynamicsNeutralTarget;
+                spatialTargetDebug = {
+                  source: requestedSpatialTargetKey,
+                  world: toDebugWorld(performanceGazeTarget),
+                  valid: false,
+                  owner: attentionFrame.target,
+                  releaseReason: 'registry-unavailable',
+                };
               }
             } else {
               performanceGazeTarget = camera.position;
@@ -1148,6 +1267,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               const now = performance.now();
               if (now - lifeDynamicsDebugLastLogAtRef.current >= 250) {
                 setLifeDynamicsDebugSnapshot(lifeDynamicsSnapshot);
+                setSpatialTargetDebugSnapshot(spatialTargetDebug);
                 console.debug('[life-dynamics]', {
                   profile: lifeDynamicsSnapshot.profileId,
                   attentionTarget: lifeDynamicsSnapshot.orienting.target,
@@ -1161,6 +1281,11 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   asymmetry: lifeDynamicsSnapshot.life.asymmetry,
                   breathModulation:
                     lifeDynamicsSnapshot.life.breathModulation,
+                  spatialSource: spatialTargetDebug.source,
+                  spatialWorld: spatialTargetDebug.world,
+                  spatialValid: spatialTargetDebug.valid,
+                  targetOwner: spatialTargetDebug.owner,
+                  releaseReason: spatialTargetDebug.releaseReason,
                 });
                 lifeDynamicsDebugLastLogAtRef.current = now;
               }
@@ -1272,6 +1397,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         lifeDynamicsLifeAdapterRef.current?.dispose();
         lifeDynamicsOrientingAdapterRef.current?.dispose();
         lifeDynamicsBlinkAdapterRef.current?.dispose();
+        spatialTargetWorldCache.clear();
         blinkController = null;
         emotionController = null;
         idleController = null;
@@ -1281,6 +1407,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         lifeDynamicsBlinkAdapterRef.current = null;
         lifeDynamicsRef.current = null;
         setLifeDynamicsDebugSnapshot(null);
+        setSpatialTargetDebugSnapshot(null);
         stopReactionMotion();
         stopMotion();
         motionPlayerRef.current?.dispose();
@@ -1322,6 +1449,24 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               <span>
                 target: {lifeDynamicsDebugSnapshot.orienting.target ?? 'none'}
               </span>
+              {spatialTargetDebugSnapshot && (
+                <>
+                  <span>source: {spatialTargetDebugSnapshot.source}</span>
+                  <span>
+                    world:{' '}
+                    {spatialTargetDebugSnapshot.world === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.world.x.toFixed(2)},${spatialTargetDebugSnapshot.world.y.toFixed(2)},${spatialTargetDebugSnapshot.world.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    valid: {String(spatialTargetDebugSnapshot.valid)}
+                  </span>
+                  <span>owner: {spatialTargetDebugSnapshot.owner}</span>
+                  <span>
+                    release: {spatialTargetDebugSnapshot.releaseReason}
+                  </span>
+                </>
+              )}
               <span>
                 orienting: {lifeDynamicsDebugSnapshot.orienting.phase}
               </span>

@@ -173,6 +173,11 @@ export function CardGamePrototype({
     return () => {
       spatialTargetRegistry.registerDefault('game', null);
     };
+  }, [spatialTargetRegistry]);
+
+  useLayoutEffect(() => {
+    if (!spatialTargetRegistry) return;
+    spatialTargetRegistry.refreshDefault('game');
   }, [spatialTargetRegistry, zones.brain]);
 
   useLayoutEffect(() => {
