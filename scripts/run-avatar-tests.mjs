@@ -12,6 +12,10 @@ const testFiles = [
   ),
   resolve('node_modules/.tmp/avatar-test/scripts/attention-target.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/idle-gaze.test.js'),
+  resolve('node_modules/.tmp/avatar-test/scripts/life-dynamics.test.js'),
+  resolve(
+    'node_modules/.tmp/avatar-test/scripts/life-dynamics-orienting-adapter.test.js',
+  ),
 ];
 const result = spawnSync(process.execPath, ['--test', ...testFiles], {
   stdio: 'inherit',

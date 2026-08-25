@@ -18,12 +18,16 @@
     "src/attention/cameraTrackingController.ts",
     "src/attention/faceLandmarkerProtocol.ts",
     "src/avatar/attentionTarget.ts",
+    "src/avatar/lifeDynamics.ts",
+    "src/avatar/lifeDynamicsOrientingAdapter.ts",
     "scripts/camera-attention-controller.test.ts",
     "scripts/camera-tracking.test.ts",
     "scripts/attention-engagement.test.ts",
     "src/avatar/idleGaze.ts",
     "scripts/attention-state.test.ts",
     "scripts/attention-target.test.ts",
-    "scripts/idle-gaze.test.ts"
+    "scripts/idle-gaze.test.ts",
+    "scripts/life-dynamics.test.ts",
+    "scripts/life-dynamics-orienting-adapter.test.ts"
   ]
 }
