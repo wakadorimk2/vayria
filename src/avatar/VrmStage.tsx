@@ -41,6 +41,7 @@ import {
   type LifeDynamicsInputs,
   type LifeDynamicsSnapshot,
 } from './lifeDynamics';
+import { LifeDynamicsBlinkAdapter } from './lifeDynamicsBlinkAdapter';
 import { LifeDynamicsLifeAdapter } from './lifeDynamicsLifeAdapter';
 import { LifeDynamicsOrientingAdapter } from './lifeDynamicsOrientingAdapter';
 import { frameAvatar } from './cameraPreset';
@@ -237,6 +238,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       useState<LifeDynamicsSnapshot | null>(null);
     const loadedVrmRef = useRef<VRM | null>(null);
     const lifeDynamicsRef = useRef<LifeDynamics | null>(null);
+    const lifeDynamicsBlinkAdapterRef =
+      useRef<LifeDynamicsBlinkAdapter | null>(null);
     const lifeDynamicsLifeAdapterRef =
       useRef<LifeDynamicsLifeAdapter | null>(null);
     const lifeDynamicsOrientingAdapterRef =
@@ -656,6 +659,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       stopReactionMotion();
       stopMotion();
       lifeDynamicsRef.current?.reset(runtimeLifeDynamicsRandom);
+      lifeDynamicsBlinkAdapterRef.current?.reset();
       lifeDynamicsLifeAdapterRef.current?.reset();
       lifeDynamicsOrientingAdapterRef.current?.reset();
       setLifeDynamicsDebugSnapshot(null);
@@ -792,6 +796,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               );
               lifeDynamics.reset(runtimeLifeDynamicsRandom);
               lifeDynamicsRef.current = lifeDynamics;
+              lifeDynamicsBlinkAdapterRef.current =
+                new LifeDynamicsBlinkAdapter(vrm);
               lifeDynamicsLifeAdapterRef.current =
                 new LifeDynamicsLifeAdapter(vrm);
               lifeDynamicsOrientingAdapterRef.current =
@@ -799,6 +805,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               idleController.setEnabled(false);
             } else {
               lifeDynamicsRef.current = null;
+              lifeDynamicsBlinkAdapterRef.current = null;
               lifeDynamicsLifeAdapterRef.current = null;
               lifeDynamicsOrientingAdapterRef.current = null;
             }
@@ -1090,6 +1097,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               }
             }
             if (lifeDynamicsSnapshot) {
+              lifeDynamicsBlinkAdapterRef.current?.apply(
+                lifeDynamicsSnapshot,
+              );
               if (!hasActiveBodyMotion) {
                 lifeDynamicsLifeAdapterRef.current?.apply(
                   lifeDynamicsSnapshot,
@@ -1192,12 +1202,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         idleGazeController?.dispose();
         lifeDynamicsLifeAdapterRef.current?.dispose();
         lifeDynamicsOrientingAdapterRef.current?.dispose();
+        lifeDynamicsBlinkAdapterRef.current?.dispose();
         blinkController = null;
         emotionController = null;
         idleController = null;
         idleGazeController = null;
         lifeDynamicsLifeAdapterRef.current = null;
         lifeDynamicsOrientingAdapterRef.current = null;
+        lifeDynamicsBlinkAdapterRef.current = null;
         lifeDynamicsRef.current = null;
         setLifeDynamicsDebugSnapshot(null);
         stopReactionMotion();
