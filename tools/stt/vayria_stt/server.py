@@ -14,7 +14,10 @@ from websockets.exceptions import ConnectionClosed
 
 from .transcriber import (
     DEFAULT_BEAM_SIZE,
+    DEFAULT_COMPUTE_TYPE,
+    DEFAULT_DEVICE,
     DEFAULT_HOTWORDS,
+    DEFAULT_MODEL,
     DEFAULT_TEMPERATURES,
     FasterWhisperTranscriber,
     STT_BEAM_SIZE_VALUES,
@@ -391,17 +394,17 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the local Vayria PCM STT service.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
-    parser.add_argument("--model", choices=STT_MODEL_VALUES, default="small")
+    parser.add_argument("--model", choices=STT_MODEL_VALUES, default=DEFAULT_MODEL)
     parser.add_argument("--language", default="ja")
     parser.add_argument(
         "--device",
         choices=STT_DEVICE_VALUES,
-        default="auto",
+        default=DEFAULT_DEVICE,
     )
     parser.add_argument(
         "--compute-type",
         choices=STT_COMPUTE_TYPE_VALUES,
-        default="auto",
+        default=DEFAULT_COMPUTE_TYPE,
     )
     parser.add_argument(
         "--beam-size",

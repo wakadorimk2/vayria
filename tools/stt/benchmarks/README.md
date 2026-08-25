@@ -43,7 +43,7 @@ Gitへ追加しません。
 
 ## 同一音声の比較
 
-同じmanifestを次の4つのprofileで実行します。
+同じmanifestを次の5つのprofileで実行します。
 `--require-primary-profile`を付けるため、CPU fallbackは比較結果へ混入しません。
 
 ```powershell
@@ -84,6 +84,17 @@ uv run --no-cache python benchmarks/run_benchmark.py `
   --hotwords 'Vayria GPT-Live Codex' `
   --require-primary-profile `
   --output (Join-Path $manifest.DirectoryName 'result-medium-beam3.json')
+
+uv run --no-cache python benchmarks/run_benchmark.py `
+  --manifest $manifest.FullName `
+  --model medium `
+  --device cuda `
+  --compute-type float16 `
+  --beam-size 1 `
+  --temperatures 0 `
+  --hotwords 'Vayria GPT-Live Codex' `
+  --require-primary-profile `
+  --output (Join-Path $manifest.DirectoryName 'result-medium-greedy.json')
 
 uv run --no-cache python benchmarks/run_benchmark.py `
   --manifest $manifest.FullName `
@@ -131,7 +142,9 @@ uv run --no-cache python benchmarks/run_benchmark.py `
 
 `base / float16`は同じ手順で`--model base`を指定します。
 `--beam-size 1`で`beam_size=1`を比較できます。
-既定値は`beam_size=3`、`temperature=(0.0, 0.2)`、hotwords有効です。
+正式採用profileは`medium / CUDA / float16 / beam_size=1 / temperature=(0.0,)`、
+hotwords有効です。
+比較コマンドでは各profileの設定を明示します。
 hotwordsを無効にする比較では`--hotwords ""`を指定します。
 
 ## Voice Labの遅延評価
@@ -156,7 +169,7 @@ uv run --no-cache python benchmarks/run_benchmark.py `
 
 `--voice-lab-jsonl`を400 msと600 ms、各モデル・compute typeで分けます。
 比較対象は同じ音声と同じmanifestでそろえます。
-`medium`はprimary候補として評価します。
+`medium / beam_size=1 / temperature=0`を正式採用profileにします。
 起動できない場合はfallbackへ切り替えず、候補外とします。
 
 ## 選定基準

@@ -110,7 +110,20 @@ def test_parse_args_accepts_comparison_compute_type_and_primary_profile(monkeypa
     assert args.hotwords == "Vayria GPT-Live Codex"
     assert args.require_primary_profile is True
     assert args.beam_size == 1
-    assert args.temperatures == [0.0, 0.2]
+    assert args.temperatures == [0.0]
+
+
+def test_parse_args_uses_formal_stt_defaults(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["vayria-stt"])
+
+    args = parse_args()
+
+    assert args.model == "medium"
+    assert args.device == "cuda"
+    assert args.compute_type == "float16"
+    assert args.beam_size == 1
+    assert args.temperatures == [0.0]
+    assert args.hotwords == "Vayria GPT-Live Codex"
 
 
 def test_parse_args_preserves_empty_hotwords_as_disabled(monkeypatch) -> None:

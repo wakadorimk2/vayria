@@ -87,7 +87,7 @@ Mode Dは`400ms`を使います。
 Python STTの展示用主profileは次です。
 
 ```text
-primary: small / CUDA / float16
+primary: medium / CUDA / float16
 fallback: disabled for exhibition startup
 ```
 
@@ -95,12 +95,13 @@ fallback: disabled for exhibition startup
 主profileの実ロードに失敗した場合、展示起動は失敗します。
 比較用の明示的な起動では、`tiny / CPU / int8`をfallback profileとして残せます。
 実効model、device、compute type、fallback理由、model load時間、decode設定をAudio LabとJSONLへ記録します。
-既定decodeは`beam_size=3`、`temperature=(0.0, 0.2)`、`without_timestamps=True`、
+既定decodeは`beam_size=1`、`temperature=(0.0,)`、`without_timestamps=True`、
 `condition_on_previous_text=False`、`vad_filter=False`です。
 既定hotwordsは`Vayria GPT-Live Codex`です。
 比較用profileは`small / float16`、`small / int8_float16`、`base / float16`です。
 `beam_size=1`と`beam_size=3`を比較できます。
-`medium`以上は4 GB VRAMと他のGPU処理を考慮して初回評価から外します。
+`medium`は正式採用のprimary profileです。
+mediumをロードできない環境では、展示起動を失敗させます。
 
 発話終了の定義は、サーバーVADがendpointを確定して`speech_ended`を送信した時刻です。
 物理的な発話終了のサンプル時刻ではありません。

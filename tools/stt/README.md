@@ -51,7 +51,7 @@ Pop-Location
 ```
 
 The service loads and warms the configured faster-whisper model before it accepts
-connections. The exhibition default requires `small / CUDA / float16`.
+connections. The exhibition default requires `medium / CUDA / float16`.
 `--require-primary-profile` makes startup fail when that profile cannot load.
 The comparison fallback remains available when that flag is omitted.
 The actual model, device, compute type, fallback reason, model load time, and
@@ -61,11 +61,11 @@ The command line supports these comparison settings:
 
 ```powershell
 uv run --no-cache python -m vayria_stt.server `
-  --model small `
+  --model medium `
   --device cuda `
   --compute-type float16 `
-  --beam-size 3 `
-  --temperatures 0.0 0.2 `
+  --beam-size 1 `
+  --temperatures 0 `
   --hotwords "Vayria GPT-Live Codex" `
   --require-primary-profile `
   --fallback-model tiny `
@@ -78,7 +78,7 @@ The fallback model accepts `tiny`, `base`, or `small`.
 `--device` accepts `auto`, `cuda`, or `cpu`.
 `--compute-type` accepts `auto`, `float16`, `int8`, or `int8_float16`.
 `--beam-size` accepts `1` or `3`.
-The default decode settings are `beam_size=3`, `temperature=(0.0, 0.2)`,
+The default decode settings are `beam_size=1`, `temperature=(0.0,)`,
 `without_timestamps=True`, `condition_on_previous_text=False`, and
 `vad_filter=False`.
 The default hotwords are `Vayria GPT-Live Codex`.

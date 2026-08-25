@@ -44,6 +44,17 @@ def test_transcriber_contract_is_provider_agnostic() -> None:
     ) == "640:16000:ja"
 
 
+def test_default_profile_uses_medium_model() -> None:
+    provider = FasterWhisperTranscriber()
+
+    assert provider.model_name == "medium"
+    assert provider.device == "cuda"
+    assert provider.compute_type == "float16"
+    assert provider.beam_size == 1
+    assert provider.temperatures == (0.0,)
+    assert provider.hotwords == "Vayria GPT-Live Codex"
+
+
 def transcribe_with_segments(segments: list[FakeSegment]) -> tuple[str, FakeWhisperModel]:
     provider = FasterWhisperTranscriber()
     model = FakeWhisperModel(segments)
@@ -83,8 +94,8 @@ def test_auto_profile_falls_back_to_tiny_cpu_and_records_reason(monkeypatch) -> 
     assert runtime["fallbackUsed"] is True
     assert runtime["fallbackReason"] == "CUDA unavailable"
     assert isinstance(runtime["modelLoadMs"], int)
-    assert runtime["decodeBeamSize"] == 3
-    assert runtime["decodeTemperatures"] == (0.0, 0.2)
+    assert runtime["decodeBeamSize"] == 1
+    assert runtime["decodeTemperatures"] == (0.0,)
     assert runtime["decodeWithoutTimestamps"] is True
     assert runtime["decodeConditionOnPreviousText"] is False
     assert runtime["decodeVadFilter"] is False
@@ -127,8 +138,8 @@ def test_warm_up_uses_the_effective_model(monkeypatch) -> None:
     provider.warm_up("ja")
 
     assert model.options["language"] == "ja"
-    assert model.options["beam_size"] == 3
-    assert model.options["temperature"] == (0.0, 0.2)
+    assert model.options["beam_size"] == 1
+    assert model.options["temperature"] == (0.0,)
     assert model.options["without_timestamps"] is True
     assert model.options["condition_on_previous_text"] is False
     assert model.options["vad_filter"] is False
@@ -140,8 +151,8 @@ def test_faster_whisper_receives_explicit_hallucination_guards() -> None:
 
     assert model.options == {
         "language": "ja",
-        "beam_size": 3,
-        "temperature": (0.0, 0.2),
+        "beam_size": 1,
+        "temperature": (0.0,),
         "compression_ratio_threshold": 2.4,
         "log_prob_threshold": -1.0,
         "no_speech_threshold": 0.6,
