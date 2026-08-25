@@ -83,6 +83,7 @@ The current source mapping is:
 | LLM and TTS provider boundary | `server/localApi.ts` |
 | Expression, gaze, and idle motion | `src/avatar/VrmStage.tsx`, `src/avatar/idleMotion.ts`, `src/avatar/idleGaze.ts` |
 | Saved VRMA catalog and body clip playback | `src/avatar/motion/`, `src/avatar/VrmStage.tsx` |
+| LifeDynamics design boundary | [`life-dynamics.md`](life-dynamics.md) |
 
 ### Exhibition observability
 
@@ -342,6 +343,12 @@ LLM → TTS → playback
 発話前は `preReaction.gaze` と `IdleController` が、視線・呼吸・微細な揺れを担当します。
 VRMAの開始と終了では、IdleとVRMAを境界だけクロスフェードします。VRMAの主再生中はIdleを停止し、同じ骨へ手続き型動作とVRMAを重ねません。
 `MotionPlayer` はVRMA clip生成後に `MotionPlaybackProfile` を適用します。hipsの初期位置を保持し、hips・上体の回転を60%、首・頭・look-atを35%へ縮小します。腕、脚、表情トラックは変更しません。
+
+LifeDynamics is a future session-scoped design for procedural temporal state.
+It owns the timing state for Life, Blink, Orienting, and Gesture.
+Avatar adapters own VRM expressions, LookAt, bone transforms, and AnimationMixer operations.
+The design is documented in [`life-dynamics.md`](life-dynamics.md).
+It does not change the current v0.1 VRMA boundary or enable a new procedural overlay.
 
 `leadBeforeSpeechMs` and `motionLeadMs` have different meanings.
 
