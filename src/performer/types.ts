@@ -67,6 +67,19 @@ export const ATTENTION_TARGETS = ['viewer', 'chat', 'game', 'none'] as const;
 
 export type AttentionTarget = (typeof ATTENTION_TARGETS)[number];
 
+export const SPATIAL_TARGET_KINDS = ['viewer', 'game', 'chat'] as const;
+
+export type SpatialTargetKind = (typeof SPATIAL_TARGET_KINDS)[number];
+
+export const SPATIAL_TARGET_ANCHORS = ['default', 'transient'] as const;
+
+export type SpatialTargetAnchor = (typeof SPATIAL_TARGET_ANCHORS)[number];
+
+export interface SpatialTargetSelection {
+  kind: SpatialTargetKind;
+  anchor: SpatialTargetAnchor;
+}
+
 export const ATTENTION_FOCUS_TARGETS = [
   'user',
   'camera',
@@ -106,6 +119,7 @@ export interface Attention {
   confidence: number;
   distance?: number;
   gaze?: AttentionPosition;
+  spatialTarget?: SpatialTargetSelection;
 }
 
 export type AttentionReader = () => Attention;

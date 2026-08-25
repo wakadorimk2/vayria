@@ -14,7 +14,9 @@ import './cards.css';
 export interface WildcardCardProps {
   card: WildcardCardData;
   interactionDisabled?: boolean;
-  onSelect?: (event?: MouseEvent<HTMLElement>) => void;
+  onSelect?: (
+    event?: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>,
+  ) => void;
   onPointerDown?: PointerEventHandler<HTMLElement>;
   motion?: CardMotion;
   state?: CardState;
@@ -74,7 +76,7 @@ export function WildcardCard({
     if (isInputDisabled || !onSelect) return;
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    onSelect();
+    onSelect(event);
   };
 
   return (

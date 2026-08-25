@@ -17,7 +17,9 @@
     "src/attention/cameraAttentionController.ts",
     "src/attention/cameraTrackingController.ts",
     "src/attention/faceLandmarkerProtocol.ts",
+    "src/attention/spatialTargetRegistry.ts",
     "src/avatar/attentionTarget.ts",
+    "src/avatar/spatialTargetBridge.ts",
     "src/avatar/lifeDynamics.ts",
     "src/avatar/blinkExpressions.ts",
     "src/avatar/lifeDynamicsBlinkAdapter.ts",
@@ -33,6 +35,7 @@
     "scripts/life-dynamics.test.ts",
     "scripts/life-dynamics-blink-adapter.test.ts",
     "scripts/life-dynamics-life-adapter.test.ts",
-    "scripts/life-dynamics-orienting-adapter.test.ts"
+    "scripts/life-dynamics-orienting-adapter.test.ts",
+    "scripts/spatial-target.test.ts"
   ]
 }

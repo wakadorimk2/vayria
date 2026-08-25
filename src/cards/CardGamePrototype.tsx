@@ -1,32 +1,43 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { WildcardCard } from './WildcardCard';
 import { runtimeConfig } from '../runtimeConfig';
 import type { CardMotion } from './cardTypes';
+import type { SpatialTargetRegistry } from '../attention/spatialTargetRegistry';
 import type {
   CardGamePrototypeController,
   CardSwapResult,
   CardZone,
 } from './useCardGamePrototype';
 
+export interface CardInteractionTarget {
+  readonly cardId: string;
+  readonly zone: CardZone;
+  readonly element: HTMLElement | null;
+}
+
 interface CardGamePrototypeProps {
   game: CardGamePrototypeController;
   isResetLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
-  onCardInteraction?: () => void;
+  onCardInteraction?: (target: CardInteractionTarget) => void;
   onSessionReset?: () => void;
   onSelectionActiveChange?: (isActive: boolean) => void;
+  spatialTargetRegistry?: SpatialTargetRegistry;
 }
 
 interface DragSession {
   cardId: string;
+  element: HTMLElement;
   height: number;
   isDragging: boolean;
   left: number;
@@ -118,6 +129,7 @@ export function CardGamePrototype({
   onCardInteraction,
   onSessionReset,
   onSelectionActiveChange,
+  spatialTargetRegistry,
 }: CardGamePrototypeProps) {
   const {
     maxInterferenceCount,
@@ -132,6 +144,7 @@ export function CardGamePrototype({
   const [lastSwap, setLastSwap] = useState<CardSwapResult | null>(null);
   const dragSessionRef = useRef<DragSession | null>(null);
   const suppressNextClickRef = useRef(false);
+  const brainCardsRef = useRef<HTMLDivElement>(null);
   const isSpent = zones.remainingInterferenceCount === 0;
   const interactionLocked = isSpent;
   const dragActive = dragState?.isDragging === true;
@@ -150,6 +163,14 @@ export function CardGamePrototype({
   useEffect(() => {
     onSelectionActiveChange?.(selectionActive);
   }, [onSelectionActiveChange, selectionActive]);
+
+  useLayoutEffect(() => {
+    if (!spatialTargetRegistry) return;
+    spatialTargetRegistry.registerDefault('game', brainCardsRef.current);
+    return () => {
+      spatialTargetRegistry.registerDefault('game', null);
+    };
+  }, [spatialTargetRegistry, zones.brain]);
 
   const commitSwap = useCallback(
     (brainCardId: string, handCardId: string) => {
@@ -172,7 +193,7 @@ export function CardGamePrototype({
     (
       zone: CardZone,
       cardId: string,
-      event?: ReactMouseEvent<HTMLElement>,
+      event?: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
     ) => {
       if (suppressNextClickRef.current) {
         if (event) {
@@ -182,6 +203,11 @@ export function CardGamePrototype({
       }
       if (interactionLocked) return;
 
+      onCardInteraction?.({
+        cardId,
+        element: event?.currentTarget ?? null,
+        zone,
+      });
       const brainCardId = zone === 'brain' ? cardId : selectedBrainCardId;
       const handCardId = zone === 'hand' ? cardId : selectedHandCardId;
       if (brainCardId && handCardId) {
@@ -189,7 +215,6 @@ export function CardGamePrototype({
         return;
       }
 
-      onCardInteraction?.();
       selectCard(zone, cardId);
     },
     [
@@ -211,6 +236,7 @@ export function CardGamePrototype({
       const rect = event.currentTarget.getBoundingClientRect();
       const session: DragSession = {
         cardId,
+        element: event.currentTarget,
         height: rect.height,
         isDragging: false,
         left: rect.left,
@@ -279,7 +305,13 @@ export function CardGamePrototype({
       };
       dragSessionRef.current = nextSession;
       setDragState(nextSession);
-      if (startedDragging) onCardInteraction?.();
+      if (startedDragging) {
+        onCardInteraction?.({
+          cardId: session.cardId,
+          element: session.element,
+          zone: 'hand',
+        });
+      }
     };
     const handlePointerUp = (event: PointerEvent) => {
       const session = dragSessionRef.current;
@@ -409,7 +441,9 @@ export function CardGamePrototype({
         <header className="card-zone__header">
           <h2>脳内</h2>
         </header>
-        <div className="card-zone__cards">{renderCards('brain')}</div>
+        <div className="card-zone__cards" ref={brainCardsRef}>
+          {renderCards('brain')}
+        </div>
       </section>
 
       <section className="card-zone card-zone--hand" aria-label="手札">

@@ -22,6 +22,7 @@ const testFiles = [
   resolve(
     'node_modules/.tmp/avatar-test/scripts/life-dynamics-orienting-adapter.test.js',
   ),
+  resolve('node_modules/.tmp/avatar-test/scripts/spatial-target.test.js'),
 ];
 const result = spawnSync(process.execPath, ['--test', ...testFiles], {
   stdio: 'inherit',

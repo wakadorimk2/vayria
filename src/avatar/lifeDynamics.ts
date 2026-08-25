@@ -89,6 +89,7 @@ export interface LifeDynamicsInputs {
   readonly curiosity: number;
   readonly attention: Readonly<Record<string, number>>;
   readonly attentionTarget: string | null;
+  readonly attentionTargetKey?: string | null;
   readonly speechUrge: number;
   readonly inhibition: number;
   readonly energy: number;
@@ -153,6 +154,7 @@ interface NormalizedInputs {
   curiosity: number;
   attention: Record<string, number>;
   attentionTarget: string | null;
+  attentionTargetKey: string | null;
   speechUrge: number;
   inhibition: number;
   energy: number;
@@ -269,6 +271,7 @@ export class LifeDynamics {
   private blinkWaitSeconds = 0;
   private blinkHazardBoost = 0;
   private orientingTarget: string | null = null;
+  private orientingTargetKey: string | null = null;
   private orientingPhase: OrientingPhase = 'neutral';
   private orientingElapsedSeconds = 0;
   private orientingStrength = 0;
@@ -327,6 +330,7 @@ export class LifeDynamics {
     );
     this.blinkHazardBoost = 0;
     this.orientingTarget = null;
+    this.orientingTargetKey = null;
     this.orientingPhase = 'neutral';
     this.orientingElapsedSeconds = 0;
     this.orientingStrength = 0;
@@ -469,11 +473,14 @@ export class LifeDynamics {
       (inputs.attention[inputs.attentionTarget] ?? 0) > 0.01
         ? inputs.attentionTarget
         : null;
-    const targetChanged = requestedTarget !== this.orientingTarget;
+    const requestedTargetKey =
+      requestedTarget === null ? null : inputs.attentionTargetKey ?? requestedTarget;
+    const targetChanged = requestedTargetKey !== this.orientingTargetKey;
 
     if (requestedTarget !== null) {
       if (targetChanged) {
         this.orientingTarget = requestedTarget;
+        this.orientingTargetKey = requestedTargetKey;
         this.orientingPhase = 'approaching';
         this.orientingElapsedSeconds = 0;
       } else if (this.orientingPhase === 'returning') {
@@ -485,6 +492,7 @@ export class LifeDynamics {
         inputs.attention[requestedTarget] ??
         0;
     } else if (this.orientingTarget !== null) {
+      if (targetChanged) this.orientingTargetKey = null;
       if (this.orientingPhase !== 'returning') {
         this.orientingPhase = 'returning';
         this.orientingElapsedSeconds = 0;
@@ -507,6 +515,7 @@ export class LifeDynamics {
         this.orientingElapsedSeconds = this.profile.gazeReturnSeconds;
         this.orientingPhase = 'neutral';
         this.orientingTarget = null;
+        this.orientingTargetKey = null;
         this.orientingStrength = 0;
       }
     }
@@ -715,6 +724,14 @@ function normalizeInputs(inputs: LifeDynamicsInputs): NormalizedInputs {
       inputs.attentionTarget.trim()
         ? inputs.attentionTarget
         : null,
+    attentionTargetKey:
+      typeof inputs.attentionTargetKey === 'string' &&
+      inputs.attentionTargetKey.trim()
+        ? inputs.attentionTargetKey
+        : typeof inputs.attentionTarget === 'string' &&
+            inputs.attentionTarget.trim()
+          ? inputs.attentionTarget
+          : null,
     speechUrge: clamp(inputs.speechUrge),
     inhibition: clamp(inputs.inhibition),
     energy: clamp(inputs.energy),

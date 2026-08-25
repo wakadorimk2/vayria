@@ -10,8 +10,12 @@ import {
 import { VrmStage, type VrmStageHandle } from './avatar/VrmStage';
 import { useCameraAttention } from './attention/useCameraAttention';
 import { useAudioLipSync } from './audio/useAudioLipSync';
-import { CardGamePrototype } from './cards/CardGamePrototype';
+import {
+  CardGamePrototype,
+  type CardInteractionTarget,
+} from './cards/CardGamePrototype';
 import { useCardGamePrototype } from './cards/useCardGamePrototype';
+import { SpatialTargetRegistry } from './attention/spatialTargetRegistry';
 import {
   addCharacterAlias,
   parseExplicitAliasInstruction,
@@ -387,8 +391,8 @@ export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
-  const [cardAttentionTarget, setCardAttentionTarget] = useState<
-    'game' | null
+  const [cardAttentionPhase, setCardAttentionPhase] = useState<
+    'transient' | 'default' | null
   >(null);
   const [audioControl, setAudioControl] = useState(readAudioControlState);
   const [characterIdentity, setCharacterIdentity] = useState(
@@ -415,6 +419,9 @@ export default function App() {
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const networkState = useNetworkState(isExhibitionMode);
+  const [spatialTargetRegistry] = useState(
+    () => new SpatialTargetRegistry(),
+  );
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, resetTurn, zones } = cardGame;
   const performer = usePerformerRuntime();
@@ -467,6 +474,7 @@ export default function App() {
     useState<VrmStageHandle | null>(null);
   const nonSpeechTimerRef = useRef<number | null>(null);
   const cardAttentionTimerRef = useRef<number | null>(null);
+  const cardAttentionFallbackTimerRef = useRef<number | null>(null);
   const sessionGenerationRef = useRef(0);
   const {
     isAudioUnlocked,
@@ -482,6 +490,21 @@ export default function App() {
   } = useAudioLipSync(volume);
   const [listeningReaction, setListeningReaction] =
     useState<ListeningReactionCue | undefined>();
+  const clearCardAttentionTimers = useCallback(() => {
+    if (cardAttentionTimerRef.current !== null) {
+      window.clearTimeout(cardAttentionTimerRef.current);
+      cardAttentionTimerRef.current = null;
+    }
+    if (cardAttentionFallbackTimerRef.current !== null) {
+      window.clearTimeout(cardAttentionFallbackTimerRef.current);
+      cardAttentionFallbackTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => spatialTargetRegistry.dispose();
+  }, [spatialTargetRegistry]);
+
   const readAttention: AttentionReader = useCallback(() => {
     const logicalAttention = logicalAttentionRef.current;
     const cameraSnapshot = readCameraSnapshot();
@@ -1334,27 +1357,39 @@ export default function App() {
   }, [isMicrophoneControlExpanded]);
 
   useEffect(() => {
-    const logicalAttentionTarget =
-      cardAttentionTarget ??
-      (activePlan !== null
+    const logicalTargetFromPerformance =
+      activePlan !== null
         ? activePlan.preReaction?.gaze?.target ??
           performer.state.attention.target
-        : listeningReaction?.target ?? 'none');
+        : listeningReaction?.target ?? 'none';
+    const logicalAttentionTarget =
+      cardAttentionPhase !== null ? 'game' : logicalTargetFromPerformance;
+    const spatialTarget: Attention['spatialTarget'] =
+      cardAttentionPhase === 'transient'
+        ? { kind: 'game', anchor: 'transient' }
+        : cardAttentionPhase === 'default'
+          ? { kind: 'game', anchor: 'default' }
+          : logicalAttentionTarget === 'game' ||
+              logicalAttentionTarget === 'chat' ||
+              logicalAttentionTarget === 'viewer'
+            ? { kind: logicalAttentionTarget, anchor: 'default' }
+            : undefined;
     logicalAttentionRef.current = {
       ...performer.state.attention,
       target: logicalAttentionTarget,
       strength:
-        cardAttentionTarget !== null || listeningReaction
+        cardAttentionPhase !== null || listeningReaction
           ? 1
           : activePlan !== null
             ? Math.max(0.72, performer.state.attention.strength)
             : 0,
       position: null,
       confidence: 0,
+      spatialTarget,
     };
   }, [
     activePlan,
-    cardAttentionTarget,
+    cardAttentionPhase,
     listeningReaction,
     performer.state.attention,
   ]);
@@ -1421,11 +1456,9 @@ export default function App() {
       nonSpeechTimerRef.current = null;
     }
 
-    if (cardAttentionTimerRef.current !== null) {
-      window.clearTimeout(cardAttentionTimerRef.current);
-      cardAttentionTimerRef.current = null;
-    }
-    setCardAttentionTarget(null);
+    clearCardAttentionTimers();
+    spatialTargetRegistry.clearTransient('game');
+    setCardAttentionPhase(null);
 
     resetConversation();
     resetRuntime();
@@ -1446,12 +1479,14 @@ export default function App() {
     setSessionGeneration(nextGeneration);
   }, [
     clearBargeInTimer,
+    clearCardAttentionTimers,
     dispatchBargeIn,
     resetConversation,
     resetRuntime,
     resetTurn,
     setProgramPhase,
     setDucked,
+    spatialTargetRegistry,
     stopReaction,
     stopVoiceInput,
   ]);
@@ -1473,24 +1508,42 @@ export default function App() {
     resetSession();
   }, [dispatchRouterCommand, resetSession]);
 
-  const handleCardInteraction = useCallback(() => {
-    if (!isExhibitionMode) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return;
-    }
-    if (!shouldReactToCardInteraction()) return;
+  const handleCardInteraction = useCallback(
+    ({ element }: CardInteractionTarget) => {
+      if (!isExhibitionMode) return;
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        return;
+      }
+      if (!shouldReactToCardInteraction()) return;
 
-    setCardAttentionTarget('game');
-    if (cardAttentionTimerRef.current !== null) {
-      window.clearTimeout(cardAttentionTimerRef.current);
-    }
-    const timerId = window.setTimeout(() => {
-      if (cardAttentionTimerRef.current !== timerId) return;
-      cardAttentionTimerRef.current = null;
-      setCardAttentionTarget(null);
-    }, CARD_INTERACTION_ATTENTION_DURATION_MS);
-    cardAttentionTimerRef.current = timerId;
-  }, [isExhibitionMode]);
+      spatialTargetRegistry.refreshDefault('game');
+      spatialTargetRegistry.captureTransient('game', element);
+      clearCardAttentionTimers();
+      setCardAttentionPhase('transient');
+
+      const transientTimerId = window.setTimeout(() => {
+        if (cardAttentionTimerRef.current !== transientTimerId) return;
+        cardAttentionTimerRef.current = null;
+        setCardAttentionPhase('default');
+
+        const defaultTimerId = window.setTimeout(() => {
+          if (cardAttentionFallbackTimerRef.current !== defaultTimerId) {
+            return;
+          }
+          cardAttentionFallbackTimerRef.current = null;
+          spatialTargetRegistry.clearTransient('game');
+          setCardAttentionPhase(null);
+        }, CARD_INTERACTION_ATTENTION_DURATION_MS);
+        cardAttentionFallbackTimerRef.current = defaultTimerId;
+      }, CARD_INTERACTION_ATTENTION_DURATION_MS);
+      cardAttentionTimerRef.current = transientTimerId;
+    },
+    [
+      clearCardAttentionTimers,
+      isExhibitionMode,
+      spatialTargetRegistry,
+    ],
+  );
 
   useEffect(() => {
     const serialized = JSON.stringify({ volume, lastAudibleVolume });
@@ -1551,11 +1604,10 @@ export default function App() {
       if (nonSpeechTimerRef.current !== null) {
         window.clearTimeout(nonSpeechTimerRef.current);
       }
-      if (cardAttentionTimerRef.current !== null) {
-        window.clearTimeout(cardAttentionTimerRef.current);
-      }
+      clearCardAttentionTimers();
+      spatialTargetRegistry.clearTransient('game');
     };
-  }, []);
+  }, [clearCardAttentionTimers, spatialTargetRegistry]);
 
   const readCardContext = useCallback(
     () => ({
@@ -2299,6 +2351,13 @@ export default function App() {
     setIsAvatarReady(true);
   }, [prepare]);
 
+  const registerChatTarget = useCallback(
+    (element: HTMLElement | null) => {
+      spatialTargetRegistry.registerDefault('chat', element);
+    },
+    [spatialTargetRegistry],
+  );
+
   const isLocalNetworkAvailable = networkState.localNetwork === 'available';
   const isInternetAvailable = networkState.internet === 'available';
   const localNetworkLabel = `Local network: ${isLocalNetworkAvailable ? 'Connected' : 'Unavailable'}`;
@@ -2564,6 +2623,7 @@ export default function App() {
           performancePlan={activePlan ?? undefined}
           ref={stageRef}
           sessionGeneration={sessionGeneration}
+          spatialTargetRegistry={spatialTargetRegistry}
         />
         {isExhibitionMode && (
           <aside className="exhibition-copy" aria-label="展示案内">
@@ -2580,12 +2640,14 @@ export default function App() {
           onCardInserted={handleCardInserted}
           onSessionReset={handleSessionReset}
           onSelectionActiveChange={setIsCardSelectionActive}
+          spatialTargetRegistry={spatialTargetRegistry}
         />
       </section>
 
       <section
         className={`conversation conversation--${status}`}
         aria-label="Character conversation"
+        ref={registerChatTarget}
       >
         <div className="conversation-copy" aria-live="polite">
           {shouldShowReply && <p className="reply">{reply}</p>}

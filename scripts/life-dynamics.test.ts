@@ -140,6 +140,38 @@ test('orienting moves eyes before head and head before torso', () => {
   assert.ok(snapshot.orienting.headWeight > snapshot.orienting.torsoWeight);
 });
 
+test('a spatial anchor change restarts orienting for the same semantic target', () => {
+  const core = new LifeDynamics();
+  const transientInputs = {
+    ...withAttention('game'),
+    attentionTargetKey: 'game:transient',
+  };
+  advance(core, 0.5, transientInputs, () => 0.5);
+
+  const snapshot = core.update(
+    0,
+    {
+      ...transientInputs,
+      attentionTargetKey: 'game:default',
+    },
+    () => 0.5,
+  );
+
+  assert.equal(snapshot.orienting.target, 'game');
+  assert.equal(snapshot.orienting.phase, 'approaching');
+  assert.ok(snapshot.orienting.eyeWeight < 1);
+});
+
+test('semantic attention target changes continue to restart orienting', () => {
+  const core = new LifeDynamics();
+  advance(core, 0.5, withAttention('game'), () => 0.5);
+
+  const snapshot = core.update(0, withAttention('chat'), () => 0.5);
+
+  assert.equal(snapshot.orienting.target, 'chat');
+  assert.equal(snapshot.orienting.phase, 'approaching');
+});
+
 test('released attention returns orienting to neutral', () => {
   const core = new LifeDynamics();
   advance(core, 0.4, withAttention('viewer'), () => 0.5);
