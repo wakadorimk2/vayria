@@ -22,8 +22,20 @@ export const LIFE_DYNAMICS_BASELINE = {
   torsoLagSeconds: 0.25,
   signalRiseSeconds: 0.4,
   signalDecaySeconds: 1.8,
-  noiseStepPerSecond: 0.12,
-  noiseReturnPerSecond: 0.5,
+  lifeNoise: {
+    posturalDrift: {
+      stepPerSecond: 0.12,
+      returnPerSecond: 0.5,
+    },
+    asymmetry: {
+      stepPerSecond: 0.08,
+      returnPerSecond: 0.3,
+    },
+    breathModulation: {
+      stepPerSecond: 0.04,
+      returnPerSecond: 0.12,
+    },
+  },
   initialBlinkIntervalSeconds: [1.2, 3.5] as const,
   blinkIntervalSeconds: [2.8, 6.5] as const,
   blinkCloseSeconds: 0.075,
@@ -47,8 +59,20 @@ export interface LifeDynamicsProfile {
   readonly torsoLagSeconds: number;
   readonly signalRiseSeconds: number;
   readonly signalDecaySeconds: number;
-  readonly noiseStepPerSecond: number;
-  readonly noiseReturnPerSecond: number;
+  readonly lifeNoise: Readonly<{
+    readonly posturalDrift: Readonly<{
+      readonly stepPerSecond: number;
+      readonly returnPerSecond: number;
+    }>;
+    readonly asymmetry: Readonly<{
+      readonly stepPerSecond: number;
+      readonly returnPerSecond: number;
+    }>;
+    readonly breathModulation: Readonly<{
+      readonly stepPerSecond: number;
+      readonly returnPerSecond: number;
+    }>;
+  }>;
   readonly initialBlinkIntervalSeconds: readonly [number, number];
   readonly blinkIntervalSeconds: readonly [number, number];
   readonly blinkCloseSeconds: number;
@@ -99,7 +123,9 @@ export interface LifeDynamicsSnapshot {
   readonly life: Readonly<{
     breathingPhase: number;
     swayPhase: number;
-    noise: number;
+    posturalDrift: number;
+    asymmetry: number;
+    breathModulation: number;
   }>;
   readonly blink: Readonly<{
     state: 'waiting' | 'blinking';
@@ -196,8 +222,7 @@ export function createLifeDynamicsProfile(
     signalDecaySeconds: scaleDuration(
       LIFE_DYNAMICS_BASELINE.signalDecaySeconds,
     ),
-    noiseStepPerSecond: LIFE_DYNAMICS_BASELINE.noiseStepPerSecond,
-    noiseReturnPerSecond: LIFE_DYNAMICS_BASELINE.noiseReturnPerSecond,
+    lifeNoise: LIFE_DYNAMICS_BASELINE.lifeNoise,
     initialBlinkIntervalSeconds: scaleRange(
       LIFE_DYNAMICS_BASELINE.initialBlinkIntervalSeconds,
       durationScale,
@@ -236,7 +261,9 @@ export class LifeDynamics {
 
   private breathingPhase = 0;
   private swayPhase = 0;
-  private noise = 0;
+  private posturalDrift = 0;
+  private asymmetry = 0;
+  private breathModulation = 0;
   private blinkPhase: BlinkPhase = 'waiting';
   private blinkElapsedSeconds = 0;
   private blinkWaitSeconds = 0;
@@ -289,7 +316,9 @@ export class LifeDynamics {
     this.signals.inhibition = 0;
     this.breathingPhase = 0;
     this.swayPhase = 0;
-    this.noise = 0;
+    this.posturalDrift = 0;
+    this.asymmetry = 0;
+    this.breathModulation = 0;
     this.blinkPhase = 'waiting';
     this.blinkElapsedSeconds = 0;
     this.blinkWaitSeconds = randomBetween(
@@ -371,12 +400,24 @@ export class LifeDynamics {
       this.profile.swayPeriodSeconds,
     );
 
-    const randomValue = normalizeRandom(random());
-    this.noise +=
-      (randomValue * 2 - 1) * this.profile.noiseStepPerSecond * delta;
-    this.noise -=
-      this.noise * this.profile.noiseReturnPerSecond * delta;
-    this.noise = clamp(this.noise, -1, 1);
+    this.posturalDrift = advanceBoundedNoise(
+      this.posturalDrift,
+      delta,
+      random,
+      this.profile.lifeNoise.posturalDrift,
+    );
+    this.asymmetry = advanceBoundedNoise(
+      this.asymmetry,
+      delta,
+      random,
+      this.profile.lifeNoise.asymmetry,
+    );
+    this.breathModulation = advanceBoundedNoise(
+      this.breathModulation,
+      delta,
+      random,
+      this.profile.lifeNoise.breathModulation,
+    );
   }
 
   private advanceBlink(
@@ -535,7 +576,9 @@ export class LifeDynamics {
       life: {
         breathingPhase: this.breathingPhase,
         swayPhase: this.swayPhase,
-        noise: this.noise,
+        posturalDrift: this.posturalDrift,
+        asymmetry: this.asymmetry,
+        breathModulation: this.breathModulation,
       },
       blink: {
         state: this.blinkPhase === 'waiting' ? 'waiting' : 'blinking',
@@ -707,6 +750,28 @@ function advancePhase(
 ): number {
   const period = Math.max(periodSeconds, 0.0001);
   return (phase + (delta / period) * Math.PI * 2) % (Math.PI * 2);
+}
+
+function advanceBoundedNoise(
+  value: number,
+  delta: number,
+  random: RandomSource,
+  parameters: Readonly<{
+    stepPerSecond: number;
+    returnPerSecond: number;
+  }>,
+): number {
+  const randomValue = normalizeRandom(random());
+  const stepped =
+    value +
+    (randomValue * 2 - 1) *
+      parameters.stepPerSecond *
+      delta;
+  return clamp(
+    stepped - stepped * parameters.returnPerSecond * delta,
+    -1,
+    1,
+  );
 }
 
 function smoothstep(value: number, start: number, end: number): number {

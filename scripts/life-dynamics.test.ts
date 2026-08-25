@@ -92,7 +92,12 @@ test('invalid dt and input values are safe and signals remain normalized', () =>
   );
 
   assert.equal(snapshot.modulation.emotion, 'neutral');
-  assert.ok(snapshot.life.noise >= -1 && snapshot.life.noise <= 1);
+  assert.ok(snapshot.life.posturalDrift >= -1 && snapshot.life.posturalDrift <= 1);
+  assert.ok(snapshot.life.asymmetry >= -1 && snapshot.life.asymmetry <= 1);
+  assert.ok(
+    snapshot.life.breathModulation >= -1 &&
+      snapshot.life.breathModulation <= 1,
+  );
   assert.ok(snapshot.signals.arousal >= 0 && snapshot.signals.arousal <= 1);
   assert.ok(snapshot.signals.curiosity >= 0 && snapshot.signals.curiosity <= 1);
   assert.ok(snapshot.signals.speechUrge >= 0 && snapshot.signals.speechUrge <= 1);
@@ -114,7 +119,12 @@ test('life phases wrap and injected noise stays bounded', () => {
   assert.ok(snapshot.life.breathingPhase < Math.PI * 2);
   assert.ok(snapshot.life.swayPhase >= 0);
   assert.ok(snapshot.life.swayPhase < Math.PI * 2);
-  assert.ok(snapshot.life.noise >= -1 && snapshot.life.noise <= 1);
+  assert.ok(snapshot.life.posturalDrift >= -1 && snapshot.life.posturalDrift <= 1);
+  assert.ok(snapshot.life.asymmetry >= -1 && snapshot.life.asymmetry <= 1);
+  assert.ok(
+    snapshot.life.breathModulation >= -1 &&
+      snapshot.life.breathModulation <= 1,
+  );
 });
 
 test('orienting moves eyes before head and head before torso', () => {
@@ -240,7 +250,9 @@ test('reset clears phases, noise, history, and transitions', () => {
 
   assert.equal(snapshot.life.breathingPhase, 0);
   assert.equal(snapshot.life.swayPhase, 0);
-  assert.equal(snapshot.life.noise, 0);
+  assert.equal(snapshot.life.posturalDrift, 0);
+  assert.equal(snapshot.life.asymmetry, 0);
+  assert.equal(snapshot.life.breathModulation, 0);
   assert.equal(snapshot.blink.phase, 'waiting');
   assert.equal(snapshot.orienting.phase, 'neutral');
   assert.equal(snapshot.orienting.target, null);
