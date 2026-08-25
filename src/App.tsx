@@ -1380,11 +1380,18 @@ export default function App() {
     startCameraAttention,
     stopCameraAttention,
   ]);
-  const exhibitionAudioActionLabel = voiceError
-    ? '音声とマイクを再試行'
+  const microphoneToggleLabel = voiceError
+    ? '音声入力を再試行'
     : isVoiceInputEnabled
       ? '音声入力を停止'
-      : '音声とマイクを有効化';
+      : '音声入力を有効化';
+  const microphoneDisclosureLabel = voiceError
+    ? '音声入力を再試行してマイク調整を表示'
+    : isVoiceInputEnabled
+      ? isMicrophoneControlExpanded
+        ? 'マイク調整を閉じる'
+        : 'マイク調整を表示'
+      : '音声入力を有効化してマイク調整を表示';
   const shouldShowAudioUnlockControl =
     !isExhibitionMode ||
     !isAudioUnlocked ||
@@ -2251,9 +2258,18 @@ export default function App() {
   ]);
 
   const handleMicrophoneControlToggle = useCallback(() => {
+    if (isVoiceInputEnabled && !voiceError) {
+      setIsMicrophoneControlExpanded((current) => !current);
+      return;
+    }
+
     setIsMicrophoneControlExpanded(true);
     void handleExhibitionAudioToggle();
-  }, [handleExhibitionAudioToggle]);
+  }, [
+    handleExhibitionAudioToggle,
+    isVoiceInputEnabled,
+    voiceError,
+  ]);
 
   const handleVolumeInput = (event: FormEvent<HTMLInputElement>) => {
     const inputVolume = Number(event.currentTarget.value) / 100;
@@ -2340,7 +2356,7 @@ export default function App() {
                   <button
                     aria-controls={EXHIBITION_MICROPHONE_PANEL_ID}
                     aria-expanded={isMicrophoneControlExpanded}
-                    aria-label={`${exhibitionAudioActionLabel}。マイク調整を表示します`}
+                    aria-label={microphoneDisclosureLabel}
                     className="audio-unlock-button microphone-disclosure-button"
                     data-input-active={isMicrophoneInputActive ? 'true' : 'false'}
                     data-state={
@@ -2355,12 +2371,12 @@ export default function App() {
                     }
                     onClick={handleMicrophoneControlToggle}
                     style={microphoneFeedbackStyle}
-                    title={`${exhibitionAudioActionLabel}。${microphoneStatusLabel}`}
+                    title={`${microphoneDisclosureLabel}。${microphoneStatusLabel}`}
                     type="button"
                   >
                     <MicrophoneIcon />
                     <span className="visually-hidden">
-                      {`${exhibitionAudioActionLabel}。${microphoneStatusLabel}。マイク調整を表示します。`}
+                      {`${microphoneDisclosureLabel}。${microphoneStatusLabel}。`}
                     </span>
                   </button>
                   <div
@@ -2421,7 +2437,7 @@ export default function App() {
                       />
                     </div>
                     <button
-                      aria-label={`${exhibitionAudioActionLabel}する`}
+                      aria-label={microphoneToggleLabel}
                       aria-pressed={isVoiceInputEnabled}
                       className="microphone-adjuster__toggle"
                       data-state={
@@ -2431,13 +2447,18 @@ export default function App() {
                             ? 'on'
                             : 'off'
                       }
-                      onClick={handleExhibitionAudioToggle}
-                      title={`${exhibitionAudioActionLabel}します`}
+                      onClick={handleVoiceToggle}
+                      title={microphoneToggleLabel}
                       type="button"
                     >
-                      <MicrophoneIcon />
+                      <span
+                        aria-hidden="true"
+                        className="microphone-adjuster__switch"
+                      >
+                        <span className="microphone-adjuster__switch-thumb" />
+                      </span>
                       <span className="visually-hidden">
-                        {exhibitionAudioActionLabel}
+                        {microphoneToggleLabel}
                       </span>
                     </button>
                   </div>

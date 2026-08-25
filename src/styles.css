@@ -2427,29 +2427,79 @@ input {
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle {
-  display: inline-grid;
-  width: 1.7rem;
-  height: 1.7rem;
-  min-height: 0;
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-height: 2.75rem;
   padding: 0;
-  place-items: center;
-  border: 1px solid rgb(244 239 230 / 22%);
-  border-radius: 50%;
-  background: rgb(23 23 37 / 52%);
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: rgb(244 239 230 / 72%);
   cursor: pointer;
 }
 
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch {
+  position: relative;
+  display: block;
+  width: 2.3rem;
+  height: 1.35rem;
+  border: 1px solid rgb(244 239 230 / 28%);
+  border-radius: 999px;
+  background: rgb(23 23 37 / 52%);
+  box-shadow: inset 0 1px 2px rgb(5 6 17 / 24%);
+  pointer-events: none;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0.2rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 1px solid rgb(244 239 230 / 78%);
+  border-radius: 50%;
+  background: rgb(244 239 230 / 88%);
+  box-shadow: 0 1px 3px rgb(5 6 17 / 34%);
+  transform: translateY(-50%);
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    left 180ms ease,
+    box-shadow 180ms ease;
+}
+
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] {
-  border-color: rgb(214 184 117 / 70%);
-  background: rgb(199 168 107 / 18%);
   color: #f4dfac;
 }
 
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] .microphone-adjuster__switch {
+  border-color: rgb(214 184 117 / 70%);
+  background: rgb(199 168 107 / 34%);
+  box-shadow:
+    inset 0 1px 2px rgb(5 6 17 / 20%),
+    0 0 7px rgb(214 184 117 / 18%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] .microphone-adjuster__switch-thumb {
+  left: 1.25rem;
+  border-color: #f4dfac;
+  background: #f4dfac;
+}
+
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="error"] {
+  color: #f5c1bb;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="error"] .microphone-adjuster__switch {
   border-color: rgb(240 184 183 / 76%);
   background: rgb(82 26 31 / 56%);
-  color: #f5c1bb;
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle:focus-visible {
@@ -2502,8 +2552,11 @@ input {
 
 @media (prefers-reduced-motion: reduce) {
   .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-input-active="true"] .control-icon,
-  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before {
+  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before,
+  .app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch,
+  .app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch-thumb {
     animation: none;
+    transition: none;
   }
 
   .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__fill {
