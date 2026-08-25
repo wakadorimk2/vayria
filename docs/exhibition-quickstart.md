@@ -22,7 +22,8 @@ npm run exhibition:check
 診断で証明書SANへの適合が確認できた場合だけ、表示されたfallback IP URLを使用します。
 
 起動前に、AivisSpeech、CUDAランタイム、STT依存関係、環境設定、ポートを確認します。
-`npm install`、`uv sync`、環境ファイルのコピーは実行しません。
+`npm install`と環境ファイルのコピーは実行しません。
+worktreeのSTT環境が未同期の場合は、起動時に`uv sync --locked`を実行します。
 
 ## 2. Windows Terminalタブの役割
 
