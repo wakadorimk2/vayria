@@ -34,6 +34,14 @@ import { AttentionVisualSmoother } from '../attention/attentionVisualSmoother';
 import { AttentionStateController } from '../attention/attentionStateController';
 import { CameraTrackingController } from '../attention/cameraTrackingController';
 import { applyBasePose, IdleController } from './idleMotion';
+import {
+  createLifeDynamicsProfile,
+  LifeDynamics,
+  resolveLifeDynamicsProfileId,
+  type LifeDynamicsInputs,
+  type LifeDynamicsSnapshot,
+} from './lifeDynamics';
+import { LifeDynamicsOrientingAdapter } from './lifeDynamicsOrientingAdapter';
 import { frameAvatar } from './cameraPreset';
 import { setupStageLighting } from './stageLighting';
 import { SavedMotionCatalog } from './motion/motionCatalog';
@@ -164,6 +172,30 @@ export interface VrmStageHandle {
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
 
+interface LifeDynamicsPocOptions {
+  enabled: boolean;
+  debug: boolean;
+  profileId: ReturnType<typeof resolveLifeDynamicsProfileId>;
+}
+
+function getLifeDynamicsPocOptions(): LifeDynamicsPocOptions {
+  if (typeof window === 'undefined') {
+    return { enabled: false, debug: false, profileId: '1.0x' };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const enabled = params.get('life-dynamics-poc') === '1';
+  return {
+    enabled,
+    debug: enabled && params.get('life-dynamics-debug') === '1',
+    profileId: resolveLifeDynamicsProfileId(
+      params.get('life-dynamics-profile'),
+    ),
+  };
+}
+
+const runtimeLifeDynamicsRandom = (): number => Math.random();
+
 export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
   function VrmStage(
     {
@@ -180,6 +212,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     },
     ref,
   ) {
+    const lifeDynamicsPocOptions = getLifeDynamicsPocOptions();
+    const lifeDynamicsPocEnabled = lifeDynamicsPocOptions.enabled;
+    const lifeDynamicsDebugEnabled = lifeDynamicsPocOptions.debug;
+    const lifeDynamicsProfileId = lifeDynamicsPocOptions.profileId;
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const mouthOpenRef = useRef(mouthOpen);
@@ -196,7 +232,13 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const onReadyRef = useRef(onReady);
     const [loadState, setLoadState] = useState<LoadState>('loading');
     const [expressionWarning, setExpressionWarning] = useState('');
+    const [lifeDynamicsDebugSnapshot, setLifeDynamicsDebugSnapshot] =
+      useState<LifeDynamicsSnapshot | null>(null);
     const loadedVrmRef = useRef<VRM | null>(null);
+    const lifeDynamicsRef = useRef<LifeDynamics | null>(null);
+    const lifeDynamicsOrientingAdapterRef =
+      useRef<LifeDynamicsOrientingAdapter | null>(null);
+    const lifeDynamicsDebugLastLogAtRef = useRef(0);
     const motionPlayerRef = useRef<MotionPlayer | null>(null);
     const motionCatalogRef = useRef(new SavedMotionCatalog());
     const motionAbortControllerRef = useRef<AbortController | null>(null);
@@ -610,6 +652,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       if (sessionGeneration === 0) return;
       stopReactionMotion();
       stopMotion();
+      lifeDynamicsRef.current?.reset(runtimeLifeDynamicsRandom);
+      lifeDynamicsOrientingAdapterRef.current?.reset();
+      setLifeDynamicsDebugSnapshot(null);
+      lifeDynamicsDebugLastLogAtRef.current = 0;
     }, [sessionGeneration, stopMotion, stopReactionMotion]);
 
     useEffect(() => {
@@ -659,6 +705,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       const lookAtWorldPosition = new Vector3();
       const thinkingGazeTarget = new Vector3();
       const viewerGazeTarget = new Vector3();
+      const lifeDynamicsNeutralTarget = new Vector3();
       let gazeModelHeight = 1;
       let blinkController: BlinkController | null = null;
       let emotionController: EmotionExpressionController | null = null;
@@ -729,8 +776,23 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               gazeModelHeight,
             );
             motionPlayerRef.current = new MotionPlayer(vrm.scene);
-            blinkController = new BlinkController(vrm);
+            blinkController = lifeDynamicsPocEnabled
+              ? null
+              : new BlinkController(vrm);
             emotionController = new EmotionExpressionController(vrm);
+            if (lifeDynamicsPocEnabled) {
+              const lifeDynamics = new LifeDynamics(
+                createLifeDynamicsProfile(lifeDynamicsProfileId),
+              );
+              lifeDynamics.reset(runtimeLifeDynamicsRandom);
+              lifeDynamicsRef.current = lifeDynamics;
+              lifeDynamicsOrientingAdapterRef.current =
+                new LifeDynamicsOrientingAdapter(vrm);
+              idleController.setEnabled(false);
+            } else {
+              lifeDynamicsRef.current = null;
+              lifeDynamicsOrientingAdapterRef.current = null;
+            }
 
             const availableExpressions =
               vrm.expressionManager?.expressions.map(
@@ -907,6 +969,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               : 0;
           const motionPlayer = motionPlayerRef.current;
           idleController?.removeOverlay();
+          lifeDynamicsOrientingAdapterRef.current?.reset();
           motionPlayer?.update(delta);
           loadedVrm.scene.updateMatrixWorld(true);
           const playbackState = motionPlayer?.playbackState ?? 'idle';
@@ -950,33 +1013,110 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           } else if (attentionFrame.state === 'AttendTarget') {
             performanceGazeTarget = camera.position;
           }
-          const idleGazeFrame = idleGazeController?.update(
-            delta,
-            camera.position,
-            !hasActiveBodyMotion &&
-              !hasPerformanceState &&
-              attentionFrame.state === 'Idle',
-            performanceGazeTarget,
-          );
-          idleController?.setEnabled(true);
-          if (hasActiveBodyMotion) {
-            idleController?.updateOverlay(
+          let lifeDynamicsSnapshot: LifeDynamicsSnapshot | null = null;
+          if (lifeDynamicsPocEnabled) {
+            const attentionTarget =
+              attentionFrame.target === 'none'
+                ? null
+                : attentionFrame.target;
+            const attentionLevel =
+              attentionTarget === null
+                ? 0
+                : Math.max(attentionFrame.strength, attentionEngagement);
+            const behaviorEnergy = activePerformancePlan?.behavior?.energy;
+            const lifeDynamicsInputs: LifeDynamicsInputs = {
+              arousal: attentionLevel,
+              curiosity:
+                attentionFrame.state === 'Thinking'
+                  ? Math.max(attentionFrame.strength, attentionEngagement)
+                  : 0,
+              attention:
+                attentionTarget === null
+                  ? {}
+                  : { [attentionTarget]: attentionLevel },
+              attentionTarget,
+              speechUrge:
+                activePerformancePlan?.intent === 'speak' ? 1 : 0,
+              inhibition: hasActiveBodyMotion ? 1 : thinking ? 0.5 : 0,
+              energy:
+                behaviorEnergy === 'high'
+                  ? 1
+                  : behaviorEnergy === 'low'
+                    ? 0.3
+                    : 0.6,
+              emotion: emotionRef.current,
+              intent: activePerformancePlan?.intent ?? null,
+              gestureIntent:
+                activePerformancePlan?.behavior?.gestureIntent ?? null,
+              gestureTrigger:
+                activePerformancePlan?.behavior?.gestureIntent !== undefined &&
+                performanceState?.phase === 'pre_reaction',
+            };
+            lifeDynamicsSnapshot =
+              lifeDynamicsRef.current?.update(
+                delta,
+                lifeDynamicsInputs,
+                runtimeLifeDynamicsRandom,
+              ) ?? null;
+            if (lifeDynamicsSnapshot && lifeDynamicsDebugEnabled) {
+              const now = performance.now();
+              if (now - lifeDynamicsDebugLastLogAtRef.current >= 250) {
+                setLifeDynamicsDebugSnapshot(lifeDynamicsSnapshot);
+                console.debug('[life-dynamics]', {
+                  profile: lifeDynamicsSnapshot.profileId,
+                  attentionTarget: lifeDynamicsSnapshot.orienting.target,
+                  orientingPhase: lifeDynamicsSnapshot.orienting.phase,
+                  headWeight: lifeDynamicsSnapshot.orienting.headWeight,
+                  blinkState: lifeDynamicsSnapshot.blink.state,
+                  gesturePhase: lifeDynamicsSnapshot.gesture.phase,
+                  inhibition: lifeDynamicsSnapshot.signals.inhibition,
+                });
+                lifeDynamicsDebugLastLogAtRef.current = now;
+              }
+            }
+            if (lifeDynamicsSnapshot) {
+              idleGazeController?.getNeutralTarget(lifeDynamicsNeutralTarget);
+              lifeDynamicsOrientingAdapterRef.current?.apply({
+                snapshot: lifeDynamicsSnapshot,
+                neutralTarget: lifeDynamicsNeutralTarget,
+                desiredTarget: performanceGazeTarget,
+                headBias: {
+                  yawDegrees: headYawBias + cameraHeadYawBias,
+                  pitchDegrees: listeningNodDegrees + cameraHeadPitchBias,
+                },
+                vrmaActive: hasActiveBodyMotion,
+              });
+            }
+          }
+          if (!lifeDynamicsPocEnabled) {
+            const idleGazeFrame = idleGazeController?.update(
               delta,
-              idleMotionWeight,
-              headYawBias +
-                cameraHeadYawBias +
-                (idleGazeFrame?.fallbackHeadYawBias ?? 0),
-              listeningNodDegrees + cameraHeadPitchBias,
+              camera.position,
+              !hasActiveBodyMotion &&
+                !hasPerformanceState &&
+                attentionFrame.state === 'Idle',
+              performanceGazeTarget,
             );
-          } else {
-            idleController?.update(
-              delta,
-              idleMotionWeight,
-              headYawBias +
-                cameraHeadYawBias +
-                (idleGazeFrame?.fallbackHeadYawBias ?? 0),
-              listeningNodDegrees + cameraHeadPitchBias,
-            );
+            idleController?.setEnabled(true);
+            if (hasActiveBodyMotion) {
+              idleController?.updateOverlay(
+                delta,
+                idleMotionWeight,
+                headYawBias +
+                  cameraHeadYawBias +
+                  (idleGazeFrame?.fallbackHeadYawBias ?? 0),
+                listeningNodDegrees + cameraHeadPitchBias,
+              );
+            } else {
+              idleController?.update(
+                delta,
+                idleMotionWeight,
+                headYawBias +
+                  cameraHeadYawBias +
+                  (idleGazeFrame?.fallbackHeadYawBias ?? 0),
+                listeningNodDegrees + cameraHeadPitchBias,
+              );
+            }
           }
           if (emotionController && appliedEmotion !== emotionRef.current) {
             emotionController.setEmotion(
@@ -986,7 +1126,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             appliedEmotion = emotionRef.current;
           }
           emotionController?.update(delta);
-          blinkController?.update(delta);
+          if (!lifeDynamicsPocEnabled) {
+            blinkController?.update(delta);
+          }
           if (mouthExpression) {
             loadedVrm.expressionManager?.setValue(
               mouthExpression,
@@ -1028,10 +1170,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         attentionEngagementController.reset();
         idleController?.dispose();
         idleGazeController?.dispose();
+        lifeDynamicsOrientingAdapterRef.current?.dispose();
         blinkController = null;
         emotionController = null;
         idleController = null;
         idleGazeController = null;
+        lifeDynamicsOrientingAdapterRef.current = null;
+        lifeDynamicsRef.current = null;
+        setLifeDynamicsDebugSnapshot(null);
         stopReactionMotion();
         stopMotion();
         motionPlayerRef.current?.dispose();
@@ -1045,6 +1191,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       };
     }, [
       isExhibitionMode,
+      lifeDynamicsDebugEnabled,
+      lifeDynamicsPocEnabled,
+      lifeDynamicsProfileId,
       stageVariant,
       stopMotion,
       stopReactionMotion,
@@ -1058,6 +1207,32 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           className="vrm-canvas"
           ref={canvasRef}
         />
+        {lifeDynamicsPocEnabled &&
+          lifeDynamicsDebugEnabled &&
+          lifeDynamicsDebugSnapshot && (
+            <aside
+              aria-label="LifeDynamics debug"
+              className="life-dynamics-debug"
+            >
+              <strong>LifeDynamics {lifeDynamicsDebugSnapshot.profileId}</strong>
+              <span>
+                target: {lifeDynamicsDebugSnapshot.orienting.target ?? 'none'}
+              </span>
+              <span>
+                orienting: {lifeDynamicsDebugSnapshot.orienting.phase}
+              </span>
+              <span>
+                head: {lifeDynamicsDebugSnapshot.orienting.headWeight.toFixed(2)}
+              </span>
+              <span>blink: {lifeDynamicsDebugSnapshot.blink.state}</span>
+              <span>
+                gesture: {lifeDynamicsDebugSnapshot.gesture.phase}
+              </span>
+              <span>
+                inhibition: {lifeDynamicsDebugSnapshot.signals.inhibition.toFixed(2)}
+              </span>
+            </aside>
+          )}
         {loadState === 'loading' && (
           <p className="stage-message" role="status">
             VRM を読み込んでいます…

@@ -758,6 +758,23 @@ function Test-Preflight {
     $env:Path = $cudaRuntimePath + ';' + $env:Path
   }
 
+  $uvSyncArguments = @(
+    'sync'
+    '--locked'
+  )
+  Push-Location -LiteralPath $sttDirectory
+  try {
+    $uvSyncOutput = & $script:resolvedCommands['uv.exe'] @uvSyncArguments 2>&1 |
+      Out-String
+    $uvSyncExitCode = $LASTEXITCODE
+  }
+  finally {
+    Pop-Location
+  }
+  if ($uvSyncExitCode -ne 0) {
+    throw "STT dependency sync failed with exit code $uvSyncExitCode. $($uvSyncOutput.Trim())"
+  }
+
   $uvCheckArguments = @(
     'run'
     '--no-sync'
