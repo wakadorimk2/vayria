@@ -589,11 +589,14 @@ input {
 .life-dynamics-debug {
   position: absolute;
   z-index: 3;
-  top: 0.7rem;
-  right: 0.7rem;
+  top: clamp(5.5rem, 12vh, 8rem);
+  right: auto;
+  left: clamp(0.7rem, 2vw, 1.5rem);
   display: grid;
   gap: 0.18rem;
-  min-width: 10.5rem;
+  width: min(10.5rem, calc(100% - 1.4rem));
+  min-width: 0;
+  max-width: calc(100% - 1.4rem);
   padding: 0.45rem 0.55rem;
   border: 1px solid rgb(244 239 230 / 24%);
   border-radius: 0.35rem;
