@@ -586,6 +586,29 @@ input {
   height: 100%;
 }
 
+.life-dynamics-debug {
+  position: absolute;
+  z-index: 3;
+  top: 0.7rem;
+  right: 0.7rem;
+  display: grid;
+  gap: 0.18rem;
+  min-width: 10.5rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid rgb(244 239 230 / 24%);
+  border-radius: 0.35rem;
+  background: rgb(12 12 24 / 78%);
+  color: rgb(244 239 230 / 84%);
+  font: 0.68rem/1.35 "Cascadia Code", Consolas, monospace;
+  pointer-events: none;
+  user-select: none;
+}
+
+.life-dynamics-debug strong {
+  color: #f3d8b5;
+  font-weight: 650;
+}
+
 .stage-message {
   position: absolute;
   inset: 50% auto auto 50%;
