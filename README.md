@@ -149,10 +149,10 @@ URLの変更後はページを再読み込みしてください。
 Mode DはAudio Labでだけ選べる実験Modeです。
 Mode D（Exhibition Mix）の実効endpointは`400ms`です。
 
-展示用STTは`small / CUDA / float16`を主プロファイルにします。
+展示用STTは`medium / CUDA / float16`を主プロファイルにします。
 展示起動では主プロファイルのロードに失敗すると起動を失敗させます。
 `tiny / CPU / int8`は明示的な比較実行だけに残します。
-既定のdecodeは`beam_size=3`、`temperature=(0.0, 0.2)`、
+既定のdecodeは`beam_size=1`、`temperature=(0.0,)`、
 `without_timestamps=True`、`condition_on_previous_text=False`、
 `vad_filter=False`です。
 既定hotwordsは`Vayria GPT-Live Codex`です。
@@ -541,9 +541,11 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    Push-Location tools/stt
    $env:Path = "$env:USERPROFILE\.vayria\cuda12;$env:Path"
    uv run --no-sync --no-cache python -m vayria_stt.server `
-     --model small `
+     --model medium `
      --device cuda `
      --compute-type float16 `
+     --beam-size 1 `
+     --temperatures 0 `
      --hotwords "Vayria GPT-Live Codex" `
      --require-primary-profile `
      --fallback-model tiny `

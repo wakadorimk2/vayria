@@ -15,13 +15,18 @@ COMPRESSION_RATIO_THRESHOLD = 2.4
 HALLUCINATION_ONLY_PHRASES = frozenset({"ご視聴ありがとうございました"})
 TRANSCRIPT_STRIP_CHARACTERS = " \t\r\n\u3000。、．.!！?？…"
 WARM_UP_AUDIO_SAMPLES = 320
-STT_MODEL_VALUES = ("tiny", "base", "small")
+STT_PRIMARY_MODEL_VALUES = ("tiny", "base", "small", "medium")
+STT_FALLBACK_MODEL_VALUES = ("tiny", "base", "small")
+STT_MODEL_VALUES = STT_PRIMARY_MODEL_VALUES
 STT_DEVICE_VALUES = ("auto", "cuda", "cpu")
 STT_COMPUTE_TYPE_VALUES = ("auto", "float16", "int8", "int8_float16")
 STT_BEAM_SIZE_VALUES = (1, 3)
+DEFAULT_MODEL = "medium"
+DEFAULT_DEVICE = "cuda"
+DEFAULT_COMPUTE_TYPE = "float16"
 DEFAULT_HOTWORDS = "Vayria GPT-Live Codex"
-DEFAULT_BEAM_SIZE = 3
-DEFAULT_TEMPERATURES = (0.0, 0.2)
+DEFAULT_BEAM_SIZE = 1
+DEFAULT_TEMPERATURES = (0.0,)
 DEFAULT_WITHOUT_TIMESTAMPS = True
 DEFAULT_CONDITION_ON_PREVIOUS_TEXT = False
 DEFAULT_VAD_FILTER = False
@@ -101,9 +106,9 @@ def _filter_transcription_segments(segments: Iterable[object]) -> str:
 
 @dataclass
 class FasterWhisperTranscriber:
-    model_name: str = "small"
-    device: str = "auto"
-    compute_type: str = "auto"
+    model_name: str = DEFAULT_MODEL
+    device: str = DEFAULT_DEVICE
+    compute_type: str = DEFAULT_COMPUTE_TYPE
     fallback_model: str = "tiny"
     fallback_device: str = "cpu"
     fallback_compute_type: str = "int8"
@@ -145,7 +150,7 @@ class FasterWhisperTranscriber:
             raise ValueError(f"unsupported STT device: {self.device}")
         if self.compute_type not in STT_COMPUTE_TYPE_VALUES:
             raise ValueError(f"unsupported STT compute type: {self.compute_type}")
-        if self.fallback_model not in STT_MODEL_VALUES:
+        if self.fallback_model not in STT_FALLBACK_MODEL_VALUES:
             raise ValueError(f"unsupported STT fallback model: {self.fallback_model}")
         if self.fallback_device not in ("cuda", "cpu"):
             raise ValueError(f"unsupported STT fallback device: {self.fallback_device}")

@@ -41,7 +41,7 @@ export const EXHIBITION_AUDIO_PRESETS = [
 export type ExhibitionAudioPreset = (typeof EXHIBITION_AUDIO_PRESETS)[number];
 
 export const DEFAULT_EXHIBITION_AUDIO_PRESET: ExhibitionAudioPreset = 'mild';
-export const STT_MODEL_VALUES = ['tiny', 'base', 'small'] as const;
+export const STT_MODEL_VALUES = ['tiny', 'base', 'small', 'medium'] as const;
 export type SttModel = (typeof STT_MODEL_VALUES)[number];
 export const STT_DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export type SttDevice = (typeof STT_DEVICE_VALUES)[number];

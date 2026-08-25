@@ -1537,23 +1537,24 @@ input {
   display: inline-flex;
   gap: 0.32rem;
   align-items: center;
-  padding: 0.22rem 0.3rem;
-  border: 1px solid rgb(244 239 230 / 15%);
-  border-radius: 999px;
-  background: rgb(23 23 37 / 54%);
-  box-shadow: 0 5px 16px rgb(5 6 17 / 12%);
-  backdrop-filter: blur(12px);
+  padding: 0;
 }
 
 .exhibition-network-status__item {
   display: inline-grid;
-  width: 1.55rem;
-  height: 1.55rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-height: 0;
+  padding: 0;
   place-items: center;
   border: 1px solid rgb(244 239 230 / 19%);
   border-radius: 50%;
   color: rgb(244 239 230 / 62%);
   background: rgb(244 239 230 / 5%);
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
 }
 
 .exhibition-network-status__item[data-state="available"] {
@@ -2201,6 +2202,14 @@ input {
   box-shadow: none;
 }
 
+.app-shell[data-app-mode="exhibition"] .app-title {
+  gap: 0.35rem;
+}
+
+.app-shell[data-app-mode="exhibition"] .exhibition-network-status {
+  gap: 0.35rem;
+}
+
 .app-shell[data-app-mode="exhibition"] .microphone-control {
   position: relative;
   display: grid;
@@ -2208,7 +2217,8 @@ input {
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button,
-.app-shell[data-app-mode="exhibition"] .attention-button {
+.app-shell[data-app-mode="exhibition"] .attention-button,
+.app-shell[data-app-mode="exhibition"] .exhibition-network-status__item {
   display: inline-grid;
   width: 2.25rem;
   height: 2.25rem;
@@ -2291,11 +2301,16 @@ input {
   color: #f7e7ba;
 }
 
-.app-shell[data-app-mode="exhibition"] .control-state {
-  font-size: 0.55rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  line-height: 1;
+.app-shell[data-app-mode="exhibition"] .attention-button[data-state="starting"] {
+  border-color: rgb(214 166 184 / 52%);
+  background: rgb(214 166 184 / 12%);
+  color: rgb(239 213 223 / 74%);
+}
+
+.app-shell[data-app-mode="exhibition"] .attention-button:disabled {
+  cursor: progress;
+  opacity: 0.72;
+  transform: none;
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster {
@@ -2384,12 +2399,13 @@ input {
   top: 50%;
   left: 50%;
   width: var(--microphone-meter-height);
-  height: 1.55rem;
+  height: 2.75rem;
   margin: 0;
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
   cursor: ns-resize;
+  touch-action: none;
   transform: translate(-50%, -50%) rotate(-90deg);
   z-index: 2;
 }
@@ -2400,9 +2416,9 @@ input {
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-webkit-slider-thumb {
-  width: 0.82rem;
-  height: 0.82rem;
-  margin-top: -0.3rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: -0.44rem;
   -webkit-appearance: none;
   appearance: none;
   border: 1px solid #f4efe6;
@@ -2417,8 +2433,8 @@ input {
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-moz-range-thumb {
-  width: 0.82rem;
-  height: 0.82rem;
+  width: 1.1rem;
+  height: 1.1rem;
   border: 1px solid #f4efe6;
   border-radius: 50%;
   background: var(--soft-gold);
@@ -2437,29 +2453,79 @@ input {
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle {
-  display: inline-grid;
-  width: 1.7rem;
-  height: 1.7rem;
-  min-height: 0;
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-height: 2.75rem;
   padding: 0;
-  place-items: center;
-  border: 1px solid rgb(244 239 230 / 22%);
-  border-radius: 50%;
-  background: rgb(23 23 37 / 52%);
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: rgb(244 239 230 / 72%);
   cursor: pointer;
 }
 
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch {
+  position: relative;
+  display: block;
+  width: 2.3rem;
+  height: 1.35rem;
+  border: 1px solid rgb(244 239 230 / 28%);
+  border-radius: 999px;
+  background: rgb(23 23 37 / 52%);
+  box-shadow: inset 0 1px 2px rgb(5 6 17 / 24%);
+  pointer-events: none;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0.2rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 1px solid rgb(244 239 230 / 78%);
+  border-radius: 50%;
+  background: rgb(244 239 230 / 88%);
+  box-shadow: 0 1px 3px rgb(5 6 17 / 34%);
+  transform: translateY(-50%);
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    left 180ms ease,
+    box-shadow 180ms ease;
+}
+
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] {
-  border-color: rgb(214 184 117 / 70%);
-  background: rgb(199 168 107 / 18%);
   color: #f4dfac;
 }
 
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] .microphone-adjuster__switch {
+  border-color: rgb(214 184 117 / 70%);
+  background: rgb(199 168 107 / 34%);
+  box-shadow:
+    inset 0 1px 2px rgb(5 6 17 / 20%),
+    0 0 7px rgb(214 184 117 / 18%);
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] .microphone-adjuster__switch-thumb {
+  left: 1.25rem;
+  border-color: #f4dfac;
+  background: #f4dfac;
+}
+
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="error"] {
+  color: #f5c1bb;
+}
+
+.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="error"] .microphone-adjuster__switch {
   border-color: rgb(240 184 183 / 76%);
   background: rgb(82 26 31 / 56%);
-  color: #f5c1bb;
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle:focus-visible {
@@ -2494,7 +2560,8 @@ input {
 
 @media (max-width: 720px) {
   .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button,
-  .app-shell[data-app-mode="exhibition"] .attention-button {
+  .app-shell[data-app-mode="exhibition"] .attention-button,
+  .app-shell[data-app-mode="exhibition"] .exhibition-network-status__item {
     width: 2.05rem;
     height: 2.05rem;
   }
@@ -2511,8 +2578,11 @@ input {
 
 @media (prefers-reduced-motion: reduce) {
   .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-input-active="true"] .control-icon,
-  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before {
+  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before,
+  .app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch,
+  .app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch-thumb {
     animation: none;
+    transition: none;
   }
 
   .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__fill {

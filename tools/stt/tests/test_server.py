@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 import sys
 from contextlib import suppress
+import wave
 
 import pytest
 from websockets.asyncio.client import connect
@@ -21,6 +23,7 @@ from vayria_stt.server import (
     handle_connection,
     parse_args,
 )
+from vayria_stt.capture import SttCaptureWriter
 from vayria_stt.transcriber import FasterWhisperTranscriber, TranscriptionResult
 from vayria_stt.vad import FRAME_BYTES, DetectorEvent
 
@@ -107,7 +110,20 @@ def test_parse_args_accepts_comparison_compute_type_and_primary_profile(monkeypa
     assert args.hotwords == "Vayria GPT-Live Codex"
     assert args.require_primary_profile is True
     assert args.beam_size == 1
-    assert args.temperatures == [0.0, 0.2]
+    assert args.temperatures == [0.0]
+
+
+def test_parse_args_uses_formal_stt_defaults(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["vayria-stt"])
+
+    args = parse_args()
+
+    assert args.model == "medium"
+    assert args.device == "cuda"
+    assert args.compute_type == "float16"
+    assert args.beam_size == 1
+    assert args.temperatures == [0.0]
+    assert args.hotwords == "Vayria GPT-Live Codex"
 
 
 def test_parse_args_preserves_empty_hotwords_as_disabled(monkeypatch) -> None:
@@ -134,6 +150,101 @@ def test_start_message_can_enable_diagnostics() -> None:
     )
     assert config.diagnostics is True
     assert config.end_silence_ms == DEFAULT_END_SILENCE_MS
+
+
+def test_start_message_can_enable_local_stt_capture() -> None:
+    config = _parse_start(
+        {
+            "type": "start",
+            "language": "ja-JP",
+            "sampleRate": 16_000,
+            "channels": 1,
+            "format": SUPPORTED_FORMAT,
+            "chunkMs": SUPPORTED_CHUNK_MS,
+            "captureAudio": True,
+        }
+    )
+
+    assert config.capture_audio is True
+
+
+def test_capture_writer_writes_wav_index_and_draft_manifest(tmp_path: Path) -> None:
+    writer = SttCaptureWriter(tmp_path)
+    pcm = b"\x01\x02" * 160
+    path = writer.write(
+        "voice-segment-test",
+        pcm,
+        TranscriptionResult("raw text", "accepted text", "test-filter"),
+    )
+
+    assert path is not None
+    with wave.open(str(path), "rb") as audio_file:
+        assert audio_file.getnchannels() == 1
+        assert audio_file.getsampwidth() == 2
+        assert audio_file.getframerate() == 16_000
+        assert audio_file.readframes(audio_file.getnframes()) == pcm
+
+    index = [
+        json.loads(line)
+        for line in writer.index_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert index[0]["segmentId"] == "voice-segment-test"
+    assert index[0]["rawText"] == "raw text"
+    assert index[0]["acceptedText"] == "accepted text"
+    assert index[0]["filterReason"] == "test-filter"
+    manifest = json.loads(writer.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["cases"] == [
+        {
+            "id": "segment-0001",
+            "category": "uncategorized",
+            "audio": "segment-0001.wav",
+            "reference": "",
+        }
+    ]
+
+
+def test_capture_writer_stops_at_ten_segments(tmp_path: Path) -> None:
+    writer = SttCaptureWriter(tmp_path)
+    result = TranscriptionResult("", "", "empty-audio")
+
+    for index in range(10):
+        assert writer.write(f"segment-{index}", b"\x00\x00", result) is not None
+    assert writer.write("segment-11", b"\x00\x00", result) is None
+    assert writer.count == 10
+    assert len(list(writer.session_dir.glob("*.wav"))) == 10
+
+
+def test_websocket_without_capture_does_not_create_capture_files(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with serve(
+            lambda connection: handle_connection(
+                connection,
+                transcriber=FakeTranscriber(),
+                capture_dir=tmp_path,
+            ),
+            "127.0.0.1",
+            0,
+        ) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(f"ws://127.0.0.1:{port}/stream") as client:
+                await client.send(
+                    json.dumps(
+                        {
+                            "type": "start",
+                            "language": "ja-JP",
+                            "sampleRate": 16_000,
+                            "channels": 1,
+                            "format": "pcm_s16le",
+                            "chunkMs": 200,
+                        }
+                    )
+                )
+                assert json.loads(await client.recv())["type"] == "listening_started"
+                await client.send(json.dumps({"type": "stop"}))
+                assert json.loads(await client.recv())["type"] == "recognition_stopped"
+
+    asyncio.run(scenario())
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_start_message_accepts_only_supported_endpoint_values() -> None:
@@ -163,10 +274,11 @@ def test_boundary_control_messages_are_strict_and_known() -> None:
         _parse_control({"type": "speech_ended", "segmentId": "client-id"})
 
 
-def test_diagnostic_worker_emits_raw_and_filtered_transcript() -> None:
+def test_diagnostic_worker_emits_raw_and_filtered_transcript(tmp_path: Path) -> None:
     async def scenario() -> None:
         connection = FakeConnection()
         queue: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue()
+        capture_writer = SttCaptureWriter(tmp_path)
         await queue.put(("segment-1", b"\x00" * 6_400))
         worker = asyncio.create_task(
             _transcription_worker(
@@ -175,6 +287,7 @@ def test_diagnostic_worker_emits_raw_and_filtered_transcript() -> None:
                 DiagnosticTranscriber(),
                 "ja",
                 True,
+                capture_writer,
             )
         )
         await queue.join()
@@ -191,6 +304,12 @@ def test_diagnostic_worker_emits_raw_and_filtered_transcript() -> None:
         assert payloads[1]["rawText"] == "raw text"
         assert payloads[1]["acceptedText"] == "accepted text"
         assert payloads[2]["text"] == "accepted text"
+        index = [
+            json.loads(line)
+            for line in capture_writer.index_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert index[0]["rawText"] == "raw text"
+        assert index[0]["acceptedText"] == "accepted text"
 
     asyncio.run(scenario())
 

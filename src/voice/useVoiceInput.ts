@@ -120,7 +120,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     const configuredTransport =
       optionsRef.current.transport ?? runtimeConfig.voiceTransport;
     const audioInputDeviceId = optionsRef.current.audioInputDeviceId?.trim() ?? '';
-    const adapterConfig = `${audioMode}|${audioPreset}|${audioEndpointMs}|${configuredTransport}|${audioInputDeviceId}`;
+    const adapterConfig = `${audioMode}|${audioPreset}|${audioEndpointMs}|${configuredTransport}|${audioInputDeviceId}|${runtimeConfig.sttCaptureEnabled}`;
     const existingAdapter = adapterRef.current;
 
     const disposeAdapter = (adapter: VoiceInputAdapter) => {
@@ -261,7 +261,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
               getExhibitionAudioPresetConfig(
                 optionsRef.current.audioPreset ?? DEFAULT_EXHIBITION_AUDIO_PRESET,
               ).defaultVadThreshold,
-            diagnostics: runtimeConfig.audioLabEnabled,
+            diagnostics:
+              runtimeConfig.audioLabEnabled || runtimeConfig.sttCaptureEnabled,
+            captureAudio: runtimeConfig.sttCaptureEnabled,
           })
         : createBrowserSpeechRecognitionAdapter(adapterOptions);
     adapterRef.current = adapter;
