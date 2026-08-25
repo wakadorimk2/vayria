@@ -235,6 +235,127 @@ test('chat and game targets have priority over viewer camera attention', () => {
   );
 });
 
+test('idle attention selects a spatial priority hint before camera reacquisition', () => {
+  const controller = new AttentionStateController();
+  const frame = controller.update(
+    createInput({
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        priorityHint: {
+          target: 'game',
+          salience: 0.85,
+          spatialTarget: { kind: 'game', anchor: 'transient' },
+        },
+      }),
+    }),
+  );
+
+  assert.equal(frame.state, 'AttendTarget');
+  assert.equal(frame.target, 'game');
+  assert.deepEqual(frame.spatialTarget, {
+    kind: 'game',
+    anchor: 'transient',
+  });
+});
+
+test('viewer engagement and explicit chat preempt a drag priority hint', () => {
+  const viewerController = new AttentionStateController();
+  const hint = createAttention({
+    priorityHint: {
+      target: 'game',
+      salience: 0.85,
+      spatialTarget: { kind: 'game', anchor: 'transient' },
+    },
+  });
+  viewerController.update(
+    createInput({ cameraEnabled: false, cameraTracking: null, attention: hint }),
+  );
+  const viewerFrame = viewerController.update(
+    createInput({
+      now: 1,
+      attention: hint,
+      viewerEngaged: true,
+    }),
+  );
+  assert.equal(viewerFrame.state, 'AttendViewer');
+  assert.equal(viewerFrame.target, 'viewer');
+
+  const chatController = new AttentionStateController();
+  chatController.update(
+    createInput({ cameraEnabled: false, cameraTracking: null, attention: hint }),
+  );
+  const chatFrame = chatController.update(
+    createInput({
+      now: 1,
+      attention: createAttention({
+        target: 'chat',
+        strength: 0.55,
+        spatialTarget: { kind: 'chat', anchor: 'default' },
+        priorityHint: hint.priorityHint,
+      }),
+      explicitTargetActive: true,
+    }),
+  );
+  assert.equal(chatFrame.state, 'AttendTarget');
+  assert.equal(chatFrame.target, 'chat');
+  assert.deepEqual(chatFrame.spatialTarget, {
+    kind: 'chat',
+    anchor: 'default',
+  });
+});
+
+test('priority hint reselects the card after the existing recovery phase', () => {
+  const controller = new AttentionStateController();
+  const hint = createAttention({
+    priorityHint: {
+      target: 'game',
+      salience: 0.85,
+      spatialTarget: { kind: 'game', anchor: 'transient' },
+    },
+  });
+
+  controller.update(
+    createInput({ cameraEnabled: false, cameraTracking: null, attention: hint }),
+  );
+  assert.equal(
+    controller.update(
+      createInput({
+        now: 1,
+        cameraEnabled: false,
+        cameraTracking: null,
+        attention: createAttention(),
+      }),
+    ).state,
+    'Recover',
+  );
+  assert.equal(
+    controller.update(
+      createInput({
+        now: 251,
+        cameraEnabled: false,
+        cameraTracking: null,
+        attention: createAttention(),
+      }),
+    ).state,
+    'Idle',
+  );
+
+  const frame = controller.update(
+    createInput({
+      now: 252,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(frame.target, 'game');
+  assert.deepEqual(frame.spatialTarget, {
+    kind: 'game',
+    anchor: 'transient',
+  });
+});
+
 test('semantic focus exposes camera uncertainty without expanding AttentionState', () => {
   const controller = new AttentionStateController();
   controller.update(createInput({ now: 0 }));

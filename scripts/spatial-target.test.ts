@@ -28,7 +28,7 @@ function createElement(
   return element;
 }
 
-test('registry captures an element center once and does not follow later DOM movement', () => {
+test('registry keeps a transient center stable until explicit layout refresh', () => {
   const registry = new SpatialTargetRegistry();
   const defaultElement = createElement(100, 200, 200, 100);
   const transientElement = createElement(400, 300, 100, 200);
@@ -43,6 +43,13 @@ test('registry captures an element center once and does not follow later DOM mov
 
   assert.deepEqual(snapshot?.point, { x: 450, y: 400 });
   assert.equal(transientElement.calls, 1);
+
+  assert.equal(registry.refreshTransient('game'), true);
+  assert.deepEqual(
+    registry.resolve({ kind: 'game', anchor: 'transient' })?.point,
+    { x: 950, y: 1_000 },
+  );
+  assert.equal(transientElement.calls, 2);
 });
 
 test('a disconnected transient element resolves to the cached default anchor', () => {

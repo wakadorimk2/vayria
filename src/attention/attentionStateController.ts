@@ -1,8 +1,10 @@
 import type {
   Attention,
   AttentionFocus,
+  AttentionPriorityHint,
   AttentionPosition,
   AttentionTarget,
+  SpatialTargetSelection,
 } from '../performer/types.js';
 import { CAMERA_ATTENTION_CONFIG } from './attentionMath.js';
 import type { CameraTrackingFrame } from './cameraTrackingController.js';
@@ -35,6 +37,7 @@ export interface AttentionStateFrame {
   headPosition: AttentionPosition | null;
   confidence: number;
   focus: AttentionFocus;
+  spatialTarget?: SpatialTargetSelection;
 }
 
 export class AttentionStateController {
@@ -115,6 +118,15 @@ export class AttentionStateController {
       this.viewerSource = 'camera';
       this.clearCandidate();
       return this.createViewerFrame(input.attention, tracking, 'camera');
+    }
+
+    const priorityHint = readPriorityHint(input.attention);
+    if (this.state === 'Idle' && priorityHint) {
+      this.clearCandidate();
+      this.clearRecovery();
+      this.state = 'AttendTarget';
+      this.viewerSource = null;
+      return this.createPriorityHintFrame(priorityHint, input.attention);
     }
 
     const cameraCandidate =
@@ -201,6 +213,29 @@ export class AttentionStateController {
       headPosition: null,
       confidence: 0,
       focus: createFocus('screen', 'focused', 1),
+      spatialTarget:
+        attention.spatialTarget?.kind === attention.target
+          ? attention.spatialTarget
+          : undefined,
+    };
+  }
+
+  private createPriorityHintFrame(
+    hint: AttentionPriorityHint,
+    attention: Attention,
+  ): AttentionStateFrame {
+    return {
+      state: 'AttendTarget',
+      target: hint.target,
+      strength: Math.max(0.55, clampStrength(attention.strength)),
+      position: null,
+      headPosition: null,
+      confidence: 0,
+      focus: createFocus('screen', 'focused', 1),
+      spatialTarget:
+        hint.spatialTarget?.kind === hint.target
+          ? hint.spatialTarget
+          : undefined,
     };
   }
 
@@ -240,6 +275,16 @@ export class AttentionStateController {
   private clearRecovery(): void {
     this.recoveryStartedAt = null;
   }
+}
+
+function readPriorityHint(
+  attention: Attention,
+): AttentionPriorityHint | null {
+  const hint = attention.priorityHint;
+  if (!hint || !Number.isFinite(hint.salience) || hint.salience <= 0) {
+    return null;
+  }
+  return hint;
 }
 
 function isCameraActive(

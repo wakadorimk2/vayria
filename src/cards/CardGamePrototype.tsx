@@ -21,6 +21,7 @@ import type {
 
 export interface CardInteractionTarget {
   readonly cardId: string;
+  readonly interaction: 'activation' | 'drag-start';
   readonly zone: CardZone;
   readonly element: HTMLElement | null;
 }
@@ -30,6 +31,7 @@ interface CardGamePrototypeProps {
   isResetLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
   onCardInteraction?: (target: CardInteractionTarget) => void;
+  onCardDragActiveChange?: (isActive: boolean) => void;
   onSessionReset?: () => void;
   onSelectionActiveChange?: (isActive: boolean) => void;
   spatialTargetRegistry?: SpatialTargetRegistry;
@@ -127,6 +129,7 @@ export function CardGamePrototype({
   isResetLocked = false,
   onCardInserted,
   onCardInteraction,
+  onCardDragActiveChange,
   onSessionReset,
   onSelectionActiveChange,
   spatialTargetRegistry,
@@ -172,6 +175,11 @@ export function CardGamePrototype({
     };
   }, [spatialTargetRegistry, zones.brain]);
 
+  useLayoutEffect(() => {
+    if (!spatialTargetRegistry || dragState?.isDragging !== true) return;
+    spatialTargetRegistry.refreshTransient('game');
+  }, [dragState?.isDragging, spatialTargetRegistry]);
+
   const commitSwap = useCallback(
     (brainCardId: string, handCardId: string) => {
       if (isSpent) return;
@@ -206,6 +214,7 @@ export function CardGamePrototype({
       onCardInteraction?.({
         cardId,
         element: event?.currentTarget ?? null,
+        interaction: 'activation',
         zone,
       });
       const brainCardId = zone === 'brain' ? cardId : selectedBrainCardId;
@@ -256,16 +265,22 @@ export function CardGamePrototype({
   );
 
   const cancelDrag = useCallback(() => {
+    if (dragSessionRef.current?.isDragging) {
+      onCardDragActiveChange?.(false);
+    }
     dragSessionRef.current = null;
     setDragState(null);
     suppressNextClickRef.current = false;
-  }, []);
+  }, [onCardDragActiveChange]);
 
   const completeDrag = useCallback(
     (pointerId: number, clientX: number, clientY: number) => {
       const session = dragSessionRef.current;
       if (!session || session.pointerId !== pointerId) return;
 
+      if (session.isDragging) {
+        onCardDragActiveChange?.(false);
+      }
       dragSessionRef.current = null;
       setDragState(null);
       if (!session.isDragging) return;
@@ -277,7 +292,7 @@ export function CardGamePrototype({
         commitSwap(targetBrainCardId, session.cardId);
       }
     },
-    [commitSwap],
+    [commitSwap, onCardDragActiveChange],
   );
 
   useEffect(() => {
@@ -306,9 +321,11 @@ export function CardGamePrototype({
       dragSessionRef.current = nextSession;
       setDragState(nextSession);
       if (startedDragging) {
+        onCardDragActiveChange?.(true);
         onCardInteraction?.({
           cardId: session.cardId,
           element: session.element,
+          interaction: 'drag-start',
           zone: 'hand',
         });
       }
@@ -335,7 +352,12 @@ export function CardGamePrototype({
       document.removeEventListener('pointercancel', handlePointerCancel);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [cancelDrag, completeDrag, onCardInteraction]);
+  }, [
+    cancelDrag,
+    completeDrag,
+    onCardDragActiveChange,
+    onCardInteraction,
+  ]);
 
   const selectionHint =
     runtimeConfig.mode === 'exhibition'

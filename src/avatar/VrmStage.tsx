@@ -1040,8 +1040,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             const spatialSelection: SpatialTargetSelection | null =
               attentionFrame.target === 'game' ||
               attentionFrame.target === 'chat'
-                ? attention.spatialTarget?.kind === attentionFrame.target
-                  ? attention.spatialTarget
+                ? attentionFrame.spatialTarget?.kind === attentionFrame.target
+                  ? attentionFrame.spatialTarget
                   : { kind: attentionFrame.target, anchor: 'default' }
                 : null;
             if (spatialSelection) {
@@ -1106,7 +1106,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 ? null
                 : attentionTarget === 'game' || attentionTarget === 'chat'
                   ? resolvedSpatialTargetKey ??
-                    `${attentionTarget}:${attention.spatialTarget?.anchor ?? 'default'}`
+                    `${attentionTarget}:${attentionFrame.spatialTarget?.anchor ?? attention.spatialTarget?.anchor ?? 'default'}`
                   : attentionTarget;
             const behaviorEnergy = activePerformancePlan?.behavior?.energy;
             const lifeDynamicsInputs: LifeDynamicsInputs = {

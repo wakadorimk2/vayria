@@ -54,10 +54,15 @@ export class SpatialTargetRegistry {
     SpatialTargetKind,
     CachedTransientTarget
   >();
+  private readonly transientObservers = new Map<
+    SpatialTargetKind,
+    ResizeObserver
+  >();
   private disposed = false;
 
   private readonly handleLayoutInvalidation = (): void => {
     this.refreshDefaults();
+    this.refreshTransients();
   };
 
   constructor() {
@@ -76,7 +81,11 @@ export class SpatialTargetRegistry {
     for (const observer of this.defaultObservers.values()) {
       observer.disconnect();
     }
+    for (const observer of this.transientObservers.values()) {
+      observer.disconnect();
+    }
     this.defaultObservers.clear();
+    this.transientObservers.clear();
     this.defaultElements.clear();
     this.defaultTargets.clear();
     this.transientTargets.clear();
@@ -138,16 +147,22 @@ export class SpatialTargetRegistry {
   ): boolean {
     if (this.disposed) return false;
     if (element === null || !isConnected(element)) {
+      this.disconnectTransientObserver(kind);
       this.transientTargets.delete(kind);
       return false;
     }
 
     const point = readElementCenter(element);
     if (point === null) {
+      this.disconnectTransientObserver(kind);
       this.transientTargets.delete(kind);
       return false;
     }
 
+    if (this.transientTargets.get(kind)?.element !== element) {
+      this.disconnectTransientObserver(kind);
+      this.observeTransient(kind, element);
+    }
     this.transientTargets.set(kind, {
       element,
       snapshot: {
@@ -159,7 +174,42 @@ export class SpatialTargetRegistry {
     return true;
   }
 
+  refreshTransient(kind: SpatialTargetKind): boolean {
+    if (this.disposed) return false;
+    const cached = this.transientTargets.get(kind);
+    if (!cached || !isConnected(cached.element)) {
+      this.disconnectTransientObserver(kind);
+      this.transientTargets.delete(kind);
+      return false;
+    }
+
+    const point = readElementCenter(cached.element);
+    if (point === null) {
+      this.disconnectTransientObserver(kind);
+      this.transientTargets.delete(kind);
+      return false;
+    }
+
+    this.transientTargets.set(kind, {
+      element: cached.element,
+      snapshot: {
+        selection: { kind, anchor: 'transient' },
+        point,
+        capturedAt: readNow(),
+      },
+    });
+    return true;
+  }
+
+  refreshTransients(): void {
+    if (this.disposed) return;
+    for (const kind of this.transientTargets.keys()) {
+      this.refreshTransient(kind);
+    }
+  }
+
   clearTransient(kind: SpatialTargetKind): void {
+    this.disconnectTransientObserver(kind);
     this.transientTargets.delete(kind);
   }
 
@@ -171,7 +221,10 @@ export class SpatialTargetRegistry {
       if (transient && isConnected(transient.element)) {
         return transient.snapshot;
       }
-      if (transient) this.transientTargets.delete(selection.kind);
+      if (transient) {
+        this.disconnectTransientObserver(selection.kind);
+        this.transientTargets.delete(selection.kind);
+      }
     }
 
     return this.defaultTargets.get(selection.kind) ?? null;
@@ -192,6 +245,23 @@ export class SpatialTargetRegistry {
     if (!observer) return;
     observer.disconnect();
     this.defaultObservers.delete(kind);
+  }
+
+  private observeTransient(
+    kind: SpatialTargetKind,
+    element: SpatialTargetElement,
+  ): void {
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => this.refreshTransient(kind));
+    observer.observe(element as Element);
+    this.transientObservers.set(kind, observer);
+  }
+
+  private disconnectTransientObserver(kind: SpatialTargetKind): void {
+    const observer = this.transientObservers.get(kind);
+    if (!observer) return;
+    observer.disconnect();
+    this.transientObservers.delete(kind);
   }
 }
 

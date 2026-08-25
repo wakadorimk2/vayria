@@ -80,6 +80,12 @@ export interface SpatialTargetSelection {
   anchor: SpatialTargetAnchor;
 }
 
+export interface AttentionPriorityHint {
+  target: Exclude<AttentionTarget, 'none'>;
+  salience: number;
+  spatialTarget?: SpatialTargetSelection;
+}
+
 export const ATTENTION_FOCUS_TARGETS = [
   'user',
   'camera',
@@ -120,6 +126,7 @@ export interface Attention {
   distance?: number;
   gaze?: AttentionPosition;
   spatialTarget?: SpatialTargetSelection;
+  priorityHint?: AttentionPriorityHint;
 }
 
 export type AttentionReader = () => Attention;
