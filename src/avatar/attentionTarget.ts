@@ -26,6 +26,24 @@ export interface ViewerCameraBasis {
   up: Vector3;
 }
 
+/**
+ * Blends the output gaze point without changing the resolved spatial target.
+ * A zero strength stays at the neutral look-at point. A strength of one uses
+ * the resolved target exactly.
+ */
+export function blendGazeTarget(
+  neutralTarget: Vector3,
+  resolvedTarget: Vector3,
+  gazeStrength: number,
+  target: Vector3,
+): Vector3 {
+  return target.lerpVectors(
+    neutralTarget,
+    resolvedTarget,
+    clampLevel(gazeStrength),
+  );
+}
+
 export function mapCameraAttentionToViewerTarget(
   camera: ViewerCameraBasis,
   eyePosition: Vector3,

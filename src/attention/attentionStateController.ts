@@ -33,6 +33,7 @@ export interface AttentionStateFrame {
   state: AttentionState;
   target: AttentionTarget;
   strength: number;
+  gazeStrength: number;
   position: AttentionPosition | null;
   headPosition: AttentionPosition | null;
   confidence: number;
@@ -192,6 +193,7 @@ export class AttentionStateController {
       state: 'Idle',
       target: 'none',
       strength: 0,
+      gazeStrength: 0,
       position: null,
       headPosition: null,
       confidence: 0,
@@ -204,6 +206,7 @@ export class AttentionStateController {
       state: 'Recover',
       target: 'none',
       strength: 0,
+      gazeStrength: 0,
       position: null,
       headPosition: null,
       confidence: 0,
@@ -216,6 +219,7 @@ export class AttentionStateController {
       state: 'Thinking',
       target: 'none',
       strength: 0.28,
+      gazeStrength: 1,
       position: null,
       headPosition: null,
       confidence: 0,
@@ -228,6 +232,7 @@ export class AttentionStateController {
       state: 'AttendTarget',
       target: attention.target,
       strength: Math.max(0.55, clampStrength(attention.strength)),
+      gazeStrength: 1,
       position: null,
       headPosition: null,
       confidence: 0,
@@ -247,6 +252,7 @@ export class AttentionStateController {
       state: 'AttendTarget',
       target: hint.target,
       strength: Math.max(0.55, clampStrength(attention.strength)),
+      gazeStrength: readGazeStrength(hint),
       position: null,
       headPosition: null,
       confidence: 0,
@@ -280,6 +286,7 @@ export class AttentionStateController {
         cameraPosition !== null
           ? Math.max(0.6, clampStrength(attention.strength))
           : 0.72,
+      gazeStrength: 1,
       position: cameraPosition,
       headPosition: cameraHeadPosition,
       confidence: cameraPosition !== null ? cameraConfidence : 0,
@@ -304,6 +311,12 @@ function readPriorityHint(
     return null;
   }
   return hint;
+}
+
+function readGazeStrength(hint: AttentionPriorityHint): number {
+  if (hint.gazeStrength === undefined) return 1;
+  if (!Number.isFinite(hint.gazeStrength)) return 1;
+  return clampStrength(hint.gazeStrength);
 }
 
 function isCameraActive(

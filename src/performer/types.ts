@@ -84,6 +84,7 @@ export interface AttentionPriorityHint {
   target: Exclude<AttentionTarget, 'none'>;
   salience: number;
   spatialTarget?: SpatialTargetSelection;
+  gazeStrength?: number;
 }
 
 export const ATTENTION_FOCUS_TARGETS = [

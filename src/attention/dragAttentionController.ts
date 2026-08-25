@@ -7,6 +7,10 @@ export const DRAG_ATTENTION_MIN_DWELL_MS = 200;
 export const DRAG_ATTENTION_MAX_ACQUIRE_MS = 1_200;
 export const DRAG_ATTENTION_TICK_MS = 50;
 export const DRAG_ATTENTION_POST_END_HOLD_MS = 300;
+export const DRAG_ATTENTION_MIN_GAZE_STRENGTH = 0.2;
+export const DRAG_ATTENTION_MAX_GAZE_STRENGTH = 0.85;
+export const DRAG_ATTENTION_GAZE_STRENGTH_REFRESH_MS = 300;
+export const DRAG_ATTENTION_GAZE_STRENGTH_SMOOTH_MS = 200;
 
 const DRAG_ATTENTION_HAZARD_WINDOWS = [
   { endMs: 500, hazardPerSecond: 0.5 },
@@ -17,6 +21,7 @@ const DRAG_ATTENTION_HAZARD_WINDOWS = [
 export interface DragAttentionSnapshot {
   readonly phase: DragAttentionPhase;
   readonly elapsedMs: number;
+  readonly gazeStrength: number;
 }
 
 /**
@@ -27,10 +32,16 @@ export interface DragAttentionSnapshot {
 export class DragAttentionController {
   private phase: DragAttentionPhase = 'idle';
   private elapsedMs = 0;
+  private gazeStrength = 0;
+  private gazeStrengthTarget = 0;
+  private nextGazeStrengthRefreshMs = 0;
 
   start(): DragAttentionSnapshot {
     this.phase = 'acquire';
     this.elapsedMs = 0;
+    this.gazeStrength = 1;
+    this.gazeStrengthTarget = 1;
+    this.nextGazeStrengthRefreshMs = 0;
     return this.snapshot();
   }
 
@@ -42,6 +53,7 @@ export class DragAttentionController {
     if (this.phase === 'idle') return this.snapshot();
     if (this.phase === 'priority') {
       this.elapsedMs += delta;
+      this.updateGazeStrength(delta, random);
       return this.snapshot();
     }
 
@@ -53,7 +65,7 @@ export class DragAttentionController {
     this.elapsedMs = endMs;
 
     if (endMs >= DRAG_ATTENTION_MAX_ACQUIRE_MS) {
-      this.phase = 'priority';
+      this.beginPriority(random);
       return this.snapshot();
     }
 
@@ -64,7 +76,7 @@ export class DragAttentionController {
       releaseProbability > 0 &&
       isRandomHit(random(), releaseProbability)
     ) {
-      this.phase = 'priority';
+      this.beginPriority(random);
     }
 
     return this.snapshot();
@@ -73,6 +85,9 @@ export class DragAttentionController {
   end(): DragAttentionSnapshot {
     this.phase = 'idle';
     this.elapsedMs = 0;
+    this.gazeStrength = 0;
+    this.gazeStrengthTarget = 0;
+    this.nextGazeStrengthRefreshMs = 0;
     return this.snapshot();
   }
 
@@ -80,7 +95,38 @@ export class DragAttentionController {
     return {
       phase: this.phase,
       elapsedMs: this.elapsedMs,
+      gazeStrength: this.gazeStrength,
     };
+  }
+
+  private beginPriority(random: DragAttentionRandom): void {
+    this.phase = 'priority';
+    this.gazeStrengthTarget = sampleGazeStrength(random);
+    this.gazeStrength = Math.min(
+      this.gazeStrength,
+      DRAG_ATTENTION_MAX_GAZE_STRENGTH,
+    );
+    this.nextGazeStrengthRefreshMs =
+      this.elapsedMs + DRAG_ATTENTION_GAZE_STRENGTH_REFRESH_MS;
+  }
+
+  private updateGazeStrength(
+    deltaMs: number,
+    random: DragAttentionRandom,
+  ): void {
+    if (this.elapsedMs >= this.nextGazeStrengthRefreshMs) {
+      this.gazeStrengthTarget = sampleGazeStrength(random);
+      this.nextGazeStrengthRefreshMs =
+        this.elapsedMs + DRAG_ATTENTION_GAZE_STRENGTH_REFRESH_MS;
+    }
+
+    const alpha =
+      1 -
+      Math.exp(-deltaMs / Math.max(DRAG_ATTENTION_GAZE_STRENGTH_SMOOTH_MS, 1));
+    this.gazeStrength = clampGazeStrength(
+      this.gazeStrength +
+        (this.gazeStrengthTarget - this.gazeStrength) * alpha,
+    );
   }
 }
 
@@ -127,6 +173,27 @@ function getNextHazardBoundary(cursorMs: number, endMs: number): number {
 function clampDeltaMs(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, value);
+}
+
+function sampleGazeStrength(random: DragAttentionRandom): number {
+  const sample = random();
+  const normalized = Number.isFinite(sample)
+    ? Math.max(0, Math.min(sample, 1))
+    : 0.5;
+  return (
+    DRAG_ATTENTION_MIN_GAZE_STRENGTH +
+    (DRAG_ATTENTION_MAX_GAZE_STRENGTH -
+      DRAG_ATTENTION_MIN_GAZE_STRENGTH) *
+      normalized
+  );
+}
+
+function clampGazeStrength(value: number): number {
+  if (!Number.isFinite(value)) return DRAG_ATTENTION_MIN_GAZE_STRENGTH;
+  return Math.max(
+    DRAG_ATTENTION_MIN_GAZE_STRENGTH,
+    Math.min(value, DRAG_ATTENTION_MAX_GAZE_STRENGTH),
+  );
 }
 
 function isRandomHit(value: number, probability: number): boolean {

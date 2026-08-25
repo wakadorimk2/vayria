@@ -540,13 +540,6 @@ export default function App() {
       setCardAttentionPhase(
         snapshot.phase === 'priority' ? 'drag-priority' : 'drag-acquire',
       );
-      if (snapshot.phase !== 'acquire') {
-        if (dragAttentionTickRef.current !== null) {
-          window.clearInterval(dragAttentionTickRef.current);
-          dragAttentionTickRef.current = null;
-        }
-        dragAttentionLastTickAtRef.current = null;
-      }
     }, DRAG_ATTENTION_TICK_MS);
   }, [clearCardAttentionTimers]);
 
@@ -622,8 +615,21 @@ export default function App() {
   const readAttention: AttentionReader = useCallback(() => {
     const logicalAttention = logicalAttentionRef.current;
     const cameraSnapshot = readCameraSnapshot();
+    const dragAttentionSnapshot = dragAttentionControllerRef.current.snapshot();
+    const priorityHint = logicalAttention.priorityHint;
+    const dynamicPriorityHint =
+      priorityHint?.target === 'game' &&
+      priorityHint.spatialTarget?.kind === 'game' &&
+      priorityHint.spatialTarget.anchor === 'transient' &&
+      dragAttentionSnapshot.phase === 'priority'
+        ? {
+            ...priorityHint,
+            gazeStrength: dragAttentionSnapshot.gazeStrength,
+          }
+        : priorityHint;
     return {
       ...logicalAttention,
+      priorityHint: dynamicPriorityHint,
       position: cameraSnapshot.position,
       confidence: cameraSnapshot.confidence,
       updatedAt: Math.max(
