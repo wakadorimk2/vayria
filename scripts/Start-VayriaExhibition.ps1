@@ -4,8 +4,8 @@ param(
 
   [string]$AivisInstallPath = '',
 
-  [ValidateSet('tiny', 'base', 'small')]
-  [string]$SttModel = 'small',
+  [ValidateSet('tiny', 'base', 'small', 'medium')]
+  [string]$SttModel = 'medium',
 
   [ValidateSet('auto', 'cuda', 'cpu')]
   [string]$SttDevice = 'cuda',

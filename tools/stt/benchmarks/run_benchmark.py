@@ -17,7 +17,10 @@ if str(STT_ROOT) not in sys.path:
 
 from vayria_stt.transcriber import (  # noqa: E402
     DEFAULT_BEAM_SIZE,
+    DEFAULT_COMPUTE_TYPE,
+    DEFAULT_DEVICE,
     DEFAULT_HOTWORDS,
+    DEFAULT_MODEL,
     DEFAULT_TEMPERATURES,
     FasterWhisperTranscriber,
     STT_BEAM_SIZE_VALUES,
@@ -175,12 +178,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audio-root", type=Path)
     parser.add_argument("--output", type=Path, default=DEFAULT_RESULT_PATH)
     parser.add_argument("--language", default="ja")
-    parser.add_argument("--model", choices=STT_MODEL_VALUES, default="small")
-    parser.add_argument("--device", choices=STT_DEVICE_VALUES, default="cuda")
+    parser.add_argument("--model", choices=STT_MODEL_VALUES, default=DEFAULT_MODEL)
+    parser.add_argument("--device", choices=STT_DEVICE_VALUES, default=DEFAULT_DEVICE)
     parser.add_argument(
         "--compute-type",
         choices=STT_COMPUTE_TYPE_VALUES,
-        default="float16",
+        default=DEFAULT_COMPUTE_TYPE,
     )
     parser.add_argument(
         "--beam-size",
@@ -255,6 +258,8 @@ def main() -> int:
                     "id": str(case.get("id", audio_path.stem)),
                     "category": str(case.get("category", "unspecified")),
                     "reference": reference,
+                    "rawText": result.raw_text,
+                    "acceptedText": result.text,
                     "hypothesis": hypothesis,
                     "filterReason": result.filter_reason,
                     "processingMs": elapsed_ms,

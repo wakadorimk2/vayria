@@ -57,6 +57,7 @@ interface RemotePcmVoiceAdapterOptions extends VoiceInputAdapterOptions {
   audioEndpointMs?: AudioEndpointMs;
   vadThreshold?: number;
   diagnostics?: boolean;
+  captureAudio?: boolean;
 }
 
 interface WindowWithWebkitAudioContext extends Window {
@@ -73,6 +74,7 @@ interface VoiceStartMessage {
   chunkMs: number;
   endSilenceMs?: AudioEndpointMs;
   diagnostics?: boolean;
+  captureAudio?: boolean;
 }
 
 type VoiceBoundaryMessageType = 'speech_started' | 'speech_ended';
@@ -939,6 +941,7 @@ export function createRemotePcmVoiceAdapter(
         chunkMs: PCM_CHUNK_DURATION_MS,
         ...(usesSelectableEndpoint ? { endSilenceMs: endpointMs } : {}),
         ...(options.diagnostics ? { diagnostics: true } : {}),
+        ...(options.captureAudio ? { captureAudio: true } : {}),
       } satisfies VoiceStartMessage),
     );
     serverStarted = true;

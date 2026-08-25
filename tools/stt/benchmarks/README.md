@@ -20,6 +20,98 @@
 
 WAVはモノラル、16-bit、16 kHz PCMにします。
 
+## 展示会の実音声キャプチャ
+
+展示会モードを開発サーバーで起動し、URLへ`?sttCapture=1`を追加します。
+この指定は開発時の展示会モードでだけ有効です。
+
+ブラウザのVADを通過してSTTへ渡した発話を、1セッション最大10件保存します。
+保存先は`tools/stt/benchmarks/local/capture/`です。
+各セッションにはWAV、`index.jsonl`、`manifest.draft.json`を保存します。
+
+`manifest.draft.json`へ実際の発話内容を`reference`として入力します。
+`category`も次のように入力します。
+
+- `normal-ja`
+- `long-katakana`
+- `short-utterance`
+- `proper-nouns`
+- `environment-noise`
+
+WAVはローカル評価用です。
+Gitへ追加しません。
+
+## 同一音声の比較
+
+同じmanifestを次の5つのprofileで実行します。
+`--require-primary-profile`を付けるため、CPU fallbackは比較結果へ混入しません。
+
+```powershell
+Push-Location tools/stt
+$manifest = Get-ChildItem benchmarks/local/capture -Filter manifest.draft.json -Recurse |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+
+uv run --no-cache python benchmarks/run_benchmark.py `
+  --manifest $manifest.FullName `
+  --model small `
+  --device cuda `
+  --compute-type float16 `
+  --beam-size 3 `
+  --temperatures 0 0.2 `
+  --hotwords 'Vayria GPT-Live Codex' `
+  --require-primary-profile `
+  --output (Join-Path $manifest.DirectoryName 'result-small-beam3.json')
+
+uv run --no-cache python benchmarks/run_benchmark.py `
+  --manifest $manifest.FullName `
+  --model small `
+  --device cuda `
+  --compute-type float16 `
+  --beam-size 1 `
+  --temperatures 0 `
+  --hotwords 'Vayria GPT-Live Codex' `
+  --require-primary-profile `
+  --output (Join-Path $manifest.DirectoryName 'result-small-greedy.json')
+
+uv run --no-cache python benchmarks/run_benchmark.py `
+  --manifest $manifest.FullName `
+  --model medium `
+  --device cuda `
+  --compute-type float16 `
+  --beam-size 3 `
+  --temperatures 0 0.2 `
+  --hotwords 'Vayria GPT-Live Codex' `
+  --require-primary-profile `
+  --output (Join-Path $manifest.DirectoryName 'result-medium-beam3.json')
+
+uv run --no-cache python benchmarks/run_benchmark.py `
+  --manifest $manifest.FullName `
+  --model medium `
+  --device cuda `
+  --compute-type float16 `
+  --beam-size 1 `
+  --temperatures 0 `
+  --hotwords 'Vayria GPT-Live Codex' `
+  --require-primary-profile `
+  --output (Join-Path $manifest.DirectoryName 'result-medium-greedy.json')
+
+uv run --no-cache python benchmarks/run_benchmark.py `
+  --manifest $manifest.FullName `
+  --model small `
+  --device cuda `
+  --compute-type float16 `
+  --beam-size 3 `
+  --temperatures 0 0.2 `
+  --hotwords '' `
+  --require-primary-profile `
+  --output (Join-Path $manifest.DirectoryName 'result-small-no-hotwords.json')
+Pop-Location
+```
+
+profileごとの`rawText`、`acceptedText`、CER、短文一致率、hallucination率、固有名詞recallを比較します。
+長いカタカナの誤認識は、`long-katakana`ケースの出力を確認します。
+
 ## オフライン評価
 
 展示ノートで、主プロファイルを必須にして実行します。
@@ -50,7 +142,9 @@ uv run --no-cache python benchmarks/run_benchmark.py `
 
 `base / float16`は同じ手順で`--model base`を指定します。
 `--beam-size 1`で`beam_size=1`を比較できます。
-既定値は`beam_size=3`、`temperature=(0.0, 0.2)`、hotwords有効です。
+正式採用profileは`medium / CUDA / float16 / beam_size=1 / temperature=(0.0,)`、
+hotwords有効です。
+比較コマンドでは各profileの設定を明示します。
 hotwordsを無効にする比較では`--hotwords ""`を指定します。
 
 ## Voice Labの遅延評価
@@ -74,13 +168,9 @@ uv run --no-cache python benchmarks/run_benchmark.py `
 ```
 
 `--voice-lab-jsonl`を400 msと600 ms、各モデル・compute typeで分けます。
-比較対象は次です。
-
-- `small / float16`
-- `small / int8_float16`
-- `base / float16`
-
-`medium`以上は初回評価へ含めません。
+比較対象は同じ音声と同じmanifestでそろえます。
+`medium / beam_size=1 / temperature=0`を正式採用profileにします。
+起動できない場合はfallbackへ切り替えず、候補外とします。
 
 ## 選定基準
 

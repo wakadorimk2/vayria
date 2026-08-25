@@ -227,7 +227,7 @@ function MicrophoneIcon() {
   );
 }
 
-function EyeIcon() {
+function CameraIcon() {
   return (
     <svg
       aria-hidden="true"
@@ -236,11 +236,19 @@ function EyeIcon() {
       focusable="false"
     >
       <path
-        d="M3 12s3.2-5 9-5 9 5 9 5-3.2 5-9 5-9-5-9-5Zm9-2.25A2.25 2.25 0 1 0 12 14.25 2.25 2.25 0 0 0 12 9.75Z"
+        d="M5 7.5h3l1.2-2h5.6l1.2 2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z"
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+      <circle
+        cx="12"
+        cy="13"
+        r="3.25"
+        fill="none"
+        stroke="currentColor"
         strokeWidth="1.5"
       />
     </svg>
@@ -1355,11 +1363,14 @@ export default function App() {
     cameraAttentionErrorCode,
   );
   const cameraAttentionEnabled = cameraAttentionStatus === 'active';
+  const cameraAttentionIsStarting = cameraAttentionStatus === 'starting';
+  const cameraAttentionButtonTitle =
+    cameraAttentionStatus === 'active'
+      ? '視線追従を停止します'
+      : cameraAttentionStatusMessage ?? '視線追従を有効化します';
   const handleCameraAttentionToggle = useCallback(() => {
-    if (
-      cameraAttentionStatus === 'active' ||
-      cameraAttentionStatus === 'starting'
-    ) {
+    if (cameraAttentionStatus === 'starting') return;
+    if (cameraAttentionStatus === 'active') {
       stopCameraAttention();
       return;
     }
@@ -1369,11 +1380,18 @@ export default function App() {
     startCameraAttention,
     stopCameraAttention,
   ]);
-  const exhibitionAudioActionLabel = voiceError
-    ? '音声とマイクを再試行'
+  const microphoneToggleLabel = voiceError
+    ? '音声入力を再試行'
     : isVoiceInputEnabled
       ? '音声入力を停止'
-      : '音声とマイクを有効化';
+      : '音声入力を有効化';
+  const microphoneDisclosureLabel = voiceError
+    ? '音声入力を再試行してマイク調整を表示'
+    : isVoiceInputEnabled
+      ? isMicrophoneControlExpanded
+        ? 'マイク調整を閉じる'
+        : 'マイク調整を表示'
+      : '音声入力を有効化してマイク調整を表示';
   const shouldShowAudioUnlockControl =
     !isExhibitionMode ||
     !isAudioUnlocked ||
@@ -2240,8 +2258,18 @@ export default function App() {
   ]);
 
   const handleMicrophoneControlToggle = useCallback(() => {
-    setIsMicrophoneControlExpanded((current) => !current);
-  }, []);
+    if (isVoiceInputEnabled && !voiceError) {
+      setIsMicrophoneControlExpanded((current) => !current);
+      return;
+    }
+
+    setIsMicrophoneControlExpanded(true);
+    void handleExhibitionAudioToggle();
+  }, [
+    handleExhibitionAudioToggle,
+    isVoiceInputEnabled,
+    voiceError,
+  ]);
 
   const handleVolumeInput = (event: FormEvent<HTMLInputElement>) => {
     const inputVolume = Number(event.currentTarget.value) / 100;
@@ -2328,7 +2356,7 @@ export default function App() {
                   <button
                     aria-controls={EXHIBITION_MICROPHONE_PANEL_ID}
                     aria-expanded={isMicrophoneControlExpanded}
-                    aria-label={`マイク調整を${isMicrophoneControlExpanded ? '閉じる' : '開く'}`}
+                    aria-label={microphoneDisclosureLabel}
                     className="audio-unlock-button microphone-disclosure-button"
                     data-input-active={isMicrophoneInputActive ? 'true' : 'false'}
                     data-state={
@@ -2343,12 +2371,12 @@ export default function App() {
                     }
                     onClick={handleMicrophoneControlToggle}
                     style={microphoneFeedbackStyle}
-                    title={`マイク調整を${isMicrophoneControlExpanded ? '閉じます' : '開きます'}。${microphoneStatusLabel}`}
+                    title={`${microphoneDisclosureLabel}。${microphoneStatusLabel}`}
                     type="button"
                   >
                     <MicrophoneIcon />
                     <span className="visually-hidden">
-                      {`マイク調整を${isMicrophoneControlExpanded ? '閉じる' : '開く'}。${microphoneStatusLabel}。音声の開始・停止は展開後に操作します。`}
+                      {`${microphoneDisclosureLabel}。${microphoneStatusLabel}。`}
                     </span>
                   </button>
                   <div
@@ -2409,7 +2437,7 @@ export default function App() {
                       />
                     </div>
                     <button
-                      aria-label={`${exhibitionAudioActionLabel}する`}
+                      aria-label={microphoneToggleLabel}
                       aria-pressed={isVoiceInputEnabled}
                       className="microphone-adjuster__toggle"
                       data-state={
@@ -2419,13 +2447,18 @@ export default function App() {
                             ? 'on'
                             : 'off'
                       }
-                      onClick={handleExhibitionAudioToggle}
-                      title={`${exhibitionAudioActionLabel}します`}
+                      onClick={handleVoiceToggle}
+                      title={microphoneToggleLabel}
                       type="button"
                     >
-                      <MicrophoneIcon />
+                      <span
+                        aria-hidden="true"
+                        className="microphone-adjuster__switch"
+                      >
+                        <span className="microphone-adjuster__switch-thumb" />
+                      </span>
                       <span className="visually-hidden">
-                        {exhibitionAudioActionLabel}
+                        {microphoneToggleLabel}
                       </span>
                     </button>
                   </div>
@@ -2437,23 +2470,29 @@ export default function App() {
                 >
                   <button
                     aria-label={
-                      cameraAttentionEnabled
+                      cameraAttentionIsStarting
+                        ? '視線追従を準備中'
+                        : cameraAttentionEnabled
                         ? '視線追従を停止する'
                         : '視線追従を有効化する'
                     }
                     aria-pressed={cameraAttentionEnabled}
                     className="attention-button"
-                    data-state={cameraAttentionEnabled ? 'on' : 'off'}
+                    data-state={
+                      cameraAttentionIsStarting
+                        ? 'starting'
+                        : cameraAttentionEnabled
+                          ? 'on'
+                          : 'off'
+                    }
+                    disabled={cameraAttentionIsStarting}
                     onClick={handleCameraAttentionToggle}
-                    title={cameraAttentionStatusMessage || '視線追従を有効化します'}
+                    title={cameraAttentionButtonTitle}
                     type="button"
                   >
-                    <EyeIcon />
-                    <span className="control-state" aria-hidden="true">
-                      {cameraAttentionEnabled ? 'ON' : 'OFF'}
-                    </span>
+                    <CameraIcon />
                     <span className="visually-hidden">
-                      {cameraAttentionStatus === 'starting'
+                      {cameraAttentionIsStarting
                         ? '視線追従を準備中…'
                         : cameraAttentionEnabled
                           ? '視線追従を停止'
@@ -2461,7 +2500,8 @@ export default function App() {
                     </span>
                   </button>
                   {cameraAttentionStatusMessage &&
-                    cameraAttentionStatus !== 'idle' && (
+                    cameraAttentionStatus !== 'idle' &&
+                    cameraAttentionStatus !== 'active' && (
                       <span
                         className="attention-status"
                         role="status"
