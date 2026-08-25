@@ -19,6 +19,8 @@
     "src/attention/faceLandmarkerProtocol.ts",
     "src/avatar/attentionTarget.ts",
     "src/avatar/lifeDynamics.ts",
+    "src/avatar/blinkExpressions.ts",
+    "src/avatar/lifeDynamicsBlinkAdapter.ts",
     "src/avatar/lifeDynamicsLifeAdapter.ts",
     "src/avatar/lifeDynamicsOrientingAdapter.ts",
     "scripts/camera-attention-controller.test.ts",
@@ -29,6 +31,7 @@
     "scripts/attention-target.test.ts",
     "scripts/idle-gaze.test.ts",
     "scripts/life-dynamics.test.ts",
+    "scripts/life-dynamics-blink-adapter.test.ts",
     "scripts/life-dynamics-life-adapter.test.ts",
     "scripts/life-dynamics-orienting-adapter.test.ts"
   ]

@@ -1,4 +1,5 @@
-import { VRM, VRMExpressionPresetName } from '@pixiv/three-vrm';
+import type { VRM } from '@pixiv/three-vrm';
+import { getBlinkExpressionNames } from './blinkExpressions';
 
 const BLINK_TIMING = {
   maxDeltaSeconds: 0.1,
@@ -25,24 +26,7 @@ export class BlinkController {
 
   constructor(vrm: VRM) {
     this.expressionManager = vrm.expressionManager;
-    const manager = this.expressionManager;
-
-    if (manager?.getExpression(VRMExpressionPresetName.Blink)) {
-      this.expressionNames = [VRMExpressionPresetName.Blink];
-      return;
-    }
-
-    const hasLeft = manager?.getExpression(VRMExpressionPresetName.BlinkLeft);
-    const hasRight = manager?.getExpression(
-      VRMExpressionPresetName.BlinkRight,
-    );
-    this.expressionNames =
-      hasLeft && hasRight
-        ? [
-            VRMExpressionPresetName.BlinkLeft,
-            VRMExpressionPresetName.BlinkRight,
-          ]
-        : [];
+    this.expressionNames = getBlinkExpressionNames(vrm);
   }
 
   setEnabled(enabled: boolean): void {
