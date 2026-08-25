@@ -1511,23 +1511,24 @@ input {
   display: inline-flex;
   gap: 0.32rem;
   align-items: center;
-  padding: 0.22rem 0.3rem;
-  border: 1px solid rgb(244 239 230 / 15%);
-  border-radius: 999px;
-  background: rgb(23 23 37 / 54%);
-  box-shadow: 0 5px 16px rgb(5 6 17 / 12%);
-  backdrop-filter: blur(12px);
+  padding: 0;
 }
 
 .exhibition-network-status__item {
   display: inline-grid;
-  width: 1.55rem;
-  height: 1.55rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-height: 0;
+  padding: 0;
   place-items: center;
   border: 1px solid rgb(244 239 230 / 19%);
   border-radius: 50%;
   color: rgb(244 239 230 / 62%);
   background: rgb(244 239 230 / 5%);
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
 }
 
 .exhibition-network-status__item[data-state="available"] {
@@ -2175,6 +2176,14 @@ input {
   box-shadow: none;
 }
 
+.app-shell[data-app-mode="exhibition"] .app-title {
+  gap: 0.35rem;
+}
+
+.app-shell[data-app-mode="exhibition"] .exhibition-network-status {
+  gap: 0.35rem;
+}
+
 .app-shell[data-app-mode="exhibition"] .microphone-control {
   position: relative;
   display: grid;
@@ -2182,7 +2191,8 @@ input {
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button,
-.app-shell[data-app-mode="exhibition"] .attention-button {
+.app-shell[data-app-mode="exhibition"] .attention-button,
+.app-shell[data-app-mode="exhibition"] .exhibition-network-status__item {
   display: inline-grid;
   width: 2.25rem;
   height: 2.25rem;
@@ -2265,11 +2275,16 @@ input {
   color: #f7e7ba;
 }
 
-.app-shell[data-app-mode="exhibition"] .control-state {
-  font-size: 0.55rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  line-height: 1;
+.app-shell[data-app-mode="exhibition"] .attention-button[data-state="starting"] {
+  border-color: rgb(214 166 184 / 52%);
+  background: rgb(214 166 184 / 12%);
+  color: rgb(239 213 223 / 74%);
+}
+
+.app-shell[data-app-mode="exhibition"] .attention-button:disabled {
+  cursor: progress;
+  opacity: 0.72;
+  transform: none;
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-adjuster {
@@ -2358,12 +2373,13 @@ input {
   top: 50%;
   left: 50%;
   width: var(--microphone-meter-height);
-  height: 1.55rem;
+  height: 2.75rem;
   margin: 0;
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
   cursor: ns-resize;
+  touch-action: none;
   transform: translate(-50%, -50%) rotate(-90deg);
   z-index: 2;
 }
@@ -2374,9 +2390,9 @@ input {
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-webkit-slider-thumb {
-  width: 0.82rem;
-  height: 0.82rem;
-  margin-top: -0.3rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: -0.44rem;
   -webkit-appearance: none;
   appearance: none;
   border: 1px solid #f4efe6;
@@ -2391,8 +2407,8 @@ input {
 }
 
 .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-moz-range-thumb {
-  width: 0.82rem;
-  height: 0.82rem;
+  width: 1.1rem;
+  height: 1.1rem;
   border: 1px solid #f4efe6;
   border-radius: 50%;
   background: var(--soft-gold);
@@ -2468,7 +2484,8 @@ input {
 
 @media (max-width: 720px) {
   .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button,
-  .app-shell[data-app-mode="exhibition"] .attention-button {
+  .app-shell[data-app-mode="exhibition"] .attention-button,
+  .app-shell[data-app-mode="exhibition"] .exhibition-network-status__item {
     width: 2.05rem;
     height: 2.05rem;
   }

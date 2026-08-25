@@ -50,6 +50,37 @@ test('permission denial becomes retryable without retaining a stream', async () 
   assert.equal(controller.readSnapshot().position, null);
 });
 
+test('concurrent starts share one pending camera startup', async () => {
+  let resolveStream!: (stream: MediaStream) => void;
+  let getUserMediaCalls = 0;
+  let stoppedTracks = 0;
+  const controller = new CameraAttentionController({
+    createAssetUrl: (path) => `https://example.test/${path}`,
+    createImageBitmap: async () => createFakeImageBitmap(),
+    createVideo: () => createFakeVideo(),
+    createWorker: () => createFakeWorker({ type: 'ready' }) as unknown as Worker,
+    getUserMedia: async () => {
+      getUserMediaCalls += 1;
+      return new Promise<MediaStream>((resolve) => {
+        resolveStream = resolve;
+      });
+    },
+    isSecureContext: () => true,
+  });
+
+  const firstStart = controller.start();
+  assert.equal(controller.getState().status, 'starting');
+  const secondStart = controller.start();
+
+  assert.strictEqual(secondStart, firstStart);
+  assert.equal(getUserMediaCalls, 1);
+
+  resolveStream(createFakeStream(() => stoppedTracks++));
+  assert.equal(await firstStart, true);
+  controller.stop();
+  assert.equal(stoppedTracks, 1);
+});
+
 test('worker failure returns to the existing gaze path and releases the stream', async () => {
   let stoppedTracks = 0;
   const workerRef: { current: TestWorker | null } = { current: null };
