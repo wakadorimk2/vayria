@@ -177,6 +177,21 @@ def test_int8_float16_is_a_supported_compute_type() -> None:
     assert provider.runtime_info()["effectiveComputeType"] == "int8_float16"
 
 
+def test_medium_is_allowed_as_a_primary_model() -> None:
+    provider = FasterWhisperTranscriber(
+        model_name="medium",
+        device="cuda",
+        compute_type="float16",
+    )
+
+    assert provider.runtime_info()["requestedModel"] == "medium"
+
+
+def test_medium_is_not_allowed_as_a_fallback_model() -> None:
+    with pytest.raises(ValueError, match="fallback model"):
+        FasterWhisperTranscriber(fallback_model="medium")
+
+
 def test_low_confidence_segments_are_discarded() -> None:
     text, _model = transcribe_with_segments(
         [

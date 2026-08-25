@@ -665,6 +665,16 @@ test('remote PCM adapter validates the first AudioWorklet frame before activatio
     assert.equal(health.at(-1)?.status, 'ready');
     assert.equal(health.at(-1)?.pcmFrameCount, 1);
     assert.ok(events.some((event) => event.type === 'listening_started'));
+    const startMessage = environment.sockets[0]?.sent.find(
+      (value): value is string =>
+        typeof value === 'string' &&
+        (JSON.parse(value) as { type?: string }).type === 'start',
+    );
+    assert.ok(startMessage);
+    assert.equal(
+      (JSON.parse(startMessage) as { captureAudio?: boolean }).captureAudio,
+      undefined,
+    );
     assert.ok(environment.sockets[0]?.sent.some((value) => value instanceof ArrayBuffer));
     assert.equal(
       environment.sockets[0]?.sent.some(
@@ -675,6 +685,39 @@ test('remote PCM adapter validates the first AudioWorklet frame before activatio
           ),
       ),
       false,
+    );
+
+    await adapter.stop();
+    adapter.dispose();
+  } finally {
+    environment.restore();
+  }
+});
+
+test('remote PCM adapter sends the STT capture flag only when explicitly enabled', async () => {
+  const environment = installRemoteBrowserEnvironment();
+  try {
+    const adapter = createRemotePcmVoiceAdapter({
+      audioMode: 'baseline',
+      diagnostics: true,
+      captureAudio: true,
+      onEvent: () => undefined,
+    });
+
+    const startPromise = adapter.start();
+    await waitForRemoteCondition(() => environment.worklets.length === 1);
+    environment.worklets[0]!.emit(makePcmChunk(0.1));
+    assert.equal(await startPromise, true);
+
+    const startMessage = environment.sockets[0]?.sent.find(
+      (value): value is string =>
+        typeof value === 'string' &&
+        (JSON.parse(value) as { type?: string }).type === 'start',
+    );
+    assert.ok(startMessage);
+    assert.equal(
+      (JSON.parse(startMessage) as { captureAudio?: boolean }).captureAudio,
+      true,
     );
 
     await adapter.stop();

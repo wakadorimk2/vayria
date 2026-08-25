@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from pathlib import Path
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from .transcriber import (
     STT_BEAM_SIZE_VALUES,
     STT_COMPUTE_TYPE_VALUES,
     STT_DEVICE_VALUES,
+    STT_FALLBACK_MODEL_VALUES,
     STT_MODEL_VALUES,
     Transcriber,
     TranscriptionResult,
@@ -31,6 +33,7 @@ from .vad import (
     SpeechClassifier,
     WebRtcSpeechClassifier,
 )
+from .capture import DEFAULT_CAPTURE_DIR, SttCaptureWriter
 
 MAX_MESSAGE_BYTES = 64 * 1024
 SUPPORTED_FORMAT = "pcm_s16le"
@@ -53,6 +56,7 @@ class StreamConfig:
     chunk_ms: int
     diagnostics: bool = False
     end_silence_ms: int = DEFAULT_END_SILENCE_MS
+    capture_audio: bool = False
 
 
 def _timestamp() -> int:
@@ -64,7 +68,7 @@ def _parse_start(payload: Any) -> StreamConfig:
         raise WireProtocolError("invalid-start-message")
     required = {"type", "language", "sampleRate", "channels", "format", "chunkMs"}
     if (
-        set(payload) - required - {"diagnostics", "endSilenceMs"}
+        set(payload) - required - {"diagnostics", "endSilenceMs", "captureAudio"}
         or not required.issubset(payload)
     ):
         raise WireProtocolError("invalid-start-message")
@@ -75,6 +79,7 @@ def _parse_start(payload: Any) -> StreamConfig:
     chunk_ms = payload["chunkMs"]
     end_silence_ms = payload.get("endSilenceMs", DEFAULT_END_SILENCE_MS)
     diagnostics = payload.get("diagnostics", False)
+    capture_audio = payload.get("captureAudio", False)
     if (
         not isinstance(language, str)
         or not language
@@ -89,6 +94,7 @@ def _parse_start(payload: Any) -> StreamConfig:
         or not isinstance(end_silence_ms, int)
         or end_silence_ms not in END_SILENCE_MS_VALUES
         or not isinstance(diagnostics, bool)
+        or not isinstance(capture_audio, bool)
     ):
         raise WireProtocolError("unsupported-audio-format")
     normalized_language = language.split("-", 1)[0].lower()
@@ -100,6 +106,7 @@ def _parse_start(payload: Any) -> StreamConfig:
         chunk_ms=chunk_ms,
         diagnostics=diagnostics,
         end_silence_ms=end_silence_ms,
+        capture_audio=capture_audio,
     )
 
 
@@ -123,6 +130,7 @@ async def _transcription_worker(
     transcriber: Transcriber,
     language: str,
     diagnostics: bool,
+    capture_writer: SttCaptureWriter | None = None,
 ) -> None:
     while True:
         segment_id, pcm = await queue.get()
@@ -156,6 +164,8 @@ async def _transcription_worker(
                     language=language,
                 )
                 result = TranscriptionResult(text, text, None)
+            if capture_writer is not None:
+                capture_writer.write(segment_id, pcm, result)
             if diagnostics:
                 observed = {
                     "type": "stt_observed",
@@ -198,10 +208,12 @@ async def handle_connection(
     *,
     transcriber: Transcriber,
     classifier: SpeechClassifier | None = None,
+    capture_dir: Path = DEFAULT_CAPTURE_DIR,
 ) -> None:
     detector: PcmUtteranceDetector | None = None
     worker: asyncio.Task[None] | None = None
     queue: asyncio.Queue[tuple[str, bytes]] | None = None
+    capture_writer: SttCaptureWriter | None = None
     try:
         first_message = await connection.recv()
         if not isinstance(first_message, str) or len(first_message.encode()) > MAX_MESSAGE_BYTES:
@@ -211,6 +223,19 @@ async def handle_connection(
         except json.JSONDecodeError as error:
             raise WireProtocolError("invalid-start-message") from error
         config = _parse_start(start_payload)
+        if config.capture_audio:
+            capture_writer = SttCaptureWriter(capture_dir)
+            print(
+                json.dumps(
+                    {
+                        "type": "stt_capture",
+                        "directory": str(capture_writer.session_dir),
+                        "maxSegments": capture_writer.max_segments,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
         detector = PcmUtteranceDetector(
             classifier=classifier or WebRtcSpeechClassifier(),
             end_silence_frame_count=config.end_silence_ms // FRAME_DURATION_MS,
@@ -223,6 +248,7 @@ async def handle_connection(
                 transcriber,
                 config.language,
                 config.diagnostics,
+                capture_writer,
             )
         )
         if config.diagnostics:
@@ -397,7 +423,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--fallback-model",
-        choices=STT_MODEL_VALUES,
+        choices=STT_FALLBACK_MODEL_VALUES,
         default="tiny",
     )
     parser.add_argument(

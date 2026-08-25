@@ -69,6 +69,11 @@ function readAudioLabEnabled(search: string): boolean {
   return new URLSearchParams(search).get('audioLab') === '1';
 }
 
+function readSttCaptureEnabled(search: string): boolean {
+  if (!import.meta.env.DEV || mode !== 'exhibition') return false;
+  return new URLSearchParams(search).get('sttCapture') === '1';
+}
+
 function readRouterEnabled(search: string): boolean {
   if (!import.meta.env.DEV) return false;
   return new URLSearchParams(search).get('router') === '1';
@@ -96,6 +101,7 @@ const browserSearch =
 export const runtimeConfig = Object.freeze({
   apiBaseUrl: readApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
   audioLabEnabled: readAudioLabEnabled(browserSearch),
+  sttCaptureEnabled: readSttCaptureEnabled(browserSearch),
   routerEnabled: readRouterEnabled(browserSearch),
   audioPreset: readAudioPreset(browserSearch),
   audioEndpointMs: readAudioEndpoint(browserSearch),

@@ -255,6 +255,8 @@ def main() -> int:
                     "id": str(case.get("id", audio_path.stem)),
                     "category": str(case.get("category", "unspecified")),
                     "reference": reference,
+                    "rawText": result.raw_text,
+                    "acceptedText": result.text,
                     "hypothesis": hypothesis,
                     "filterReason": result.filter_reason,
                     "processingMs": elapsed_ms,

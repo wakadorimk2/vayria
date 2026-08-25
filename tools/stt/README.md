@@ -73,7 +73,8 @@ uv run --no-cache python -m vayria_stt.server `
   --fallback-compute-type int8
 ```
 
-`--model` accepts `tiny`, `base`, or `small`.
+`--model` accepts `tiny`, `base`, `small`, or `medium`.
+The fallback model accepts `tiny`, `base`, or `small`.
 `--device` accepts `auto`, `cuda`, or `cpu`.
 `--compute-type` accepts `auto`, `float16`, `int8`, or `int8_float16`.
 `--beam-size` accepts `1` or `3`.
@@ -81,8 +82,9 @@ The default decode settings are `beam_size=3`, `temperature=(0.0, 0.2)`,
 `without_timestamps=True`, `condition_on_previous_text=False`, and
 `vad_filter=False`.
 The default hotwords are `Vayria GPT-Live Codex`.
-The benchmark matrix is `small / float16`, `small / int8_float16`, and
-`base / float16` on CUDA.
+The exhibition comparison matrix is documented in
+`tools/stt/benchmarks/README.md`. It includes `small`, `medium`, greedy
+decoding, and a no-hotwords comparison on CUDA.
 
 The local benchmark procedure is in
 `tools/stt/benchmarks/README.md`. It does not add raw audio to Git.

@@ -15,7 +15,9 @@ COMPRESSION_RATIO_THRESHOLD = 2.4
 HALLUCINATION_ONLY_PHRASES = frozenset({"ご視聴ありがとうございました"})
 TRANSCRIPT_STRIP_CHARACTERS = " \t\r\n\u3000。、．.!！?？…"
 WARM_UP_AUDIO_SAMPLES = 320
-STT_MODEL_VALUES = ("tiny", "base", "small")
+STT_PRIMARY_MODEL_VALUES = ("tiny", "base", "small", "medium")
+STT_FALLBACK_MODEL_VALUES = ("tiny", "base", "small")
+STT_MODEL_VALUES = STT_PRIMARY_MODEL_VALUES
 STT_DEVICE_VALUES = ("auto", "cuda", "cpu")
 STT_COMPUTE_TYPE_VALUES = ("auto", "float16", "int8", "int8_float16")
 STT_BEAM_SIZE_VALUES = (1, 3)
@@ -145,7 +147,7 @@ class FasterWhisperTranscriber:
             raise ValueError(f"unsupported STT device: {self.device}")
         if self.compute_type not in STT_COMPUTE_TYPE_VALUES:
             raise ValueError(f"unsupported STT compute type: {self.compute_type}")
-        if self.fallback_model not in STT_MODEL_VALUES:
+        if self.fallback_model not in STT_FALLBACK_MODEL_VALUES:
             raise ValueError(f"unsupported STT fallback model: {self.fallback_model}")
         if self.fallback_device not in ("cuda", "cpu"):
             raise ValueError(f"unsupported STT fallback device: {self.fallback_device}")
