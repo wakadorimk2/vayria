@@ -24,8 +24,15 @@ export interface SpatialTargetBridgeInput {
 
 export interface SpatialTargetBridgeResult {
   readonly target: Vector3;
-  readonly headBias: ViewerHeadBias;
+  readonly headProjection: ViewerHeadBias;
 }
+
+export const SPATIAL_HEAD_PROJECTION = {
+  horizontalComfortDegrees: 10,
+  horizontalEngageDegrees: 30,
+  verticalComfortDegrees: 8,
+  verticalEngageDegrees: 24,
+} as const;
 
 /**
  * Converts a cached viewport anchor into the world-space target used by VRM.
@@ -124,7 +131,10 @@ export class SpatialTargetBridge {
     if (!isFiniteVector(this.worldTarget)) return null;
 
     this.headDirection.copy(this.worldTarget).sub(input.eyePosition);
-    let headBias: ViewerHeadBias = { yawDegrees: 0, pitchDegrees: 0 };
+    let headProjection: ViewerHeadBias = {
+      yawDegrees: 0,
+      pitchDegrees: 0,
+    };
     if (this.headDirection.lengthSq() > 0.000001) {
       const headYaw = Math.atan2(
         this.headDirection.dot(this.right),
@@ -134,13 +144,25 @@ export class SpatialTargetBridge {
         this.headDirection.dot(this.up),
         this.headDirection.dot(this.forward),
       );
-      headBias = {
+      const headYawDegrees = (headYaw * 180) / Math.PI;
+      const headPitchDegrees = (headPitch * 180) / Math.PI;
+      headProjection = {
         yawDegrees: clampDegrees(
-          (headYaw * 180) / Math.PI * VIEWER_HEAD_ATTENTION.followRatio,
+          headYawDegrees *
+            smoothstepRange(
+              Math.abs(headYawDegrees),
+              SPATIAL_HEAD_PROJECTION.horizontalComfortDegrees,
+              SPATIAL_HEAD_PROJECTION.horizontalEngageDegrees,
+            ),
           VIEWER_HEAD_ATTENTION.maxHorizontalAngleDegrees,
         ),
         pitchDegrees: clampDegrees(
-          (headPitch * 180) / Math.PI * VIEWER_HEAD_ATTENTION.followRatio,
+          headPitchDegrees *
+            smoothstepRange(
+              Math.abs(headPitchDegrees),
+              SPATIAL_HEAD_PROJECTION.verticalComfortDegrees,
+              SPATIAL_HEAD_PROJECTION.verticalEngageDegrees,
+            ),
           VIEWER_HEAD_ATTENTION.maxVerticalAngleDegrees,
         ),
       };
@@ -148,7 +170,7 @@ export class SpatialTargetBridge {
 
     return {
       target: this.worldTarget.clone(),
-      headBias,
+      headProjection,
     };
   }
 }
@@ -181,4 +203,13 @@ function clampRadians(value: number, maxDegrees: number): number {
 function clampDegrees(value: number, maxDegrees: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(-maxDegrees, Math.min(value, maxDegrees));
+}
+
+function smoothstepRange(value: number, start: number, end: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(start) || !Number.isFinite(end)) {
+    return 0;
+  }
+  if (end <= start) return value >= end ? 1 : 0;
+  const normalized = Math.max(0, Math.min((value - start) / (end - start), 1));
+  return normalized * normalized * (3 - 2 * normalized);
 }

@@ -20,6 +20,12 @@ export interface SpatialViewportPoint {
   readonly y: number;
 }
 
+export interface SpatialTargetPointUpdateOptions {
+  readonly now?: number;
+  readonly deadZonePx?: number;
+  readonly interpolation?: number;
+}
+
 export interface SpatialTargetSnapshot {
   readonly selection: SpatialTargetSelection;
   readonly point: SpatialViewportPoint;
@@ -27,10 +33,14 @@ export interface SpatialTargetSnapshot {
 }
 
 export const SPATIAL_TARGET_INVALID_GRACE_MS = 100;
+export const SPATIAL_TARGET_DEFAULT_DEAD_ZONE_PX = 32;
+export const SPATIAL_TARGET_DRAG_DEAD_ZONE_PX = 16;
+export const SPATIAL_TARGET_DRAG_INTERPOLATION = 0.35;
 
 export type SpatialTargetInvalidReason =
   | 'disconnected'
-  | 'invalid-rect';
+  | 'invalid-rect'
+  | 'invalid-point';
 
 export type SpatialTargetResolutionReason =
   | 'valid'
@@ -53,6 +63,8 @@ interface CachedTransientTarget {
   snapshot: SpatialTargetSnapshot;
   invalidSince: number | null;
   invalidReason: SpatialTargetInvalidReason | null;
+  dragActive: boolean;
+  frozen: boolean;
 }
 
 /**
@@ -150,6 +162,18 @@ export class SpatialTargetRegistry {
       return false;
     }
 
+    const previous = this.defaultTargets.get(kind);
+    if (
+      previous &&
+      !hasMovedBeyondDeadZone(
+        previous.point,
+        point,
+        SPATIAL_TARGET_DEFAULT_DEAD_ZONE_PX,
+      )
+    ) {
+      return true;
+    }
+
     this.defaultTargets.set(kind, {
       selection: { kind, anchor: 'default' },
       point,
@@ -194,7 +218,59 @@ export class SpatialTargetRegistry {
       },
       invalidSince: null,
       invalidReason: null,
+      dragActive: false,
+      frozen: false,
     });
+    return true;
+  }
+
+  setTransientDragActive(
+    kind: SpatialTargetKind,
+    isActive: boolean,
+  ): boolean {
+    const cached = this.transientTargets.get(kind);
+    if (!cached) return false;
+    cached.dragActive = isActive;
+    cached.frozen = !isActive;
+    return true;
+  }
+
+  updateTransientPoint(
+    kind: SpatialTargetKind,
+    point: SpatialViewportPoint,
+    options: SpatialTargetPointUpdateOptions = {},
+  ): boolean {
+    if (this.disposed) return false;
+    const cached = this.transientTargets.get(kind);
+    if (!cached) return false;
+
+    const timestamp = Number.isFinite(options.now)
+      ? (options.now as number)
+      : readNow();
+    if (!isValidViewportPoint(point)) {
+      this.markTransientInvalid(cached, timestamp, 'invalid-point');
+      return false;
+    }
+
+    const deadZonePx = Number.isFinite(options.deadZonePx)
+      ? Math.max(0, options.deadZonePx as number)
+      : SPATIAL_TARGET_DRAG_DEAD_ZONE_PX;
+    const interpolation = Number.isFinite(options.interpolation)
+      ? Math.max(0, Math.min(options.interpolation as number, 1))
+      : SPATIAL_TARGET_DRAG_INTERPOLATION;
+    if (
+      hasMovedBeyondDeadZone(cached.snapshot.point, point, deadZonePx)
+    ) {
+      cached.snapshot = {
+        selection: { kind, anchor: 'transient' },
+        point: interpolatePoint(cached.snapshot.point, point, interpolation),
+        capturedAt: timestamp,
+      };
+    }
+    cached.invalidSince = null;
+    cached.invalidReason = null;
+    cached.dragActive = true;
+    cached.frozen = false;
     return true;
   }
 
@@ -203,6 +279,10 @@ export class SpatialTargetRegistry {
     const cached = this.transientTargets.get(kind);
     if (!cached) {
       return false;
+    }
+
+    if (cached.dragActive || cached.frozen) {
+      return true;
     }
 
     const timestamp = Number.isFinite(now) ? now : readNow();
@@ -274,7 +354,11 @@ export class SpatialTargetRegistry {
 
     const transient = this.transientTargets.get(selection.kind);
     if (transient) {
-      if (transient.invalidSince === null && !isConnected(transient.element)) {
+      if (
+        transient.invalidSince === null &&
+        !transient.dragActive &&
+        !isConnected(transient.element)
+      ) {
         this.markTransientInvalid(transient, timestamp, 'disconnected');
       }
 
@@ -406,12 +490,33 @@ function readElementCenter(
       x: rect.left + rect.width / 2,
       y: rect.top + rect.height / 2,
     };
-    return Number.isFinite(point.x) && Number.isFinite(point.y)
-      ? point
-      : null;
+    return isValidViewportPoint(point) ? point : null;
   } catch {
     return null;
   }
+}
+
+function isValidViewportPoint(point: SpatialViewportPoint): boolean {
+  return Number.isFinite(point.x) && Number.isFinite(point.y);
+}
+
+function hasMovedBeyondDeadZone(
+  previous: SpatialViewportPoint,
+  next: SpatialViewportPoint,
+  deadZonePx: number,
+): boolean {
+  return Math.hypot(next.x - previous.x, next.y - previous.y) >= deadZonePx;
+}
+
+function interpolatePoint(
+  previous: SpatialViewportPoint,
+  next: SpatialViewportPoint,
+  interpolation: number,
+): SpatialViewportPoint {
+  return {
+    x: previous.x + (next.x - previous.x) * interpolation,
+    y: previous.y + (next.y - previous.y) * interpolation,
+  };
 }
 
 function readNow(): number {

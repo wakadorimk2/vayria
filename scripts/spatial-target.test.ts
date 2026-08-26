@@ -3,6 +3,7 @@ import test from 'node:test';
 import { PerspectiveCamera, Vector3 } from 'three';
 import {
   SPATIAL_TARGET_INVALID_GRACE_MS,
+  SPATIAL_TARGET_DRAG_INTERPOLATION,
   SpatialTargetRegistry,
   type SpatialTargetElement,
 } from '../src/attention/spatialTargetRegistry.js';
@@ -11,6 +12,11 @@ import {
   SPATIAL_TARGET_WORLD_GRACE_MS,
   SpatialTargetWorldCache,
 } from '../src/avatar/spatialTargetContinuity.js';
+import {
+  SPATIAL_TARGET_OUTPUT_TIMING,
+  SpatialHeadProjectionSmoother,
+  SpatialTargetOutputSmoother,
+} from '../src/avatar/spatialTargetOutputSmoother.js';
 
 function createElement(
   left: number,
@@ -157,6 +163,54 @@ test('refreshDefault reads a moved default element only after layout invalidatio
   assert.equal(element.calls, 2);
 });
 
+test('drag point updates do not read the DOM and use a dead zone plus interpolation', () => {
+  const registry = new SpatialTargetRegistry();
+  const defaultElement = createElement(0, 0, 100, 100);
+  const transientElement = createElement(400, 300, 100, 200);
+
+  registry.registerDefault('game', defaultElement);
+  registry.captureTransient('game', transientElement);
+  const callsAfterCapture = transientElement.calls;
+
+  assert.equal(
+    registry.updateTransientPoint('game', { x: 455, y: 400 }, { now: 10 }),
+    true,
+  );
+  assert.equal(transientElement.calls, callsAfterCapture);
+  assert.deepEqual(
+    registry.resolve({ kind: 'game', anchor: 'transient' })?.point,
+    { x: 450, y: 400 },
+  );
+
+  assert.equal(
+    registry.updateTransientPoint('game', { x: 500, y: 400 }, { now: 20 }),
+    true,
+  );
+  assert.equal(transientElement.calls, callsAfterCapture);
+  assert.deepEqual(
+    registry.resolve({ kind: 'game', anchor: 'transient' })?.point,
+    {
+      x: 450 + (500 - 450) * SPATIAL_TARGET_DRAG_INTERPOLATION,
+      y: 400,
+    },
+  );
+});
+
+test('default layout refresh ignores movement inside the normal dead zone', () => {
+  const registry = new SpatialTargetRegistry();
+  const element = createElement(0, 0, 100, 100);
+
+  registry.registerDefault('chat', element);
+  element.rect.left = 20;
+  element.rect.top = 10;
+  assert.equal(registry.refreshDefault('chat'), true);
+  assert.deepEqual(
+    registry.resolve({ kind: 'chat', anchor: 'default' })?.point,
+    { x: 50, y: 50 },
+  );
+  assert.equal(element.calls, 2);
+});
+
 function createBridgeCamera(): PerspectiveCamera {
   const camera = new PerspectiveCamera(60, 1, 0.1, 100);
   camera.position.set(0, 0, 5);
@@ -215,8 +269,8 @@ test('bridge clamps head bias and rejects invalid stage geometry', () => {
   });
 
   assert.ok(result);
-  assert.ok(Math.abs(result.headBias.yawDegrees) <= 8);
-  assert.ok(Math.abs(result.headBias.pitchDegrees) <= 6);
+  assert.ok(Math.abs(result.headProjection.yawDegrees) <= 8);
+  assert.ok(Math.abs(result.headProjection.pitchDegrees) <= 6);
   assert.equal(
     bridge.resolve({
       camera: createBridgeCamera(),
@@ -229,12 +283,56 @@ test('bridge clamps head bias and rejects invalid stage geometry', () => {
   );
 });
 
-test('world target cache holds target and head bias across a short bridge failure', () => {
+test('bridge keeps head projection near zero for a centered target', () => {
+  const bridge = new SpatialTargetBridge();
+  const result = bridge.resolve({
+    camera: createBridgeCamera(),
+    eyePosition: new Vector3(0, 0, 0),
+    neutralTarget: new Vector3(0, 0, 0),
+    snapshot: createSnapshot(500, 500),
+    stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+  });
+
+  assert.ok(result);
+  assert.ok(Math.abs(result.headProjection.yawDegrees) < 0.01);
+  assert.ok(Math.abs(result.headProjection.pitchDegrees) < 0.01);
+});
+
+test('bridge increases head projection with target angle before the cap', () => {
+  const bridge = new SpatialTargetBridge();
+  const result = bridge.resolve({
+    camera: createBridgeCamera(),
+    eyePosition: new Vector3(0, 0, 0),
+    neutralTarget: new Vector3(0, 0, 0),
+    snapshot: createSnapshot(620, 500),
+    stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+  });
+
+  assert.ok(result);
+  assert.ok(result.headProjection.yawDegrees > 0);
+  assert.ok(result.headProjection.yawDegrees < 8);
+});
+
+test('bridge rejects a non-finite viewport point', () => {
+  const bridge = new SpatialTargetBridge();
+  assert.equal(
+    bridge.resolve({
+      camera: createBridgeCamera(),
+      eyePosition: new Vector3(0, 0, 0),
+      neutralTarget: new Vector3(0, 0, 0),
+      snapshot: createSnapshot(Number.NaN, 500),
+      stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+    }),
+    null,
+  );
+});
+
+test('world target cache holds target and head projection across a short bridge failure', () => {
   const cache = new SpatialTargetWorldCache();
   const liveTarget = new Vector3(1, 2, 3);
   const live = {
     target: liveTarget,
-    headBias: { yawDegrees: 4, pitchDegrees: -2 },
+    headProjection: { yawDegrees: 4, pitchDegrees: -2 },
   };
 
   const valid = cache.resolve({
@@ -259,7 +357,7 @@ test('world target cache holds target and head bias across a short bridge failur
   assert.equal(grace.valid, false);
   assert.equal(grace.usingLastValid, true);
   assert.deepEqual(grace.target?.toArray(), [1, 2, 3]);
-  assert.deepEqual(grace.headBias, { yawDegrees: 4, pitchDegrees: -2 });
+  assert.deepEqual(grace.headProjection, { yawDegrees: 4, pitchDegrees: -2 });
 
   const expired = cache.resolve({
     key: 'game:transient',
@@ -270,4 +368,34 @@ test('world target cache holds target and head bias across a short bridge failur
     invalidSince: 50,
   });
   assert.equal(expired.target, null);
+});
+
+test('spatial eye and head outputs use separate low-pass response times', () => {
+  const eyeSmoother = new SpatialTargetOutputSmoother();
+  const eyeOutput = new Vector3();
+  const firstTarget = new Vector3(1, 0, 0);
+  const secondTarget = new Vector3(-1, 0, 0);
+
+  eyeSmoother.update(firstTarget, 0, SPATIAL_TARGET_OUTPUT_TIMING.eyeResponseMs, eyeOutput);
+  eyeSmoother.update(
+    secondTarget,
+    0.016,
+    SPATIAL_TARGET_OUTPUT_TIMING.eyeResponseMs,
+    eyeOutput,
+  );
+  assert.ok(eyeOutput.x > -1 && eyeOutput.x < 1);
+
+  const headSmoother = new SpatialHeadProjectionSmoother();
+  headSmoother.update(
+    { yawDegrees: 8, pitchDegrees: 6 },
+    0,
+    SPATIAL_TARGET_OUTPUT_TIMING.headResponseMs,
+  );
+  const head = headSmoother.update(
+    { yawDegrees: 0, pitchDegrees: 0 },
+    0.016,
+    SPATIAL_TARGET_OUTPUT_TIMING.headResponseMs,
+  );
+  assert.ok(head.yawDegrees > 0 && head.yawDegrees < 8);
+  assert.ok(head.pitchDegrees > 0 && head.pitchDegrees < 6);
 });

@@ -16,13 +16,15 @@ test('drag attention always starts with a guaranteed acquire', () => {
   assert.deepEqual(controller.start(), {
     phase: 'acquire',
     elapsedMs: 0,
-    gazeStrength: 1,
+    gazeStrength: 0.55,
+    attentionEnergy: 0.55,
   });
   assert.equal(
     controller.update(DRAG_ATTENTION_MIN_DWELL_MS, () => 0).phase,
     'acquire',
   );
-  assert.equal(controller.snapshot().gazeStrength, 1);
+  assert.ok(controller.snapshot().gazeStrength < 0.55);
+  assert.ok(controller.snapshot().gazeStrength >= 0.33);
 });
 
 test('release hazard rises across the configured dwell windows', () => {
@@ -48,6 +50,7 @@ test('a release can occur after minimum dwell, but never before it', () => {
     priority.gazeStrength >= DRAG_ATTENTION_MIN_GAZE_STRENGTH &&
       priority.gazeStrength <= DRAG_ATTENTION_MAX_GAZE_STRENGTH,
   );
+  assert.equal(priority.attentionEnergy, priority.gazeStrength);
   assert.equal(DRAG_ATTENTION_SALIENCE, 0.85);
 });
 
@@ -57,21 +60,21 @@ test('priority gaze strength changes smoothly inside the bounded range', () => {
   controller.update(DRAG_ATTENTION_MIN_DWELL_MS + 1, () => 0);
 
   const before = controller.snapshot().gazeStrength;
-  const after = controller.update(50, () => 0).gazeStrength;
+  const after = controller.update(50, () => 0, 600).gazeStrength;
 
-  assert.ok(after < before);
+  assert.notEqual(after, before);
   assert.ok(
     after >= DRAG_ATTENTION_MIN_GAZE_STRENGTH &&
       after <= DRAG_ATTENTION_MAX_GAZE_STRENGTH,
   );
   assert.ok(Math.abs(after - before) < 0.2);
 
-  const refreshed = controller.update(300, () => 1).gazeStrength;
+  const refreshed = controller.update(300, () => 1, 0).gazeStrength;
   assert.ok(
     refreshed >= DRAG_ATTENTION_MIN_GAZE_STRENGTH &&
       refreshed <= DRAG_ATTENTION_MAX_GAZE_STRENGTH,
   );
-  assert.notEqual(refreshed, after);
+  assert.ok(refreshed < after);
 });
 
 test('the safety maximum releases acquire when random samples never hit', () => {
@@ -100,5 +103,6 @@ test('ending drag attention clears the controller', () => {
     phase: 'idle',
     elapsedMs: 0,
     gazeStrength: 0,
+    attentionEnergy: 0,
   });
 });

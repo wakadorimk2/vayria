@@ -8,6 +8,7 @@ const testFiles = [
   resolve('node_modules/.tmp/avatar-test/scripts/camera-tracking.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/attention-state.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/drag-attention.test.js'),
+  resolve('node_modules/.tmp/avatar-test/scripts/attention-energy.test.js'),
   resolve(
     'node_modules/.tmp/avatar-test/scripts/attention-engagement.test.js',
   ),

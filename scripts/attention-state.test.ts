@@ -525,3 +525,88 @@ test('semantic focus exposes camera uncertainty without expanding AttentionState
   assert.deepEqual(frame.position, { x: 0.52, y: 0.5 });
   assert.deepEqual(frame.headPosition, { x: 0.7, y: 0.5 });
 });
+
+test('task cue stays secondary to viewer and is suppressed by chat or thinking', () => {
+  const softCue = {
+    target: 'game' as const,
+    spatialTarget: { kind: 'game' as const, anchor: 'transient' as const },
+    strength: 0.8,
+  };
+  const hint = {
+    target: 'game' as const,
+    salience: 0.35,
+    spatialTarget: softCue.spatialTarget,
+    gazeStrength: 0.25,
+  };
+  const viewerController = new AttentionStateController();
+  const viewer = viewerController.update(
+    createInput({
+      cameraEnabled: false,
+      cameraTracking: null,
+      viewerEngaged: true,
+      attention: createAttention({ softCue, priorityHint: hint }),
+    }),
+  );
+
+  assert.equal(viewer.target, 'viewer');
+  assert.deepEqual(viewer.softCue, { ...softCue, strength: 0.12 });
+
+  const thinking = viewerController.update(
+    createInput({
+      now: 1,
+      cameraEnabled: false,
+      cameraTracking: null,
+      thinking: true,
+      attention: createAttention({ softCue, priorityHint: hint }),
+    }),
+  );
+  assert.equal(thinking.state, 'Thinking');
+  assert.equal(thinking.softCue, undefined);
+
+  const chat = new AttentionStateController().update(
+    createInput({
+      attention: createAttention({
+        target: 'chat',
+        strength: 1,
+        spatialTarget: { kind: 'chat', anchor: 'default' },
+        softCue,
+        priorityHint: hint,
+      }),
+      explicitTargetActive: true,
+    }),
+  );
+  assert.equal(chat.target, 'chat');
+  assert.equal(chat.softCue, undefined);
+});
+
+test('task cue mode does not become an explicit semantic target', () => {
+  const controller = new AttentionStateController();
+  const frame = controller.update(
+    createInput({
+      explicitTargetActive: true,
+      viewerEngaged: true,
+      attention: createAttention({
+        target: 'game',
+        targetMode: 'task-cue',
+        spatialTarget: { kind: 'game', anchor: 'transient' },
+        priorityHint: {
+          target: 'game',
+          salience: 0.35,
+          spatialTarget: { kind: 'game', anchor: 'transient' },
+        },
+        softCue: {
+          target: 'game',
+          spatialTarget: { kind: 'game', anchor: 'transient' },
+          strength: 0.35,
+        },
+      }),
+    }),
+  );
+
+  assert.equal(frame.target, 'viewer');
+  assert.deepEqual(frame.softCue, {
+    target: 'game',
+    spatialTarget: { kind: 'game', anchor: 'transient' },
+    strength: 0.12,
+  });
+});

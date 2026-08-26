@@ -3,6 +3,7 @@ import type {
   AttentionFocus,
   AttentionPriorityHint,
   AttentionPosition,
+  AttentionSoftCue,
   AttentionTarget,
   SpatialTargetSelection,
 } from '../performer/types.js';
@@ -39,6 +40,7 @@ export interface AttentionStateFrame {
   confidence: number;
   focus: AttentionFocus;
   spatialTarget?: SpatialTargetSelection;
+  softCue?: AttentionSoftCue;
 }
 
 export class AttentionStateController {
@@ -54,9 +56,11 @@ export class AttentionStateController {
     const cameraReacquiring =
       input.cameraEnabled && tracking?.state === 'Reacquire';
     const priorityHint = readPriorityHint(input.attention);
+    const explicitTargetActive =
+      input.explicitTargetActive && input.attention.targetMode !== 'task-cue';
 
     if (
-      input.explicitTargetActive &&
+      explicitTargetActive &&
       (input.attention.target === 'chat' || input.attention.target === 'game')
     ) {
       this.clearCandidate();
@@ -99,6 +103,12 @@ export class AttentionStateController {
     }
 
     if (this.state === 'AttendTarget' || this.state === 'Thinking') {
+      if (cameraReacquiring) {
+        this.state = 'AttendViewer';
+        this.viewerSource = 'camera';
+        this.clearRecovery();
+        return this.createViewerFrame(input.attention, tracking, 'camera');
+      }
       if (priorityHint) {
         return this.beginPriorityHint(priorityHint, input.attention);
       }
@@ -232,7 +242,7 @@ export class AttentionStateController {
       state: 'AttendTarget',
       target: attention.target,
       strength: Math.max(0.55, clampStrength(attention.strength)),
-      gazeStrength: 1,
+      gazeStrength: readAttentionGazeStrength(attention),
       position: null,
       headPosition: null,
       confidence: 0,
@@ -261,6 +271,7 @@ export class AttentionStateController {
         hint.spatialTarget?.kind === hint.target
           ? hint.spatialTarget
           : undefined,
+      softCue: readSecondarySoftCue(attention, hint.target),
     };
   }
 
@@ -291,6 +302,7 @@ export class AttentionStateController {
       headPosition: cameraHeadPosition,
       confidence: cameraPosition !== null ? cameraConfidence : 0,
       focus,
+      softCue: readViewerSoftCue(attention),
     };
   }
 
@@ -317,6 +329,44 @@ function readGazeStrength(hint: AttentionPriorityHint): number {
   if (hint.gazeStrength === undefined) return 1;
   if (!Number.isFinite(hint.gazeStrength)) return 1;
   return clampStrength(hint.gazeStrength);
+}
+
+function readAttentionGazeStrength(attention: Attention): number {
+  if (attention.gazeStrength === undefined) return 1;
+  if (!Number.isFinite(attention.gazeStrength)) return 1;
+  return clampStrength(attention.gazeStrength);
+}
+
+function readSecondarySoftCue(
+  attention: Attention,
+  selectedTarget: AttentionTarget,
+): AttentionSoftCue | undefined {
+  const cue = readSoftCue(attention);
+  if (!cue || cue.target === selectedTarget) return undefined;
+  return {
+    ...cue,
+    strength: Math.min(cue.strength, 0.12),
+  };
+}
+
+function readViewerSoftCue(attention: Attention): AttentionSoftCue | undefined {
+  return readSecondarySoftCue(attention, 'viewer');
+}
+
+function readSoftCue(attention: Attention): AttentionSoftCue | undefined {
+  const cue = attention.softCue;
+  if (
+    !cue ||
+    !Number.isFinite(cue.strength) ||
+    cue.strength <= 0 ||
+    cue.spatialTarget.kind !== cue.target
+  ) {
+    return undefined;
+  }
+  return {
+    ...cue,
+    strength: clampStrength(cue.strength),
+  };
 }
 
 function isCameraActive(

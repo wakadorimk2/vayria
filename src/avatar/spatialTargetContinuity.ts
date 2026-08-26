@@ -19,7 +19,7 @@ export interface SpatialTargetWorldInput {
   readonly now: number;
   readonly live: {
     readonly target: Vector3;
-    readonly headBias: ViewerHeadBias;
+    readonly headProjection: ViewerHeadBias;
   } | null;
   readonly liveValid: boolean;
   readonly liveReason: SpatialTargetResolutionReason;
@@ -28,7 +28,7 @@ export interface SpatialTargetWorldInput {
 
 export interface SpatialTargetWorldResolution {
   readonly target: Vector3 | null;
-  readonly headBias: ViewerHeadBias;
+  readonly headProjection: ViewerHeadBias;
   readonly valid: boolean;
   readonly usingLastValid: boolean;
   readonly reason: SpatialTargetWorldResolutionReason;
@@ -36,7 +36,7 @@ export interface SpatialTargetWorldResolution {
 
 interface CachedWorldTarget {
   readonly target: Vector3;
-  readonly headBias: ViewerHeadBias;
+  readonly headProjection: ViewerHeadBias;
   invalidSince: number | null;
 }
 
@@ -56,12 +56,12 @@ export class SpatialTargetWorldCache {
     if (liveFinite && input.liveValid) {
       this.entries.set(input.key, {
         target: live.target.clone(),
-        headBias: cloneHeadBias(live.headBias),
+        headProjection: cloneHeadProjection(live.headProjection),
         invalidSince: null,
       });
       return createResolution(
         live.target.clone(),
-        live.headBias,
+        live.headProjection,
         true,
         false,
         input.liveReason,
@@ -81,7 +81,7 @@ export class SpatialTargetWorldCache {
       if (cached) {
         return createResolution(
           cached.target.clone(),
-          cached.headBias,
+          cached.headProjection,
           false,
           true,
           liveFinite ? input.liveReason : 'bridge-invalid',
@@ -91,12 +91,12 @@ export class SpatialTargetWorldCache {
       if (liveFinite) {
         this.entries.set(input.key, {
           target: live.target.clone(),
-          headBias: cloneHeadBias(live.headBias),
+          headProjection: cloneHeadProjection(live.headProjection),
           invalidSince: failureSince,
         });
         return createResolution(
           live.target.clone(),
-          live.headBias,
+          live.headProjection,
           false,
           true,
           input.liveReason,
@@ -120,36 +120,38 @@ export class SpatialTargetWorldCache {
 
 function createResolution(
   target: Vector3 | null,
-  headBias: ViewerHeadBias,
+  headProjection: ViewerHeadBias,
   valid: boolean,
   usingLastValid: boolean,
   reason: SpatialTargetWorldResolutionReason,
 ): SpatialTargetWorldResolution {
   return {
     target,
-    headBias: cloneHeadBias(headBias),
+    headProjection: cloneHeadProjection(headProjection),
     valid,
     usingLastValid,
     reason,
   };
 }
 
-function cloneHeadBias(headBias: ViewerHeadBias): ViewerHeadBias {
+function cloneHeadProjection(
+  headProjection: ViewerHeadBias,
+): ViewerHeadBias {
   return {
-    yawDegrees: headBias.yawDegrees,
-    pitchDegrees: headBias.pitchDegrees,
+    yawDegrees: headProjection.yawDegrees,
+    pitchDegrees: headProjection.pitchDegrees,
   };
 }
 
 function isFiniteLiveResult(value: {
   readonly target: Vector3;
-  readonly headBias: ViewerHeadBias;
+  readonly headProjection: ViewerHeadBias;
 }): boolean {
   return (
     Number.isFinite(value.target.x) &&
     Number.isFinite(value.target.y) &&
     Number.isFinite(value.target.z) &&
-    Number.isFinite(value.headBias.yawDegrees) &&
-    Number.isFinite(value.headBias.pitchDegrees)
+    Number.isFinite(value.headProjection.yawDegrees) &&
+    Number.isFinite(value.headProjection.pitchDegrees)
   );
 }

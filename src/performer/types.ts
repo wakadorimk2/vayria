@@ -75,6 +75,10 @@ export const SPATIAL_TARGET_ANCHORS = ['default', 'transient'] as const;
 
 export type SpatialTargetAnchor = (typeof SPATIAL_TARGET_ANCHORS)[number];
 
+export const ATTENTION_TARGET_MODES = ['semantic', 'task-cue'] as const;
+
+export type AttentionTargetMode = (typeof ATTENTION_TARGET_MODES)[number];
+
 export interface SpatialTargetSelection {
   kind: SpatialTargetKind;
   anchor: SpatialTargetAnchor;
@@ -85,6 +89,12 @@ export interface AttentionPriorityHint {
   salience: number;
   spatialTarget?: SpatialTargetSelection;
   gazeStrength?: number;
+}
+
+export interface AttentionSoftCue {
+  target: Exclude<AttentionTarget, 'none'>;
+  spatialTarget: SpatialTargetSelection;
+  strength: number;
 }
 
 export const ATTENTION_FOCUS_TARGETS = [
@@ -128,6 +138,9 @@ export interface Attention {
   gaze?: AttentionPosition;
   spatialTarget?: SpatialTargetSelection;
   priorityHint?: AttentionPriorityHint;
+  targetMode?: AttentionTargetMode;
+  gazeStrength?: number;
+  softCue?: AttentionSoftCue;
 }
 
 export type AttentionReader = () => Attention;
