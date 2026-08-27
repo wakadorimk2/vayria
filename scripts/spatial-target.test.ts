@@ -219,6 +219,12 @@ function createBridgeCamera(): PerspectiveCamera {
   return camera;
 }
 
+const allocationBasis = {
+  forward: new Vector3(0, 0, 1),
+  right: new Vector3(1, 0, 0),
+  up: new Vector3(0, 1, 0),
+};
+
 function createSnapshot(x: number, y: number) {
   return {
     selection: { kind: 'game' as const, anchor: 'default' as const },
@@ -235,6 +241,7 @@ test('bridge moves the world target right for a right-side card', () => {
     neutralTarget: new Vector3(0, 0, 0),
     snapshot: createSnapshot(750, 500),
     stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+    allocationBasis,
   });
 
   assert.ok(result);
@@ -256,6 +263,7 @@ test('bridge moves the world target down for a lower conversation region', () =>
     neutralTarget: new Vector3(0, 0, 0),
     snapshot: createSnapshot(500, 750),
     stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+    allocationBasis,
   });
 
   assert.ok(result);
@@ -272,6 +280,7 @@ test('bridge clamps head bias and rejects invalid stage geometry', () => {
     neutralTarget: new Vector3(0, 0, 0),
     snapshot: createSnapshot(10_000, -10_000),
     stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+    allocationBasis,
   });
 
   assert.ok(result);
@@ -286,6 +295,7 @@ test('bridge clamps head bias and rejects invalid stage geometry', () => {
       neutralTarget: new Vector3(0, 0, 0),
       snapshot: createSnapshot(500, 500),
       stageRect: { left: 0, top: 0, width: 0, height: 1_000 },
+      allocationBasis,
     }),
     null,
   );
@@ -299,11 +309,13 @@ test('bridge keeps head projection near zero for a centered target', () => {
     neutralTarget: new Vector3(0, 0, 0),
     snapshot: createSnapshot(500, 500),
     stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+    allocationBasis,
   });
 
   assert.ok(result);
   assert.ok(Math.abs(result.headProjection.yawDegrees) < 0.01);
   assert.ok(Math.abs(result.headProjection.pitchDegrees) < 0.01);
+  assert.ok(result.eyeTarget.z > 0);
 });
 
 test('fixed-target probe changes allocation only, not the resolved target', () => {
@@ -314,6 +326,7 @@ test('fixed-target probe changes allocation only, not the resolved target', () =
     neutralTarget: new Vector3(0, 0, 0),
     snapshot: createSnapshot(750, 500),
     stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+    allocationBasis,
     fixedTarget: new Vector3(0, 0, 0),
   });
 
@@ -330,8 +343,9 @@ test('bridge increases head projection with target angle before the cap', () => 
     camera: createBridgeCamera(),
     eyePosition: new Vector3(0, 0, 0),
     neutralTarget: new Vector3(0, 0, 0),
-    snapshot: createSnapshot(580, 500),
+    snapshot: createSnapshot(600, 500),
     stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+    allocationBasis,
   });
 
   assert.ok(result);
@@ -348,6 +362,7 @@ test('bridge rejects a non-finite viewport point', () => {
       neutralTarget: new Vector3(0, 0, 0),
       snapshot: createSnapshot(Number.NaN, 500),
       stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+      allocationBasis,
     }),
     null,
   );
@@ -368,6 +383,9 @@ test('world target cache holds target and head projection across a short bridge 
     residualAngle: { yawDegrees: 4, pitchDegrees: -2 },
     headContribution: { yawDegrees: 4, pitchDegrees: -2 },
     neckContribution: { yawDegrees: 1, pitchDegrees: -0.5 },
+    targetEyeVector: new Vector3(1, 1, 1),
+    normalizedDirection: new Vector3(0.3, 0.3, 0.9),
+    headRelativeDirection: new Vector3(0.3, 0.3, 0.9),
     eyeRadius: 0.8,
   };
 
@@ -404,6 +422,9 @@ test('world target cache holds target and head projection across a short bridge 
   assert.deepEqual(grace.residualAngle, { yawDegrees: 4, pitchDegrees: -2 });
   assert.deepEqual(grace.headContribution, { yawDegrees: 4, pitchDegrees: -2 });
   assert.deepEqual(grace.neckContribution, { yawDegrees: 1, pitchDegrees: -0.5 });
+  assert.deepEqual(grace.targetEyeVector?.toArray(), [1, 1, 1]);
+  assert.deepEqual(grace.normalizedDirection?.toArray(), [0.3, 0.3, 0.9]);
+  assert.deepEqual(grace.headRelativeDirection?.toArray(), [0.3, 0.3, 0.9]);
   assert.equal(grace.eyeRadius, 0.8);
 
   const expired = cache.resolve({
@@ -431,6 +452,9 @@ test('world target cache keeps allocation profiles isolated', () => {
     residualAngle: { yawDegrees: 2, pitchDegrees: 0 },
     headContribution: { yawDegrees: 2, pitchDegrees: 0 },
     neckContribution: { yawDegrees: 1, pitchDegrees: 0 },
+    targetEyeVector: new Vector3(1, 0, 1),
+    normalizedDirection: new Vector3(0.7, 0, 0.7),
+    headRelativeDirection: new Vector3(0.7, 0, 0.7),
     eyeRadius: 1,
   };
   const softCue = {
@@ -445,6 +469,9 @@ test('world target cache keeps allocation profiles isolated', () => {
     residualAngle: { yawDegrees: -2, pitchDegrees: 0 },
     headContribution: { yawDegrees: 0, pitchDegrees: 0 },
     neckContribution: { yawDegrees: 0, pitchDegrees: 0 },
+    targetEyeVector: new Vector3(-1, 0, 1),
+    normalizedDirection: new Vector3(-0.7, 0, 0.7),
+    headRelativeDirection: new Vector3(-0.7, 0, 0.7),
     eyeRadius: 1,
   };
 

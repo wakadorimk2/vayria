@@ -8,6 +8,10 @@ import {
 import type { ViewerHeadBias } from './attentionTarget.js';
 import type { GazeAllocationBasis } from './gazeAllocation.js';
 
+export interface GazeFaceFrontProvider {
+  getFaceFrontQuaternion(target: Quaternion): Quaternion;
+}
+
 export interface GazeProjectionOffset {
   readonly head: ViewerHeadBias;
   readonly neck: ViewerHeadBias;
@@ -23,6 +27,7 @@ export class GazeProjectionFeedback {
   private readonly neckOffset = new Quaternion();
   private readonly combinedOffset = new Quaternion();
   private readonly worldRotation = new Quaternion();
+  private readonly faceFrontRotation = new Quaternion();
   private readonly projectedRotation = new Quaternion();
   private readonly forward = new Vector3();
   private readonly right = new Vector3();
@@ -44,24 +49,53 @@ export class GazeProjectionFeedback {
     this.offset = createZeroOffset();
   }
 
+  createNeutralBasis(
+    headNode: Object3D | null,
+    faceFrontProvider: GazeFaceFrontProvider | null,
+    output: GazeAllocationBasis,
+  ): GazeAllocationBasis | null {
+    return this.createBasis(headNode, faceFrontProvider, output, false);
+  }
+
   createHeadBasis(
     headNode: Object3D | null,
+    faceFrontProvider: GazeFaceFrontProvider | null,
     output: GazeAllocationBasis,
+  ): GazeAllocationBasis | null {
+    return this.createBasis(headNode, faceFrontProvider, output, true);
+  }
+
+  private createBasis(
+    headNode: Object3D | null,
+    faceFrontProvider: GazeFaceFrontProvider | null,
+    output: GazeAllocationBasis,
+    includeFeedback: boolean,
   ): GazeAllocationBasis | null {
     if (!headNode) return null;
     headNode.getWorldQuaternion(this.worldRotation);
     if (!isFiniteQuaternion(this.worldRotation)) return null;
 
-    setOffsetQuaternion(this.headOffset, this.offsetEuler, this.offset.head);
-    setOffsetQuaternion(this.neckOffset, this.offsetEuler, this.offset.neck);
-    this.combinedOffset
-      .copy(this.neckOffset)
-      .multiply(this.headOffset);
-    this.projectedRotation
-      .copy(this.worldRotation)
-      .multiply(this.combinedOffset);
+    this.faceFrontRotation.identity();
+    if (faceFrontProvider) {
+      faceFrontProvider.getFaceFrontQuaternion(this.faceFrontRotation);
+    }
+    if (!isFiniteQuaternion(this.faceFrontRotation)) return null;
 
-    this.forward.set(0, 0, -1).applyQuaternion(this.projectedRotation).normalize();
+    this.projectedRotation.copy(this.worldRotation);
+    if (includeFeedback) {
+      setOffsetQuaternion(this.headOffset, this.offsetEuler, this.offset.head);
+      setOffsetQuaternion(this.neckOffset, this.offsetEuler, this.offset.neck);
+      this.combinedOffset
+        .copy(this.neckOffset)
+        .multiply(this.headOffset);
+      this.projectedRotation.multiply(this.combinedOffset);
+    }
+    this.projectedRotation.multiply(this.faceFrontRotation);
+
+    this.forward
+      .set(0, 0, 1)
+      .applyQuaternion(this.projectedRotation)
+      .normalize();
     this.right.set(1, 0, 0).applyQuaternion(this.projectedRotation).normalize();
     this.up.set(0, 1, 0).applyQuaternion(this.projectedRotation).normalize();
     if (

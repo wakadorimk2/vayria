@@ -25,6 +25,8 @@ export interface SpatialTargetBridgeInput {
   readonly neutralTarget: Vector3;
   readonly snapshot: SpatialTargetSnapshot;
   readonly stageRect: SpatialTargetRect;
+  /** Avatar-facing basis used by gaze allocation. This is not the camera ray basis. */
+  readonly allocationBasis: GazeAllocationBasis;
   readonly headBasis?: GazeAllocationBasis;
   readonly handoffState?: GazeHandoffState;
   /** Debug-only allocation target override. The resolved target is unchanged. */
@@ -46,24 +48,32 @@ export interface SpatialTargetBridgeResult {
   readonly residualAngle: GazeAllocationResult['residualAngle'];
   readonly headContribution: GazeAllocationResult['headContribution'];
   readonly neckContribution: GazeAllocationResult['neckContribution'];
+  readonly targetEyeVector: GazeAllocationResult['targetEyeVector'];
+  readonly normalizedDirection: GazeAllocationResult['normalizedDirection'];
+  readonly headRelativeDirection: GazeAllocationResult['headRelativeDirection'];
   readonly eyeRadius: number;
   readonly handoffState: GazeHandoffState;
 }
 
+/** Fallback distance used when the LookAt origin has no neutral depth. */
+export const SPATIAL_TARGET_REFERENCE_DEPTH = 1;
+
 /**
  * Converts a cached viewport anchor into the world-space target used by VRM.
  *
- * The target lies on a plane through the neutral gaze point. The plane is
- * normal to the render camera forward vector, so the result stays at the
- * avatar's eye depth while the anchor moves across the stage.
+ * The target lies on a plane normal to the render camera forward vector.
+ * The plane uses the neutral target depth when available. Otherwise it uses
+ * a stable forward reference depth from the avatar eye origin.
  */
 export class SpatialTargetBridge {
   private readonly ndcPoint = new Vector3();
   private readonly rayDirection = new Vector3();
-  private readonly forward = new Vector3();
-  private readonly right = new Vector3();
-  private readonly up = new Vector3();
+  private readonly cameraForward = new Vector3();
+  private readonly cameraRight = new Vector3();
+  private readonly cameraUp = new Vector3();
   private readonly safeDirection = new Vector3();
+  private readonly allocationForward = new Vector3();
+  private readonly eyeDepthPoint = new Vector3();
   private readonly worldTarget = new Vector3();
   private readonly ray = new Ray();
   private readonly eyeDepthPlane = new Plane();
@@ -73,6 +83,13 @@ export class SpatialTargetBridge {
     if (!isFiniteVector(input.eyePosition)) return null;
     if (!isFiniteVector(input.neutralTarget)) return null;
     if (!isFiniteVector(input.camera.position)) return null;
+    if (
+      !isFiniteVector(input.allocationBasis.forward) ||
+      !isFiniteVector(input.allocationBasis.right) ||
+      !isFiniteVector(input.allocationBasis.up)
+    ) {
+      return null;
+    }
     if (
       !Number.isFinite(input.snapshot.point.x) ||
       !Number.isFinite(input.snapshot.point.y)
@@ -89,15 +106,15 @@ export class SpatialTargetBridge {
     }
 
     input.camera.updateMatrixWorld(true);
-    input.camera.getWorldDirection(this.forward).normalize();
-    this.right
+    input.camera.getWorldDirection(this.cameraForward).normalize();
+    this.cameraRight
       .setFromMatrixColumn(input.camera.matrixWorld, 0)
       .normalize();
-    this.up.setFromMatrixColumn(input.camera.matrixWorld, 1).normalize();
+    this.cameraUp.setFromMatrixColumn(input.camera.matrixWorld, 1).normalize();
     if (
-      !isFiniteVector(this.forward) ||
-      !isFiniteVector(this.right) ||
-      !isFiniteVector(this.up)
+      !isFiniteVector(this.cameraForward) ||
+      !isFiniteVector(this.cameraRight) ||
+      !isFiniteVector(this.cameraUp)
     ) {
       return null;
     }
@@ -112,12 +129,12 @@ export class SpatialTargetBridge {
     if (!isFiniteVector(this.rayDirection)) return null;
 
     const rawYaw = Math.atan2(
-      this.rayDirection.dot(this.right),
-      this.rayDirection.dot(this.forward),
+      this.rayDirection.dot(this.cameraRight),
+      this.rayDirection.dot(this.cameraForward),
     );
     const rawPitch = Math.atan2(
-      this.rayDirection.dot(this.up),
-      this.rayDirection.dot(this.forward),
+      this.rayDirection.dot(this.cameraUp),
+      this.rayDirection.dot(this.cameraForward),
     );
     const yaw = clampRadians(
       rawYaw,
@@ -128,17 +145,27 @@ export class SpatialTargetBridge {
       VIEWER_GAZE_PROJECTION.maxVerticalAngleDegrees,
     );
     this.safeDirection
-      .copy(this.forward)
-      .addScaledVector(this.right, Math.tan(yaw))
-      .addScaledVector(this.up, Math.tan(pitch))
+      .copy(this.cameraForward)
+      .addScaledVector(this.cameraRight, Math.tan(yaw))
+      .addScaledVector(this.cameraUp, Math.tan(pitch))
       .normalize();
     if (!isFiniteVector(this.safeDirection)) return null;
 
     this.ray.origin.copy(input.camera.position);
     this.ray.direction.copy(this.safeDirection);
+    this.allocationForward.copy(input.allocationBasis.forward).normalize();
+    if (!isFiniteVector(this.allocationForward)) return null;
+    const neutralDepth = input.neutralTarget.distanceTo(input.eyePosition);
+    const referenceDepth =
+      Number.isFinite(neutralDepth) && neutralDepth > 0.000001
+        ? neutralDepth
+        : SPATIAL_TARGET_REFERENCE_DEPTH;
+    this.eyeDepthPoint
+      .copy(input.eyePosition)
+      .addScaledVector(this.allocationForward, referenceDepth);
     this.eyeDepthPlane.setFromNormalAndCoplanarPoint(
-      this.forward,
-      input.neutralTarget,
+      this.cameraForward,
+      this.eyeDepthPoint,
     );
     if (!this.ray.intersectPlane(this.eyeDepthPlane, this.worldTarget)) {
       return null;
@@ -151,11 +178,7 @@ export class SpatialTargetBridge {
       eyePosition: input.eyePosition,
       neutralTarget: input.neutralTarget,
       resolvedTarget: allocationTarget,
-      basis: {
-        forward: this.forward,
-        right: this.right,
-        up: this.up,
-      },
+      neutralBasis: input.allocationBasis,
       headBasis: input.headBasis,
       handoffState: input.handoffState,
       profile: input.profile ?? 'spatial',
@@ -175,6 +198,9 @@ export class SpatialTargetBridge {
       residualAngle: allocation.residualAngle,
       headContribution: allocation.headContribution,
       neckContribution: allocation.neckContribution,
+      targetEyeVector: allocation.targetEyeVector,
+      normalizedDirection: allocation.normalizedDirection,
+      headRelativeDirection: allocation.headRelativeDirection,
       eyeRadius: allocation.eyeRadius,
       handoffState: allocation.handoffState,
     };

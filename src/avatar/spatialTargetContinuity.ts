@@ -25,6 +25,9 @@ export interface SpatialTargetWorldValue {
   readonly residualAngle: ViewerHeadBias;
   readonly headContribution: ViewerHeadBias;
   readonly neckContribution: ViewerHeadBias;
+  readonly targetEyeVector: Vector3;
+  readonly normalizedDirection: Vector3;
+  readonly headRelativeDirection: Vector3;
   readonly eyeRadius: number;
 }
 
@@ -49,6 +52,9 @@ export interface SpatialTargetWorldResolution {
   readonly residualAngle: ViewerHeadBias;
   readonly headContribution: ViewerHeadBias;
   readonly neckContribution: ViewerHeadBias;
+  readonly targetEyeVector: Vector3 | null;
+  readonly normalizedDirection: Vector3 | null;
+  readonly headRelativeDirection: Vector3 | null;
   readonly eyeRadius: number;
   readonly valid: boolean;
   readonly usingLastValid: boolean;
@@ -139,6 +145,9 @@ function createResolution(
     residualAngle: cloneHeadProjection(value?.residualAngle),
     headContribution: cloneHeadProjection(value?.headContribution),
     neckContribution: cloneHeadProjection(value?.neckContribution),
+    targetEyeVector: value?.targetEyeVector.clone() ?? null,
+    normalizedDirection: value?.normalizedDirection.clone() ?? null,
+    headRelativeDirection: value?.headRelativeDirection.clone() ?? null,
     eyeRadius: value && Number.isFinite(value.eyeRadius) ? value.eyeRadius : 0,
     valid,
     usingLastValid,
@@ -159,6 +168,9 @@ function cloneWorldValue(value: SpatialTargetWorldValue): SpatialTargetWorldValu
     residualAngle: cloneHeadProjection(value.residualAngle),
     headContribution: cloneHeadProjection(value.headContribution),
     neckContribution: cloneHeadProjection(value.neckContribution),
+    targetEyeVector: value.targetEyeVector.clone(),
+    normalizedDirection: value.normalizedDirection.clone(),
+    headRelativeDirection: value.headRelativeDirection.clone(),
     eyeRadius: value.eyeRadius,
   };
 }
@@ -185,6 +197,9 @@ function isFiniteLiveResult(value: SpatialTargetWorldValue): boolean {
     isFiniteHeadProjection(value.residualAngle) &&
     isFiniteHeadProjection(value.headContribution) &&
     isFiniteHeadProjection(value.neckContribution) &&
+    isFiniteVector(value.targetEyeVector) &&
+    isFiniteVector(value.normalizedDirection) &&
+    isFiniteVector(value.headRelativeDirection) &&
     Number.isFinite(value.eyeRadius)
   );
 }

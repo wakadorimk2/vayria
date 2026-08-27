@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Object3D, Vector3 } from 'three';
+import { Object3D, Quaternion, Vector3 } from 'three';
 import {
   EYE_GAZE_ENVELOPE,
   allocateGaze,
@@ -28,7 +28,7 @@ function allocate(
     eyePosition: new Vector3(0, 0, 0),
     neutralTarget: new Vector3(0, 0, 1),
     resolvedTarget: targetAt(yawDegrees, pitchDegrees),
-    basis,
+    neutralBasis: basis,
     profile,
   });
   assert.ok(result);
@@ -43,6 +43,45 @@ test('center keeps eye, head, and neck allocation at zero', () => {
   assert.deepEqual(result.headProjection, { yawDegrees: 0, pitchDegrees: 0 });
   assert.deepEqual(result.neckProjection, { yawDegrees: 0, pitchDegrees: 0 });
   assert.deepEqual(result.eyeTarget.toArray(), [0, 0, 1]);
+});
+
+test('eye-to-target angles use the forward depth and remain near frontal', () => {
+  const result = allocateGaze({
+    eyePosition: new Vector3(0, 0, 0),
+    neutralTarget: new Vector3(0, 0, 0),
+    resolvedTarget: new Vector3(0.03, -0.39, 2.28),
+    neutralBasis: basis,
+  });
+
+  assert.ok(result);
+  const expectedYaw =
+    (Math.atan2(0.03, 2.28) * 180) / Math.PI;
+  const expectedPitch =
+    (Math.atan2(-0.39, Math.hypot(0.03, 2.28)) * 180) / Math.PI;
+  assert.ok(Math.abs(result.rawTargetAngle.yawDegrees - expectedYaw) < 0.01);
+  assert.ok(
+    Math.abs(result.rawTargetAngle.pitchDegrees - expectedPitch) < 0.01,
+  );
+  assert.deepEqual(result.targetEyeVector.toArray(), [0.03, -0.39, 2.28]);
+  assert.ok(result.normalizedDirection.z > 0.98);
+  assert.ok(result.eyeTarget.z > 0);
+  assert.ok(result.eyeTarget.z < 1.01);
+});
+
+test('pitch uses horizontal depth instead of only the forward component', () => {
+  const result = allocateGaze({
+    eyePosition: new Vector3(0, 0, 0),
+    neutralTarget: new Vector3(0, 0, 0),
+    resolvedTarget: new Vector3(1, 1, 1),
+    neutralBasis: basis,
+  });
+
+  assert.ok(result);
+  const expectedPitch =
+    (Math.atan2(1, Math.hypot(1, 1)) * 180) / Math.PI;
+  assert.ok(
+    Math.abs(result.rawTargetAngle.pitchDegrees - expectedPitch) < 0.01,
+  );
 });
 
 test('eye output uses the conservative elliptical envelope', () => {
@@ -122,7 +161,7 @@ test('head-relative demand decreases when the head turns toward the target', () 
     eyePosition: new Vector3(0, 0, 0),
     neutralTarget: new Vector3(0, 0, 1),
     resolvedTarget: target,
-    basis,
+    neutralBasis: basis,
     headBasis: turnedHeadBasis,
   });
 
@@ -146,7 +185,7 @@ test('handoff thresholds hold state through a small residual decrease', () => {
     eyePosition: new Vector3(0, 0, 0),
     neutralTarget: new Vector3(0, 0, 1),
     resolvedTarget: targetAt(25),
-    basis,
+    neutralBasis: basis,
   });
   assert.ok(acquired);
   assert.equal(acquired.handoffState.headActive, true);
@@ -155,7 +194,7 @@ test('handoff thresholds hold state through a small residual decrease', () => {
     eyePosition: new Vector3(0, 0, 0),
     neutralTarget: new Vector3(0, 0, 1),
     resolvedTarget: targetAt(20.5),
-    basis,
+    neutralBasis: basis,
     handoffState: acquired.handoffState,
   });
   assert.ok(held);
@@ -165,7 +204,7 @@ test('handoff thresholds hold state through a small residual decrease', () => {
     eyePosition: new Vector3(0, 0, 0),
     neutralTarget: new Vector3(0, 0, 1),
     resolvedTarget: targetAt(12),
-    basis,
+    neutralBasis: basis,
     handoffState: held.handoffState,
   });
   assert.ok(released);
@@ -181,7 +220,7 @@ test('gaze feedback applies only the previous gaze offset to the head basis', ()
     up: new Vector3(),
   };
   const feedback = new GazeProjectionFeedback();
-  const neutralBasis = feedback.createHeadBasis(head, output);
+  const neutralBasis = feedback.createNeutralBasis(head, null, output);
   assert.ok(neutralBasis);
   const neutralForward = neutralBasis.forward.clone();
 
@@ -189,14 +228,41 @@ test('gaze feedback applies only the previous gaze offset to the head basis', ()
     head: { yawDegrees: 8, pitchDegrees: 0 },
     neck: { yawDegrees: 0, pitchDegrees: 0 },
   });
-  const projectedBasis = feedback.createHeadBasis(head, output);
+  const projectedBasis = feedback.createHeadBasis(head, null, output);
   assert.ok(projectedBasis);
   assert.ok(projectedBasis.forward.distanceTo(neutralForward) > 0.01);
 
   feedback.reset();
-  const resetBasis = feedback.createHeadBasis(head, output);
+  const resetBasis = feedback.createHeadBasis(head, null, output);
   assert.ok(resetBasis);
   assert.ok(resetBasis.forward.distanceTo(neutralForward) < 0.0001);
+});
+
+test('gaze feedback uses the VRM face-front rotation for the neutral basis', () => {
+  const head = new Object3D();
+  head.updateMatrixWorld(true);
+  const output = {
+    forward: new Vector3(),
+    right: new Vector3(),
+    up: new Vector3(),
+  };
+  const feedback = new GazeProjectionFeedback();
+  const faceFrontProvider = {
+    getFaceFrontQuaternion(target: Quaternion) {
+      return target.setFromAxisAngle(new Vector3(0, 1, 0), Math.PI);
+    },
+  };
+
+  const result = feedback.createNeutralBasis(
+    head,
+    faceFrontProvider,
+    output,
+  );
+
+  assert.ok(result);
+  assert.ok(result.forward.z < -0.99);
+  assert.ok(result.right.x < -0.99);
+  assert.ok(result.up.y > 0.99);
 });
 
 test('viewer and soft-cue profiles preserve their allocation contracts', () => {
@@ -220,7 +286,7 @@ test('invalid vectors return null', () => {
     eyePosition: new Vector3(Number.NaN, 0, 0),
     neutralTarget: new Vector3(0, 0, 1),
     resolvedTarget: new Vector3(0, 0, 1),
-    basis,
+    neutralBasis: basis,
   });
 
   assert.equal(result, null);

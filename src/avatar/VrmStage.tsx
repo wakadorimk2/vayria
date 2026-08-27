@@ -256,6 +256,9 @@ interface SpatialTargetDebugSnapshot {
   readonly primarySource: string;
   readonly primaryWorld: { x: number; y: number; z: number } | null;
   readonly eyeWorld: { x: number; y: number; z: number } | null;
+  readonly targetEyeVector: { x: number; y: number; z: number } | null;
+  readonly normalizedDirection: { x: number; y: number; z: number } | null;
+  readonly headRelativeDirection: { x: number; y: number; z: number } | null;
   readonly eyeRadius: number;
   readonly attentionMode: string;
   readonly attentionEnergy: number;
@@ -282,6 +285,9 @@ interface GazeDebugSample {
   readonly source: string;
   readonly owner: string;
   readonly valid: boolean;
+  readonly targetEyeVector: { x: number; y: number; z: number } | null;
+  readonly normalizedDirection: { x: number; y: number; z: number } | null;
+  readonly headRelativeDirection: { x: number; y: number; z: number } | null;
   readonly rawYaw: number;
   readonly rawPitch: number;
   readonly headRelativeYaw: number;
@@ -305,6 +311,9 @@ class GazeDebugHistory {
       source: snapshot.primarySource,
       owner: snapshot.owner,
       valid: snapshot.valid,
+      targetEyeVector: snapshot.targetEyeVector,
+      normalizedDirection: snapshot.normalizedDirection,
+      headRelativeDirection: snapshot.headRelativeDirection,
       rawYaw: snapshot.rawTargetAngle.yawDegrees,
       rawPitch: snapshot.rawTargetAngle.pitchDegrees,
       headRelativeYaw: snapshot.headRelativeAngle.yawDegrees,
@@ -375,6 +384,9 @@ function zeroBias(): { yawDegrees: number; pitchDegrees: number } {
 
 function zeroGazeDiagnostics(): Pick<
   SpatialTargetDebugSnapshot,
+  | 'targetEyeVector'
+  | 'normalizedDirection'
+  | 'headRelativeDirection'
   | 'rawTargetAngle'
   | 'headRelativeAngle'
   | 'eyeAngle'
@@ -383,6 +395,9 @@ function zeroGazeDiagnostics(): Pick<
   | 'neckContribution'
 > {
   return {
+    targetEyeVector: null,
+    normalizedDirection: null,
+    headRelativeDirection: null,
     rawTargetAngle: zeroBias(),
     headRelativeAngle: zeroBias(),
     eyeAngle: zeroBias(),
@@ -424,17 +439,21 @@ function applyGazeProbe(
 function createAllocationDebug(
   allocation: Pick<
     GazeAllocationResult,
-    | 'rawTargetAngle'
-    | 'headRelativeAngle'
-    | 'eyeAngle'
-    | 'residualAngle'
-  >,
+    'rawTargetAngle' | 'headRelativeAngle' | 'eyeAngle' | 'residualAngle'
+  > & {
+    readonly targetEyeVector: Vector3 | null;
+    readonly normalizedDirection: Vector3 | null;
+    readonly headRelativeDirection: Vector3 | null;
+  },
   projection: Pick<
     GazeAllocationResult,
     'headProjection' | 'neckProjection'
   >,
 ): Pick<
   SpatialTargetDebugSnapshot,
+  | 'targetEyeVector'
+  | 'normalizedDirection'
+  | 'headRelativeDirection'
   | 'rawTargetAngle'
   | 'headRelativeAngle'
   | 'eyeAngle'
@@ -445,6 +464,9 @@ function createAllocationDebug(
   | 'neckProjection'
 > {
   return {
+    targetEyeVector: toDebugWorld(allocation.targetEyeVector),
+    normalizedDirection: toDebugWorld(allocation.normalizedDirection),
+    headRelativeDirection: toDebugWorld(allocation.headRelativeDirection),
     rawTargetAngle: { ...allocation.rawTargetAngle },
     headRelativeAngle: { ...allocation.headRelativeAngle },
     eyeAngle: { ...allocation.eyeAngle },
@@ -981,6 +1003,11 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       const spatialHeadSmoother = new SpatialHeadProjectionSmoother();
       const spatialNeckSmoother = new SpatialHeadProjectionSmoother();
       const gazeProjectionFeedback = new GazeProjectionFeedback();
+      const gazeNeutralBasisOutput: GazeAllocationBasis = {
+        forward: new Vector3(),
+        right: new Vector3(),
+        up: new Vector3(),
+      };
       const gazeHeadBasisOutput: GazeAllocationBasis = {
         forward: new Vector3(),
         right: new Vector3(),
@@ -1311,10 +1338,19 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             playbackState === 'exiting';
           if (!hasActiveBodyMotion) idleController?.resetForGazeFrame();
           if (hasActiveBodyMotion) gazeProjectionFeedback.reset();
+          const headNode = loadedVrm.humanoid.getNormalizedBoneNode(
+            VRMHumanBoneName.Head,
+          );
+          const neutralBasis = gazeProjectionFeedback.createNeutralBasis(
+            headNode,
+            loadedVrm.lookAt ?? null,
+            gazeNeutralBasisOutput,
+          );
           const headBasis = hasActiveBodyMotion
             ? null
             : gazeProjectionFeedback.createHeadBasis(
-                loadedVrm.humanoid.getNormalizedBoneNode(VRMHumanBoneName.Head),
+                headNode,
+                loadedVrm.lookAt ?? null,
                 gazeHeadBasisOutput,
               );
           idleGazeController?.getNeutralTarget(lifeDynamicsNeutralTarget);
@@ -1433,19 +1469,17 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 viewerGazeTarget,
               );
               primaryWorldTarget = rawViewerTarget;
-              viewerAllocation = allocateGaze({
-                eyePosition: lookAtWorldPosition,
-                neutralTarget: lifeDynamicsNeutralTarget,
-                resolvedTarget: rawViewerTarget,
-                basis: {
-                  forward: viewerCameraForward,
-                  right: viewerCameraRight,
-                  up: viewerCameraUp,
-                },
-                headBasis: headBasis ?? undefined,
-                handoffState: gazeHandoffState,
-                profile: 'viewer',
-              });
+              viewerAllocation = neutralBasis
+                ? allocateGaze({
+                    eyePosition: lookAtWorldPosition,
+                    neutralTarget: lifeDynamicsNeutralTarget,
+                    resolvedTarget: rawViewerTarget,
+                    neutralBasis,
+                    headBasis: headBasis ?? undefined,
+                    handoffState: gazeHandoffState,
+                    profile: 'viewer',
+                  })
+                : null;
               if (viewerAllocation) {
                 viewerProjection = applyGazeProbe(
                   viewerAllocation,
@@ -1555,13 +1589,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 fixedProbeTarget = null;
                 fixedProbeSelectionKey = null;
               }
-              const spatialResolution = spatialSnapshot
+              const spatialResolution = spatialSnapshot && neutralBasis
                 ? spatialTargetBridge.resolve({
                     camera,
                     eyePosition: lookAtWorldPosition,
                     neutralTarget: lifeDynamicsNeutralTarget,
                     snapshot: spatialSnapshot,
                     stageRect,
+                    allocationBasis: neutralBasis,
                     headBasis: headBasis ?? undefined,
                     handoffState: gazeHandoffState,
                     fixedTarget: fixedProbeTarget ?? undefined,
@@ -1680,13 +1715,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               performance.now(),
             );
             const softCueSnapshot = softCueLookup.snapshot;
-            const softCueResolution = softCueSnapshot
+            const softCueResolution = softCueSnapshot && neutralBasis
               ? spatialTargetBridge.resolve({
                   camera,
                   eyePosition: lookAtWorldPosition,
                   neutralTarget: lifeDynamicsNeutralTarget,
                   snapshot: softCueSnapshot,
                   stageRect,
+                  allocationBasis: neutralBasis,
                   headBasis: headBasis ?? undefined,
                   profile: 'soft-cue',
                 })
@@ -1909,6 +1945,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   primarySource: spatialTargetDebug.primarySource,
                   primaryWorld: spatialTargetDebug.primaryWorld,
                   eyeWorld: spatialTargetDebug.eyeWorld,
+                  targetEyeVector: spatialTargetDebug.targetEyeVector,
+                  normalizedDirection: spatialTargetDebug.normalizedDirection,
+                  headRelativeDirection:
+                    spatialTargetDebug.headRelativeDirection,
                   eyeRadius: spatialTargetDebug.eyeRadius,
                   rawTargetAngle: spatialTargetDebug.rawTargetAngle,
                   headRelativeAngle: spatialTargetDebug.headRelativeAngle,
@@ -2178,6 +2218,24 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                     {spatialTargetDebugSnapshot.eyeWorld === null
                       ? 'none'
                       : `${spatialTargetDebugSnapshot.eyeWorld.x.toFixed(2)},${spatialTargetDebugSnapshot.eyeWorld.y.toFixed(2)},${spatialTargetDebugSnapshot.eyeWorld.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    target-eye:{' '}
+                    {spatialTargetDebugSnapshot.targetEyeVector === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.targetEyeVector.x.toFixed(2)},${spatialTargetDebugSnapshot.targetEyeVector.y.toFixed(2)},${spatialTargetDebugSnapshot.targetEyeVector.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    direction:{' '}
+                    {spatialTargetDebugSnapshot.normalizedDirection === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.normalizedDirection.x.toFixed(2)},${spatialTargetDebugSnapshot.normalizedDirection.y.toFixed(2)},${spatialTargetDebugSnapshot.normalizedDirection.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    head-local:{' '}
+                    {spatialTargetDebugSnapshot.headRelativeDirection === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.headRelativeDirection.x.toFixed(2)},${spatialTargetDebugSnapshot.headRelativeDirection.y.toFixed(2)},${spatialTargetDebugSnapshot.headRelativeDirection.z.toFixed(2)}`}
                   </span>
                   <span>
                     eye radius: {spatialTargetDebugSnapshot.eyeRadius.toFixed(2)}
