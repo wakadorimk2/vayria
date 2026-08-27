@@ -3,6 +3,7 @@ import { Vector3 } from 'three';
 export const SPATIAL_TARGET_OUTPUT_TIMING = {
   eyeResponseMs: 120,
   headResponseMs: 350,
+  neckResponseMs: 700,
 } as const;
 
 export interface SpatialHeadProjection {

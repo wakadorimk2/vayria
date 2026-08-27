@@ -9,6 +9,7 @@ import { VRMHumanBoneName } from '@pixiv/three-vrm';
 import type { VRM } from '@pixiv/three-vrm';
 import {
   VIEWER_HEAD_ATTENTION,
+  VIEWER_NECK_ATTENTION,
   type ViewerHeadBias,
 } from './attentionTarget.js';
 import type { LifeDynamicsSnapshot } from './lifeDynamics.js';
@@ -18,6 +19,7 @@ export interface LifeDynamicsOrientingFrame {
   readonly neutralTarget: Vector3;
   readonly desiredTarget: Vector3 | null;
   readonly headBias: ViewerHeadBias;
+  readonly neckBias: ViewerHeadBias;
   readonly vrmaActive: boolean;
 }
 
@@ -32,12 +34,18 @@ export class LifeDynamicsOrientingAdapter {
   private readonly offsetEuler = new Euler(0, 0, 0, 'XYZ');
   private readonly offsetRotation = new Quaternion();
   private readonly appliedHeadOffset = new Quaternion();
+  private readonly appliedNeckOffset = new Quaternion();
   private readonly headNode: Object3D | null;
+  private readonly neckNode: Object3D | null;
   private hasAppliedHeadOffset = false;
+  private hasAppliedNeckOffset = false;
 
   constructor(private readonly vrm: VRM) {
     this.headNode = vrm.humanoid.getNormalizedBoneNode(
       VRMHumanBoneName.Head,
+    );
+    this.neckNode = vrm.humanoid.getNormalizedBoneNode(
+      VRMHumanBoneName.Neck,
     );
   }
 
@@ -62,28 +70,48 @@ export class LifeDynamicsOrientingAdapter {
       this.vrm.lookAt.target = this.gazeTarget;
     }
 
-    if (!this.headNode) return;
-
     const headWeight = clamp(frame.snapshot.orienting.headWeight);
     if (headWeight <= 0) return;
 
-    const yawDegrees = clampDegrees(
-      frame.headBias.yawDegrees * headWeight,
-      VIEWER_HEAD_ATTENTION.maxHorizontalAngleDegrees,
-    );
-    const pitchDegrees = clampDegrees(
-      frame.headBias.pitchDegrees * headWeight,
-      VIEWER_HEAD_ATTENTION.maxVerticalAngleDegrees,
-    );
-    this.offsetEuler.set(
-      MathUtils.degToRad(pitchDegrees),
-      MathUtils.degToRad(yawDegrees),
-      0,
-    );
-    this.offsetRotation.setFromEuler(this.offsetEuler);
-    this.headNode.quaternion.multiply(this.offsetRotation);
-    this.appliedHeadOffset.copy(this.offsetRotation);
-    this.hasAppliedHeadOffset = true;
+    if (this.headNode) {
+      const yawDegrees = clampDegrees(
+        frame.headBias.yawDegrees * headWeight,
+        VIEWER_HEAD_ATTENTION.maxHorizontalAngleDegrees,
+      );
+      const pitchDegrees = clampDegrees(
+        frame.headBias.pitchDegrees * headWeight,
+        VIEWER_HEAD_ATTENTION.maxVerticalAngleDegrees,
+      );
+      this.offsetEuler.set(
+        MathUtils.degToRad(pitchDegrees),
+        MathUtils.degToRad(yawDegrees),
+        0,
+      );
+      this.offsetRotation.setFromEuler(this.offsetEuler);
+      this.headNode.quaternion.multiply(this.offsetRotation);
+      this.appliedHeadOffset.copy(this.offsetRotation);
+      this.hasAppliedHeadOffset = true;
+    }
+
+    if (this.neckNode) {
+      const neckYawDegrees = clampDegrees(
+        frame.neckBias.yawDegrees * headWeight,
+        VIEWER_NECK_ATTENTION.maxHorizontalAngleDegrees,
+      );
+      const neckPitchDegrees = clampDegrees(
+        frame.neckBias.pitchDegrees * headWeight,
+        VIEWER_NECK_ATTENTION.maxVerticalAngleDegrees,
+      );
+      this.offsetEuler.set(
+        MathUtils.degToRad(neckPitchDegrees),
+        MathUtils.degToRad(neckYawDegrees),
+        0,
+      );
+      this.offsetRotation.setFromEuler(this.offsetEuler);
+      this.neckNode.quaternion.multiply(this.offsetRotation);
+      this.appliedNeckOffset.copy(this.offsetRotation);
+      this.hasAppliedNeckOffset = true;
+    }
   }
 
   reset(): void {
@@ -95,6 +123,11 @@ export class LifeDynamicsOrientingAdapter {
   }
 
   private clearOutput(): void {
+    if (this.hasAppliedNeckOffset && this.neckNode) {
+      this.neckNode.quaternion.multiply(this.appliedNeckOffset.clone().invert());
+    }
+    this.hasAppliedNeckOffset = false;
+
     if (this.hasAppliedHeadOffset && this.headNode) {
       this.headNode.quaternion.multiply(this.appliedHeadOffset.clone().invert());
     }

@@ -14,6 +14,11 @@ export const VIEWER_HEAD_ATTENTION = {
   maxVerticalAngleDegrees: 6,
 } as const;
 
+export const VIEWER_NECK_ATTENTION = {
+  maxHorizontalAngleDegrees: 4,
+  maxVerticalAngleDegrees: 3,
+} as const;
+
 export interface ViewerHeadBias {
   yawDegrees: number;
   pitchDegrees: number;

@@ -21,6 +21,7 @@
     "src/attention/faceLandmarkerProtocol.ts",
     "src/attention/spatialTargetRegistry.ts",
     "src/avatar/attentionTarget.ts",
+    "src/avatar/gazeAllocation.ts",
     "src/avatar/spatialTargetBridge.ts",
     "src/avatar/spatialTargetContinuity.ts",
     "src/avatar/spatialTargetOutputSmoother.ts",
@@ -42,6 +43,7 @@
     "scripts/life-dynamics-blink-adapter.test.ts",
     "scripts/life-dynamics-life-adapter.test.ts",
     "scripts/life-dynamics-orienting-adapter.test.ts",
-    "scripts/spatial-target.test.ts"
+    "scripts/spatial-target.test.ts",
+    "scripts/gaze-allocation.test.ts"
   ]
 }

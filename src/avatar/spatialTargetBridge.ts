@@ -10,9 +10,12 @@ import type {
 } from '../attention/spatialTargetRegistry.js';
 import {
   VIEWER_GAZE_PROJECTION,
-  VIEWER_HEAD_ATTENTION,
-  type ViewerHeadBias,
 } from './attentionTarget.js';
+import {
+  allocateGaze,
+  type GazeAllocationProfile,
+  type GazeAllocationResult,
+} from './gazeAllocation.js';
 
 export interface SpatialTargetBridgeInput {
   readonly camera: PerspectiveCamera;
@@ -20,19 +23,19 @@ export interface SpatialTargetBridgeInput {
   readonly neutralTarget: Vector3;
   readonly snapshot: SpatialTargetSnapshot;
   readonly stageRect: SpatialTargetRect;
+  readonly profile?: GazeAllocationProfile;
 }
 
 export interface SpatialTargetBridgeResult {
+  /** The resolved world target before the eye envelope is applied. */
   readonly target: Vector3;
-  readonly headProjection: ViewerHeadBias;
+  readonly rawTarget: Vector3;
+  readonly eyeTarget: Vector3;
+  readonly headProjection: GazeAllocationResult['headProjection'];
+  readonly neckProjection: GazeAllocationResult['neckProjection'];
+  readonly rawEyeAngle: GazeAllocationResult['rawEyeAngle'];
+  readonly eyeRadius: number;
 }
-
-export const SPATIAL_HEAD_PROJECTION = {
-  horizontalComfortDegrees: 10,
-  horizontalEngageDegrees: 30,
-  verticalComfortDegrees: 8,
-  verticalEngageDegrees: 24,
-} as const;
 
 /**
  * Converts a cached viewport anchor into the world-space target used by VRM.
@@ -48,7 +51,6 @@ export class SpatialTargetBridge {
   private readonly right = new Vector3();
   private readonly up = new Vector3();
   private readonly safeDirection = new Vector3();
-  private readonly headDirection = new Vector3();
   private readonly worldTarget = new Vector3();
   private readonly ray = new Ray();
   private readonly eyeDepthPlane = new Plane();
@@ -130,47 +132,27 @@ export class SpatialTargetBridge {
     }
     if (!isFiniteVector(this.worldTarget)) return null;
 
-    this.headDirection.copy(this.worldTarget).sub(input.eyePosition);
-    let headProjection: ViewerHeadBias = {
-      yawDegrees: 0,
-      pitchDegrees: 0,
-    };
-    if (this.headDirection.lengthSq() > 0.000001) {
-      const headYaw = Math.atan2(
-        this.headDirection.dot(this.right),
-        this.headDirection.dot(this.forward),
-      );
-      const headPitch = Math.atan2(
-        this.headDirection.dot(this.up),
-        this.headDirection.dot(this.forward),
-      );
-      const headYawDegrees = (headYaw * 180) / Math.PI;
-      const headPitchDegrees = (headPitch * 180) / Math.PI;
-      headProjection = {
-        yawDegrees: clampDegrees(
-          headYawDegrees *
-            smoothstepRange(
-              Math.abs(headYawDegrees),
-              SPATIAL_HEAD_PROJECTION.horizontalComfortDegrees,
-              SPATIAL_HEAD_PROJECTION.horizontalEngageDegrees,
-            ),
-          VIEWER_HEAD_ATTENTION.maxHorizontalAngleDegrees,
-        ),
-        pitchDegrees: clampDegrees(
-          headPitchDegrees *
-            smoothstepRange(
-              Math.abs(headPitchDegrees),
-              SPATIAL_HEAD_PROJECTION.verticalComfortDegrees,
-              SPATIAL_HEAD_PROJECTION.verticalEngageDegrees,
-            ),
-          VIEWER_HEAD_ATTENTION.maxVerticalAngleDegrees,
-        ),
-      };
-    }
+    const allocation = allocateGaze({
+      eyePosition: input.eyePosition,
+      neutralTarget: input.neutralTarget,
+      resolvedTarget: this.worldTarget,
+      basis: {
+        forward: this.forward,
+        right: this.right,
+        up: this.up,
+      },
+      profile: input.profile ?? 'spatial',
+    });
+    if (!allocation) return null;
 
     return {
       target: this.worldTarget.clone(),
-      headProjection,
+      rawTarget: allocation.rawTarget,
+      eyeTarget: allocation.eyeTarget,
+      headProjection: allocation.headProjection,
+      neckProjection: allocation.neckProjection,
+      rawEyeAngle: allocation.rawEyeAngle,
+      eyeRadius: allocation.eyeRadius,
     };
   }
 }
@@ -198,18 +180,4 @@ function clampRadians(value: number, maxDegrees: number): number {
   if (!Number.isFinite(value)) return 0;
   const limit = (maxDegrees * Math.PI) / 180;
   return Math.max(-limit, Math.min(value, limit));
-}
-
-function clampDegrees(value: number, maxDegrees: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(-maxDegrees, Math.min(value, maxDegrees));
-}
-
-function smoothstepRange(value: number, start: number, end: number): number {
-  if (!Number.isFinite(value) || !Number.isFinite(start) || !Number.isFinite(end)) {
-    return 0;
-  }
-  if (end <= start) return value >= end ? 1 : 0;
-  const normalized = Math.max(0, Math.min((value - start) / (end - start), 1));
-  return normalized * normalized * (3 - 2 * normalized);
 }
