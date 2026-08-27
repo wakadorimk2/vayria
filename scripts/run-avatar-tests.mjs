@@ -26,6 +26,9 @@ const testFiles = [
   ),
   resolve('node_modules/.tmp/avatar-test/scripts/gaze-allocation.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/spatial-target.test.js'),
+  resolve(
+    'node_modules/.tmp/avatar-test/scripts/vrm-look-at-boundary.test.js',
+  ),
 ];
 const result = spawnSync(process.execPath, ['--test', ...testFiles], {
   stdio: 'inherit',

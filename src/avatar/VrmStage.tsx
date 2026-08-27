@@ -47,6 +47,10 @@ import {
 import { LifeDynamicsBlinkAdapter } from './lifeDynamicsBlinkAdapter';
 import { LifeDynamicsLifeAdapter } from './lifeDynamicsLifeAdapter';
 import { LifeDynamicsOrientingAdapter } from './lifeDynamicsOrientingAdapter';
+import {
+  VrmLookAtBoundaryDriver,
+  type VrmLookAtBoundaryFrame,
+} from './vrmLookAtBoundary';
 import { toVrmBonePitchDegrees } from './vrmBoneRotation';
 import { SpatialTargetBridge } from './spatialTargetBridge';
 import { SpatialTargetWorldCache } from './spatialTargetContinuity';
@@ -523,6 +527,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       useState<LifeDynamicsSnapshot | null>(null);
     const [spatialTargetDebugSnapshot, setSpatialTargetDebugSnapshot] =
       useState<SpatialTargetDebugSnapshot | null>(null);
+    const [vrmLookAtDebugSnapshot, setVrmLookAtDebugSnapshot] =
+      useState<VrmLookAtBoundaryFrame | null>(null);
     const loadedVrmRef = useRef<VRM | null>(null);
     const lifeDynamicsRef = useRef<LifeDynamics | null>(null);
     const lifeDynamicsBlinkAdapterRef =
@@ -532,6 +538,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const lifeDynamicsOrientingAdapterRef =
       useRef<LifeDynamicsOrientingAdapter | null>(null);
     const lifeDynamicsDebugLastLogAtRef = useRef(0);
+    const vrmLookAtDebugLastLogAtRef = useRef(0);
     const motionPlayerRef = useRef<MotionPlayer | null>(null);
     const motionCatalogRef = useRef(new SavedMotionCatalog());
     const motionAbortControllerRef = useRef<AbortController | null>(null);
@@ -993,6 +1000,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       let mouthExpression: string | null = null;
       let idleController: IdleController | null = null;
       let idleGazeController: IdleGazeController | null = null;
+      let vrmLookAtBoundaryDriver: VrmLookAtBoundaryDriver | null = null;
       const attentionStateController = new AttentionStateController();
       const cameraTrackingController = new CameraTrackingController();
       const attentionVisualSmoother = new AttentionVisualSmoother();
@@ -1102,6 +1110,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             scene.add(vrm.scene);
             loadedVrm = vrm;
             loadedVrmRef.current = vrm;
+            vrmLookAtBoundaryDriver = new VrmLookAtBoundaryDriver(vrm);
+            console.info('Performer VRM LookAt applier:', {
+              type: vrmLookAtBoundaryDriver.applierType,
+            });
             applyBasePose(vrm);
             idleController = new IdleController(vrm);
             idleGazeController = new IdleGazeController(
@@ -1220,6 +1232,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           gazeDebugHistory.clear();
           setLifeDynamicsDebugSnapshot(null);
           setSpatialTargetDebugSnapshot(null);
+          setVrmLookAtDebugSnapshot(null);
+          vrmLookAtDebugLastLogAtRef.current = 0;
         }
         const delta = clock.getDelta();
         if (loadedVrm) {
@@ -2113,7 +2127,20 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             );
           }
           loadedVrm.expressionManager?.update();
-          loadedVrm.update(delta);
+          const lookAtFrame = vrmLookAtBoundaryDriver?.prepare();
+          if (lookAtFrame && lifeDynamicsDebugEnabled) {
+            const now = performance.now();
+            if (now - vrmLookAtDebugLastLogAtRef.current >= 250) {
+              setVrmLookAtDebugSnapshot(lookAtFrame);
+              console.debug('[vrm-look-at]', lookAtFrame);
+              vrmLookAtDebugLastLogAtRef.current = now;
+            }
+          }
+          try {
+            loadedVrm.update(delta);
+          } finally {
+            vrmLookAtBoundaryDriver?.restore();
+          }
 
           const currentPerformanceState = performanceStateRef.current;
           const recoveryStartedAt =
@@ -2166,8 +2193,11 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         lifeDynamicsOrientingAdapterRef.current = null;
         lifeDynamicsBlinkAdapterRef.current = null;
         lifeDynamicsRef.current = null;
+        vrmLookAtBoundaryDriver?.dispose();
+        vrmLookAtBoundaryDriver = null;
         setLifeDynamicsDebugSnapshot(null);
         setSpatialTargetDebugSnapshot(null);
+        setVrmLookAtDebugSnapshot(null);
         stopReactionMotion();
         stopMotion();
         motionPlayerRef.current?.dispose();
@@ -2210,6 +2240,21 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               <span>
                 target: {lifeDynamicsDebugSnapshot.orienting.target ?? 'none'}
               </span>
+              {vrmLookAtDebugSnapshot && (
+                <>
+                  <span>
+                    lookAt applier: {vrmLookAtDebugSnapshot.applierType}
+                  </span>
+                  <span>
+                    lookAt target: {String(vrmLookAtDebugSnapshot.targetActive)}
+                  </span>
+                  <span>
+                    lookAt angle:{' '}
+                    {vrmLookAtDebugSnapshot.yawDegrees.toFixed(2)},
+                    {vrmLookAtDebugSnapshot.pitchDegrees.toFixed(2)}
+                  </span>
+                </>
+              )}
               {spatialTargetDebugSnapshot && (
                 <>
                   <span>

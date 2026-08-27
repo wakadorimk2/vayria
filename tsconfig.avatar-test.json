@@ -30,6 +30,7 @@
     "src/avatar/lifeDynamicsBlinkAdapter.ts",
     "src/avatar/lifeDynamicsLifeAdapter.ts",
     "src/avatar/lifeDynamicsOrientingAdapter.ts",
+    "src/avatar/vrmLookAtBoundary.ts",
     "scripts/camera-attention-controller.test.ts",
     "scripts/camera-tracking.test.ts",
     "scripts/attention-engagement.test.ts",
@@ -44,6 +45,7 @@
     "scripts/life-dynamics-life-adapter.test.ts",
     "scripts/life-dynamics-orienting-adapter.test.ts",
     "scripts/spatial-target.test.ts",
-    "scripts/gaze-allocation.test.ts"
+    "scripts/gaze-allocation.test.ts",
+    "scripts/vrm-look-at-boundary.test.ts"
   ]
 }
