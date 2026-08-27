@@ -18,14 +18,17 @@ import {
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   VRM,
+  VRMHumanBoneName,
   VRMExpressionPresetName,
   VRMLoaderPlugin,
   VRMUtils,
 } from '@pixiv/three-vrm';
 import { BlinkController } from './BlinkController';
+import { ATTENTION_ENERGY_CONFIG } from '../attention/attentionEnergyController';
 import { EmotionExpressionController } from './EmotionExpressionController';
 import { IdleGazeController } from './idleGaze';
 import {
+  blendGazeTarget,
   mapCameraAttentionToHeadBias,
   mapCameraAttentionToViewerTarget,
 } from './attentionTarget';
@@ -44,6 +47,25 @@ import {
 import { LifeDynamicsBlinkAdapter } from './lifeDynamicsBlinkAdapter';
 import { LifeDynamicsLifeAdapter } from './lifeDynamicsLifeAdapter';
 import { LifeDynamicsOrientingAdapter } from './lifeDynamicsOrientingAdapter';
+import { SpatialTargetBridge } from './spatialTargetBridge';
+import { SpatialTargetWorldCache } from './spatialTargetContinuity';
+import {
+  DEFAULT_GAZE_HANDOFF_STATE,
+  allocateGaze,
+  type GazeAllocationBasis,
+  type GazeAllocationResult,
+  type GazeHandoffState,
+} from './gazeAllocation';
+import { GazeProjectionFeedback } from './gazeProjectionFeedback';
+import {
+  SPATIAL_TARGET_OUTPUT_TIMING,
+  SpatialHeadProjectionSmoother,
+  SpatialTargetOutputSmoother,
+} from './spatialTargetOutputSmoother';
+import type {
+  SpatialTargetRect,
+  SpatialTargetRegistry,
+} from '../attention/spatialTargetRegistry';
 import { frameAvatar } from './cameraPreset';
 import { setupStageLighting } from './stageLighting';
 import { SavedMotionCatalog } from './motion/motionCatalog';
@@ -57,6 +79,7 @@ import type { Emotion } from '../character/emotion';
 import type {
   AttentionReader,
   PerformancePlan,
+  SpatialTargetSelection,
 } from '../performer/types';
 import type { ListeningReactionCue } from '../voice/voiceInput';
 
@@ -72,6 +95,47 @@ function getListeningNodDegrees(elapsedSeconds: number): number {
   }
   const progress = elapsedSeconds / LISTENING_NOD_DURATION_SECONDS;
   return LISTENING_NOD_DEGREES * Math.sin(progress * Math.PI);
+}
+
+function readStageRect(element: HTMLElement): SpatialTargetRect {
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function formatSpatialTargetSelection(
+  selection: SpatialTargetSelection | null,
+): string {
+  return selection === null
+    ? 'none'
+    : `${selection.kind}:${selection.anchor}`;
+}
+
+function toDebugWorld(
+  target: Vector3 | null,
+): { x: number; y: number; z: number } | null {
+  if (
+    target === null ||
+    !Number.isFinite(target.x) ||
+    !Number.isFinite(target.y) ||
+    !Number.isFinite(target.z)
+  ) {
+    return null;
+  }
+  return {
+    x: target.x,
+    y: target.y,
+    z: target.z,
+  };
+}
+
+function clampGazeStrength(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(value, 1));
 }
 
 function waitForMotionDelay(
@@ -155,6 +219,7 @@ interface VrmStageProps {
   onReady?: () => void;
   performancePlan?: PerformancePlan;
   sessionGeneration?: number;
+  spatialTargetRegistry?: SpatialTargetRegistry;
   stageVariant?: 'default' | 'card-preview';
 }
 
@@ -178,21 +243,238 @@ interface LifeDynamicsPocOptions {
   enabled: boolean;
   debug: boolean;
   profileId: ReturnType<typeof resolveLifeDynamicsProfileId>;
+  gazeProbe: GazeProbeMode;
+}
+
+type GazeProbeMode =
+  | 'full'
+  | 'eye-only'
+  | 'no-neck'
+  | 'fixed-target';
+
+interface SpatialTargetDebugSnapshot {
+  readonly primarySource: string;
+  readonly primaryWorld: { x: number; y: number; z: number } | null;
+  readonly eyeWorld: { x: number; y: number; z: number } | null;
+  readonly targetEyeVector: { x: number; y: number; z: number } | null;
+  readonly normalizedDirection: { x: number; y: number; z: number } | null;
+  readonly headRelativeDirection: { x: number; y: number; z: number } | null;
+  readonly eyeRadius: number;
+  readonly attentionMode: string;
+  readonly attentionEnergy: number;
+  readonly softCueSource: string | null;
+  readonly softCueWorld: { x: number; y: number; z: number } | null;
+  readonly headProjection: { yawDegrees: number; pitchDegrees: number };
+  readonly neckProjection: { yawDegrees: number; pitchDegrees: number };
+  readonly rawTargetAngle: { yawDegrees: number; pitchDegrees: number };
+  readonly headRelativeAngle: { yawDegrees: number; pitchDegrees: number };
+  readonly eyeAngle: { yawDegrees: number; pitchDegrees: number };
+  readonly residualAngle: { yawDegrees: number; pitchDegrees: number };
+  readonly headContribution: { yawDegrees: number; pitchDegrees: number };
+  readonly neckContribution: { yawDegrees: number; pitchDegrees: number };
+  readonly valid: boolean;
+  readonly owner: string;
+  readonly releaseReason: string;
+  readonly gazeStrength: number;
+  readonly sourceTransition: string;
+  readonly probeMode: GazeProbeMode;
+}
+
+interface GazeDebugSample {
+  readonly at: number;
+  readonly source: string;
+  readonly owner: string;
+  readonly valid: boolean;
+  readonly targetEyeVector: { x: number; y: number; z: number } | null;
+  readonly normalizedDirection: { x: number; y: number; z: number } | null;
+  readonly headRelativeDirection: { x: number; y: number; z: number } | null;
+  readonly rawYaw: number;
+  readonly rawPitch: number;
+  readonly headRelativeYaw: number;
+  readonly headRelativePitch: number;
+  readonly eyeYaw: number;
+  readonly eyePitch: number;
+  readonly residualYaw: number;
+  readonly residualPitch: number;
+  readonly headYaw: number;
+  readonly headPitch: number;
+  readonly neckYaw: number;
+  readonly neckPitch: number;
+}
+
+class GazeDebugHistory {
+  private readonly samples: GazeDebugSample[] = [];
+
+  push(now: number, snapshot: SpatialTargetDebugSnapshot): void {
+    this.samples.push({
+      at: now,
+      source: snapshot.primarySource,
+      owner: snapshot.owner,
+      valid: snapshot.valid,
+      targetEyeVector: snapshot.targetEyeVector,
+      normalizedDirection: snapshot.normalizedDirection,
+      headRelativeDirection: snapshot.headRelativeDirection,
+      rawYaw: snapshot.rawTargetAngle.yawDegrees,
+      rawPitch: snapshot.rawTargetAngle.pitchDegrees,
+      headRelativeYaw: snapshot.headRelativeAngle.yawDegrees,
+      headRelativePitch: snapshot.headRelativeAngle.pitchDegrees,
+      eyeYaw: snapshot.eyeAngle.yawDegrees,
+      eyePitch: snapshot.eyeAngle.pitchDegrees,
+      residualYaw: snapshot.residualAngle.yawDegrees,
+      residualPitch: snapshot.residualAngle.pitchDegrees,
+      headYaw: snapshot.headContribution.yawDegrees,
+      headPitch: snapshot.headContribution.pitchDegrees,
+      neckYaw: snapshot.neckContribution.yawDegrees,
+      neckPitch: snapshot.neckContribution.pitchDegrees,
+    });
+    if (this.samples.length > 32) this.samples.shift();
+  }
+
+  clear(): void {
+    this.samples.length = 0;
+  }
+
+  toArray(): readonly GazeDebugSample[] {
+    return this.samples.map((sample) => ({ ...sample }));
+  }
 }
 
 function getLifeDynamicsPocOptions(): LifeDynamicsPocOptions {
   if (typeof window === 'undefined') {
-    return { enabled: false, debug: false, profileId: '1.0x' };
+    return {
+      enabled: false,
+      debug: false,
+      profileId: '1.0x',
+      gazeProbe: 'full',
+    };
   }
 
   const params = new URLSearchParams(window.location.search);
   const enabled = params.get('life-dynamics-poc') === '1';
+  const debug = enabled && params.get('life-dynamics-debug') === '1';
   return {
     enabled,
-    debug: enabled && params.get('life-dynamics-debug') === '1',
+    debug,
     profileId: resolveLifeDynamicsProfileId(
       params.get('life-dynamics-profile'),
     ),
+    gazeProbe: debug
+      ? readGazeProbe(
+          params.get('gazeProbe') ??
+            params.get('life-dynamics-gaze-probe'),
+        )
+      : 'full',
+  };
+}
+
+function readGazeProbe(value: string | null): GazeProbeMode {
+  switch (value) {
+    case 'eye-only':
+    case 'no-neck':
+    case 'fixed-target':
+      return value;
+    default:
+      return 'full';
+  }
+}
+
+function zeroBias(): { yawDegrees: number; pitchDegrees: number } {
+  return { yawDegrees: 0, pitchDegrees: 0 };
+}
+
+function zeroGazeDiagnostics(): Pick<
+  SpatialTargetDebugSnapshot,
+  | 'targetEyeVector'
+  | 'normalizedDirection'
+  | 'headRelativeDirection'
+  | 'rawTargetAngle'
+  | 'headRelativeAngle'
+  | 'eyeAngle'
+  | 'residualAngle'
+  | 'headContribution'
+  | 'neckContribution'
+> {
+  return {
+    targetEyeVector: null,
+    normalizedDirection: null,
+    headRelativeDirection: null,
+    rawTargetAngle: zeroBias(),
+    headRelativeAngle: zeroBias(),
+    eyeAngle: zeroBias(),
+    residualAngle: zeroBias(),
+    headContribution: zeroBias(),
+    neckContribution: zeroBias(),
+  };
+}
+
+function zeroGazeHandoffState(): GazeHandoffState {
+  return { ...DEFAULT_GAZE_HANDOFF_STATE };
+}
+
+function applyGazeProbe(
+  allocation: Pick<
+    GazeAllocationResult,
+    'headProjection' | 'neckProjection'
+  >,
+  probe: GazeProbeMode,
+): Pick<GazeAllocationResult, 'headProjection' | 'neckProjection'> {
+  if (probe === 'eye-only') {
+    return {
+      headProjection: zeroBias(),
+      neckProjection: zeroBias(),
+    };
+  }
+  if (probe === 'no-neck') {
+    return {
+      headProjection: { ...allocation.headProjection },
+      neckProjection: zeroBias(),
+    };
+  }
+  return {
+    headProjection: { ...allocation.headProjection },
+    neckProjection: { ...allocation.neckProjection },
+  };
+}
+
+function createAllocationDebug(
+  allocation: Pick<
+    GazeAllocationResult,
+    'rawTargetAngle' | 'headRelativeAngle' | 'eyeAngle' | 'residualAngle'
+  > & {
+    readonly targetEyeVector: Vector3 | null;
+    readonly normalizedDirection: Vector3 | null;
+    readonly headRelativeDirection: Vector3 | null;
+  },
+  projection: Pick<
+    GazeAllocationResult,
+    'headProjection' | 'neckProjection'
+  >,
+): Pick<
+  SpatialTargetDebugSnapshot,
+  | 'targetEyeVector'
+  | 'normalizedDirection'
+  | 'headRelativeDirection'
+  | 'rawTargetAngle'
+  | 'headRelativeAngle'
+  | 'eyeAngle'
+  | 'residualAngle'
+  | 'headContribution'
+  | 'neckContribution'
+  | 'headProjection'
+  | 'neckProjection'
+> {
+  return {
+    targetEyeVector: toDebugWorld(allocation.targetEyeVector),
+    normalizedDirection: toDebugWorld(allocation.normalizedDirection),
+    headRelativeDirection: toDebugWorld(allocation.headRelativeDirection),
+    rawTargetAngle: { ...allocation.rawTargetAngle },
+    headRelativeAngle: { ...allocation.headRelativeAngle },
+    eyeAngle: { ...allocation.eyeAngle },
+    residualAngle: { ...allocation.residualAngle },
+    headContribution: { ...projection.headProjection },
+    neckContribution: { ...projection.neckProjection },
+    headProjection: { ...projection.headProjection },
+    neckProjection: { ...projection.neckProjection },
   };
 }
 
@@ -210,6 +492,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       onReady,
       performancePlan,
       sessionGeneration = 0,
+      spatialTargetRegistry,
       stageVariant = 'default',
     },
     ref,
@@ -231,11 +514,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const performanceStateRef = useRef<AvatarPerformanceState | null>(null);
     const motionScaleRef = useRef(motionScale);
     const performancePlanRef = useRef(performancePlan);
+    const sessionGenerationRef = useRef(sessionGeneration);
     const onReadyRef = useRef(onReady);
     const [loadState, setLoadState] = useState<LoadState>('loading');
     const [expressionWarning, setExpressionWarning] = useState('');
     const [lifeDynamicsDebugSnapshot, setLifeDynamicsDebugSnapshot] =
       useState<LifeDynamicsSnapshot | null>(null);
+    const [spatialTargetDebugSnapshot, setSpatialTargetDebugSnapshot] =
+      useState<SpatialTargetDebugSnapshot | null>(null);
     const loadedVrmRef = useRef<VRM | null>(null);
     const lifeDynamicsRef = useRef<LifeDynamics | null>(null);
     const lifeDynamicsBlinkAdapterRef =
@@ -267,6 +553,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     useEffect(() => {
       emotionRef.current = emotion;
     }, [emotion]);
+
+    useEffect(() => {
+      sessionGenerationRef.current = sessionGeneration;
+    }, [sessionGeneration]);
 
     useEffect(() => {
       attentionReaderRef.current = attentionReader;
@@ -707,6 +997,32 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       const attentionVisualSmoother = new AttentionVisualSmoother();
       const attentionEngagementController =
         new AttentionEngagementController();
+      const spatialTargetBridge = new SpatialTargetBridge();
+      const spatialTargetWorldCache = new SpatialTargetWorldCache();
+      const spatialEyeSmoother = new SpatialTargetOutputSmoother();
+      const spatialHeadSmoother = new SpatialHeadProjectionSmoother();
+      const spatialNeckSmoother = new SpatialHeadProjectionSmoother();
+      const gazeProjectionFeedback = new GazeProjectionFeedback();
+      const gazeNeutralBasisOutput: GazeAllocationBasis = {
+        forward: new Vector3(),
+        right: new Vector3(),
+        up: new Vector3(),
+      };
+      const gazeHeadBasisOutput: GazeAllocationBasis = {
+        forward: new Vector3(),
+        right: new Vector3(),
+        up: new Vector3(),
+      };
+      let gazeHandoffState = zeroGazeHandoffState();
+      let gazeFeedbackOwner: string | null = null;
+      let gazeFeedbackSelectionKey: string | null = null;
+      let fixedProbeTarget: Vector3 | null = null;
+      let fixedProbeSelectionKey: string | null = null;
+      let previousDebugSource = 'none';
+      let previousDebugOwner = 'none';
+      let lastSourceTransition = 'none';
+      const gazeDebugHistory = new GazeDebugHistory();
+      let lastSessionGeneration = sessionGenerationRef.current;
       const viewerCameraForward = new Vector3();
       const viewerCameraRight = new Vector3();
       const viewerCameraUp = new Vector3();
@@ -714,10 +1030,13 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       const thinkingGazeTarget = new Vector3();
       const viewerGazeTarget = new Vector3();
       const lifeDynamicsNeutralTarget = new Vector3();
+      const gazeOutputTargetVector = new Vector3();
+      const primaryGazeOutputTarget = new Vector3();
       let gazeModelHeight = 1;
       let blinkController: BlinkController | null = null;
       let emotionController: EmotionExpressionController | null = null;
       let appliedEmotion: Emotion | null = null;
+      let stageRect: SpatialTargetRect = readStageRect(container);
       const usesExhibitionPortraitCamera = () =>
         isExhibitionMode &&
         window.matchMedia(
@@ -725,6 +1044,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         ).matches;
 
       const resize = () => {
+        stageRect = readStageRect(container);
         const width = Math.max(container.clientWidth, 1);
         const height = Math.max(container.clientHeight, 1);
         renderer.setSize(width, height, false);
@@ -741,6 +1061,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         }
       };
       const resizeObserver = new ResizeObserver(resize);
+      const handleWindowScroll = () => {
+        stageRect = readStageRect(container);
+      };
+      window.addEventListener('scroll', handleWindowScroll, true);
       resizeObserver.observe(container);
       resize();
 
@@ -873,6 +1197,29 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       const clock = new Clock();
       const render = () => {
         if (disposed) return;
+        if (sessionGenerationRef.current !== lastSessionGeneration) {
+          lastSessionGeneration = sessionGenerationRef.current;
+          attentionStateController.reset();
+          cameraTrackingController.reset();
+          attentionVisualSmoother.reset();
+          attentionEngagementController.reset();
+          spatialTargetWorldCache.clear();
+          spatialEyeSmoother.reset();
+          spatialHeadSmoother.reset();
+          spatialNeckSmoother.reset();
+          gazeProjectionFeedback.reset();
+          gazeHandoffState = zeroGazeHandoffState();
+          gazeFeedbackOwner = null;
+          gazeFeedbackSelectionKey = null;
+          fixedProbeTarget = null;
+          fixedProbeSelectionKey = null;
+          previousDebugSource = 'none';
+          previousDebugOwner = 'none';
+          lastSourceTransition = 'none';
+          gazeDebugHistory.clear();
+          setLifeDynamicsDebugSnapshot(null);
+          setSpatialTargetDebugSnapshot(null);
+        }
         const delta = clock.getDelta();
         if (loadedVrm) {
           const plan = performancePlanRef.current;
@@ -908,13 +1255,28 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             now: performance.now(),
             attention,
             explicitTargetActive:
-              attention.target === 'game' ||
-              (hasPerformanceState && attention.target === 'chat'),
+              attention.targetMode !== 'task-cue' &&
+              (attention.target === 'game' ||
+                (hasPerformanceState && attention.target === 'chat')),
             viewerEngaged,
             thinking,
             cameraEnabled,
             cameraTracking,
           });
+          const currentGazeOwner =
+            attentionFrame.target === 'viewer' ||
+            attentionFrame.target === 'game' ||
+            attentionFrame.target === 'chat'
+              ? attentionFrame.target
+              : null;
+          if (currentGazeOwner !== gazeFeedbackOwner) {
+            gazeProjectionFeedback.reset();
+            gazeHandoffState = zeroGazeHandoffState();
+            gazeFeedbackSelectionKey = null;
+            fixedProbeTarget = null;
+            fixedProbeSelectionKey = null;
+            gazeFeedbackOwner = currentGazeOwner;
+          }
           const attentionEngagement = attentionEngagementController.update(
             delta,
             {
@@ -952,30 +1314,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             0,
             Math.min(motionScaleRef.current, 1),
           );
-          const gazeTarget = attentionFrame.target;
-          const gazeYawBias =
-            gazeTarget === 'viewer'
-              ? loadedVrm.lookAt
-                ? 0
-                : 0.6
-              : gazeTarget === 'chat'
-                ? -0.45
-                : gazeTarget === 'game'
-                  ? 0.35
-                  : 0;
           const requestedIdleMotionWeight =
             avatarProfile?.idleMotionWeight ?? preReaction?.motion?.weight ?? 1;
           const idleMotionWeight =
             1 + (requestedIdleMotionWeight - 1) * safeMotionScale;
-          const requestedHeadYawBias =
-            (avatarProfile?.headYawBias ??
-              preReaction?.motion?.headYawBias ??
-              0) +
-            gazeYawBias *
-              (avatarProfile?.gazeDirectness ??
-                preReaction?.gaze?.directness ??
-                0.72);
-          const headYawBias = requestedHeadYawBias * safeMotionScale;
           const listeningNodDegrees =
             listeningReactionState?.kind === 'nod'
               ? getListeningNodDegrees(
@@ -994,13 +1336,115 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             playbackState === 'entering' ||
             playbackState === 'playing' ||
             playbackState === 'exiting';
+          if (!hasActiveBodyMotion) idleController?.resetForGazeFrame();
+          if (hasActiveBodyMotion) gazeProjectionFeedback.reset();
+          const headNode = loadedVrm.humanoid.getNormalizedBoneNode(
+            VRMHumanBoneName.Head,
+          );
+          const neutralBasis = gazeProjectionFeedback.createNeutralBasis(
+            headNode,
+            loadedVrm.lookAt ?? null,
+            gazeNeutralBasisOutput,
+          );
+          const headBasis = hasActiveBodyMotion
+            ? null
+            : gazeProjectionFeedback.createHeadBasis(
+                headNode,
+                loadedVrm.lookAt ?? null,
+                gazeHeadBasisOutput,
+              );
+          idleGazeController?.getNeutralTarget(lifeDynamicsNeutralTarget);
+          let spatialHeadYawBias = 0;
+          let spatialHeadPitchBias = 0;
+          let spatialNeckYawBias = 0;
+          let spatialNeckPitchBias = 0;
+          let resolvedSpatialTargetKey: string | null = null;
+          let primaryWorldTarget: Vector3 | null = null;
           let performanceGazeTarget: Vector3 | null = null;
+          let softCueWorldTarget: Vector3 | null = null;
+          let softCueEyeTarget: Vector3 | null = null;
+          let softCueSource: string | null = null;
+          let hasPrimarySpatialTarget = false;
+          let hasPrimaryGazeAllocation = false;
+          let primaryEyeRadius = 0;
+          const attentionEnergy =
+            attention.softCue?.strength ??
+            attention.priorityHint?.gazeStrength ??
+            attention.gazeStrength ??
+            (attentionFrame.target === 'none'
+              ? ATTENTION_ENERGY_CONFIG.normalBaseline
+              : attentionFrame.gazeStrength);
+          let spatialTargetDebug: SpatialTargetDebugSnapshot = {
+            ...zeroGazeDiagnostics(),
+            primarySource:
+              attentionFrame.target === 'viewer'
+                ? 'viewer'
+                : attentionFrame.target === 'none'
+                  ? 'none'
+                  : `${attentionFrame.target}:default`,
+            primaryWorld: null,
+            eyeWorld: null,
+            eyeRadius: 0,
+            attentionMode: attention.targetMode ?? 'semantic',
+            attentionEnergy,
+            softCueSource: null,
+            softCueWorld: null,
+            headProjection: { yawDegrees: 0, pitchDegrees: 0 },
+            neckProjection: { yawDegrees: 0, pitchDegrees: 0 },
+            valid: false,
+            owner:
+              attentionFrame.target === 'none'
+                ? 'none'
+                : attentionFrame.target,
+            releaseReason:
+              attentionFrame.target === 'none' ? 'released' : 'none',
+            gazeStrength: attentionFrame.gazeStrength,
+            sourceTransition: lastSourceTransition,
+            probeMode: lifeDynamicsPocOptions.gazeProbe,
+          };
+          const hasSpatialHint =
+            attention.priorityHint?.spatialTarget?.kind === 'game' ||
+            attention.priorityHint?.spatialTarget?.kind === 'chat' ||
+            attentionFrame.softCue?.spatialTarget.kind === 'game' ||
+            attentionFrame.softCue?.spatialTarget.kind === 'chat';
+          const hasSpatialOwnership =
+            attentionFrame.target === 'game' ||
+            attentionFrame.target === 'chat' ||
+            hasSpatialHint;
+          if (!hasSpatialOwnership) {
+            spatialTargetWorldCache.clear();
+          }
           if (attentionFrame.state === 'Thinking') {
             idleGazeController?.getNeutralTarget(thinkingGazeTarget);
             thinkingGazeTarget.x += gazeModelHeight * 0.035;
             thinkingGazeTarget.y += gazeModelHeight * 0.018;
             performanceGazeTarget = thinkingGazeTarget;
+            primaryWorldTarget = thinkingGazeTarget;
+            spatialTargetDebug = {
+              ...zeroGazeDiagnostics(),
+              primarySource: 'thinking',
+              primaryWorld: toDebugWorld(performanceGazeTarget),
+              eyeWorld: toDebugWorld(performanceGazeTarget),
+              eyeRadius: 0,
+              attentionMode: attention.targetMode ?? 'semantic',
+              attentionEnergy,
+              softCueSource: null,
+              softCueWorld: null,
+              headProjection: { yawDegrees: 0, pitchDegrees: 0 },
+              neckProjection: { yawDegrees: 0, pitchDegrees: 0 },
+              valid: true,
+              owner: 'none',
+              releaseReason: 'none',
+              gazeStrength: attentionFrame.gazeStrength,
+              sourceTransition: lastSourceTransition,
+              probeMode: lifeDynamicsPocOptions.gazeProbe,
+            };
           } else if (attentionFrame.state === 'AttendViewer') {
+            let viewerAllocation: GazeAllocationResult | null = null;
+            let viewerProjection = {
+              headProjection: zeroBias(),
+              neckProjection: zeroBias(),
+            };
             if (visualAttention.eyePosition && loadedVrm.lookAt) {
               camera.updateMatrixWorld(true);
               loadedVrm.lookAt.getLookAtWorldPosition(lookAtWorldPosition);
@@ -1011,7 +1455,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               viewerCameraUp
                 .setFromMatrixColumn(camera.matrixWorld, 1)
                 .normalize();
-              performanceGazeTarget = mapCameraAttentionToViewerTarget(
+              const rawViewerTarget = mapCameraAttentionToViewerTarget(
                 {
                   position: camera.position,
                   forward: viewerCameraForward,
@@ -1024,12 +1468,409 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 camera.aspect,
                 viewerGazeTarget,
               );
+              primaryWorldTarget = rawViewerTarget;
+              viewerAllocation = neutralBasis
+                ? allocateGaze({
+                    eyePosition: lookAtWorldPosition,
+                    neutralTarget: lifeDynamicsNeutralTarget,
+                    resolvedTarget: rawViewerTarget,
+                    neutralBasis,
+                    headBasis: headBasis ?? undefined,
+                    handoffState: gazeHandoffState,
+                    profile: 'viewer',
+                  })
+                : null;
+              if (viewerAllocation) {
+                viewerProjection = applyGazeProbe(
+                  viewerAllocation,
+                  lifeDynamicsPocOptions.gazeProbe,
+                );
+                performanceGazeTarget = viewerAllocation.eyeTarget;
+                spatialHeadYawBias =
+                  viewerProjection.headProjection.yawDegrees;
+                spatialHeadPitchBias =
+                  viewerProjection.headProjection.pitchDegrees;
+                spatialNeckYawBias =
+                  viewerProjection.neckProjection.yawDegrees;
+                spatialNeckPitchBias =
+                  viewerProjection.neckProjection.pitchDegrees;
+                primaryEyeRadius = viewerAllocation.eyeRadius;
+                gazeHandoffState = viewerAllocation.handoffState;
+                hasPrimaryGazeAllocation = true;
+                cameraHeadYawBias = 0;
+                cameraHeadPitchBias = 0;
+              } else {
+                performanceGazeTarget = rawViewerTarget;
+              }
             } else if (viewerEngaged) {
               performanceGazeTarget = camera.position;
+              primaryWorldTarget = camera.position;
+            }
+            spatialTargetDebug = {
+              ...zeroGazeDiagnostics(),
+              primarySource: 'viewer',
+              primaryWorld: toDebugWorld(primaryWorldTarget),
+              eyeWorld: toDebugWorld(performanceGazeTarget),
+              eyeRadius: primaryEyeRadius,
+              attentionMode: attention.targetMode ?? 'semantic',
+              attentionEnergy,
+              softCueSource: null,
+              softCueWorld: null,
+              headProjection: {
+                yawDegrees: spatialHeadYawBias,
+                pitchDegrees: spatialHeadPitchBias,
+              },
+              neckProjection: {
+                yawDegrees: spatialNeckYawBias,
+                pitchDegrees: spatialNeckPitchBias,
+              },
+              valid: performanceGazeTarget !== null,
+              owner: 'viewer',
+              releaseReason:
+                performanceGazeTarget === null ? 'camera-invalid' : 'none',
+              gazeStrength: attentionFrame.gazeStrength,
+              sourceTransition: lastSourceTransition,
+              probeMode: lifeDynamicsPocOptions.gazeProbe,
+            };
+            if (viewerAllocation) {
+              spatialTargetDebug = {
+                ...spatialTargetDebug,
+                ...createAllocationDebug(
+                  viewerAllocation,
+                  viewerProjection,
+                ),
+              };
             }
           } else if (attentionFrame.state === 'AttendTarget') {
-            performanceGazeTarget = camera.position;
+            const spatialSelection: SpatialTargetSelection | null =
+              attentionFrame.target === 'game' ||
+              attentionFrame.target === 'chat'
+                ? attentionFrame.spatialTarget?.kind === attentionFrame.target
+                  ? attentionFrame.spatialTarget
+                  : { kind: attentionFrame.target, anchor: 'default' }
+                : null;
+            if (spatialSelection) {
+              hasPrimarySpatialTarget = true;
+              const requestedSpatialTargetKey = formatSpatialTargetSelection(
+                spatialSelection,
+              );
+              resolvedSpatialTargetKey = requestedSpatialTargetKey;
+              camera.updateMatrixWorld(true);
+              if (loadedVrm.lookAt) {
+                loadedVrm.lookAt.getLookAtWorldPosition(lookAtWorldPosition);
+              } else {
+                lookAtWorldPosition.copy(lifeDynamicsNeutralTarget);
+              }
+              const spatialLookup = spatialTargetRegistry?.resolveWithStatus(
+                spatialSelection,
+                performance.now(),
+              );
+              const spatialSnapshot = spatialLookup?.snapshot ?? null;
+              const allocationSelectionKey = formatSpatialTargetSelection(
+                spatialSnapshot?.selection ?? spatialSelection,
+              );
+              if (
+                gazeFeedbackSelectionKey !== null &&
+                allocationSelectionKey !== gazeFeedbackSelectionKey
+              ) {
+                gazeProjectionFeedback.reset();
+                gazeHandoffState = zeroGazeHandoffState();
+                spatialTargetWorldCache.clear();
+                fixedProbeTarget = null;
+                fixedProbeSelectionKey = null;
+              }
+              gazeFeedbackSelectionKey = allocationSelectionKey;
+              if (lifeDynamicsPocOptions.gazeProbe === 'fixed-target') {
+                if (fixedProbeSelectionKey !== requestedSpatialTargetKey) {
+                  fixedProbeTarget = null;
+                  fixedProbeSelectionKey = requestedSpatialTargetKey;
+                }
+              } else {
+                fixedProbeTarget = null;
+                fixedProbeSelectionKey = null;
+              }
+              const spatialResolution = spatialSnapshot && neutralBasis
+                ? spatialTargetBridge.resolve({
+                    camera,
+                    eyePosition: lookAtWorldPosition,
+                    neutralTarget: lifeDynamicsNeutralTarget,
+                    snapshot: spatialSnapshot,
+                    stageRect,
+                    allocationBasis: neutralBasis,
+                    headBasis: headBasis ?? undefined,
+                    handoffState: gazeHandoffState,
+                    fixedTarget: fixedProbeTarget ?? undefined,
+                    profile: 'spatial',
+                  })
+                : null;
+              if (spatialResolution !== null) {
+                gazeHandoffState = spatialResolution.handoffState;
+              }
+              if (
+                lifeDynamicsPocOptions.gazeProbe === 'fixed-target' &&
+                fixedProbeTarget === null &&
+                spatialResolution !== null
+              ) {
+                fixedProbeTarget = spatialResolution.target.clone();
+              }
+              if (spatialTargetRegistry) {
+                const resolvedSpatialTargetKeyFromSnapshot =
+                  formatSpatialTargetSelection(
+                    spatialSnapshot?.selection ?? spatialSelection,
+                  );
+                resolvedSpatialTargetKey =
+                  resolvedSpatialTargetKeyFromSnapshot;
+                const worldResolution = spatialTargetWorldCache.resolve({
+                  key: `${resolvedSpatialTargetKeyFromSnapshot}|spatial`,
+                  now: performance.now(),
+                  live: spatialResolution,
+                  liveValid:
+                    spatialLookup?.valid === true &&
+                    spatialResolution !== null,
+                  liveReason: spatialLookup?.reason ?? 'missing',
+                  invalidSince: spatialLookup?.invalidSince ?? null,
+                });
+                const worldProjection = applyGazeProbe(
+                  worldResolution,
+                  lifeDynamicsPocOptions.gazeProbe,
+                );
+                primaryWorldTarget = worldResolution.target;
+                performanceGazeTarget =
+                  worldResolution.eyeTarget ?? lifeDynamicsNeutralTarget;
+                spatialHeadYawBias =
+                  worldProjection.headProjection.yawDegrees;
+                spatialHeadPitchBias =
+                  worldProjection.headProjection.pitchDegrees;
+                spatialNeckYawBias =
+                  worldProjection.neckProjection.yawDegrees;
+                spatialNeckPitchBias =
+                  worldProjection.neckProjection.pitchDegrees;
+                primaryEyeRadius = worldResolution.eyeRadius;
+                hasPrimaryGazeAllocation = worldResolution.eyeTarget !== null;
+                spatialTargetDebug = {
+                  ...zeroGazeDiagnostics(),
+                  primarySource: resolvedSpatialTargetKeyFromSnapshot,
+                  primaryWorld: toDebugWorld(worldResolution.target),
+                  eyeWorld: toDebugWorld(worldResolution.eyeTarget),
+                  eyeRadius: worldResolution.eyeRadius,
+                  attentionMode: attention.targetMode ?? 'semantic',
+                  attentionEnergy,
+                  softCueSource: null,
+                  softCueWorld: null,
+                  valid: worldResolution.valid,
+                  owner: attentionFrame.target,
+                  releaseReason:
+                    spatialSnapshot === null
+                      ? spatialLookup?.reason ?? 'registry-unavailable'
+                      : spatialResolution === null
+                        ? 'bridge-invalid'
+                        : worldResolution.reason,
+                  gazeStrength: attentionFrame.gazeStrength,
+                  sourceTransition: lastSourceTransition,
+                  probeMode: lifeDynamicsPocOptions.gazeProbe,
+                  ...createAllocationDebug(worldResolution, worldProjection),
+                };
+              } else {
+                performanceGazeTarget = lifeDynamicsNeutralTarget;
+                spatialTargetDebug = {
+                  ...zeroGazeDiagnostics(),
+                  primarySource: requestedSpatialTargetKey,
+                  primaryWorld: null,
+                  eyeWorld: null,
+                  eyeRadius: 0,
+                  attentionMode: attention.targetMode ?? 'semantic',
+                  attentionEnergy,
+                  softCueSource: null,
+                  softCueWorld: null,
+                  headProjection: { yawDegrees: 0, pitchDegrees: 0 },
+                  neckProjection: { yawDegrees: 0, pitchDegrees: 0 },
+                  valid: false,
+                  owner: attentionFrame.target,
+                  releaseReason: 'registry-unavailable',
+                  gazeStrength: attentionFrame.gazeStrength,
+                  sourceTransition: lastSourceTransition,
+                  probeMode: lifeDynamicsPocOptions.gazeProbe,
+                };
+              }
+            } else {
+              performanceGazeTarget = null;
+            }
           }
+
+          const softCueSelection = attentionFrame.softCue?.spatialTarget;
+          if (
+            softCueSelection &&
+            (softCueSelection.kind === 'game' ||
+              softCueSelection.kind === 'chat') &&
+            spatialTargetRegistry
+          ) {
+            camera.updateMatrixWorld(true);
+            if (loadedVrm.lookAt) {
+              loadedVrm.lookAt.getLookAtWorldPosition(lookAtWorldPosition);
+            } else {
+              lookAtWorldPosition.copy(lifeDynamicsNeutralTarget);
+            }
+            const softCueLookup = spatialTargetRegistry.resolveWithStatus(
+              softCueSelection,
+              performance.now(),
+            );
+            const softCueSnapshot = softCueLookup.snapshot;
+            const softCueResolution = softCueSnapshot && neutralBasis
+              ? spatialTargetBridge.resolve({
+                  camera,
+                  eyePosition: lookAtWorldPosition,
+                  neutralTarget: lifeDynamicsNeutralTarget,
+                  snapshot: softCueSnapshot,
+                  stageRect,
+                  allocationBasis: neutralBasis,
+                  headBasis: headBasis ?? undefined,
+                  profile: 'soft-cue',
+                })
+              : null;
+            const softCueResolvedKey = formatSpatialTargetSelection(
+              softCueSnapshot?.selection ?? softCueSelection,
+            );
+            const softCueWorldResolution = spatialTargetWorldCache.resolve({
+              key: `${softCueResolvedKey}|soft-cue`,
+              now: performance.now(),
+              live: softCueResolution,
+              liveValid:
+                softCueLookup.valid === true && softCueResolution !== null,
+              liveReason: softCueLookup.reason ?? 'missing',
+              invalidSince: softCueLookup.invalidSince ?? null,
+            });
+            softCueSource = softCueResolvedKey;
+            softCueWorldTarget = softCueWorldResolution.target;
+            softCueEyeTarget = softCueWorldResolution.eyeTarget;
+          }
+
+          spatialTargetDebug = {
+            ...spatialTargetDebug,
+            softCueSource,
+            softCueWorld: toDebugWorld(softCueWorldTarget),
+          };
+          if (
+            spatialTargetDebug.primarySource !== previousDebugSource ||
+            spatialTargetDebug.owner !== previousDebugOwner
+          ) {
+            lastSourceTransition = `${previousDebugSource}/${previousDebugOwner}->${spatialTargetDebug.primarySource}/${spatialTargetDebug.owner}`;
+            if (lifeDynamicsDebugEnabled) {
+              console.debug('[gaze-transition]', {
+                from: {
+                  source: previousDebugSource,
+                  owner: previousDebugOwner,
+                },
+                to: {
+                  source: spatialTargetDebug.primarySource,
+                  owner: spatialTargetDebug.owner,
+                },
+              });
+            }
+            previousDebugSource = spatialTargetDebug.primarySource;
+            previousDebugOwner = spatialTargetDebug.owner;
+          }
+          spatialTargetDebug = {
+            ...spatialTargetDebug,
+            sourceTransition: lastSourceTransition,
+          };
+          if (lifeDynamicsDebugEnabled) {
+            gazeDebugHistory.push(performance.now(), spatialTargetDebug);
+          }
+          const gazeStrength = attentionFrame.gazeStrength;
+          const primaryOutputTarget =
+            performanceGazeTarget === null
+              ? null
+              : blendGazeTarget(
+                  lifeDynamicsNeutralTarget,
+                  performanceGazeTarget,
+                  gazeStrength,
+                  primaryGazeOutputTarget,
+                );
+          const softCueApplies =
+            softCueEyeTarget !== null &&
+            attentionFrame.softCue !== undefined &&
+            attentionFrame.softCue.target !== attentionFrame.target;
+          let gazeOutputTarget: Vector3 | null = null;
+          if (primaryOutputTarget !== null || softCueApplies) {
+            if (primaryOutputTarget !== null) {
+              gazeOutputTargetVector.copy(primaryOutputTarget);
+            } else {
+              gazeOutputTargetVector.copy(lifeDynamicsNeutralTarget);
+            }
+            if (softCueApplies) {
+              gazeOutputTargetVector.lerp(
+                softCueEyeTarget!,
+                clampGazeStrength(attentionFrame.softCue?.strength ?? 0),
+              );
+            }
+            if (hasPrimarySpatialTarget) {
+              gazeOutputTarget = spatialEyeSmoother.update(
+                gazeOutputTargetVector,
+                delta,
+                SPATIAL_TARGET_OUTPUT_TIMING.eyeResponseMs,
+                gazeOutputTargetVector,
+              );
+            } else {
+              spatialEyeSmoother.reset(lifeDynamicsNeutralTarget);
+              gazeOutputTarget = gazeOutputTargetVector;
+            }
+          } else {
+            spatialEyeSmoother.reset(lifeDynamicsNeutralTarget);
+          }
+          const smoothedSpatialHeadProjection = hasPrimaryGazeAllocation
+            ? spatialHeadSmoother.update(
+                {
+                  yawDegrees: spatialHeadYawBias,
+                  pitchDegrees: spatialHeadPitchBias,
+                },
+                delta,
+                SPATIAL_TARGET_OUTPUT_TIMING.headResponseMs,
+              )
+            : (spatialHeadSmoother.reset(), {
+                yawDegrees: 0,
+                pitchDegrees: 0,
+              });
+          const smoothedSpatialNeckProjection = hasPrimaryGazeAllocation
+            ? spatialNeckSmoother.update(
+                {
+                  yawDegrees: spatialNeckYawBias,
+                  pitchDegrees: spatialNeckPitchBias,
+                },
+                delta,
+                SPATIAL_TARGET_OUTPUT_TIMING.neckResponseMs,
+              )
+            : (spatialNeckSmoother.reset(), {
+                yawDegrees: 0,
+                pitchDegrees: 0,
+              });
+          const effectiveSpatialHeadYawBias =
+            smoothedSpatialHeadProjection.yawDegrees;
+          const effectiveSpatialHeadPitchBias =
+            smoothedSpatialHeadProjection.pitchDegrees;
+          const effectiveSpatialNeckYawBias =
+            smoothedSpatialNeckProjection.yawDegrees;
+          const effectiveSpatialNeckPitchBias =
+            smoothedSpatialNeckProjection.pitchDegrees;
+          const gazeDirectness =
+            avatarProfile?.gazeDirectness ??
+            preReaction?.gaze?.directness ??
+            0.72;
+          const requestedHeadYawBias =
+            (avatarProfile?.headYawBias ??
+              preReaction?.motion?.headYawBias ??
+              0) +
+            (attentionFrame.target === 'viewer' && !loadedVrm.lookAt
+              ? 0.6
+              : effectiveSpatialHeadYawBias) * gazeDirectness;
+          const headYawBias = requestedHeadYawBias * safeMotionScale;
+          const headPitchBias =
+            (listeningNodDegrees +
+              effectiveSpatialHeadPitchBias * gazeDirectness) *
+            safeMotionScale;
+          const neckYawBias =
+            effectiveSpatialNeckYawBias * gazeDirectness * safeMotionScale;
+          const neckPitchBias =
+            effectiveSpatialNeckPitchBias * gazeDirectness * safeMotionScale;
           let lifeDynamicsSnapshot: LifeDynamicsSnapshot | null = null;
           if (lifeDynamicsPocEnabled) {
             const attentionTarget =
@@ -1040,6 +1881,13 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               attentionTarget === null
                 ? 0
                 : Math.max(attentionFrame.strength, attentionEngagement);
+            const attentionTargetKey =
+              attentionTarget === null
+                ? null
+                : attentionTarget === 'game' || attentionTarget === 'chat'
+                  ? resolvedSpatialTargetKey ??
+                    `${attentionTarget}:${attentionFrame.spatialTarget?.anchor ?? attention.spatialTarget?.anchor ?? 'default'}`
+                  : attentionTarget;
             const behaviorEnergy = activePerformancePlan?.behavior?.energy;
             const lifeDynamicsInputs: LifeDynamicsInputs = {
               arousal: attentionLevel,
@@ -1052,6 +1900,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   ? {}
                   : { [attentionTarget]: attentionLevel },
               attentionTarget,
+              attentionTargetKey,
               speechUrge:
                 activePerformancePlan?.intent === 'speak' ? 1 : 0,
               inhibition: hasActiveBodyMotion ? 1 : thinking ? 0.5 : 0,
@@ -1079,6 +1928,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               const now = performance.now();
               if (now - lifeDynamicsDebugLastLogAtRef.current >= 250) {
                 setLifeDynamicsDebugSnapshot(lifeDynamicsSnapshot);
+                setSpatialTargetDebugSnapshot(spatialTargetDebug);
                 console.debug('[life-dynamics]', {
                   profile: lifeDynamicsSnapshot.profileId,
                   attentionTarget: lifeDynamicsSnapshot.orienting.target,
@@ -1092,6 +1942,33 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   asymmetry: lifeDynamicsSnapshot.life.asymmetry,
                   breathModulation:
                     lifeDynamicsSnapshot.life.breathModulation,
+                  primarySource: spatialTargetDebug.primarySource,
+                  primaryWorld: spatialTargetDebug.primaryWorld,
+                  eyeWorld: spatialTargetDebug.eyeWorld,
+                  targetEyeVector: spatialTargetDebug.targetEyeVector,
+                  normalizedDirection: spatialTargetDebug.normalizedDirection,
+                  headRelativeDirection:
+                    spatialTargetDebug.headRelativeDirection,
+                  eyeRadius: spatialTargetDebug.eyeRadius,
+                  rawTargetAngle: spatialTargetDebug.rawTargetAngle,
+                  headRelativeAngle: spatialTargetDebug.headRelativeAngle,
+                  eyeAngle: spatialTargetDebug.eyeAngle,
+                  residualAngle: spatialTargetDebug.residualAngle,
+                  headContribution: spatialTargetDebug.headContribution,
+                  neckContribution: spatialTargetDebug.neckContribution,
+                  spatialValid: spatialTargetDebug.valid,
+                  attentionMode: spatialTargetDebug.attentionMode,
+                  attentionEnergy: spatialTargetDebug.attentionEnergy,
+                  softCueSource: spatialTargetDebug.softCueSource,
+                  softCueWorld: spatialTargetDebug.softCueWorld,
+                  headProjection: spatialTargetDebug.headProjection,
+                  neckProjection: spatialTargetDebug.neckProjection,
+                  targetOwner: spatialTargetDebug.owner,
+                  releaseReason: spatialTargetDebug.releaseReason,
+                  gazeStrength: spatialTargetDebug.gazeStrength,
+                  sourceTransition: spatialTargetDebug.sourceTransition,
+                  gazeProbe: spatialTargetDebug.probeMode,
+                  gazeHistory: gazeDebugHistory.toArray(),
                 });
                 lifeDynamicsDebugLastLogAtRef.current = now;
               }
@@ -1105,14 +1982,17 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   lifeDynamicsSnapshot,
                 );
               }
-              idleGazeController?.getNeutralTarget(lifeDynamicsNeutralTarget);
               lifeDynamicsOrientingAdapterRef.current?.apply({
                 snapshot: lifeDynamicsSnapshot,
                 neutralTarget: lifeDynamicsNeutralTarget,
-                desiredTarget: performanceGazeTarget,
+                desiredTarget: gazeOutputTarget,
                 headBias: {
                   yawDegrees: headYawBias + cameraHeadYawBias,
-                  pitchDegrees: listeningNodDegrees + cameraHeadPitchBias,
+                  pitchDegrees: headPitchBias + cameraHeadPitchBias,
+                },
+                neckBias: {
+                  yawDegrees: neckYawBias,
+                  pitchDegrees: neckPitchBias,
                 },
                 vrmaActive: hasActiveBodyMotion,
               });
@@ -1125,7 +2005,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               !hasActiveBodyMotion &&
                 !hasPerformanceState &&
                 attentionFrame.state === 'Idle',
-              performanceGazeTarget,
+              gazeOutputTarget,
             );
             idleController?.setEnabled(true);
             if (hasActiveBodyMotion) {
@@ -1135,7 +2015,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 headYawBias +
                   cameraHeadYawBias +
                   (idleGazeFrame?.fallbackHeadYawBias ?? 0),
-                listeningNodDegrees + cameraHeadPitchBias,
+                headPitchBias + cameraHeadPitchBias,
+                undefined,
+                neckYawBias,
+                neckPitchBias,
               );
             } else {
               idleController?.update(
@@ -1144,9 +2027,65 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 headYawBias +
                   cameraHeadYawBias +
                   (idleGazeFrame?.fallbackHeadYawBias ?? 0),
-                listeningNodDegrees + cameraHeadPitchBias,
+                headPitchBias + cameraHeadPitchBias,
+                neckYawBias,
+                neckPitchBias,
               );
             }
+          }
+          if (
+            currentGazeOwner !== null &&
+            hasPrimaryGazeAllocation &&
+            !hasActiveBodyMotion
+          ) {
+            const baseHeadFeedback = {
+              yawDegrees:
+                effectiveSpatialHeadYawBias *
+                gazeDirectness *
+                safeMotionScale,
+              pitchDegrees:
+                effectiveSpatialHeadPitchBias *
+                gazeDirectness *
+                safeMotionScale,
+            };
+            const baseNeckFeedback = {
+              yawDegrees:
+                effectiveSpatialNeckYawBias *
+                gazeDirectness *
+                safeMotionScale,
+              pitchDegrees:
+                effectiveSpatialNeckPitchBias *
+                gazeDirectness *
+                safeMotionScale,
+            };
+            const adapterWeight = lifeDynamicsPocEnabled
+              ? clampGazeStrength(
+                  lifeDynamicsSnapshot?.orienting.headWeight ?? 0,
+                )
+              : 1;
+            const hasAppliedGaze =
+              !lifeDynamicsPocEnabled ||
+              (lifeDynamicsSnapshot?.orienting.target !== null &&
+                gazeOutputTarget !== null &&
+                adapterWeight > 0);
+            if (hasAppliedGaze) {
+              gazeProjectionFeedback.set({
+                head: {
+                  yawDegrees: baseHeadFeedback.yawDegrees * adapterWeight,
+                  pitchDegrees:
+                    baseHeadFeedback.pitchDegrees * adapterWeight,
+                },
+                neck: {
+                  yawDegrees: baseNeckFeedback.yawDegrees * adapterWeight,
+                  pitchDegrees:
+                    baseNeckFeedback.pitchDegrees * adapterWeight,
+                },
+              });
+            } else {
+              gazeProjectionFeedback.reset();
+            }
+          } else {
+            gazeProjectionFeedback.reset();
           }
           if (emotionController && appliedEmotion !== emotionRef.current) {
             emotionController.setEmotion(
@@ -1195,14 +2134,22 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         disposed = true;
         cancelAnimationFrame(animationFrame);
         resizeObserver.disconnect();
+        window.removeEventListener('scroll', handleWindowScroll, true);
         blinkController?.dispose();
         emotionController?.dispose();
         attentionEngagementController.reset();
+        spatialEyeSmoother.reset();
+        spatialHeadSmoother.reset();
+        spatialNeckSmoother.reset();
+        gazeProjectionFeedback.reset();
+        gazeHandoffState = zeroGazeHandoffState();
+        gazeDebugHistory.clear();
         idleController?.dispose();
         idleGazeController?.dispose();
         lifeDynamicsLifeAdapterRef.current?.dispose();
         lifeDynamicsOrientingAdapterRef.current?.dispose();
         lifeDynamicsBlinkAdapterRef.current?.dispose();
+        spatialTargetWorldCache.clear();
         blinkController = null;
         emotionController = null;
         idleController = null;
@@ -1212,6 +2159,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         lifeDynamicsBlinkAdapterRef.current = null;
         lifeDynamicsRef.current = null;
         setLifeDynamicsDebugSnapshot(null);
+        setSpatialTargetDebugSnapshot(null);
         stopReactionMotion();
         stopMotion();
         motionPlayerRef.current?.dispose();
@@ -1228,6 +2176,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       lifeDynamicsDebugEnabled,
       lifeDynamicsPocEnabled,
       lifeDynamicsProfileId,
+      lifeDynamicsPocOptions.gazeProbe,
+      spatialTargetRegistry,
       stageVariant,
       stopMotion,
       stopReactionMotion,
@@ -1252,6 +2202,115 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               <span>
                 target: {lifeDynamicsDebugSnapshot.orienting.target ?? 'none'}
               </span>
+              {spatialTargetDebugSnapshot && (
+                <>
+                  <span>
+                    primary source: {spatialTargetDebugSnapshot.primarySource}
+                  </span>
+                  <span>
+                    primary world:{' '}
+                    {spatialTargetDebugSnapshot.primaryWorld === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.primaryWorld.x.toFixed(2)},${spatialTargetDebugSnapshot.primaryWorld.y.toFixed(2)},${spatialTargetDebugSnapshot.primaryWorld.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    eye world:{' '}
+                    {spatialTargetDebugSnapshot.eyeWorld === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.eyeWorld.x.toFixed(2)},${spatialTargetDebugSnapshot.eyeWorld.y.toFixed(2)},${spatialTargetDebugSnapshot.eyeWorld.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    target-eye:{' '}
+                    {spatialTargetDebugSnapshot.targetEyeVector === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.targetEyeVector.x.toFixed(2)},${spatialTargetDebugSnapshot.targetEyeVector.y.toFixed(2)},${spatialTargetDebugSnapshot.targetEyeVector.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    direction:{' '}
+                    {spatialTargetDebugSnapshot.normalizedDirection === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.normalizedDirection.x.toFixed(2)},${spatialTargetDebugSnapshot.normalizedDirection.y.toFixed(2)},${spatialTargetDebugSnapshot.normalizedDirection.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    head-local:{' '}
+                    {spatialTargetDebugSnapshot.headRelativeDirection === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.headRelativeDirection.x.toFixed(2)},${spatialTargetDebugSnapshot.headRelativeDirection.y.toFixed(2)},${spatialTargetDebugSnapshot.headRelativeDirection.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    eye radius: {spatialTargetDebugSnapshot.eyeRadius.toFixed(2)}
+                  </span>
+                  <span>
+                    probe: {spatialTargetDebugSnapshot.probeMode}
+                  </span>
+                  <span>
+                    raw angle:{' '}
+                    {spatialTargetDebugSnapshot.rawTargetAngle.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.rawTargetAngle.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    head-relative:{' '}
+                    {spatialTargetDebugSnapshot.headRelativeAngle.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.headRelativeAngle.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    eye angle:{' '}
+                    {spatialTargetDebugSnapshot.eyeAngle.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.eyeAngle.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    residual:{' '}
+                    {spatialTargetDebugSnapshot.residualAngle.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.residualAngle.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    mode: {spatialTargetDebugSnapshot.attentionMode}
+                  </span>
+                  <span>
+                    energy: {spatialTargetDebugSnapshot.attentionEnergy.toFixed(2)}
+                  </span>
+                  <span>
+                    soft: {spatialTargetDebugSnapshot.softCueSource ?? 'none'}
+                  </span>
+                  <span>
+                    soft world:{' '}
+                    {spatialTargetDebugSnapshot.softCueWorld === null
+                      ? 'none'
+                      : `${spatialTargetDebugSnapshot.softCueWorld.x.toFixed(2)},${spatialTargetDebugSnapshot.softCueWorld.y.toFixed(2)},${spatialTargetDebugSnapshot.softCueWorld.z.toFixed(2)}`}
+                  </span>
+                  <span>
+                    head projection:{' '}
+                    {spatialTargetDebugSnapshot.headProjection.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.headProjection.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    neck projection:{' '}
+                    {spatialTargetDebugSnapshot.neckProjection.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.neckProjection.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    contribution:{' '}
+                    {spatialTargetDebugSnapshot.headContribution.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.headContribution.pitchDegrees.toFixed(2)}
+                    {' / '}
+                    {spatialTargetDebugSnapshot.neckContribution.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.neckContribution.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    valid: {String(spatialTargetDebugSnapshot.valid)}
+                  </span>
+                  <span>
+                    gaze: {spatialTargetDebugSnapshot.gazeStrength.toFixed(2)}
+                  </span>
+                  <span>owner: {spatialTargetDebugSnapshot.owner}</span>
+                  <span>
+                    release: {spatialTargetDebugSnapshot.releaseReason}
+                  </span>
+                  <span>
+                    transition: {spatialTargetDebugSnapshot.sourceTransition}
+                  </span>
+                </>
+              )}
               <span>
                 orienting: {lifeDynamicsDebugSnapshot.orienting.phase}
               </span>

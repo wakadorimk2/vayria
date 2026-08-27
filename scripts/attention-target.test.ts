@@ -2,11 +2,23 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PerspectiveCamera, Vector3 } from 'three';
 import {
+  blendGazeTarget,
   mapCameraAttentionToHeadBias,
   mapCameraAttentionToViewerTarget,
   VIEWER_GAZE_PROJECTION,
   VIEWER_HEAD_ATTENTION,
 } from '../src/avatar/attentionTarget.js';
+
+test('gaze strength blends toward the resolved target without changing it', () => {
+  const neutral = new Vector3(0, 0, 0);
+  const resolved = new Vector3(10, 5, -2);
+  const output = blendGazeTarget(neutral, resolved, 1, new Vector3());
+  assert.deepEqual(output.toArray(), resolved.toArray());
+
+  blendGazeTarget(neutral, resolved, 0.2, output);
+  assert.deepEqual(output.toArray(), [2, 1, -0.4]);
+  assert.ok(output.toArray().every(Number.isFinite));
+});
 
 function createCameraBasis(aspect = 0.75): {
   basis: {

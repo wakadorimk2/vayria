@@ -56,6 +56,7 @@ export const CARD_REACTION_VISIBLE_FIELDS = [
 const CARD_PREVIEW_EFFECT_DURATION_MS = 30_000;
 
 export const CARD_INTERACTION_ATTENTION_CHANCE = 0.35;
+export const CARD_INTERACTION_CUE_DURATION_MS = 300;
 export const CARD_INTERACTION_ATTENTION_DURATION_MS = 900;
 
 export function shouldReactToCardInteraction(random = Math.random): boolean {

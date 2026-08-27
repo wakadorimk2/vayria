@@ -9,9 +9,22 @@ import {
 } from 'react';
 import { VrmStage, type VrmStageHandle } from './avatar/VrmStage';
 import { useCameraAttention } from './attention/useCameraAttention';
+import { AttentionEnergyController } from './attention/attentionEnergyController';
+import {
+  DragAttentionController,
+  DRAG_ATTENTION_POST_END_HOLD_MS,
+  DRAG_ATTENTION_SALIENCE,
+  DRAG_ATTENTION_TICK_MS,
+} from './attention/dragAttentionController';
 import { useAudioLipSync } from './audio/useAudioLipSync';
-import { CardGamePrototype } from './cards/CardGamePrototype';
+import {
+  CardGamePrototype,
+  type CardAttentionInput,
+  type CardInteractionTarget,
+  type CardDragPositionUpdate,
+} from './cards/CardGamePrototype';
 import { useCardGamePrototype } from './cards/useCardGamePrototype';
+import { SpatialTargetRegistry } from './attention/spatialTargetRegistry';
 import {
   addCharacterAlias,
   parseExplicitAliasInstruction,
@@ -62,6 +75,7 @@ import {
 } from './conversation/programContext';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
 import {
+  CARD_INTERACTION_CUE_DURATION_MS,
   CARD_INTERACTION_ATTENTION_DURATION_MS,
   shouldReactToCardInteraction,
 } from './cards/cardReactions';
@@ -134,6 +148,12 @@ const STATUS_LABELS = {
   speaking: '話しています。',
   error: '処理を完了できませんでした。',
 } as const;
+
+function readAnimationNow(): number {
+  return typeof performance !== 'undefined' && Number.isFinite(performance.now())
+    ? performance.now()
+    : Date.now();
+}
 
 function getCameraAttentionStatusMessage(
   status: ReturnType<typeof useCameraAttention>['status'],
@@ -387,8 +407,8 @@ export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
-  const [cardAttentionTarget, setCardAttentionTarget] = useState<
-    'game' | null
+  const [cardAttentionPhase, setCardAttentionPhase] = useState<
+    'transient' | 'default' | 'drag-acquire' | 'drag-priority' | null
   >(null);
   const [audioControl, setAudioControl] = useState(readAudioControlState);
   const [characterIdentity, setCharacterIdentity] = useState(
@@ -415,6 +435,10 @@ export default function App() {
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const networkState = useNetworkState(isExhibitionMode);
+  const [spatialTargetRegistry] = useState(
+    () => new SpatialTargetRegistry(),
+  );
+  const spatialTargetDisposeTimerRef = useRef<number | null>(null);
   const cardGame = useCardGamePrototype();
   const { acceptReply, beginReply, resetTurn, zones } = cardGame;
   const performer = usePerformerRuntime();
@@ -467,6 +491,17 @@ export default function App() {
     useState<VrmStageHandle | null>(null);
   const nonSpeechTimerRef = useRef<number | null>(null);
   const cardAttentionTimerRef = useRef<number | null>(null);
+  const cardAttentionFallbackTimerRef = useRef<number | null>(null);
+  const dragAttentionTickRef = useRef<number | null>(null);
+  const dragAttentionLastTickAtRef = useRef<number | null>(null);
+  const dragAttentionSpeedRef = useRef<{
+    speedPxPerSecond: number;
+    capturedAt: number;
+  } | null>(null);
+  const dragAttentionControllerRef = useRef(new DragAttentionController());
+  const cardAttentionEnergyControllerRef = useRef(
+    new AttentionEnergyController(),
+  );
   const sessionGenerationRef = useRef(0);
   const {
     isAudioUnlocked,
@@ -482,11 +517,176 @@ export default function App() {
   } = useAudioLipSync(volume);
   const [listeningReaction, setListeningReaction] =
     useState<ListeningReactionCue | undefined>();
+  const clearCardAttentionTimers = useCallback(() => {
+    if (cardAttentionTimerRef.current !== null) {
+      window.clearTimeout(cardAttentionTimerRef.current);
+      cardAttentionTimerRef.current = null;
+    }
+    if (cardAttentionFallbackTimerRef.current !== null) {
+      window.clearTimeout(cardAttentionFallbackTimerRef.current);
+      cardAttentionFallbackTimerRef.current = null;
+    }
+    if (dragAttentionTickRef.current !== null) {
+      window.clearInterval(dragAttentionTickRef.current);
+      dragAttentionTickRef.current = null;
+    }
+    dragAttentionLastTickAtRef.current = null;
+  }, []);
+
+  const scheduleDragAttentionTick = useCallback(() => {
+    if (dragAttentionTickRef.current !== null) return;
+
+    dragAttentionTickRef.current = window.setInterval(() => {
+      const now = readAnimationNow();
+      const previous = dragAttentionLastTickAtRef.current ?? now;
+      dragAttentionLastTickAtRef.current = now;
+      const movement = dragAttentionSpeedRef.current;
+      const speedPxPerSecond =
+        movement && now - movement.capturedAt <= 160
+          ? movement.speedPxPerSecond
+          : 0;
+      const snapshot = dragAttentionControllerRef.current.update(
+        Math.max(0, now - previous),
+        Math.random,
+        speedPxPerSecond,
+      );
+      if (snapshot.phase === 'idle') {
+        clearCardAttentionTimers();
+        return;
+      }
+
+      setCardAttentionPhase(
+        snapshot.phase === 'priority' ? 'drag-priority' : 'drag-acquire',
+      );
+    }, DRAG_ATTENTION_TICK_MS);
+  }, [clearCardAttentionTimers]);
+
+  const scheduleCardAttentionSequence = useCallback(
+    (transientDurationMs: number) => {
+      clearCardAttentionTimers();
+      setCardAttentionPhase('transient');
+
+      const transientTimerId = window.setTimeout(() => {
+        if (cardAttentionTimerRef.current !== transientTimerId) return;
+        cardAttentionTimerRef.current = null;
+        setCardAttentionPhase('default');
+
+        const defaultTimerId = window.setTimeout(() => {
+          if (cardAttentionFallbackTimerRef.current !== defaultTimerId) {
+            return;
+          }
+          cardAttentionFallbackTimerRef.current = null;
+          spatialTargetRegistry.clearTransient('game');
+          cardAttentionEnergyControllerRef.current.clear();
+          setCardAttentionPhase(null);
+        }, CARD_INTERACTION_ATTENTION_DURATION_MS);
+        cardAttentionFallbackTimerRef.current = defaultTimerId;
+      }, Math.max(0, transientDurationMs));
+      cardAttentionTimerRef.current = transientTimerId;
+    },
+    [clearCardAttentionTimers, spatialTargetRegistry],
+  );
+
+  const scheduleCardDefaultAttention = useCallback(() => {
+    clearCardAttentionTimers();
+    spatialTargetRegistry.clearTransient('game');
+    setCardAttentionPhase('default');
+
+    const defaultTimerId = window.setTimeout(() => {
+      if (cardAttentionFallbackTimerRef.current !== defaultTimerId) return;
+      cardAttentionFallbackTimerRef.current = null;
+      cardAttentionEnergyControllerRef.current.clear();
+      setCardAttentionPhase(null);
+    }, CARD_INTERACTION_ATTENTION_DURATION_MS);
+    cardAttentionFallbackTimerRef.current = defaultTimerId;
+  }, [clearCardAttentionTimers, spatialTargetRegistry]);
+
+  const finishDragAttention = useCallback(() => {
+    const previousSnapshot = dragAttentionControllerRef.current.snapshot();
+    const wasActive = previousSnapshot.phase !== 'idle';
+    dragAttentionControllerRef.current.end();
+    dragAttentionSpeedRef.current = null;
+    spatialTargetRegistry.setTransientDragActive('game', false);
+    clearCardAttentionTimers();
+    if (!wasActive) return;
+    if (
+      !isExhibitionMode ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      cardAttentionEnergyControllerRef.current.clear();
+      spatialTargetRegistry.clearTransient('game');
+      setCardAttentionPhase(null);
+      return;
+    }
+
+    cardAttentionEnergyControllerRef.current.hold(
+      readAnimationNow(),
+      previousSnapshot.gazeStrength,
+    );
+    scheduleCardAttentionSequence(DRAG_ATTENTION_POST_END_HOLD_MS);
+  }, [
+    clearCardAttentionTimers,
+    isExhibitionMode,
+    scheduleCardAttentionSequence,
+    spatialTargetRegistry,
+  ]);
+
+  useEffect(() => {
+    if (spatialTargetDisposeTimerRef.current !== null) {
+      window.clearTimeout(spatialTargetDisposeTimerRef.current);
+      spatialTargetDisposeTimerRef.current = null;
+    }
+    const controller = dragAttentionControllerRef.current;
+    const energyController = cardAttentionEnergyControllerRef.current;
+    return () => {
+      controller.end();
+      dragAttentionSpeedRef.current = null;
+      energyController.clear();
+      clearCardAttentionTimers();
+      const disposeTimerId = window.setTimeout(() => {
+        if (spatialTargetDisposeTimerRef.current !== disposeTimerId) return;
+        spatialTargetDisposeTimerRef.current = null;
+        spatialTargetRegistry.dispose();
+      }, 0);
+      spatialTargetDisposeTimerRef.current = disposeTimerId;
+    };
+  }, [
+    clearCardAttentionTimers,
+    spatialTargetRegistry,
+  ]);
+
   const readAttention: AttentionReader = useCallback(() => {
     const logicalAttention = logicalAttentionRef.current;
     const cameraSnapshot = readCameraSnapshot();
+    const dragAttentionSnapshot = dragAttentionControllerRef.current.snapshot();
+    const now = readAnimationNow();
+    const cardAttentionEnergy =
+      cardAttentionEnergyControllerRef.current.update(now);
+    const priorityHint = logicalAttention.priorityHint;
+    const dynamicPriorityHint =
+      priorityHint?.target === 'game' &&
+      priorityHint.spatialTarget?.kind === 'game'
+        ? {
+            ...priorityHint,
+            gazeStrength:
+              dragAttentionSnapshot.phase !== 'idle'
+                ? dragAttentionSnapshot.gazeStrength
+                : cardAttentionEnergy.energy,
+          }
+        : priorityHint;
+    const dynamicSoftCue = logicalAttention.softCue
+      ? {
+          ...logicalAttention.softCue,
+          strength:
+            dragAttentionSnapshot.phase !== 'idle'
+              ? dragAttentionSnapshot.gazeStrength
+              : cardAttentionEnergy.energy,
+        }
+      : undefined;
     return {
       ...logicalAttention,
+      priorityHint: dynamicPriorityHint,
+      softCue: dynamicSoftCue,
       position: cameraSnapshot.position,
       confidence: cameraSnapshot.confidence,
       updatedAt: Math.max(
@@ -1334,27 +1534,83 @@ export default function App() {
   }, [isMicrophoneControlExpanded]);
 
   useEffect(() => {
-    const logicalAttentionTarget =
-      cardAttentionTarget ??
-      (activePlan !== null
+    const logicalTargetFromPerformance =
+      activePlan !== null
         ? activePlan.preReaction?.gaze?.target ??
           performer.state.attention.target
-        : listeningReaction?.target ?? 'none');
+        : listeningReaction?.target ?? 'none';
+    const dragAcquireActive = cardAttentionPhase === 'drag-acquire';
+    const dragPriorityActive = cardAttentionPhase === 'drag-priority';
+    const cardTaskCueActive = cardAttentionPhase !== null;
+    const semanticTargetOwnsPrimary =
+      logicalTargetFromPerformance === 'game' ||
+      logicalTargetFromPerformance === 'chat';
+    const cardCueOwnsPrimary =
+      cardTaskCueActive && !semanticTargetOwnsPrimary;
+    const logicalAttentionTarget =
+      cardCueOwnsPrimary ? 'game' : logicalTargetFromPerformance;
+    const cardSpatialTarget: Attention['spatialTarget'] =
+      cardCueOwnsPrimary
+        ? cardAttentionPhase === 'transient' ||
+          dragAcquireActive ||
+          dragPriorityActive
+          ? { kind: 'game', anchor: 'transient' }
+          : { kind: 'game', anchor: 'default' }
+        : undefined;
+    const spatialTarget: Attention['spatialTarget'] =
+      cardSpatialTarget ??
+      (logicalAttentionTarget === 'game' ||
+      logicalAttentionTarget === 'chat' ||
+      logicalAttentionTarget === 'viewer'
+        ? { kind: logicalAttentionTarget, anchor: 'default' }
+        : undefined);
+    const cardEnergy = cardAttentionEnergyControllerRef.current.snapshot();
+    const dragEnergy = dragAttentionControllerRef.current.snapshot();
+    const priorityHint: Attention['priorityHint'] = cardCueOwnsPrimary
+      ? {
+          target: 'game',
+          salience: dragPriorityActive
+            ? DRAG_ATTENTION_SALIENCE
+            : 0.35,
+          spatialTarget: cardSpatialTarget ?? {
+            kind: 'game',
+            anchor: 'default',
+          },
+          gazeStrength:
+            dragEnergy.phase !== 'idle'
+              ? dragEnergy.gazeStrength
+              : cardEnergy.energy,
+        }
+      : undefined;
+    const softCue: Attention['softCue'] = cardCueOwnsPrimary && cardSpatialTarget
+      ? {
+          target: 'game',
+          spatialTarget: cardSpatialTarget,
+          strength:
+            dragEnergy.phase !== 'idle'
+              ? dragEnergy.gazeStrength
+              : cardEnergy.energy,
+        }
+      : undefined;
     logicalAttentionRef.current = {
       ...performer.state.attention,
       target: logicalAttentionTarget,
       strength:
-        cardAttentionTarget !== null || listeningReaction
+        cardCueOwnsPrimary || listeningReaction
           ? 1
           : activePlan !== null
             ? Math.max(0.72, performer.state.attention.strength)
             : 0,
       position: null,
       confidence: 0,
+      spatialTarget,
+      priorityHint,
+      targetMode: cardCueOwnsPrimary ? 'task-cue' : 'semantic',
+      softCue,
     };
   }, [
     activePlan,
-    cardAttentionTarget,
+    cardAttentionPhase,
     listeningReaction,
     performer.state.attention,
   ]);
@@ -1421,11 +1677,12 @@ export default function App() {
       nonSpeechTimerRef.current = null;
     }
 
-    if (cardAttentionTimerRef.current !== null) {
-      window.clearTimeout(cardAttentionTimerRef.current);
-      cardAttentionTimerRef.current = null;
-    }
-    setCardAttentionTarget(null);
+    clearCardAttentionTimers();
+    dragAttentionControllerRef.current.end();
+    dragAttentionSpeedRef.current = null;
+    cardAttentionEnergyControllerRef.current.clear();
+    spatialTargetRegistry.clearTransient('game');
+    setCardAttentionPhase(null);
 
     resetConversation();
     resetRuntime();
@@ -1446,12 +1703,14 @@ export default function App() {
     setSessionGeneration(nextGeneration);
   }, [
     clearBargeInTimer,
+    clearCardAttentionTimers,
     dispatchBargeIn,
     resetConversation,
     resetRuntime,
     resetTurn,
     setProgramPhase,
     setDucked,
+    spatialTargetRegistry,
     stopReaction,
     stopVoiceInput,
   ]);
@@ -1473,24 +1732,95 @@ export default function App() {
     resetSession();
   }, [dispatchRouterCommand, resetSession]);
 
-  const handleCardInteraction = useCallback(() => {
-    if (!isExhibitionMode) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return;
-    }
-    if (!shouldReactToCardInteraction()) return;
+  const handleCardInteraction = useCallback(
+    ({ element, interaction }: CardInteractionTarget) => {
+      if (!isExhibitionMode) return;
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        return;
+      }
 
-    setCardAttentionTarget('game');
-    if (cardAttentionTimerRef.current !== null) {
-      window.clearTimeout(cardAttentionTimerRef.current);
-    }
-    const timerId = window.setTimeout(() => {
-      if (cardAttentionTimerRef.current !== timerId) return;
-      cardAttentionTimerRef.current = null;
-      setCardAttentionTarget(null);
-    }, CARD_INTERACTION_ATTENTION_DURATION_MS);
-    cardAttentionTimerRef.current = timerId;
-  }, [isExhibitionMode]);
+      if (interaction === 'drag-start') {
+        spatialTargetRegistry.refreshDefault('game');
+        spatialTargetRegistry.captureTransient('game', element);
+        spatialTargetRegistry.setTransientDragActive('game', true);
+        clearCardAttentionTimers();
+        dragAttentionControllerRef.current.start(
+          logicalAttentionRef.current.gazeStrength ??
+            logicalAttentionRef.current.strength,
+        );
+        dragAttentionSpeedRef.current = null;
+        dragAttentionLastTickAtRef.current = readAnimationNow();
+        setCardAttentionPhase('drag-acquire');
+        scheduleDragAttentionTick();
+        return;
+      }
+
+      if (!shouldReactToCardInteraction()) return;
+
+      spatialTargetRegistry.refreshDefault('game');
+      spatialTargetRegistry.captureTransient('game', element);
+      scheduleCardAttentionSequence(CARD_INTERACTION_CUE_DURATION_MS);
+    },
+    [
+      clearCardAttentionTimers,
+      isExhibitionMode,
+      scheduleCardAttentionSequence,
+      scheduleDragAttentionTick,
+      spatialTargetRegistry,
+    ],
+  );
+
+  const handleCardAttentionInput = useCallback(
+    ({ interaction }: CardAttentionInput) => {
+      if (!isExhibitionMode) return;
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        return;
+      }
+      if (interaction === 'drag-start') return;
+
+      const now = readAnimationNow();
+      cardAttentionEnergyControllerRef.current.trigger(
+        now,
+        logicalAttentionRef.current.gazeStrength ??
+          logicalAttentionRef.current.strength,
+      );
+
+      if (interaction === 'appearance') {
+        spatialTargetRegistry.refreshDefault('game');
+        scheduleCardDefaultAttention();
+        return;
+      }
+
+      spatialTargetRegistry.refreshDefault('game');
+      scheduleCardDefaultAttention();
+    },
+    [
+      isExhibitionMode,
+      scheduleCardDefaultAttention,
+      spatialTargetRegistry,
+    ],
+  );
+
+  const handleCardDragPositionChange = useCallback(
+    ({ center, speedPxPerSecond, capturedAt }: CardDragPositionUpdate) => {
+      spatialTargetRegistry.updateTransientPoint('game', center, {
+        now: capturedAt,
+      });
+      dragAttentionSpeedRef.current = {
+        speedPxPerSecond,
+        capturedAt,
+      };
+    },
+    [spatialTargetRegistry],
+  );
+
+  const handleCardDragActiveChange = useCallback(
+    (isActive: boolean) => {
+      if (isActive) return;
+      finishDragAttention();
+    },
+    [finishDragAttention],
+  );
 
   useEffect(() => {
     const serialized = JSON.stringify({ volume, lastAudibleVolume });
@@ -1551,11 +1881,10 @@ export default function App() {
       if (nonSpeechTimerRef.current !== null) {
         window.clearTimeout(nonSpeechTimerRef.current);
       }
-      if (cardAttentionTimerRef.current !== null) {
-        window.clearTimeout(cardAttentionTimerRef.current);
-      }
+      clearCardAttentionTimers();
+      spatialTargetRegistry.clearTransient('game');
     };
-  }, []);
+  }, [clearCardAttentionTimers, spatialTargetRegistry]);
 
   const readCardContext = useCallback(
     () => ({
@@ -2299,6 +2628,13 @@ export default function App() {
     setIsAvatarReady(true);
   }, [prepare]);
 
+  const registerChatTarget = useCallback(
+    (element: HTMLElement | null) => {
+      spatialTargetRegistry.registerDefault('chat', element);
+    },
+    [spatialTargetRegistry],
+  );
+
   const isLocalNetworkAvailable = networkState.localNetwork === 'available';
   const isInternetAvailable = networkState.internet === 'available';
   const localNetworkLabel = `Local network: ${isLocalNetworkAvailable ? 'Connected' : 'Unavailable'}`;
@@ -2564,6 +2900,7 @@ export default function App() {
           performancePlan={activePlan ?? undefined}
           ref={stageRef}
           sessionGeneration={sessionGeneration}
+          spatialTargetRegistry={spatialTargetRegistry}
         />
         {isExhibitionMode && (
           <aside className="exhibition-copy" aria-label="展示案内">
@@ -2576,16 +2913,21 @@ export default function App() {
         <CardGamePrototype
           game={cardGame}
           isResetLocked={isPerformerBusy}
+          onCardAttentionInput={handleCardAttentionInput}
+          onCardDragPositionChange={handleCardDragPositionChange}
+          onCardDragActiveChange={handleCardDragActiveChange}
           onCardInteraction={handleCardInteraction}
           onCardInserted={handleCardInserted}
           onSessionReset={handleSessionReset}
           onSelectionActiveChange={setIsCardSelectionActive}
+          spatialTargetRegistry={spatialTargetRegistry}
         />
       </section>
 
       <section
         className={`conversation conversation--${status}`}
         aria-label="Character conversation"
+        ref={registerChatTarget}
       >
         <div className="conversation-copy" aria-live="polite">
           {shouldShowReply && <p className="reply">{reply}</p>}

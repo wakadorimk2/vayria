@@ -5,6 +5,7 @@ import {
   type Object3D,
 } from 'three';
 import { VRM, VRMHumanBoneName } from '@pixiv/three-vrm';
+import { VIEWER_NECK_ATTENTION } from './attentionTarget';
 
 const BASE_POSE_DEGREES = {
   hipsTilt: 1.8,
@@ -141,6 +142,7 @@ export class IdleController {
     this.captureBone(vrm, VRMHumanBoneName.Hips);
     this.captureBone(vrm, VRMHumanBoneName.Spine);
     this.captureBone(vrm, VRMHumanBoneName.Chest);
+    this.captureBone(vrm, VRMHumanBoneName.Neck);
     this.captureBone(vrm, VRMHumanBoneName.Head);
   }
 
@@ -149,6 +151,8 @@ export class IdleController {
     weight = 1,
     headYawBias = 0,
     headPitchBias = 0,
+    neckYawBias = 0,
+    neckPitchBias = 0,
   ): void {
     if (!this.enabled) return;
 
@@ -181,6 +185,18 @@ export class IdleController {
       offsets.headYaw * IDLE_MOTION.headYawDegrees * safeWeight + headYawBias,
       offsets.headRoll * IDLE_MOTION.headRollDegrees * safeWeight,
     );
+    this.setOffset(
+      VRMHumanBoneName.Neck,
+      clampDegrees(
+        neckPitchBias,
+        VIEWER_NECK_ATTENTION.maxVerticalAngleDegrees,
+      ),
+      clampDegrees(
+        neckYawBias,
+        VIEWER_NECK_ATTENTION.maxHorizontalAngleDegrees,
+      ),
+      0,
+    );
   }
 
   updateOverlay(
@@ -189,6 +205,8 @@ export class IdleController {
     headYawBias = 0,
     headPitchBias = 0,
     overlayWeight = IDLE_MOTION.performanceOverlayWeight,
+    neckYawBias = 0,
+    neckPitchBias = 0,
   ): void {
     if (!this.enabled) return;
 
@@ -226,6 +244,18 @@ export class IdleController {
         headYawBias,
       offsets.headRoll * IDLE_MOTION.headRollDegrees * safeWeight * safeOverlayWeight,
     );
+    this.multiplyOffset(
+      VRMHumanBoneName.Neck,
+      clampDegrees(
+        neckPitchBias * safeOverlayWeight,
+        VIEWER_NECK_ATTENTION.maxVerticalAngleDegrees,
+      ),
+      clampDegrees(
+        neckYawBias * safeOverlayWeight,
+        VIEWER_NECK_ATTENTION.maxHorizontalAngleDegrees,
+      ),
+      0,
+    );
   }
 
   removeOverlay(): void {
@@ -235,6 +265,13 @@ export class IdleController {
       bone.node.quaternion.multiply(offset.clone().invert());
     }
     this.appliedOverlay.clear();
+  }
+
+  /** Restores the captured base pose before a new gaze allocation is read. */
+  resetForGazeFrame(): void {
+    if (!this.enabled) return;
+    this.removeOverlay();
+    this.restoreCapturedRotations();
   }
 
   setEnabled(enabled: boolean): void {
@@ -341,4 +378,9 @@ export class IdleController {
     bone.node.quaternion.multiply(this.offsetRotation);
     this.appliedOverlay.set(boneName, this.offsetRotation.clone());
   }
+}
+
+function clampDegrees(value: number, limit: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(-limit, Math.min(value, limit));
 }

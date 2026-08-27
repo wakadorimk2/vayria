@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Euler, Object3D, Quaternion, Vector3 } from 'three';
+import { VRMHumanBoneName } from '@pixiv/three-vrm';
 import type { VRM } from '@pixiv/three-vrm';
 import {
   LifeDynamics,
@@ -15,12 +16,14 @@ interface FakeLookAt {
   getLookAtWorldPosition(target: Vector3): Vector3;
 }
 
-function createFakeVrm(withLookAt = true): {
+function createFakeVrm(withLookAt = true, withNeck = true): {
   head: Object3D;
+  neck: Object3D;
   lookAt: FakeLookAt | undefined;
   vrm: VRM;
 } {
   const head = new Object3D();
+  const neck = new Object3D();
   const lookAt = withLookAt
     ? {
         resetCount: 0,
@@ -36,11 +39,16 @@ function createFakeVrm(withLookAt = true): {
 
   return {
     head,
+    neck,
     lookAt,
     vrm: {
       humanoid: {
-        getNormalizedBoneNode() {
-          return head;
+        getNormalizedBoneNode(boneName: VRMHumanBoneName) {
+          return boneName === VRMHumanBoneName.Neck
+            ? withNeck
+              ? neck
+              : undefined
+            : head;
         },
       },
       lookAt,
@@ -69,8 +77,8 @@ function createSnapshot(): LifeDynamicsSnapshot {
   );
 }
 
-test('adapter maps orienting to LookAt and clamps head angles', () => {
-  const { head, lookAt, vrm } = createFakeVrm();
+test('adapter maps orienting to LookAt and clamps head and neck angles', () => {
+  const { head, neck, lookAt, vrm } = createFakeVrm();
   const adapter = new LifeDynamicsOrientingAdapter(vrm);
   const snapshot = createSnapshot();
   const neutralTarget = new Vector3(0, 1, 2);
@@ -81,6 +89,7 @@ test('adapter maps orienting to LookAt and clamps head angles', () => {
     neutralTarget,
     desiredTarget,
     headBias: { yawDegrees: 100, pitchDegrees: -100 },
+    neckBias: { yawDegrees: 100, pitchDegrees: -100 },
     vrmaActive: false,
   });
 
@@ -89,11 +98,15 @@ test('adapter maps orienting to LookAt and clamps head angles', () => {
   const rotation = new Euler().setFromQuaternion(head.quaternion, 'XYZ');
   assert.ok(Math.abs(rotation.x) <= (6 * Math.PI) / 180 + 0.0001);
   assert.ok(Math.abs(rotation.y) <= (8 * Math.PI) / 180 + 0.0001);
+  const neckRotation = new Euler().setFromQuaternion(neck.quaternion, 'XYZ');
+  assert.ok(Math.abs(neckRotation.x) <= (3 * Math.PI) / 180 + 0.0001);
+  assert.ok(Math.abs(neckRotation.y) <= (4 * Math.PI) / 180 + 0.0001);
 
   adapter.reset();
   assert.equal(lookAt?.target, null);
   assert.equal(lookAt?.resetCount, 1);
   assert.ok(head.quaternion.equals(new Quaternion()));
+  assert.ok(neck.quaternion.equals(new Quaternion()));
 });
 
 test('adapter provides a head fallback when LookAt is unavailable', () => {
@@ -106,6 +119,7 @@ test('adapter provides a head fallback when LookAt is unavailable', () => {
       neutralTarget: new Vector3(0, 1, 2),
       desiredTarget: new Vector3(2, 1, 5),
       headBias: { yawDegrees: 4, pitchDegrees: 2 },
+      neckBias: { yawDegrees: 2, pitchDegrees: 1 },
       vrmaActive: false,
     });
   });
@@ -113,8 +127,25 @@ test('adapter provides a head fallback when LookAt is unavailable', () => {
   assert.doesNotThrow(() => adapter.reset());
 });
 
+test('adapter ignores a missing neck bone safely', () => {
+  const { vrm } = createFakeVrm(true, false);
+  const adapter = new LifeDynamicsOrientingAdapter(vrm);
+
+  assert.doesNotThrow(() => {
+    adapter.apply({
+      snapshot: createSnapshot(),
+      neutralTarget: new Vector3(0, 1, 2),
+      desiredTarget: new Vector3(2, 1, 5),
+      headBias: { yawDegrees: 4, pitchDegrees: 2 },
+      neckBias: { yawDegrees: 4, pitchDegrees: 2 },
+      vrmaActive: false,
+    });
+    adapter.reset();
+  });
+});
+
 test('adapter produces no output while VRMA is active', () => {
-  const { head, lookAt, vrm } = createFakeVrm();
+  const { head, neck, lookAt, vrm } = createFakeVrm();
   const adapter = new LifeDynamicsOrientingAdapter(vrm);
 
   adapter.apply({
@@ -122,9 +153,11 @@ test('adapter produces no output while VRMA is active', () => {
     neutralTarget: new Vector3(0, 1, 2),
     desiredTarget: new Vector3(2, 1, 5),
     headBias: { yawDegrees: 4, pitchDegrees: 2 },
+    neckBias: { yawDegrees: 2, pitchDegrees: 1 },
     vrmaActive: true,
   });
 
   assert.equal(lookAt?.target, null);
   assert.ok(head.quaternion.equals(new Quaternion()));
+  assert.ok(neck.quaternion.equals(new Quaternion()));
 });

@@ -235,6 +235,272 @@ test('chat and game targets have priority over viewer camera attention', () => {
   );
 });
 
+test('idle attention selects a spatial priority hint before camera reacquisition', () => {
+  const controller = new AttentionStateController();
+  const frame = controller.update(
+    createInput({
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        priorityHint: {
+          target: 'game',
+          salience: 0.85,
+          spatialTarget: { kind: 'game', anchor: 'transient' },
+          gazeStrength: 0.2,
+        },
+      }),
+    }),
+  );
+
+  assert.equal(frame.state, 'AttendTarget');
+  assert.equal(frame.target, 'game');
+  assert.deepEqual(frame.spatialTarget, {
+    kind: 'game',
+    anchor: 'transient',
+  });
+  assert.equal(frame.gazeStrength, 0.2);
+});
+
+test('viewer engagement and explicit chat preempt a drag priority hint', () => {
+  const viewerController = new AttentionStateController();
+  const hint = createAttention({
+    priorityHint: {
+      target: 'game',
+      salience: 0.85,
+      spatialTarget: { kind: 'game', anchor: 'transient' },
+      gazeStrength: 0.2,
+    },
+  });
+  viewerController.update(
+    createInput({ cameraEnabled: false, cameraTracking: null, attention: hint }),
+  );
+  const viewerFrame = viewerController.update(
+    createInput({
+      now: 1,
+      attention: hint,
+      viewerEngaged: true,
+    }),
+  );
+  assert.equal(viewerFrame.state, 'AttendViewer');
+  assert.equal(viewerFrame.target, 'viewer');
+  assert.equal(viewerFrame.gazeStrength, 1);
+
+  const resumedAfterViewer = viewerController.update(
+    createInput({
+      now: 2,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(resumedAfterViewer.target, 'game');
+  assert.equal(resumedAfterViewer.gazeStrength, 0.2);
+
+  const chatController = new AttentionStateController();
+  chatController.update(
+    createInput({ cameraEnabled: false, cameraTracking: null, attention: hint }),
+  );
+  const chatFrame = chatController.update(
+    createInput({
+      now: 1,
+      attention: createAttention({
+        target: 'chat',
+        strength: 0.55,
+        spatialTarget: { kind: 'chat', anchor: 'default' },
+        priorityHint: hint.priorityHint,
+      }),
+      explicitTargetActive: true,
+    }),
+  );
+  assert.equal(chatFrame.state, 'AttendTarget');
+  assert.equal(chatFrame.target, 'chat');
+  assert.equal(chatFrame.gazeStrength, 1);
+  assert.deepEqual(chatFrame.spatialTarget, {
+    kind: 'chat',
+    anchor: 'default',
+  });
+});
+
+test('thinking preempts drag strength and resumes it without changing ownership', () => {
+  const controller = new AttentionStateController();
+  const hint = createAttention({
+    priorityHint: {
+      target: 'game',
+      salience: 0.85,
+      spatialTarget: { kind: 'game', anchor: 'transient' },
+      gazeStrength: 0.2,
+    },
+  });
+
+  const acquired = controller.update(
+    createInput({ cameraEnabled: false, cameraTracking: null, attention: hint }),
+  );
+  assert.equal(acquired.target, 'game');
+  assert.equal(acquired.gazeStrength, 0.2);
+
+  const thinking = controller.update(
+    createInput({
+      now: 1,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+      thinking: true,
+    }),
+  );
+  assert.equal(thinking.state, 'Thinking');
+  assert.equal(thinking.gazeStrength, 1);
+
+  const resumed = controller.update(
+    createInput({
+      now: 2,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(resumed.target, 'game');
+  assert.equal(resumed.gazeStrength, 0.2);
+  assert.deepEqual(resumed.spatialTarget, {
+    kind: 'game',
+    anchor: 'transient',
+  });
+});
+
+test('an active priority hint keeps game ownership through release and resumes after overrides', () => {
+  const controller = new AttentionStateController();
+  const hint = createAttention({
+    priorityHint: {
+      target: 'game',
+      salience: 0.85,
+      spatialTarget: { kind: 'game', anchor: 'transient' },
+    },
+  });
+
+  const acquired = controller.update(
+    createInput({
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        target: 'game',
+        strength: 1,
+        spatialTarget: { kind: 'game', anchor: 'transient' },
+      }),
+      explicitTargetActive: true,
+    }),
+  );
+  assert.equal(acquired.target, 'game');
+
+  const released = controller.update(
+    createInput({
+      now: 1,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(released.state, 'AttendTarget');
+  assert.equal(released.target, 'game');
+  assert.notEqual(released.state, 'Recover');
+
+  const viewer = controller.update(
+    createInput({
+      now: 2,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+      viewerEngaged: true,
+    }),
+  );
+  assert.equal(viewer.target, 'viewer');
+
+  const resumedAfterViewer = controller.update(
+    createInput({
+      now: 3,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(resumedAfterViewer.target, 'game');
+
+  const chat = controller.update(
+    createInput({
+      now: 4,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        target: 'chat',
+        strength: 1,
+        spatialTarget: { kind: 'chat', anchor: 'default' },
+        priorityHint: hint.priorityHint,
+      }),
+      explicitTargetActive: true,
+    }),
+  );
+  assert.equal(chat.target, 'chat');
+
+  const resumedAfterChat = controller.update(
+    createInput({
+      now: 5,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(resumedAfterChat.target, 'game');
+});
+
+test('priority hint reselects the card after the existing recovery phase', () => {
+  const controller = new AttentionStateController();
+  const hint = createAttention({
+    priorityHint: {
+      target: 'game',
+      salience: 0.85,
+      spatialTarget: { kind: 'game', anchor: 'transient' },
+    },
+  });
+
+  controller.update(
+    createInput({ cameraEnabled: false, cameraTracking: null, attention: hint }),
+  );
+  assert.equal(
+    controller.update(
+      createInput({
+        now: 1,
+        cameraEnabled: false,
+        cameraTracking: null,
+        attention: createAttention(),
+      }),
+    ).state,
+    'Recover',
+  );
+  assert.equal(
+    controller.update(
+      createInput({
+        now: 251,
+        cameraEnabled: false,
+        cameraTracking: null,
+        attention: createAttention(),
+      }),
+    ).state,
+    'Idle',
+  );
+
+  const frame = controller.update(
+    createInput({
+      now: 252,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: hint,
+    }),
+  );
+  assert.equal(frame.target, 'game');
+  assert.deepEqual(frame.spatialTarget, {
+    kind: 'game',
+    anchor: 'transient',
+  });
+});
+
 test('semantic focus exposes camera uncertainty without expanding AttentionState', () => {
   const controller = new AttentionStateController();
   controller.update(createInput({ now: 0 }));
@@ -258,4 +524,149 @@ test('semantic focus exposes camera uncertainty without expanding AttentionState
   });
   assert.deepEqual(frame.position, { x: 0.52, y: 0.5 });
   assert.deepEqual(frame.headPosition, { x: 0.7, y: 0.5 });
+});
+
+test('task cue stays secondary to viewer and is suppressed by chat or thinking', () => {
+  const softCue = {
+    target: 'game' as const,
+    spatialTarget: { kind: 'game' as const, anchor: 'transient' as const },
+    strength: 0.8,
+  };
+  const hint = {
+    target: 'game' as const,
+    salience: 0.35,
+    spatialTarget: softCue.spatialTarget,
+    gazeStrength: 0.25,
+  };
+  const viewerController = new AttentionStateController();
+  const viewer = viewerController.update(
+    createInput({
+      cameraEnabled: false,
+      cameraTracking: null,
+      viewerEngaged: true,
+      attention: createAttention({ softCue, priorityHint: hint }),
+    }),
+  );
+
+  assert.equal(viewer.target, 'viewer');
+  assert.deepEqual(viewer.softCue, { ...softCue, strength: 0.12 });
+
+  const thinking = viewerController.update(
+    createInput({
+      now: 1,
+      cameraEnabled: false,
+      cameraTracking: null,
+      thinking: true,
+      attention: createAttention({ softCue, priorityHint: hint }),
+    }),
+  );
+  assert.equal(thinking.state, 'Thinking');
+  assert.equal(thinking.softCue, undefined);
+
+  const chat = new AttentionStateController().update(
+    createInput({
+      attention: createAttention({
+        target: 'chat',
+        strength: 1,
+        spatialTarget: { kind: 'chat', anchor: 'default' },
+        softCue,
+        priorityHint: hint,
+      }),
+      explicitTargetActive: true,
+    }),
+  );
+  assert.equal(chat.target, 'chat');
+  assert.equal(chat.softCue, undefined);
+});
+
+test('task cue mode does not become an explicit semantic target', () => {
+  const controller = new AttentionStateController();
+  const frame = controller.update(
+    createInput({
+      explicitTargetActive: true,
+      viewerEngaged: true,
+      attention: createAttention({
+        target: 'game',
+        targetMode: 'task-cue',
+        spatialTarget: { kind: 'game', anchor: 'transient' },
+        priorityHint: {
+          target: 'game',
+          salience: 0.35,
+          spatialTarget: { kind: 'game', anchor: 'transient' },
+        },
+        softCue: {
+          target: 'game',
+          spatialTarget: { kind: 'game', anchor: 'transient' },
+          strength: 0.35,
+        },
+      }),
+    }),
+  );
+
+  assert.equal(frame.target, 'viewer');
+  assert.deepEqual(frame.softCue, {
+    target: 'game',
+    spatialTarget: { kind: 'game', anchor: 'transient' },
+    strength: 0.12,
+  });
+});
+
+test('task cue grace avoids a transient recover frame when the hint drops', () => {
+  const controller = new AttentionStateController();
+  const initial = createAttention({
+    target: 'game',
+    targetMode: 'task-cue',
+    spatialTarget: { kind: 'game', anchor: 'transient' },
+    priorityHint: {
+      target: 'game',
+      salience: 0.85,
+      spatialTarget: { kind: 'game', anchor: 'transient' },
+      gazeStrength: 0.4,
+    },
+  });
+
+  assert.equal(
+    controller.update(
+      createInput({
+        cameraEnabled: false,
+        cameraTracking: null,
+        attention: initial,
+      }),
+    ).target,
+    'game',
+  );
+
+  const retained = controller.update(
+    createInput({
+      now: 50,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        target: 'game',
+        targetMode: 'task-cue',
+        spatialTarget: { kind: 'game', anchor: 'transient' },
+      }),
+    }),
+  );
+  assert.equal(retained.state, 'AttendTarget');
+  assert.equal(retained.target, 'game');
+  assert.deepEqual(retained.spatialTarget, {
+    kind: 'game',
+    anchor: 'transient',
+  });
+
+  const expired = controller.update(
+    createInput({
+      now: 151,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        target: 'game',
+        targetMode: 'task-cue',
+        spatialTarget: { kind: 'game', anchor: 'transient' },
+      }),
+    }),
+  );
+  assert.equal(expired.state, 'Recover');
+  assert.equal(expired.target, 'none');
 });

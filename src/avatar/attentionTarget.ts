@@ -14,6 +14,11 @@ export const VIEWER_HEAD_ATTENTION = {
   maxVerticalAngleDegrees: 6,
 } as const;
 
+export const VIEWER_NECK_ATTENTION = {
+  maxHorizontalAngleDegrees: 4,
+  maxVerticalAngleDegrees: 3,
+} as const;
+
 export interface ViewerHeadBias {
   yawDegrees: number;
   pitchDegrees: number;
@@ -24,6 +29,24 @@ export interface ViewerCameraBasis {
   forward: Vector3;
   right: Vector3;
   up: Vector3;
+}
+
+/**
+ * Blends the output gaze point without changing the resolved spatial target.
+ * A zero strength stays at the neutral look-at point. A strength of one uses
+ * the resolved target exactly.
+ */
+export function blendGazeTarget(
+  neutralTarget: Vector3,
+  resolvedTarget: Vector3,
+  gazeStrength: number,
+  target: Vector3,
+): Vector3 {
+  return target.lerpVectors(
+    neutralTarget,
+    resolvedTarget,
+    clampLevel(gazeStrength),
+  );
 }
 
 export function mapCameraAttentionToViewerTarget(
