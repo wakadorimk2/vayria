@@ -47,6 +47,7 @@ import {
 import { LifeDynamicsBlinkAdapter } from './lifeDynamicsBlinkAdapter';
 import { LifeDynamicsLifeAdapter } from './lifeDynamicsLifeAdapter';
 import { LifeDynamicsOrientingAdapter } from './lifeDynamicsOrientingAdapter';
+import { toVrmBonePitchDegrees } from './vrmBoneRotation';
 import { SpatialTargetBridge } from './spatialTargetBridge';
 import { SpatialTargetWorldCache } from './spatialTargetContinuity';
 import {
@@ -1863,14 +1864,21 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               ? 0.6
               : effectiveSpatialHeadYawBias) * gazeDirectness;
           const headYawBias = requestedHeadYawBias * safeMotionScale;
-          const headPitchBias =
-            (listeningNodDegrees +
-              effectiveSpatialHeadPitchBias * gazeDirectness) *
-            safeMotionScale;
+          const vrmHeadPitchBias =
+            listeningNodDegrees * safeMotionScale +
+            toVrmBonePitchDegrees(
+              effectiveSpatialHeadPitchBias *
+                gazeDirectness *
+                safeMotionScale,
+            );
           const neckYawBias =
             effectiveSpatialNeckYawBias * gazeDirectness * safeMotionScale;
-          const neckPitchBias =
-            effectiveSpatialNeckPitchBias * gazeDirectness * safeMotionScale;
+          const vrmNeckPitchBias = toVrmBonePitchDegrees(
+            effectiveSpatialNeckPitchBias * gazeDirectness * safeMotionScale,
+          );
+          const vrmCameraHeadPitchBias = toVrmBonePitchDegrees(
+            cameraHeadPitchBias,
+          );
           let lifeDynamicsSnapshot: LifeDynamicsSnapshot | null = null;
           if (lifeDynamicsPocEnabled) {
             const attentionTarget =
@@ -1988,11 +1996,11 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 desiredTarget: gazeOutputTarget,
                 headBias: {
                   yawDegrees: headYawBias + cameraHeadYawBias,
-                  pitchDegrees: headPitchBias + cameraHeadPitchBias,
+                  pitchDegrees: vrmHeadPitchBias + vrmCameraHeadPitchBias,
                 },
                 neckBias: {
                   yawDegrees: neckYawBias,
-                  pitchDegrees: neckPitchBias,
+                  pitchDegrees: vrmNeckPitchBias,
                 },
                 vrmaActive: hasActiveBodyMotion,
               });
@@ -2015,10 +2023,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 headYawBias +
                   cameraHeadYawBias +
                   (idleGazeFrame?.fallbackHeadYawBias ?? 0),
-                headPitchBias + cameraHeadPitchBias,
+                vrmHeadPitchBias + vrmCameraHeadPitchBias,
                 undefined,
                 neckYawBias,
-                neckPitchBias,
+                vrmNeckPitchBias,
               );
             } else {
               idleController?.update(
@@ -2027,9 +2035,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 headYawBias +
                   cameraHeadYawBias +
                   (idleGazeFrame?.fallbackHeadYawBias ?? 0),
-                headPitchBias + cameraHeadPitchBias,
+                vrmHeadPitchBias + vrmCameraHeadPitchBias,
                 neckYawBias,
-                neckPitchBias,
+                vrmNeckPitchBias,
               );
             }
           }

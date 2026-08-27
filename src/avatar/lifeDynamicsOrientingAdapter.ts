@@ -10,16 +10,16 @@ import type { VRM } from '@pixiv/three-vrm';
 import {
   VIEWER_HEAD_ATTENTION,
   VIEWER_NECK_ATTENTION,
-  type ViewerHeadBias,
 } from './attentionTarget.js';
 import type { LifeDynamicsSnapshot } from './lifeDynamics.js';
+import type { VrmBoneBias } from './vrmBoneRotation.js';
 
 export interface LifeDynamicsOrientingFrame {
   readonly snapshot: LifeDynamicsSnapshot;
   readonly neutralTarget: Vector3;
   readonly desiredTarget: Vector3 | null;
-  readonly headBias: ViewerHeadBias;
-  readonly neckBias: ViewerHeadBias;
+  readonly headBias: VrmBoneBias;
+  readonly neckBias: VrmBoneBias;
   readonly vrmaActive: boolean;
 }
 

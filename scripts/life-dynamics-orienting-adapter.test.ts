@@ -127,6 +127,26 @@ test('adapter provides a head fallback when LookAt is unavailable', () => {
   assert.doesNotThrow(() => adapter.reset());
 });
 
+test('adapter applies the supplied VRM bone pitch without changing its sign', () => {
+  const { head, neck, vrm } = createFakeVrm();
+  const adapter = new LifeDynamicsOrientingAdapter(vrm);
+
+  adapter.apply({
+    snapshot: createSnapshot(),
+    neutralTarget: new Vector3(0, 1, 2),
+    desiredTarget: new Vector3(2, 1, 5),
+    headBias: { yawDegrees: 0, pitchDegrees: -4 },
+    neckBias: { yawDegrees: 0, pitchDegrees: -2 },
+    vrmaActive: false,
+  });
+
+  const headRotation = new Euler().setFromQuaternion(head.quaternion, 'XYZ');
+  const neckRotation = new Euler().setFromQuaternion(neck.quaternion, 'XYZ');
+  assert.ok(headRotation.x < 0);
+  assert.ok(neckRotation.x < 0);
+  adapter.reset();
+});
+
 test('adapter ignores a missing neck bone safely', () => {
   const { vrm } = createFakeVrm(true, false);
   const adapter = new LifeDynamicsOrientingAdapter(vrm);
