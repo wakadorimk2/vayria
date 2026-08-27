@@ -18,6 +18,7 @@ import {
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   VRM,
+  VRMHumanBoneName,
   VRMExpressionPresetName,
   VRMLoaderPlugin,
   VRMUtils,
@@ -49,8 +50,13 @@ import { LifeDynamicsOrientingAdapter } from './lifeDynamicsOrientingAdapter';
 import { SpatialTargetBridge } from './spatialTargetBridge';
 import { SpatialTargetWorldCache } from './spatialTargetContinuity';
 import {
+  DEFAULT_GAZE_HANDOFF_STATE,
   allocateGaze,
+  type GazeAllocationBasis,
+  type GazeAllocationResult,
+  type GazeHandoffState,
 } from './gazeAllocation';
+import { GazeProjectionFeedback } from './gazeProjectionFeedback';
 import {
   SPATIAL_TARGET_OUTPUT_TIMING,
   SpatialHeadProjectionSmoother,
@@ -237,7 +243,14 @@ interface LifeDynamicsPocOptions {
   enabled: boolean;
   debug: boolean;
   profileId: ReturnType<typeof resolveLifeDynamicsProfileId>;
+  gazeProbe: GazeProbeMode;
 }
+
+type GazeProbeMode =
+  | 'full'
+  | 'eye-only'
+  | 'no-neck'
+  | 'fixed-target';
 
 interface SpatialTargetDebugSnapshot {
   readonly primarySource: string;
@@ -250,25 +263,196 @@ interface SpatialTargetDebugSnapshot {
   readonly softCueWorld: { x: number; y: number; z: number } | null;
   readonly headProjection: { yawDegrees: number; pitchDegrees: number };
   readonly neckProjection: { yawDegrees: number; pitchDegrees: number };
+  readonly rawTargetAngle: { yawDegrees: number; pitchDegrees: number };
+  readonly headRelativeAngle: { yawDegrees: number; pitchDegrees: number };
+  readonly eyeAngle: { yawDegrees: number; pitchDegrees: number };
+  readonly residualAngle: { yawDegrees: number; pitchDegrees: number };
+  readonly headContribution: { yawDegrees: number; pitchDegrees: number };
+  readonly neckContribution: { yawDegrees: number; pitchDegrees: number };
   readonly valid: boolean;
   readonly owner: string;
   readonly releaseReason: string;
   readonly gazeStrength: number;
+  readonly sourceTransition: string;
+  readonly probeMode: GazeProbeMode;
+}
+
+interface GazeDebugSample {
+  readonly at: number;
+  readonly source: string;
+  readonly owner: string;
+  readonly valid: boolean;
+  readonly rawYaw: number;
+  readonly rawPitch: number;
+  readonly headRelativeYaw: number;
+  readonly headRelativePitch: number;
+  readonly eyeYaw: number;
+  readonly eyePitch: number;
+  readonly residualYaw: number;
+  readonly residualPitch: number;
+  readonly headYaw: number;
+  readonly headPitch: number;
+  readonly neckYaw: number;
+  readonly neckPitch: number;
+}
+
+class GazeDebugHistory {
+  private readonly samples: GazeDebugSample[] = [];
+
+  push(now: number, snapshot: SpatialTargetDebugSnapshot): void {
+    this.samples.push({
+      at: now,
+      source: snapshot.primarySource,
+      owner: snapshot.owner,
+      valid: snapshot.valid,
+      rawYaw: snapshot.rawTargetAngle.yawDegrees,
+      rawPitch: snapshot.rawTargetAngle.pitchDegrees,
+      headRelativeYaw: snapshot.headRelativeAngle.yawDegrees,
+      headRelativePitch: snapshot.headRelativeAngle.pitchDegrees,
+      eyeYaw: snapshot.eyeAngle.yawDegrees,
+      eyePitch: snapshot.eyeAngle.pitchDegrees,
+      residualYaw: snapshot.residualAngle.yawDegrees,
+      residualPitch: snapshot.residualAngle.pitchDegrees,
+      headYaw: snapshot.headContribution.yawDegrees,
+      headPitch: snapshot.headContribution.pitchDegrees,
+      neckYaw: snapshot.neckContribution.yawDegrees,
+      neckPitch: snapshot.neckContribution.pitchDegrees,
+    });
+    if (this.samples.length > 32) this.samples.shift();
+  }
+
+  clear(): void {
+    this.samples.length = 0;
+  }
+
+  toArray(): readonly GazeDebugSample[] {
+    return this.samples.map((sample) => ({ ...sample }));
+  }
 }
 
 function getLifeDynamicsPocOptions(): LifeDynamicsPocOptions {
   if (typeof window === 'undefined') {
-    return { enabled: false, debug: false, profileId: '1.0x' };
+    return {
+      enabled: false,
+      debug: false,
+      profileId: '1.0x',
+      gazeProbe: 'full',
+    };
   }
 
   const params = new URLSearchParams(window.location.search);
   const enabled = params.get('life-dynamics-poc') === '1';
+  const debug = enabled && params.get('life-dynamics-debug') === '1';
   return {
     enabled,
-    debug: enabled && params.get('life-dynamics-debug') === '1',
+    debug,
     profileId: resolveLifeDynamicsProfileId(
       params.get('life-dynamics-profile'),
     ),
+    gazeProbe: debug
+      ? readGazeProbe(
+          params.get('gazeProbe') ??
+            params.get('life-dynamics-gaze-probe'),
+        )
+      : 'full',
+  };
+}
+
+function readGazeProbe(value: string | null): GazeProbeMode {
+  switch (value) {
+    case 'eye-only':
+    case 'no-neck':
+    case 'fixed-target':
+      return value;
+    default:
+      return 'full';
+  }
+}
+
+function zeroBias(): { yawDegrees: number; pitchDegrees: number } {
+  return { yawDegrees: 0, pitchDegrees: 0 };
+}
+
+function zeroGazeDiagnostics(): Pick<
+  SpatialTargetDebugSnapshot,
+  | 'rawTargetAngle'
+  | 'headRelativeAngle'
+  | 'eyeAngle'
+  | 'residualAngle'
+  | 'headContribution'
+  | 'neckContribution'
+> {
+  return {
+    rawTargetAngle: zeroBias(),
+    headRelativeAngle: zeroBias(),
+    eyeAngle: zeroBias(),
+    residualAngle: zeroBias(),
+    headContribution: zeroBias(),
+    neckContribution: zeroBias(),
+  };
+}
+
+function zeroGazeHandoffState(): GazeHandoffState {
+  return { ...DEFAULT_GAZE_HANDOFF_STATE };
+}
+
+function applyGazeProbe(
+  allocation: Pick<
+    GazeAllocationResult,
+    'headProjection' | 'neckProjection'
+  >,
+  probe: GazeProbeMode,
+): Pick<GazeAllocationResult, 'headProjection' | 'neckProjection'> {
+  if (probe === 'eye-only') {
+    return {
+      headProjection: zeroBias(),
+      neckProjection: zeroBias(),
+    };
+  }
+  if (probe === 'no-neck') {
+    return {
+      headProjection: { ...allocation.headProjection },
+      neckProjection: zeroBias(),
+    };
+  }
+  return {
+    headProjection: { ...allocation.headProjection },
+    neckProjection: { ...allocation.neckProjection },
+  };
+}
+
+function createAllocationDebug(
+  allocation: Pick<
+    GazeAllocationResult,
+    | 'rawTargetAngle'
+    | 'headRelativeAngle'
+    | 'eyeAngle'
+    | 'residualAngle'
+  >,
+  projection: Pick<
+    GazeAllocationResult,
+    'headProjection' | 'neckProjection'
+  >,
+): Pick<
+  SpatialTargetDebugSnapshot,
+  | 'rawTargetAngle'
+  | 'headRelativeAngle'
+  | 'eyeAngle'
+  | 'residualAngle'
+  | 'headContribution'
+  | 'neckContribution'
+  | 'headProjection'
+  | 'neckProjection'
+> {
+  return {
+    rawTargetAngle: { ...allocation.rawTargetAngle },
+    headRelativeAngle: { ...allocation.headRelativeAngle },
+    eyeAngle: { ...allocation.eyeAngle },
+    residualAngle: { ...allocation.residualAngle },
+    headContribution: { ...projection.headProjection },
+    neckContribution: { ...projection.neckProjection },
+    headProjection: { ...projection.headProjection },
+    neckProjection: { ...projection.neckProjection },
   };
 }
 
@@ -308,6 +492,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const performanceStateRef = useRef<AvatarPerformanceState | null>(null);
     const motionScaleRef = useRef(motionScale);
     const performancePlanRef = useRef(performancePlan);
+    const sessionGenerationRef = useRef(sessionGeneration);
     const onReadyRef = useRef(onReady);
     const [loadState, setLoadState] = useState<LoadState>('loading');
     const [expressionWarning, setExpressionWarning] = useState('');
@@ -346,6 +531,10 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     useEffect(() => {
       emotionRef.current = emotion;
     }, [emotion]);
+
+    useEffect(() => {
+      sessionGenerationRef.current = sessionGeneration;
+    }, [sessionGeneration]);
 
     useEffect(() => {
       attentionReaderRef.current = attentionReader;
@@ -791,6 +980,22 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       const spatialEyeSmoother = new SpatialTargetOutputSmoother();
       const spatialHeadSmoother = new SpatialHeadProjectionSmoother();
       const spatialNeckSmoother = new SpatialHeadProjectionSmoother();
+      const gazeProjectionFeedback = new GazeProjectionFeedback();
+      const gazeHeadBasisOutput: GazeAllocationBasis = {
+        forward: new Vector3(),
+        right: new Vector3(),
+        up: new Vector3(),
+      };
+      let gazeHandoffState = zeroGazeHandoffState();
+      let gazeFeedbackOwner: string | null = null;
+      let gazeFeedbackSelectionKey: string | null = null;
+      let fixedProbeTarget: Vector3 | null = null;
+      let fixedProbeSelectionKey: string | null = null;
+      let previousDebugSource = 'none';
+      let previousDebugOwner = 'none';
+      let lastSourceTransition = 'none';
+      const gazeDebugHistory = new GazeDebugHistory();
+      let lastSessionGeneration = sessionGenerationRef.current;
       const viewerCameraForward = new Vector3();
       const viewerCameraRight = new Vector3();
       const viewerCameraUp = new Vector3();
@@ -965,6 +1170,29 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       const clock = new Clock();
       const render = () => {
         if (disposed) return;
+        if (sessionGenerationRef.current !== lastSessionGeneration) {
+          lastSessionGeneration = sessionGenerationRef.current;
+          attentionStateController.reset();
+          cameraTrackingController.reset();
+          attentionVisualSmoother.reset();
+          attentionEngagementController.reset();
+          spatialTargetWorldCache.clear();
+          spatialEyeSmoother.reset();
+          spatialHeadSmoother.reset();
+          spatialNeckSmoother.reset();
+          gazeProjectionFeedback.reset();
+          gazeHandoffState = zeroGazeHandoffState();
+          gazeFeedbackOwner = null;
+          gazeFeedbackSelectionKey = null;
+          fixedProbeTarget = null;
+          fixedProbeSelectionKey = null;
+          previousDebugSource = 'none';
+          previousDebugOwner = 'none';
+          lastSourceTransition = 'none';
+          gazeDebugHistory.clear();
+          setLifeDynamicsDebugSnapshot(null);
+          setSpatialTargetDebugSnapshot(null);
+        }
         const delta = clock.getDelta();
         if (loadedVrm) {
           const plan = performancePlanRef.current;
@@ -1008,6 +1236,20 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             cameraEnabled,
             cameraTracking,
           });
+          const currentGazeOwner =
+            attentionFrame.target === 'viewer' ||
+            attentionFrame.target === 'game' ||
+            attentionFrame.target === 'chat'
+              ? attentionFrame.target
+              : null;
+          if (currentGazeOwner !== gazeFeedbackOwner) {
+            gazeProjectionFeedback.reset();
+            gazeHandoffState = zeroGazeHandoffState();
+            gazeFeedbackSelectionKey = null;
+            fixedProbeTarget = null;
+            fixedProbeSelectionKey = null;
+            gazeFeedbackOwner = currentGazeOwner;
+          }
           const attentionEngagement = attentionEngagementController.update(
             delta,
             {
@@ -1067,6 +1309,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             playbackState === 'entering' ||
             playbackState === 'playing' ||
             playbackState === 'exiting';
+          if (!hasActiveBodyMotion) idleController?.resetForGazeFrame();
+          if (hasActiveBodyMotion) gazeProjectionFeedback.reset();
+          const headBasis = hasActiveBodyMotion
+            ? null
+            : gazeProjectionFeedback.createHeadBasis(
+                loadedVrm.humanoid.getNormalizedBoneNode(VRMHumanBoneName.Head),
+                gazeHeadBasisOutput,
+              );
           idleGazeController?.getNeutralTarget(lifeDynamicsNeutralTarget);
           let spatialHeadYawBias = 0;
           let spatialHeadPitchBias = 0;
@@ -1089,6 +1339,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               ? ATTENTION_ENERGY_CONFIG.normalBaseline
               : attentionFrame.gazeStrength);
           let spatialTargetDebug: SpatialTargetDebugSnapshot = {
+            ...zeroGazeDiagnostics(),
             primarySource:
               attentionFrame.target === 'viewer'
                 ? 'viewer'
@@ -1112,6 +1363,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             releaseReason:
               attentionFrame.target === 'none' ? 'released' : 'none',
             gazeStrength: attentionFrame.gazeStrength,
+            sourceTransition: lastSourceTransition,
+            probeMode: lifeDynamicsPocOptions.gazeProbe,
           };
           const hasSpatialHint =
             attention.priorityHint?.spatialTarget?.kind === 'game' ||
@@ -1132,6 +1385,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             performanceGazeTarget = thinkingGazeTarget;
             primaryWorldTarget = thinkingGazeTarget;
             spatialTargetDebug = {
+              ...zeroGazeDiagnostics(),
               primarySource: 'thinking',
               primaryWorld: toDebugWorld(performanceGazeTarget),
               eyeWorld: toDebugWorld(performanceGazeTarget),
@@ -1146,8 +1400,15 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               owner: 'none',
               releaseReason: 'none',
               gazeStrength: attentionFrame.gazeStrength,
+              sourceTransition: lastSourceTransition,
+              probeMode: lifeDynamicsPocOptions.gazeProbe,
             };
           } else if (attentionFrame.state === 'AttendViewer') {
+            let viewerAllocation: GazeAllocationResult | null = null;
+            let viewerProjection = {
+              headProjection: zeroBias(),
+              neckProjection: zeroBias(),
+            };
             if (visualAttention.eyePosition && loadedVrm.lookAt) {
               camera.updateMatrixWorld(true);
               loadedVrm.lookAt.getLookAtWorldPosition(lookAtWorldPosition);
@@ -1172,7 +1433,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 viewerGazeTarget,
               );
               primaryWorldTarget = rawViewerTarget;
-              const viewerAllocation = allocateGaze({
+              viewerAllocation = allocateGaze({
                 eyePosition: lookAtWorldPosition,
                 neutralTarget: lifeDynamicsNeutralTarget,
                 resolvedTarget: rawViewerTarget,
@@ -1181,19 +1442,26 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   right: viewerCameraRight,
                   up: viewerCameraUp,
                 },
+                headBasis: headBasis ?? undefined,
+                handoffState: gazeHandoffState,
                 profile: 'viewer',
               });
               if (viewerAllocation) {
+                viewerProjection = applyGazeProbe(
+                  viewerAllocation,
+                  lifeDynamicsPocOptions.gazeProbe,
+                );
                 performanceGazeTarget = viewerAllocation.eyeTarget;
                 spatialHeadYawBias =
-                  viewerAllocation.headProjection.yawDegrees;
+                  viewerProjection.headProjection.yawDegrees;
                 spatialHeadPitchBias =
-                  viewerAllocation.headProjection.pitchDegrees;
+                  viewerProjection.headProjection.pitchDegrees;
                 spatialNeckYawBias =
-                  viewerAllocation.neckProjection.yawDegrees;
+                  viewerProjection.neckProjection.yawDegrees;
                 spatialNeckPitchBias =
-                  viewerAllocation.neckProjection.pitchDegrees;
+                  viewerProjection.neckProjection.pitchDegrees;
                 primaryEyeRadius = viewerAllocation.eyeRadius;
+                gazeHandoffState = viewerAllocation.handoffState;
                 hasPrimaryGazeAllocation = true;
                 cameraHeadYawBias = 0;
                 cameraHeadPitchBias = 0;
@@ -1205,6 +1473,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               primaryWorldTarget = camera.position;
             }
             spatialTargetDebug = {
+              ...zeroGazeDiagnostics(),
               primarySource: 'viewer',
               primaryWorld: toDebugWorld(primaryWorldTarget),
               eyeWorld: toDebugWorld(performanceGazeTarget),
@@ -1226,7 +1495,18 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               releaseReason:
                 performanceGazeTarget === null ? 'camera-invalid' : 'none',
               gazeStrength: attentionFrame.gazeStrength,
+              sourceTransition: lastSourceTransition,
+              probeMode: lifeDynamicsPocOptions.gazeProbe,
             };
+            if (viewerAllocation) {
+              spatialTargetDebug = {
+                ...spatialTargetDebug,
+                ...createAllocationDebug(
+                  viewerAllocation,
+                  viewerProjection,
+                ),
+              };
+            }
           } else if (attentionFrame.state === 'AttendTarget') {
             const spatialSelection: SpatialTargetSelection | null =
               attentionFrame.target === 'game' ||
@@ -1252,6 +1532,29 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 performance.now(),
               );
               const spatialSnapshot = spatialLookup?.snapshot ?? null;
+              const allocationSelectionKey = formatSpatialTargetSelection(
+                spatialSnapshot?.selection ?? spatialSelection,
+              );
+              if (
+                gazeFeedbackSelectionKey !== null &&
+                allocationSelectionKey !== gazeFeedbackSelectionKey
+              ) {
+                gazeProjectionFeedback.reset();
+                gazeHandoffState = zeroGazeHandoffState();
+                spatialTargetWorldCache.clear();
+                fixedProbeTarget = null;
+                fixedProbeSelectionKey = null;
+              }
+              gazeFeedbackSelectionKey = allocationSelectionKey;
+              if (lifeDynamicsPocOptions.gazeProbe === 'fixed-target') {
+                if (fixedProbeSelectionKey !== requestedSpatialTargetKey) {
+                  fixedProbeTarget = null;
+                  fixedProbeSelectionKey = requestedSpatialTargetKey;
+                }
+              } else {
+                fixedProbeTarget = null;
+                fixedProbeSelectionKey = null;
+              }
               const spatialResolution = spatialSnapshot
                 ? spatialTargetBridge.resolve({
                     camera,
@@ -1259,9 +1562,22 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                     neutralTarget: lifeDynamicsNeutralTarget,
                     snapshot: spatialSnapshot,
                     stageRect,
+                    headBasis: headBasis ?? undefined,
+                    handoffState: gazeHandoffState,
+                    fixedTarget: fixedProbeTarget ?? undefined,
                     profile: 'spatial',
                   })
                 : null;
+              if (spatialResolution !== null) {
+                gazeHandoffState = spatialResolution.handoffState;
+              }
+              if (
+                lifeDynamicsPocOptions.gazeProbe === 'fixed-target' &&
+                fixedProbeTarget === null &&
+                spatialResolution !== null
+              ) {
+                fixedProbeTarget = spatialResolution.target.clone();
+              }
               if (spatialTargetRegistry) {
                 const resolvedSpatialTargetKeyFromSnapshot =
                   formatSpatialTargetSelection(
@@ -1279,19 +1595,25 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   liveReason: spatialLookup?.reason ?? 'missing',
                   invalidSince: spatialLookup?.invalidSince ?? null,
                 });
+                const worldProjection = applyGazeProbe(
+                  worldResolution,
+                  lifeDynamicsPocOptions.gazeProbe,
+                );
                 primaryWorldTarget = worldResolution.target;
                 performanceGazeTarget =
                   worldResolution.eyeTarget ?? lifeDynamicsNeutralTarget;
-                spatialHeadYawBias = worldResolution.headProjection.yawDegrees;
+                spatialHeadYawBias =
+                  worldProjection.headProjection.yawDegrees;
                 spatialHeadPitchBias =
-                  worldResolution.headProjection.pitchDegrees;
+                  worldProjection.headProjection.pitchDegrees;
                 spatialNeckYawBias =
-                  worldResolution.neckProjection.yawDegrees;
+                  worldProjection.neckProjection.yawDegrees;
                 spatialNeckPitchBias =
-                  worldResolution.neckProjection.pitchDegrees;
+                  worldProjection.neckProjection.pitchDegrees;
                 primaryEyeRadius = worldResolution.eyeRadius;
                 hasPrimaryGazeAllocation = worldResolution.eyeTarget !== null;
                 spatialTargetDebug = {
+                  ...zeroGazeDiagnostics(),
                   primarySource: resolvedSpatialTargetKeyFromSnapshot,
                   primaryWorld: toDebugWorld(worldResolution.target),
                   eyeWorld: toDebugWorld(worldResolution.eyeTarget),
@@ -1300,14 +1622,6 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   attentionEnergy,
                   softCueSource: null,
                   softCueWorld: null,
-                  headProjection: {
-                    yawDegrees: spatialHeadYawBias,
-                    pitchDegrees: spatialHeadPitchBias,
-                  },
-                  neckProjection: {
-                    yawDegrees: spatialNeckYawBias,
-                    pitchDegrees: spatialNeckPitchBias,
-                  },
                   valid: worldResolution.valid,
                   owner: attentionFrame.target,
                   releaseReason:
@@ -1317,10 +1631,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                         ? 'bridge-invalid'
                         : worldResolution.reason,
                   gazeStrength: attentionFrame.gazeStrength,
+                  sourceTransition: lastSourceTransition,
+                  probeMode: lifeDynamicsPocOptions.gazeProbe,
+                  ...createAllocationDebug(worldResolution, worldProjection),
                 };
               } else {
                 performanceGazeTarget = lifeDynamicsNeutralTarget;
                 spatialTargetDebug = {
+                  ...zeroGazeDiagnostics(),
                   primarySource: requestedSpatialTargetKey,
                   primaryWorld: null,
                   eyeWorld: null,
@@ -1335,6 +1653,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   owner: attentionFrame.target,
                   releaseReason: 'registry-unavailable',
                   gazeStrength: attentionFrame.gazeStrength,
+                  sourceTransition: lastSourceTransition,
+                  probeMode: lifeDynamicsPocOptions.gazeProbe,
                 };
               }
             } else {
@@ -1367,6 +1687,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   neutralTarget: lifeDynamicsNeutralTarget,
                   snapshot: softCueSnapshot,
                   stageRect,
+                  headBasis: headBasis ?? undefined,
                   profile: 'soft-cue',
                 })
               : null;
@@ -1392,6 +1713,33 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             softCueSource,
             softCueWorld: toDebugWorld(softCueWorldTarget),
           };
+          if (
+            spatialTargetDebug.primarySource !== previousDebugSource ||
+            spatialTargetDebug.owner !== previousDebugOwner
+          ) {
+            lastSourceTransition = `${previousDebugSource}/${previousDebugOwner}->${spatialTargetDebug.primarySource}/${spatialTargetDebug.owner}`;
+            if (lifeDynamicsDebugEnabled) {
+              console.debug('[gaze-transition]', {
+                from: {
+                  source: previousDebugSource,
+                  owner: previousDebugOwner,
+                },
+                to: {
+                  source: spatialTargetDebug.primarySource,
+                  owner: spatialTargetDebug.owner,
+                },
+              });
+            }
+            previousDebugSource = spatialTargetDebug.primarySource;
+            previousDebugOwner = spatialTargetDebug.owner;
+          }
+          spatialTargetDebug = {
+            ...spatialTargetDebug,
+            sourceTransition: lastSourceTransition,
+          };
+          if (lifeDynamicsDebugEnabled) {
+            gazeDebugHistory.push(performance.now(), spatialTargetDebug);
+          }
           const gazeStrength = attentionFrame.gazeStrength;
           const primaryOutputTarget =
             performanceGazeTarget === null
@@ -1562,6 +1910,12 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   primaryWorld: spatialTargetDebug.primaryWorld,
                   eyeWorld: spatialTargetDebug.eyeWorld,
                   eyeRadius: spatialTargetDebug.eyeRadius,
+                  rawTargetAngle: spatialTargetDebug.rawTargetAngle,
+                  headRelativeAngle: spatialTargetDebug.headRelativeAngle,
+                  eyeAngle: spatialTargetDebug.eyeAngle,
+                  residualAngle: spatialTargetDebug.residualAngle,
+                  headContribution: spatialTargetDebug.headContribution,
+                  neckContribution: spatialTargetDebug.neckContribution,
                   spatialValid: spatialTargetDebug.valid,
                   attentionMode: spatialTargetDebug.attentionMode,
                   attentionEnergy: spatialTargetDebug.attentionEnergy,
@@ -1572,6 +1926,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   targetOwner: spatialTargetDebug.owner,
                   releaseReason: spatialTargetDebug.releaseReason,
                   gazeStrength: spatialTargetDebug.gazeStrength,
+                  sourceTransition: spatialTargetDebug.sourceTransition,
+                  gazeProbe: spatialTargetDebug.probeMode,
+                  gazeHistory: gazeDebugHistory.toArray(),
                 });
                 lifeDynamicsDebugLastLogAtRef.current = now;
               }
@@ -1636,6 +1993,60 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               );
             }
           }
+          if (
+            currentGazeOwner !== null &&
+            hasPrimaryGazeAllocation &&
+            !hasActiveBodyMotion
+          ) {
+            const baseHeadFeedback = {
+              yawDegrees:
+                effectiveSpatialHeadYawBias *
+                gazeDirectness *
+                safeMotionScale,
+              pitchDegrees:
+                effectiveSpatialHeadPitchBias *
+                gazeDirectness *
+                safeMotionScale,
+            };
+            const baseNeckFeedback = {
+              yawDegrees:
+                effectiveSpatialNeckYawBias *
+                gazeDirectness *
+                safeMotionScale,
+              pitchDegrees:
+                effectiveSpatialNeckPitchBias *
+                gazeDirectness *
+                safeMotionScale,
+            };
+            const adapterWeight = lifeDynamicsPocEnabled
+              ? clampGazeStrength(
+                  lifeDynamicsSnapshot?.orienting.headWeight ?? 0,
+                )
+              : 1;
+            const hasAppliedGaze =
+              !lifeDynamicsPocEnabled ||
+              (lifeDynamicsSnapshot?.orienting.target !== null &&
+                gazeOutputTarget !== null &&
+                adapterWeight > 0);
+            if (hasAppliedGaze) {
+              gazeProjectionFeedback.set({
+                head: {
+                  yawDegrees: baseHeadFeedback.yawDegrees * adapterWeight,
+                  pitchDegrees:
+                    baseHeadFeedback.pitchDegrees * adapterWeight,
+                },
+                neck: {
+                  yawDegrees: baseNeckFeedback.yawDegrees * adapterWeight,
+                  pitchDegrees:
+                    baseNeckFeedback.pitchDegrees * adapterWeight,
+                },
+              });
+            } else {
+              gazeProjectionFeedback.reset();
+            }
+          } else {
+            gazeProjectionFeedback.reset();
+          }
           if (emotionController && appliedEmotion !== emotionRef.current) {
             emotionController.setEmotion(
               emotionRef.current,
@@ -1690,6 +2101,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         spatialEyeSmoother.reset();
         spatialHeadSmoother.reset();
         spatialNeckSmoother.reset();
+        gazeProjectionFeedback.reset();
+        gazeHandoffState = zeroGazeHandoffState();
+        gazeDebugHistory.clear();
         idleController?.dispose();
         idleGazeController?.dispose();
         lifeDynamicsLifeAdapterRef.current?.dispose();
@@ -1722,6 +2136,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       lifeDynamicsDebugEnabled,
       lifeDynamicsPocEnabled,
       lifeDynamicsProfileId,
+      lifeDynamicsPocOptions.gazeProbe,
       spatialTargetRegistry,
       stageVariant,
       stopMotion,
@@ -1768,6 +2183,29 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                     eye radius: {spatialTargetDebugSnapshot.eyeRadius.toFixed(2)}
                   </span>
                   <span>
+                    probe: {spatialTargetDebugSnapshot.probeMode}
+                  </span>
+                  <span>
+                    raw angle:{' '}
+                    {spatialTargetDebugSnapshot.rawTargetAngle.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.rawTargetAngle.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    head-relative:{' '}
+                    {spatialTargetDebugSnapshot.headRelativeAngle.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.headRelativeAngle.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    eye angle:{' '}
+                    {spatialTargetDebugSnapshot.eyeAngle.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.eyeAngle.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
+                    residual:{' '}
+                    {spatialTargetDebugSnapshot.residualAngle.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.residualAngle.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
                     mode: {spatialTargetDebugSnapshot.attentionMode}
                   </span>
                   <span>
@@ -1793,6 +2231,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                     {spatialTargetDebugSnapshot.neckProjection.pitchDegrees.toFixed(2)}
                   </span>
                   <span>
+                    contribution:{' '}
+                    {spatialTargetDebugSnapshot.headContribution.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.headContribution.pitchDegrees.toFixed(2)}
+                    {' / '}
+                    {spatialTargetDebugSnapshot.neckContribution.yawDegrees.toFixed(2)},
+                    {spatialTargetDebugSnapshot.neckContribution.pitchDegrees.toFixed(2)}
+                  </span>
+                  <span>
                     valid: {String(spatialTargetDebugSnapshot.valid)}
                   </span>
                   <span>
@@ -1801,6 +2247,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   <span>owner: {spatialTargetDebugSnapshot.owner}</span>
                   <span>
                     release: {spatialTargetDebugSnapshot.releaseReason}
+                  </span>
+                  <span>
+                    transition: {spatialTargetDebugSnapshot.sourceTransition}
                   </span>
                 </>
               )}

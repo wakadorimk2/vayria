@@ -13,8 +13,10 @@ import {
 } from './attentionTarget.js';
 import {
   allocateGaze,
+  type GazeAllocationBasis,
   type GazeAllocationProfile,
   type GazeAllocationResult,
+  type GazeHandoffState,
 } from './gazeAllocation.js';
 
 export interface SpatialTargetBridgeInput {
@@ -23,6 +25,10 @@ export interface SpatialTargetBridgeInput {
   readonly neutralTarget: Vector3;
   readonly snapshot: SpatialTargetSnapshot;
   readonly stageRect: SpatialTargetRect;
+  readonly headBasis?: GazeAllocationBasis;
+  readonly handoffState?: GazeHandoffState;
+  /** Debug-only allocation target override. The resolved target is unchanged. */
+  readonly fixedTarget?: Vector3;
   readonly profile?: GazeAllocationProfile;
 }
 
@@ -33,8 +39,15 @@ export interface SpatialTargetBridgeResult {
   readonly eyeTarget: Vector3;
   readonly headProjection: GazeAllocationResult['headProjection'];
   readonly neckProjection: GazeAllocationResult['neckProjection'];
+  readonly rawTargetAngle: GazeAllocationResult['rawTargetAngle'];
+  readonly headRelativeAngle: GazeAllocationResult['headRelativeAngle'];
   readonly rawEyeAngle: GazeAllocationResult['rawEyeAngle'];
+  readonly eyeAngle: GazeAllocationResult['eyeAngle'];
+  readonly residualAngle: GazeAllocationResult['residualAngle'];
+  readonly headContribution: GazeAllocationResult['headContribution'];
+  readonly neckContribution: GazeAllocationResult['neckContribution'];
   readonly eyeRadius: number;
+  readonly handoffState: GazeHandoffState;
 }
 
 /**
@@ -132,15 +145,19 @@ export class SpatialTargetBridge {
     }
     if (!isFiniteVector(this.worldTarget)) return null;
 
+    const allocationTarget = input.fixedTarget ?? this.worldTarget;
+    if (!isFiniteVector(allocationTarget)) return null;
     const allocation = allocateGaze({
       eyePosition: input.eyePosition,
       neutralTarget: input.neutralTarget,
-      resolvedTarget: this.worldTarget,
+      resolvedTarget: allocationTarget,
       basis: {
         forward: this.forward,
         right: this.right,
         up: this.up,
       },
+      headBasis: input.headBasis,
+      handoffState: input.handoffState,
       profile: input.profile ?? 'spatial',
     });
     if (!allocation) return null;
@@ -151,8 +168,15 @@ export class SpatialTargetBridge {
       eyeTarget: allocation.eyeTarget,
       headProjection: allocation.headProjection,
       neckProjection: allocation.neckProjection,
+      rawTargetAngle: allocation.rawTargetAngle,
+      headRelativeAngle: allocation.headRelativeAngle,
       rawEyeAngle: allocation.rawEyeAngle,
+      eyeAngle: allocation.eyeAngle,
+      residualAngle: allocation.residualAngle,
+      headContribution: allocation.headContribution,
+      neckContribution: allocation.neckContribution,
       eyeRadius: allocation.eyeRadius,
+      handoffState: allocation.handoffState,
     };
   }
 }

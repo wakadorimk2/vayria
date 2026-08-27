@@ -610,3 +610,63 @@ test('task cue mode does not become an explicit semantic target', () => {
     strength: 0.12,
   });
 });
+
+test('task cue grace avoids a transient recover frame when the hint drops', () => {
+  const controller = new AttentionStateController();
+  const initial = createAttention({
+    target: 'game',
+    targetMode: 'task-cue',
+    spatialTarget: { kind: 'game', anchor: 'transient' },
+    priorityHint: {
+      target: 'game',
+      salience: 0.85,
+      spatialTarget: { kind: 'game', anchor: 'transient' },
+      gazeStrength: 0.4,
+    },
+  });
+
+  assert.equal(
+    controller.update(
+      createInput({
+        cameraEnabled: false,
+        cameraTracking: null,
+        attention: initial,
+      }),
+    ).target,
+    'game',
+  );
+
+  const retained = controller.update(
+    createInput({
+      now: 50,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        target: 'game',
+        targetMode: 'task-cue',
+        spatialTarget: { kind: 'game', anchor: 'transient' },
+      }),
+    }),
+  );
+  assert.equal(retained.state, 'AttendTarget');
+  assert.equal(retained.target, 'game');
+  assert.deepEqual(retained.spatialTarget, {
+    kind: 'game',
+    anchor: 'transient',
+  });
+
+  const expired = controller.update(
+    createInput({
+      now: 151,
+      cameraEnabled: false,
+      cameraTracking: null,
+      attention: createAttention({
+        target: 'game',
+        targetMode: 'task-cue',
+        spatialTarget: { kind: 'game', anchor: 'transient' },
+      }),
+    }),
+  );
+  assert.equal(expired.state, 'Recover');
+  assert.equal(expired.target, 'none');
+});

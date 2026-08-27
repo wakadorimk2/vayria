@@ -18,7 +18,13 @@ export interface SpatialTargetWorldValue {
   readonly eyeTarget: Vector3;
   readonly headProjection: ViewerHeadBias;
   readonly neckProjection: ViewerHeadBias;
+  readonly rawTargetAngle: ViewerHeadBias;
+  readonly headRelativeAngle: ViewerHeadBias;
   readonly rawEyeAngle: ViewerHeadBias;
+  readonly eyeAngle: ViewerHeadBias;
+  readonly residualAngle: ViewerHeadBias;
+  readonly headContribution: ViewerHeadBias;
+  readonly neckContribution: ViewerHeadBias;
   readonly eyeRadius: number;
 }
 
@@ -36,7 +42,13 @@ export interface SpatialTargetWorldResolution {
   readonly eyeTarget: Vector3 | null;
   readonly headProjection: ViewerHeadBias;
   readonly neckProjection: ViewerHeadBias;
+  readonly rawTargetAngle: ViewerHeadBias;
+  readonly headRelativeAngle: ViewerHeadBias;
   readonly rawEyeAngle: ViewerHeadBias;
+  readonly eyeAngle: ViewerHeadBias;
+  readonly residualAngle: ViewerHeadBias;
+  readonly headContribution: ViewerHeadBias;
+  readonly neckContribution: ViewerHeadBias;
   readonly eyeRadius: number;
   readonly valid: boolean;
   readonly usingLastValid: boolean;
@@ -120,7 +132,13 @@ function createResolution(
     eyeTarget: value?.eyeTarget.clone() ?? null,
     headProjection: cloneHeadProjection(value?.headProjection),
     neckProjection: cloneHeadProjection(value?.neckProjection),
+    rawTargetAngle: cloneHeadProjection(value?.rawTargetAngle),
+    headRelativeAngle: cloneHeadProjection(value?.headRelativeAngle),
     rawEyeAngle: cloneHeadProjection(value?.rawEyeAngle),
+    eyeAngle: cloneHeadProjection(value?.eyeAngle),
+    residualAngle: cloneHeadProjection(value?.residualAngle),
+    headContribution: cloneHeadProjection(value?.headContribution),
+    neckContribution: cloneHeadProjection(value?.neckContribution),
     eyeRadius: value && Number.isFinite(value.eyeRadius) ? value.eyeRadius : 0,
     valid,
     usingLastValid,
@@ -134,7 +152,13 @@ function cloneWorldValue(value: SpatialTargetWorldValue): SpatialTargetWorldValu
     eyeTarget: value.eyeTarget.clone(),
     headProjection: cloneHeadProjection(value.headProjection),
     neckProjection: cloneHeadProjection(value.neckProjection),
+    rawTargetAngle: cloneHeadProjection(value.rawTargetAngle),
+    headRelativeAngle: cloneHeadProjection(value.headRelativeAngle),
     rawEyeAngle: cloneHeadProjection(value.rawEyeAngle),
+    eyeAngle: cloneHeadProjection(value.eyeAngle),
+    residualAngle: cloneHeadProjection(value.residualAngle),
+    headContribution: cloneHeadProjection(value.headContribution),
+    neckContribution: cloneHeadProjection(value.neckContribution),
     eyeRadius: value.eyeRadius,
   };
 }
@@ -154,7 +178,13 @@ function isFiniteLiveResult(value: SpatialTargetWorldValue): boolean {
     isFiniteVector(value.eyeTarget) &&
     isFiniteHeadProjection(value.headProjection) &&
     isFiniteHeadProjection(value.neckProjection) &&
+    isFiniteHeadProjection(value.rawTargetAngle) &&
+    isFiniteHeadProjection(value.headRelativeAngle) &&
     isFiniteHeadProjection(value.rawEyeAngle) &&
+    isFiniteHeadProjection(value.eyeAngle) &&
+    isFiniteHeadProjection(value.residualAngle) &&
+    isFiniteHeadProjection(value.headContribution) &&
+    isFiniteHeadProjection(value.neckContribution) &&
     Number.isFinite(value.eyeRadius)
   );
 }

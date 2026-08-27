@@ -44,8 +44,21 @@ export interface GazeAllocationInput {
   readonly neutralTarget: Vector3;
   readonly resolvedTarget: Vector3;
   readonly basis: GazeAllocationBasis;
+  /** Avatar head basis after the previous frame's gaze projection. */
+  readonly headBasis?: GazeAllocationBasis;
+  readonly handoffState?: GazeHandoffState;
   readonly profile?: GazeAllocationProfile;
 }
+
+export interface GazeHandoffState {
+  readonly headActive: boolean;
+  readonly neckActive: boolean;
+}
+
+export const DEFAULT_GAZE_HANDOFF_STATE: GazeHandoffState = {
+  headActive: false,
+  neckActive: false,
+};
 
 export interface GazeAllocationResult {
   /** The target before the eye envelope is applied. */
@@ -54,8 +67,19 @@ export interface GazeAllocationResult {
   readonly eyeTarget: Vector3;
   readonly headProjection: ViewerHeadBias;
   readonly neckProjection: ViewerHeadBias;
+  /** Raw target angle in the stable camera/neutral basis. */
+  readonly rawTargetAngle: ViewerHeadBias;
+  /** Raw target angle relative to the projected avatar head. */
+  readonly headRelativeAngle: ViewerHeadBias;
   readonly rawEyeAngle: ViewerHeadBias;
+  /** Eye angle after the elliptical envelope and soft saturation. */
+  readonly eyeAngle: ViewerHeadBias;
+  /** Remaining angle after the eye allocation. */
+  readonly residualAngle: ViewerHeadBias;
+  readonly headContribution: ViewerHeadBias;
+  readonly neckContribution: ViewerHeadBias;
   readonly eyeRadius: number;
+  readonly handoffState: GazeHandoffState;
 }
 
 const DEFAULT_PROFILE: GazeAllocationProfile = 'spatial';
@@ -80,72 +104,42 @@ export function allocateGaze(
     return null;
   }
 
-  const forward = input.basis.forward.clone();
-  const rightBasis = input.basis.right.clone();
-  const upBasis = input.basis.up.clone();
-  if (
-    !normalizeVector(forward) ||
-    !normalizeVector(rightBasis) ||
-    !normalizeVector(upBasis)
-  ) {
-    return null;
-  }
+  const stableBasis = normalizeBasis(input.basis);
+  if (!stableBasis) return null;
+  const headBasis = input.headBasis
+    ? normalizeBasis(input.headBasis)
+    : stableBasis;
+  const actuatorBasis = headBasis ?? stableBasis;
 
   const neutralDirection = input.neutralTarget
     .clone()
     .sub(input.eyePosition);
-  const referenceForward = neutralDirection.clone();
-  if (!normalizeVector(referenceForward)) {
-    referenceForward.copy(forward);
-  }
-
-  const referenceRight = rightBasis
-    .clone()
-    .addScaledVector(
-      referenceForward,
-      -rightBasis.dot(referenceForward),
-    );
-  if (!normalizeVector(referenceRight)) {
-    referenceRight.copy(rightBasis);
-  }
-
-  const referenceUp = referenceRight
-    .clone()
-    .cross(referenceForward)
-    .normalize();
-  if (!isFiniteVector(referenceUp) || referenceUp.lengthSq() <= 0.000001) {
-    return null;
-  }
-  if (referenceUp.dot(upBasis) < 0) referenceUp.negate();
-
-  const rawDirection = input.resolvedTarget
-    .clone()
-    .sub(input.eyePosition);
   const hasReferenceDepth = neutralDirection.lengthSq() > 0.000001;
-  const angularDirection = hasReferenceDepth
-    ? rawDirection
+  const rawDirection = hasReferenceDepth
+    ? input.resolvedTarget.clone().sub(input.eyePosition)
     : input.resolvedTarget.clone().sub(input.neutralTarget);
-  const forwardComponent = hasReferenceDepth
-    ? rawDirection.dot(referenceForward)
-    : 1;
-  const rawYaw =
-    angularDirection.lengthSq() <= 0.000001
-      ? 0
-      : Math.atan2(
-          angularDirection.dot(referenceRight),
-          forwardComponent,
-        );
-  const rawPitch =
-    angularDirection.lengthSq() <= 0.000001
-      ? 0
-      : Math.atan2(
-          angularDirection.dot(referenceUp),
-          forwardComponent,
-        );
-  if (!Number.isFinite(rawYaw) || !Number.isFinite(rawPitch)) return null;
+  if (!isFiniteVector(rawDirection)) return null;
 
-  const rawYawDegrees = toDegrees(rawYaw);
-  const rawPitchDegrees = toDegrees(rawPitch);
+  const rawTargetAngle = getRelativeAngle(
+    rawDirection,
+    neutralDirection,
+    stableBasis,
+    hasReferenceDepth,
+    true,
+  );
+  const headRelativeAngle = getRelativeAngle(
+    rawDirection,
+    neutralDirection,
+    actuatorBasis,
+    hasReferenceDepth,
+    false,
+  );
+  if (!rawTargetAngle || !headRelativeAngle) return null;
+
+  const rawYawDegrees = toDegrees(headRelativeAngle.yawRadians);
+  const rawPitchDegrees = toDegrees(headRelativeAngle.pitchRadians);
+  const rawTargetYawDegrees = toDegrees(rawTargetAngle.yawRadians);
+  const rawTargetPitchDegrees = toDegrees(rawTargetAngle.pitchRadians);
   const verticalLimit =
     rawPitchDegrees >= 0
       ? EYE_GAZE_ENVELOPE.upperDegrees
@@ -170,40 +164,62 @@ export function allocateGaze(
   const eyeTarget = input.neutralTarget
     .clone()
     .addScaledVector(
-      referenceRight,
+      actuatorBasis.right,
       Math.tan(toRadians(eyeYawDegrees)) * depth,
     )
     .addScaledVector(
-      referenceUp,
+      actuatorBasis.up,
       Math.tan(toRadians(eyePitchDegrees)) * depth,
     );
   if (!isFiniteVector(eyeTarget)) return null;
 
-  const headWeight = smoothstep(0.5, 1, eyeRadius);
-  const neckWeight = smoothstep(0.75, 1.25, eyeRadius);
-  const neckShare = 0.5 * neckWeight;
   const residualYaw = rawYawDegrees - eyeYawDegrees;
   const residualPitch = rawPitchDegrees - eyePitchDegrees;
+  const residualMagnitude = Math.hypot(residualYaw, residualPitch);
+  const previousHandoffState = input.handoffState ?? DEFAULT_GAZE_HANDOFF_STATE;
+  const handoffState = {
+    headActive: previousHandoffState.headActive
+      ? residualMagnitude >= GAZE_HANDOFF.headReleaseDegrees
+      : residualMagnitude > GAZE_HANDOFF.headEnterDegrees,
+    neckActive: previousHandoffState.neckActive
+      ? residualMagnitude >= GAZE_HANDOFF.neckReleaseDegrees
+      : residualMagnitude > GAZE_HANDOFF.neckEnterDegrees,
+  };
+  const headWeight = handoffState.headActive
+    ? smoothstep(GAZE_HANDOFF.headEnterDegrees, 9, residualMagnitude)
+    : 0;
+  const neckWeight = handoffState.neckActive
+    ? smoothstep(GAZE_HANDOFF.neckEnterDegrees, 12, residualMagnitude)
+    : 0;
+  const neckShare = 0.5 * neckWeight;
   const profile = getProfile(input.profile ?? DEFAULT_PROFILE);
+  const headContribution = {
+    yawDegrees:
+      residualYaw * headWeight * (1 - neckShare) * profile.headScale,
+    pitchDegrees:
+      residualPitch * headWeight * (1 - neckShare) * profile.headScale,
+  };
+  const neckContribution = {
+    yawDegrees: residualYaw * headWeight * neckShare * profile.neckScale,
+    pitchDegrees: residualPitch * headWeight * neckShare * profile.neckScale,
+  };
   const headProjection = {
     yawDegrees: clampDegrees(
-      (rawYawDegrees * headWeight + residualYaw * (1 - neckShare)) *
-        profile.headScale,
+      headContribution.yawDegrees,
       VIEWER_HEAD_ATTENTION.maxHorizontalAngleDegrees,
     ),
     pitchDegrees: clampDegrees(
-      (rawPitchDegrees * headWeight + residualPitch * (1 - neckShare)) *
-        profile.headScale,
+      headContribution.pitchDegrees,
       VIEWER_HEAD_ATTENTION.maxVerticalAngleDegrees,
     ),
   };
   const neckProjection = {
     yawDegrees: clampDegrees(
-      residualYaw * neckShare * profile.neckScale,
+      neckContribution.yawDegrees,
       VIEWER_NECK_ATTENTION.maxHorizontalAngleDegrees,
     ),
     pitchDegrees: clampDegrees(
-      residualPitch * neckShare * profile.neckScale,
+      neckContribution.pitchDegrees,
       VIEWER_NECK_ATTENTION.maxVerticalAngleDegrees,
     ),
   };
@@ -220,15 +236,41 @@ export function allocateGaze(
     eyeTarget,
     headProjection,
     neckProjection,
+    rawTargetAngle: {
+      yawDegrees: rawTargetYawDegrees,
+      pitchDegrees: rawTargetPitchDegrees,
+    },
+    headRelativeAngle: {
+      yawDegrees: rawYawDegrees,
+      pitchDegrees: rawPitchDegrees,
+    },
     rawEyeAngle: {
       yawDegrees: rawYawDegrees,
       pitchDegrees: rawPitchDegrees,
     },
+    eyeAngle: {
+      yawDegrees: eyeYawDegrees,
+      pitchDegrees: eyePitchDegrees,
+    },
+    residualAngle: {
+      yawDegrees: residualYaw,
+      pitchDegrees: residualPitch,
+    },
+    headContribution: { ...headProjection },
+    neckContribution: { ...neckProjection },
     eyeRadius,
+    handoffState,
   };
 }
 
 export const allocateGazeTarget = allocateGaze;
+
+export const GAZE_HANDOFF = {
+  headEnterDegrees: 3,
+  headReleaseDegrees: 2,
+  neckEnterDegrees: 5,
+  neckReleaseDegrees: 3,
+} as const;
 
 function getProfile(profile: GazeAllocationProfile): {
   headScale: number;
@@ -247,6 +289,89 @@ function getProfile(profile: GazeAllocationProfile): {
     default:
       return { headScale: 1, neckScale: 0.75 };
   }
+}
+
+interface NormalizedGazeBasis {
+  forward: Vector3;
+  right: Vector3;
+  up: Vector3;
+}
+
+interface RelativeAngle {
+  yawRadians: number;
+  pitchRadians: number;
+}
+
+function normalizeBasis(
+  basis: GazeAllocationBasis,
+): NormalizedGazeBasis | null {
+  const forward = basis.forward.clone();
+  const right = basis.right.clone();
+  const up = basis.up.clone();
+  if (
+    !normalizeVector(forward) ||
+    !normalizeVector(right) ||
+    !normalizeVector(up)
+  ) {
+    return null;
+  }
+
+  right.addScaledVector(forward, -right.dot(forward));
+  if (!normalizeVector(right)) return null;
+  up.copy(right).cross(forward).normalize();
+  if (!isFiniteVector(up) || up.lengthSq() <= 0.000001) return null;
+  if (up.dot(basis.up) < 0) up.negate();
+  return { forward, right, up };
+}
+
+function getRelativeAngle(
+  direction: Vector3,
+  neutralDirection: Vector3,
+  basis: NormalizedGazeBasis,
+  hasReferenceDepth: boolean,
+  subtractNeutralAngle: boolean,
+): RelativeAngle | null {
+  if (!isFiniteVector(direction) || !isFiniteVector(neutralDirection)) {
+    return null;
+  }
+
+  if (!hasReferenceDepth) {
+    return {
+      yawRadians: Math.atan2(
+        direction.dot(basis.right),
+        1,
+      ),
+      pitchRadians: Math.atan2(
+        direction.dot(basis.up),
+        1,
+      ),
+    };
+  }
+
+  const directionYaw = Math.atan2(
+    direction.dot(basis.right),
+    direction.dot(basis.forward),
+  );
+  const directionPitch = Math.atan2(
+    direction.dot(basis.up),
+    direction.dot(basis.forward),
+  );
+  const neutralYaw = Math.atan2(
+    neutralDirection.dot(basis.right),
+    neutralDirection.dot(basis.forward),
+  );
+  const neutralPitch = Math.atan2(
+    neutralDirection.dot(basis.up),
+    neutralDirection.dot(basis.forward),
+  );
+  return {
+    yawRadians: wrapRadians(
+      subtractNeutralAngle ? directionYaw - neutralYaw : directionYaw,
+    ),
+    pitchRadians: wrapRadians(
+      subtractNeutralAngle ? directionPitch - neutralPitch : directionPitch,
+    ),
+  };
 }
 
 function saturateEyeRadius(radius: number): number {
@@ -313,4 +438,12 @@ function toDegrees(radians: number): number {
 
 function toRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
+}
+
+function wrapRadians(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  let wrapped = value;
+  while (wrapped > Math.PI) wrapped -= Math.PI * 2;
+  while (wrapped < -Math.PI) wrapped += Math.PI * 2;
+  return wrapped;
 }

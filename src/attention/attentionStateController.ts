@@ -20,6 +20,8 @@ export const ATTENTION_STATES = [
 
 export type AttentionState = (typeof ATTENTION_STATES)[number];
 
+export const TASK_CUE_HINT_GRACE_MS = 100;
+
 export interface AttentionStateInput {
   now: number;
   attention: Attention;
@@ -48,6 +50,9 @@ export class AttentionStateController {
   private candidateStartedAt: number | null = null;
   private recoveryStartedAt: number | null = null;
   private viewerSource: 'camera' | 'conversation' | null = null;
+  private lastTaskCueHint: AttentionPriorityHint | null = null;
+  private lastTaskCueAttention: Attention | null = null;
+  private lastTaskCueHintAt: number | null = null;
 
   update(input: AttentionStateInput): AttentionStateFrame {
     const now = Number.isFinite(input.now) ? input.now : 0;
@@ -56,8 +61,22 @@ export class AttentionStateController {
     const cameraReacquiring =
       input.cameraEnabled && tracking?.state === 'Reacquire';
     const priorityHint = readPriorityHint(input.attention);
+    this.rememberTaskCue(priorityHint, input.attention, now);
+    const retainedPriorityHint =
+      priorityHint ?? this.readRetainedTaskCueHint(input.attention, now);
+    const retainedTaskCueAttention =
+      priorityHint === null && retainedPriorityHint !== null
+        ? this.lastTaskCueAttention ?? input.attention
+        : input.attention;
     const explicitTargetActive =
       input.explicitTargetActive && input.attention.targetMode !== 'task-cue';
+
+    if (
+      input.attention.targetMode !== 'task-cue' &&
+      priorityHint === null
+    ) {
+      this.clearTaskCue();
+    }
 
     if (
       explicitTargetActive &&
@@ -67,6 +86,7 @@ export class AttentionStateController {
       this.clearRecovery();
       this.state = 'AttendTarget';
       this.viewerSource = null;
+      this.clearTaskCue();
       return this.createTargetFrame(input.attention);
     }
 
@@ -88,16 +108,22 @@ export class AttentionStateController {
 
     if (this.state === 'AttendViewer') {
       if (this.viewerSource === 'conversation') {
-        if (priorityHint) {
-          return this.beginPriorityHint(priorityHint, input.attention);
+        if (retainedPriorityHint) {
+          return this.beginPriorityHint(
+            retainedPriorityHint,
+            retainedTaskCueAttention,
+          );
         }
         return this.beginRecovery(now);
       }
       if (cameraActive) {
         return this.createViewerFrame(input.attention, tracking, 'camera');
       }
-      if (priorityHint) {
-        return this.beginPriorityHint(priorityHint, input.attention);
+      if (retainedPriorityHint) {
+        return this.beginPriorityHint(
+          retainedPriorityHint,
+          retainedTaskCueAttention,
+        );
       }
       return this.beginRecovery(now);
     }
@@ -109,8 +135,11 @@ export class AttentionStateController {
         this.clearRecovery();
         return this.createViewerFrame(input.attention, tracking, 'camera');
       }
-      if (priorityHint) {
-        return this.beginPriorityHint(priorityHint, input.attention);
+      if (retainedPriorityHint) {
+        return this.beginPriorityHint(
+          retainedPriorityHint,
+          retainedTaskCueAttention,
+        );
       }
       return this.beginRecovery(now);
     }
@@ -122,8 +151,11 @@ export class AttentionStateController {
         this.clearRecovery();
         return this.createViewerFrame(input.attention, tracking, 'camera');
       }
-      if (priorityHint) {
-        return this.beginPriorityHint(priorityHint, input.attention);
+      if (retainedPriorityHint) {
+        return this.beginPriorityHint(
+          retainedPriorityHint,
+          retainedTaskCueAttention,
+        );
       }
       if (
         this.recoveryStartedAt !== null &&
@@ -144,8 +176,11 @@ export class AttentionStateController {
       return this.createViewerFrame(input.attention, tracking, 'camera');
     }
 
-    if (this.state === 'Idle' && priorityHint) {
-      return this.beginPriorityHint(priorityHint, input.attention);
+    if (this.state === 'Idle' && retainedPriorityHint) {
+      return this.beginPriorityHint(
+        retainedPriorityHint,
+        retainedTaskCueAttention,
+      );
     }
 
     const cameraCandidate =
@@ -175,6 +210,7 @@ export class AttentionStateController {
     this.clearCandidate();
     this.clearRecovery();
     this.viewerSource = null;
+    this.clearTaskCue();
   }
 
   private beginRecovery(now: number): AttentionStateFrame {
@@ -312,6 +348,55 @@ export class AttentionStateController {
 
   private clearRecovery(): void {
     this.recoveryStartedAt = null;
+  }
+
+  private rememberTaskCue(
+    priorityHint: AttentionPriorityHint | null,
+    attention: Attention,
+    now: number,
+  ): void {
+    if (priorityHint === null || attention.targetMode !== 'task-cue') return;
+    this.lastTaskCueHint = {
+      ...priorityHint,
+      spatialTarget: priorityHint.spatialTarget
+        ? { ...priorityHint.spatialTarget }
+        : undefined,
+    };
+    this.lastTaskCueAttention = {
+      ...attention,
+      spatialTarget: attention.spatialTarget
+        ? { ...attention.spatialTarget }
+        : undefined,
+      priorityHint: this.lastTaskCueHint,
+      softCue: attention.softCue
+        ? {
+            ...attention.softCue,
+            spatialTarget: { ...attention.softCue.spatialTarget },
+          }
+        : undefined,
+    };
+    this.lastTaskCueHintAt = now;
+  }
+
+  private readRetainedTaskCueHint(
+    attention: Attention,
+    now: number,
+  ): AttentionPriorityHint | null {
+    if (
+      attention.targetMode !== 'task-cue' ||
+      this.lastTaskCueHint === null ||
+      this.lastTaskCueHintAt === null ||
+      now - this.lastTaskCueHintAt > TASK_CUE_HINT_GRACE_MS
+    ) {
+      return null;
+    }
+    return this.lastTaskCueHint;
+  }
+
+  private clearTaskCue(): void {
+    this.lastTaskCueHint = null;
+    this.lastTaskCueAttention = null;
+    this.lastTaskCueHintAt = null;
   }
 }
 

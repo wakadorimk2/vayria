@@ -267,6 +267,13 @@ export class IdleController {
     this.appliedOverlay.clear();
   }
 
+  /** Restores the captured base pose before a new gaze allocation is read. */
+  resetForGazeFrame(): void {
+    if (!this.enabled) return;
+    this.removeOverlay();
+    this.restoreCapturedRotations();
+  }
+
   setEnabled(enabled: boolean): void {
     if (this.enabled === enabled) return;
     this.enabled = enabled;

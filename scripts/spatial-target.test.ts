@@ -306,13 +306,31 @@ test('bridge keeps head projection near zero for a centered target', () => {
   assert.ok(Math.abs(result.headProjection.pitchDegrees) < 0.01);
 });
 
+test('fixed-target probe changes allocation only, not the resolved target', () => {
+  const bridge = new SpatialTargetBridge();
+  const result = bridge.resolve({
+    camera: createBridgeCamera(),
+    eyePosition: new Vector3(0, 0, 0),
+    neutralTarget: new Vector3(0, 0, 0),
+    snapshot: createSnapshot(750, 500),
+    stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
+    fixedTarget: new Vector3(0, 0, 0),
+  });
+
+  assert.ok(result);
+  assert.ok(result.target.x > 0);
+  assert.deepEqual(result.rawTarget.toArray(), [0, 0, 0]);
+  assert.ok(Math.abs(result.rawTargetAngle.yawDegrees) < 0.01);
+  assert.ok(Math.abs(result.eyeTarget.x) < 0.01);
+});
+
 test('bridge increases head projection with target angle before the cap', () => {
   const bridge = new SpatialTargetBridge();
   const result = bridge.resolve({
     camera: createBridgeCamera(),
     eyePosition: new Vector3(0, 0, 0),
     neutralTarget: new Vector3(0, 0, 0),
-    snapshot: createSnapshot(540, 500),
+    snapshot: createSnapshot(580, 500),
     stageRect: { left: 0, top: 0, width: 1_000, height: 1_000 },
   });
 
@@ -343,7 +361,13 @@ test('world target cache holds target and head projection across a short bridge 
     eyeTarget: new Vector3(0.5, 1.5, 2.5),
     headProjection: { yawDegrees: 4, pitchDegrees: -2 },
     neckProjection: { yawDegrees: 1, pitchDegrees: -0.5 },
+    rawTargetAngle: { yawDegrees: 14, pitchDegrees: -7 },
+    headRelativeAngle: { yawDegrees: 12, pitchDegrees: -6 },
     rawEyeAngle: { yawDegrees: 12, pitchDegrees: -6 },
+    eyeAngle: { yawDegrees: 8, pitchDegrees: -4 },
+    residualAngle: { yawDegrees: 4, pitchDegrees: -2 },
+    headContribution: { yawDegrees: 4, pitchDegrees: -2 },
+    neckContribution: { yawDegrees: 1, pitchDegrees: -0.5 },
     eyeRadius: 0.8,
   };
 
@@ -373,7 +397,13 @@ test('world target cache holds target and head projection across a short bridge 
   assert.deepEqual(grace.eyeTarget?.toArray(), [0.5, 1.5, 2.5]);
   assert.deepEqual(grace.headProjection, { yawDegrees: 4, pitchDegrees: -2 });
   assert.deepEqual(grace.neckProjection, { yawDegrees: 1, pitchDegrees: -0.5 });
+  assert.deepEqual(grace.rawTargetAngle, { yawDegrees: 14, pitchDegrees: -7 });
+  assert.deepEqual(grace.headRelativeAngle, { yawDegrees: 12, pitchDegrees: -6 });
   assert.deepEqual(grace.rawEyeAngle, { yawDegrees: 12, pitchDegrees: -6 });
+  assert.deepEqual(grace.eyeAngle, { yawDegrees: 8, pitchDegrees: -4 });
+  assert.deepEqual(grace.residualAngle, { yawDegrees: 4, pitchDegrees: -2 });
+  assert.deepEqual(grace.headContribution, { yawDegrees: 4, pitchDegrees: -2 });
+  assert.deepEqual(grace.neckContribution, { yawDegrees: 1, pitchDegrees: -0.5 });
   assert.equal(grace.eyeRadius, 0.8);
 
   const expired = cache.resolve({
@@ -394,7 +424,13 @@ test('world target cache keeps allocation profiles isolated', () => {
     eyeTarget: new Vector3(0.5, 0, 1),
     headProjection: { yawDegrees: 2, pitchDegrees: 0 },
     neckProjection: { yawDegrees: 1, pitchDegrees: 0 },
+    rawTargetAngle: { yawDegrees: 20, pitchDegrees: 0 },
+    headRelativeAngle: { yawDegrees: 18, pitchDegrees: 0 },
     rawEyeAngle: { yawDegrees: 18, pitchDegrees: 0 },
+    eyeAngle: { yawDegrees: 16, pitchDegrees: 0 },
+    residualAngle: { yawDegrees: 2, pitchDegrees: 0 },
+    headContribution: { yawDegrees: 2, pitchDegrees: 0 },
+    neckContribution: { yawDegrees: 1, pitchDegrees: 0 },
     eyeRadius: 1,
   };
   const softCue = {
@@ -402,7 +438,13 @@ test('world target cache keeps allocation profiles isolated', () => {
     eyeTarget: new Vector3(-0.2, 0, 1),
     headProjection: { yawDegrees: 0, pitchDegrees: 0 },
     neckProjection: { yawDegrees: 0, pitchDegrees: 0 },
+    rawTargetAngle: { yawDegrees: -20, pitchDegrees: 0 },
+    headRelativeAngle: { yawDegrees: -18, pitchDegrees: 0 },
     rawEyeAngle: { yawDegrees: -18, pitchDegrees: 0 },
+    eyeAngle: { yawDegrees: -16, pitchDegrees: 0 },
+    residualAngle: { yawDegrees: -2, pitchDegrees: 0 },
+    headContribution: { yawDegrees: 0, pitchDegrees: 0 },
+    neckContribution: { yawDegrees: 0, pitchDegrees: 0 },
     eyeRadius: 1,
   };
 

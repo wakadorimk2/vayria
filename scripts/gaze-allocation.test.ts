@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Vector3 } from 'three';
+import { Object3D, Vector3 } from 'three';
 import {
   EYE_GAZE_ENVELOPE,
   allocateGaze,
 } from '../src/avatar/gazeAllocation.js';
+import { GazeProjectionFeedback } from '../src/avatar/gazeProjectionFeedback.js';
 
 const basis = {
   forward: new Vector3(0, 0, 1),
@@ -91,8 +92,8 @@ test('soft saturation is monotonic and continuous at the knee', () => {
 });
 
 test('head begins near the comfort radius and neck receives large residuals', () => {
-  const belowHeadHandoff = allocate(8);
-  const headHandoff = allocate(10);
+  const belowHeadHandoff = allocate(12);
+  const headHandoff = allocate(22);
   const sustained = allocate(30);
 
   assert.equal(belowHeadHandoff.headProjection.yawDegrees, 0);
@@ -104,11 +105,105 @@ test('head begins near the comfort radius and neck receives large residuals', ()
   assert.ok(Math.abs(sustained.neckProjection.pitchDegrees) <= 3);
 });
 
+test('head-relative demand decreases when the head turns toward the target', () => {
+  const target = targetAt(20);
+  const turnedHeadBasis = {
+    forward: new Vector3(0, 0, 1).applyAxisAngle(
+      new Vector3(0, 1, 0),
+      (8 * Math.PI) / 180,
+    ),
+    right: new Vector3(1, 0, 0).applyAxisAngle(
+      new Vector3(0, 1, 0),
+      (8 * Math.PI) / 180,
+    ),
+    up: new Vector3(0, 1, 0),
+  };
+  const result = allocateGaze({
+    eyePosition: new Vector3(0, 0, 0),
+    neutralTarget: new Vector3(0, 0, 1),
+    resolvedTarget: target,
+    basis,
+    headBasis: turnedHeadBasis,
+  });
+
+  assert.ok(result);
+  assert.ok(result.rawTargetAngle.yawDegrees > result.headRelativeAngle.yawDegrees);
+  assert.ok(Math.abs(result.headRelativeAngle.yawDegrees - 12) < 0.01);
+});
+
+test('head projection uses the eye residual instead of re-adding raw demand', () => {
+  const result = allocate(30);
+
+  assert.ok(result.residualAngle.yawDegrees > 0);
+  assert.ok(result.headProjection.yawDegrees <= result.residualAngle.yawDegrees);
+  assert.ok(result.headProjection.yawDegrees < result.rawEyeAngle.yawDegrees);
+  assert.equal(result.headContribution.yawDegrees, result.headProjection.yawDegrees);
+  assert.equal(result.neckContribution.yawDegrees, result.neckProjection.yawDegrees);
+});
+
+test('handoff thresholds hold state through a small residual decrease', () => {
+  const acquired = allocateGaze({
+    eyePosition: new Vector3(0, 0, 0),
+    neutralTarget: new Vector3(0, 0, 1),
+    resolvedTarget: targetAt(25),
+    basis,
+  });
+  assert.ok(acquired);
+  assert.equal(acquired.handoffState.headActive, true);
+
+  const held = allocateGaze({
+    eyePosition: new Vector3(0, 0, 0),
+    neutralTarget: new Vector3(0, 0, 1),
+    resolvedTarget: targetAt(20.5),
+    basis,
+    handoffState: acquired.handoffState,
+  });
+  assert.ok(held);
+  assert.equal(held.handoffState.headActive, true);
+
+  const released = allocateGaze({
+    eyePosition: new Vector3(0, 0, 0),
+    neutralTarget: new Vector3(0, 0, 1),
+    resolvedTarget: targetAt(12),
+    basis,
+    handoffState: held.handoffState,
+  });
+  assert.ok(released);
+  assert.equal(released.handoffState.headActive, false);
+});
+
+test('gaze feedback applies only the previous gaze offset to the head basis', () => {
+  const head = new Object3D();
+  head.updateMatrixWorld(true);
+  const output = {
+    forward: new Vector3(),
+    right: new Vector3(),
+    up: new Vector3(),
+  };
+  const feedback = new GazeProjectionFeedback();
+  const neutralBasis = feedback.createHeadBasis(head, output);
+  assert.ok(neutralBasis);
+  const neutralForward = neutralBasis.forward.clone();
+
+  feedback.set({
+    head: { yawDegrees: 8, pitchDegrees: 0 },
+    neck: { yawDegrees: 0, pitchDegrees: 0 },
+  });
+  const projectedBasis = feedback.createHeadBasis(head, output);
+  assert.ok(projectedBasis);
+  assert.ok(projectedBasis.forward.distanceTo(neutralForward) > 0.01);
+
+  feedback.reset();
+  const resetBasis = feedback.createHeadBasis(head, output);
+  assert.ok(resetBasis);
+  assert.ok(resetBasis.forward.distanceTo(neutralForward) < 0.0001);
+});
+
 test('viewer and soft-cue profiles preserve their allocation contracts', () => {
-  const viewer = allocate(12, 0, 'viewer');
-  const spatial = allocate(12, 0, 'spatial');
-  const viewerNeck = allocate(20, 0, 'viewer');
-  const spatialNeck = allocate(20, 0, 'spatial');
+  const viewer = allocate(22, 0, 'viewer');
+  const spatial = allocate(22, 0, 'spatial');
+  const viewerNeck = allocate(25, 0, 'viewer');
+  const spatialNeck = allocate(25, 0, 'spatial');
   const softCue = allocate(30, 15, 'soft-cue');
 
   assert.ok(viewer.headProjection.yawDegrees < spatial.headProjection.yawDegrees);
