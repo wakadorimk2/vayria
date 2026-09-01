@@ -1,7 +1,6 @@
 import { createServer } from 'node:http';
 import {
   unwatchFile,
-  watch as watchFileSystem,
   watchFile,
 } from 'node:fs';
 import {
@@ -622,11 +621,9 @@ export async function createProjectViewServer({
     });
   });
 
-  let watcher = null;
   let debounceTimer = null;
   let pollingListener = null;
   if (watch) {
-    const projectName = projectPath.slice(dirname(projectPath).length + 1).toLowerCase();
     const scheduleRegeneration = () => {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
@@ -641,14 +638,8 @@ export async function createProjectViewServer({
       }, 80);
     };
 
-    watcher = watchFileSystem(dirname(projectPath), (eventType, changedName) => {
-      if (!changedName || changedName.toString().toLowerCase() !== projectName) return;
-      scheduleRegeneration();
-    });
-
-    // Some editors replace the source file atomically. Directory events are not
-    // reliable for that save strategy on every Windows filesystem, so poll the
-    // source metadata as a fallback.
+    // Polling handles both direct writes and atomic replacement without relying
+    // on platform-specific directory watcher behavior.
     pollingListener = (current, previous) => {
       if (current.mtimeMs === previous.mtimeMs && current.size === previous.size) return;
       scheduleRegeneration();
@@ -665,7 +656,6 @@ export async function createProjectViewServer({
     server,
     async close() {
       clearTimeout(debounceTimer);
-      watcher?.close();
       if (pollingListener) unwatchFile(projectPath, pollingListener);
       for (const client of clients) client.end();
       clients.clear();
