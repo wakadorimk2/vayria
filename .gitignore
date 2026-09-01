@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.project-view/
 *.log
 stress-results/
 playcheck-results/local/
