@@ -12,8 +12,6 @@ import { useCameraAttention } from './attention/useCameraAttention';
 import { AttentionEnergyController } from './attention/attentionEnergyController';
 import {
   DragAttentionController,
-  DRAG_ATTENTION_POST_END_HOLD_MS,
-  DRAG_ATTENTION_SALIENCE,
   DRAG_ATTENTION_TICK_MS,
 } from './attention/dragAttentionController';
 import { useAudioLipSync } from './audio/useAudioLipSync';
@@ -491,6 +489,7 @@ export default function App() {
     useState<VrmStageHandle | null>(null);
   const nonSpeechTimerRef = useRef<number | null>(null);
   const cardAttentionTimerRef = useRef<number | null>(null);
+  const cardAttentionStartedAtRef = useRef<number | null>(null);
   const cardAttentionFallbackTimerRef = useRef<number | null>(null);
   const dragAttentionTickRef = useRef<number | null>(null);
   const dragAttentionLastTickAtRef = useRef<number | null>(null);
@@ -565,6 +564,7 @@ export default function App() {
   const scheduleCardAttentionSequence = useCallback(
     (transientDurationMs: number) => {
       clearCardAttentionTimers();
+      cardAttentionStartedAtRef.current = readAnimationNow();
       setCardAttentionPhase('transient');
 
       const transientTimerId = window.setTimeout(() => {
@@ -579,6 +579,7 @@ export default function App() {
           cardAttentionFallbackTimerRef.current = null;
           spatialTargetRegistry.clearTransient('game');
           cardAttentionEnergyControllerRef.current.clear();
+          cardAttentionStartedAtRef.current = null;
           setCardAttentionPhase(null);
         }, CARD_INTERACTION_ATTENTION_DURATION_MS);
         cardAttentionFallbackTimerRef.current = defaultTimerId;
@@ -591,12 +592,14 @@ export default function App() {
   const scheduleCardDefaultAttention = useCallback(() => {
     clearCardAttentionTimers();
     spatialTargetRegistry.clearTransient('game');
+    cardAttentionStartedAtRef.current = readAnimationNow();
     setCardAttentionPhase('default');
 
     const defaultTimerId = window.setTimeout(() => {
       if (cardAttentionFallbackTimerRef.current !== defaultTimerId) return;
       cardAttentionFallbackTimerRef.current = null;
       cardAttentionEnergyControllerRef.current.clear();
+      cardAttentionStartedAtRef.current = null;
       setCardAttentionPhase(null);
     }, CARD_INTERACTION_ATTENTION_DURATION_MS);
     cardAttentionFallbackTimerRef.current = defaultTimerId;
@@ -609,26 +612,13 @@ export default function App() {
     dragAttentionSpeedRef.current = null;
     spatialTargetRegistry.setTransientDragActive('game', false);
     clearCardAttentionTimers();
+    cardAttentionStartedAtRef.current = null;
     if (!wasActive) return;
-    if (
-      !isExhibitionMode ||
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      cardAttentionEnergyControllerRef.current.clear();
-      spatialTargetRegistry.clearTransient('game');
-      setCardAttentionPhase(null);
-      return;
-    }
-
-    cardAttentionEnergyControllerRef.current.hold(
-      readAnimationNow(),
-      previousSnapshot.gazeStrength,
-    );
-    scheduleCardAttentionSequence(DRAG_ATTENTION_POST_END_HOLD_MS);
+    cardAttentionEnergyControllerRef.current.clear();
+    spatialTargetRegistry.clearTransient('game');
+    setCardAttentionPhase(null);
   }, [
     clearCardAttentionTimers,
-    isExhibitionMode,
-    scheduleCardAttentionSequence,
     spatialTargetRegistry,
   ]);
 
@@ -643,6 +633,7 @@ export default function App() {
       controller.end();
       dragAttentionSpeedRef.current = null;
       energyController.clear();
+      cardAttentionStartedAtRef.current = null;
       clearCardAttentionTimers();
       const disposeTimerId = window.setTimeout(() => {
         if (spatialTargetDisposeTimerRef.current !== disposeTimerId) return;
@@ -663,31 +654,28 @@ export default function App() {
     const now = readAnimationNow();
     const cardAttentionEnergy =
       cardAttentionEnergyControllerRef.current.update(now);
-    const priorityHint = logicalAttention.priorityHint;
-    const dynamicPriorityHint =
-      priorityHint?.target === 'game' &&
-      priorityHint.spatialTarget?.kind === 'game'
-        ? {
-            ...priorityHint,
-            gazeStrength:
-              dragAttentionSnapshot.phase !== 'idle'
-                ? dragAttentionSnapshot.gazeStrength
-                : cardAttentionEnergy.energy,
-          }
-        : priorityHint;
-    const dynamicSoftCue = logicalAttention.softCue
+    const dynamicGazeOverride = logicalAttention.gazeOverride
       ? {
-          ...logicalAttention.softCue,
-          strength:
+          ...logicalAttention.gazeOverride,
+          elapsedMs:
             dragAttentionSnapshot.phase !== 'idle'
-              ? dragAttentionSnapshot.gazeStrength
+              ? dragAttentionSnapshot.elapsedMs
+              : Math.max(
+                  0,
+                  now - (cardAttentionStartedAtRef.current ?? now),
+                ),
+          energy:
+            dragAttentionSnapshot.phase !== 'idle'
+              ? dragAttentionSnapshot.attentionEnergy
               : cardAttentionEnergy.energy,
+          viewerCheckIn:
+            dragAttentionSnapshot.phase !== 'idle' &&
+            dragAttentionSnapshot.viewerCheckIn,
         }
       : undefined;
     return {
       ...logicalAttention,
-      priorityHint: dynamicPriorityHint,
-      softCue: dynamicSoftCue,
+      gazeOverride: dynamicGazeOverride,
       position: cameraSnapshot.position,
       confidence: cameraSnapshot.confidence,
       updatedAt: Math.max(
@@ -1543,61 +1531,44 @@ export default function App() {
     const dragAcquireActive = cardAttentionPhase === 'drag-acquire';
     const dragPriorityActive = cardAttentionPhase === 'drag-priority';
     const cardTaskCueActive = cardAttentionPhase !== null;
-    const semanticTargetOwnsPrimary =
-      logicalTargetFromPerformance === 'game' ||
-      logicalTargetFromPerformance === 'chat';
-    const cardCueOwnsPrimary =
-      cardTaskCueActive && !semanticTargetOwnsPrimary;
-    const logicalAttentionTarget =
-      cardCueOwnsPrimary ? 'game' : logicalTargetFromPerformance;
-    const cardSpatialTarget: Attention['spatialTarget'] =
-      cardCueOwnsPrimary
-        ? cardAttentionPhase === 'transient' ||
-          dragAcquireActive ||
-          dragPriorityActive
-          ? { kind: 'game', anchor: 'transient' }
-          : { kind: 'game', anchor: 'default' }
-        : undefined;
+    const logicalAttentionTarget = logicalTargetFromPerformance;
+    const cardSpatialTarget = cardTaskCueActive
+      ? cardAttentionPhase === 'transient' ||
+        dragAcquireActive ||
+        dragPriorityActive
+        ? ({ kind: 'game', anchor: 'transient' } as const)
+        : ({ kind: 'game', anchor: 'default' } as const)
+      : undefined;
     const spatialTarget: Attention['spatialTarget'] =
-      cardSpatialTarget ??
-      (logicalAttentionTarget === 'game' ||
+      logicalAttentionTarget === 'game' ||
       logicalAttentionTarget === 'chat' ||
       logicalAttentionTarget === 'viewer'
         ? { kind: logicalAttentionTarget, anchor: 'default' }
-        : undefined);
+        : undefined;
     const cardEnergy = cardAttentionEnergyControllerRef.current.snapshot();
     const dragEnergy = dragAttentionControllerRef.current.snapshot();
-    const priorityHint: Attention['priorityHint'] = cardCueOwnsPrimary
+    const gazeOverride: Attention['gazeOverride'] = cardSpatialTarget
       ? {
-          target: 'game',
-          salience: dragPriorityActive
-            ? DRAG_ATTENTION_SALIENCE
-            : 0.35,
-          spatialTarget: cardSpatialTarget ?? {
-            kind: 'game',
-            anchor: 'default',
-          },
-          gazeStrength:
-            dragEnergy.phase !== 'idle'
-              ? dragEnergy.gazeStrength
-              : cardEnergy.energy,
-        }
-      : undefined;
-    const softCue: Attention['softCue'] = cardCueOwnsPrimary && cardSpatialTarget
-      ? {
+          kind:
+            dragAcquireActive || dragPriorityActive
+              ? 'card-drag'
+              : 'card-transient',
           target: 'game',
           spatialTarget: cardSpatialTarget,
-          strength:
+          elapsedMs: dragEnergy.elapsedMs,
+          energy:
             dragEnergy.phase !== 'idle'
-              ? dragEnergy.gazeStrength
+              ? dragEnergy.attentionEnergy
               : cardEnergy.energy,
+          viewerCheckIn:
+            dragEnergy.phase !== 'idle' && dragEnergy.viewerCheckIn,
         }
       : undefined;
     logicalAttentionRef.current = {
       ...performer.state.attention,
       target: logicalAttentionTarget,
       strength:
-        cardCueOwnsPrimary || listeningReaction
+        listeningReaction
           ? 1
           : activePlan !== null
             ? Math.max(0.72, performer.state.attention.strength)
@@ -1605,9 +1576,8 @@ export default function App() {
       position: null,
       confidence: 0,
       spatialTarget,
-      priorityHint,
-      targetMode: cardCueOwnsPrimary ? 'task-cue' : 'semantic',
-      softCue,
+      targetMode: performer.state.attention.targetMode ?? 'semantic',
+      gazeOverride,
     };
   }, [
     activePlan,
@@ -1682,6 +1652,7 @@ export default function App() {
     dragAttentionControllerRef.current.end();
     dragAttentionSpeedRef.current = null;
     cardAttentionEnergyControllerRef.current.clear();
+    cardAttentionStartedAtRef.current = null;
     spatialTargetRegistry.clearTransient('game');
     setCardAttentionPhase(null);
 
@@ -1751,6 +1722,7 @@ export default function App() {
         );
         dragAttentionSpeedRef.current = null;
         dragAttentionLastTickAtRef.current = readAnimationNow();
+        cardAttentionStartedAtRef.current = dragAttentionLastTickAtRef.current;
         setCardAttentionPhase('drag-acquire');
         scheduleDragAttentionTick();
         return;

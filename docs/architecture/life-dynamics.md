@@ -4,17 +4,19 @@
 
 This document defines the design baseline for LifeDynamics in issue #65.
 
-LifeDynamics is a future session-scoped runtime state.
-This document does not implement LifeDynamics.
-It does not add a public API, a TypeScript type, or a runtime class.
+LifeDynamics is now the default session-scoped avatar runtime.
+The default path creates the Life, Blink, and Orienting adapters.
+Gesture remains internal temporal state and has no rendering adapter.
+The default path does not create `MotionPlayer` or the legacy `BlinkController`.
+Use `?life-dynamics=legacy` to restore the retained Idle, Blink, and VRMA path.
+The legacy `?life-dynamics-poc=1` input remains compatible but no longer enables a separate mode.
 
 Issue #66 remains the parent issue for the wider performer architecture.
 Issue #64 covers autonomous speech timing.
 The implementation PoC will use a separate follow-up issue.
 
-The current M1 runtime remains unchanged.
-VRMA remains the main authored body motion.
-New procedural merging stays disabled until a PoC validates ownership and safety.
+The public Performer State and gaze target formats remain unchanged.
+The VRMA types, assets, and public handles remain available for rollback compatibility.
 
 ## Ownership boundary
 

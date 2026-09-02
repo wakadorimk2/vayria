@@ -6,6 +6,7 @@ import {
   allocateGaze,
 } from '../src/avatar/gazeAllocation.js';
 import { GazeProjectionFeedback } from '../src/avatar/gazeProjectionFeedback.js';
+import { toVrmBonePitchDegrees } from '../src/avatar/vrmBoneRotation.js';
 
 const basis = {
   forward: new Vector3(0, 0, 1),
@@ -225,17 +226,24 @@ test('gaze feedback applies only the previous gaze offset to the head basis', ()
   const neutralForward = neutralBasis.forward.clone();
 
   feedback.set({
-    head: { yawDegrees: 8, pitchDegrees: 0 },
+    head: { yawDegrees: 8, pitchDegrees: 10 },
     neck: { yawDegrees: 0, pitchDegrees: 0 },
   });
   const projectedBasis = feedback.createHeadBasis(head, null, output);
   assert.ok(projectedBasis);
   assert.ok(projectedBasis.forward.distanceTo(neutralForward) > 0.01);
+  assert.ok(projectedBasis.forward.y > 0.1);
 
   feedback.reset();
   const resetBasis = feedback.createHeadBasis(head, null, output);
   assert.ok(resetBasis);
   assert.ok(resetBasis.forward.distanceTo(neutralForward) < 0.0001);
+});
+
+test('viewer-up pitch converts to the opposite VRM bone pitch', () => {
+  assert.equal(toVrmBonePitchDegrees(6), -6);
+  assert.equal(toVrmBonePitchDegrees(-6), 6);
+  assert.equal(toVrmBonePitchDegrees(0), 0);
 });
 
 test('gaze feedback uses the VRM face-front rotation for the neutral basis', () => {

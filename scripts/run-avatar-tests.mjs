@@ -13,8 +13,12 @@ const testFiles = [
     'node_modules/.tmp/avatar-test/scripts/attention-engagement.test.js',
   ),
   resolve('node_modules/.tmp/avatar-test/scripts/attention-target.test.js'),
+  resolve('node_modules/.tmp/avatar-test/scripts/card-gaze-override.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/idle-gaze.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/life-dynamics.test.js'),
+  resolve(
+    'node_modules/.tmp/avatar-test/scripts/life-dynamics-runtime.test.js',
+  ),
   resolve(
     'node_modules/.tmp/avatar-test/scripts/life-dynamics-blink-adapter.test.js',
   ),
@@ -26,6 +30,9 @@ const testFiles = [
   ),
   resolve('node_modules/.tmp/avatar-test/scripts/gaze-allocation.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/spatial-target.test.js'),
+  resolve(
+    'node_modules/.tmp/avatar-test/scripts/vrm-look-at-boundary.test.js',
+  ),
 ];
 const result = spawnSync(process.execPath, ['--test', ...testFiles], {
   stdio: 'inherit',

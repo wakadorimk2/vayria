@@ -10,17 +10,19 @@ import type { VRM } from '@pixiv/three-vrm';
 import {
   VIEWER_HEAD_ATTENTION,
   VIEWER_NECK_ATTENTION,
-  type ViewerHeadBias,
 } from './attentionTarget.js';
 import type { LifeDynamicsSnapshot } from './lifeDynamics.js';
+import type { VrmBoneBias } from './vrmBoneRotation.js';
 
 export interface LifeDynamicsOrientingFrame {
   readonly snapshot: LifeDynamicsSnapshot;
   readonly neutralTarget: Vector3;
   readonly desiredTarget: Vector3 | null;
-  readonly headBias: ViewerHeadBias;
-  readonly neckBias: ViewerHeadBias;
+  readonly headBias: VrmBoneBias;
+  readonly neckBias: VrmBoneBias;
   readonly vrmaActive: boolean;
+  /** The caller already applied the gaze-layer participation weights. */
+  readonly precomposedGaze?: boolean;
 }
 
 /**
@@ -54,13 +56,15 @@ export class LifeDynamicsOrientingAdapter {
 
     if (
       frame.vrmaActive ||
-      frame.snapshot.orienting.target === null ||
+      (!frame.precomposedGaze && frame.snapshot.orienting.target === null) ||
       frame.desiredTarget === null
     ) {
       return;
     }
 
-    const eyeWeight = clamp(frame.snapshot.orienting.eyeWeight);
+    const eyeWeight = frame.precomposedGaze
+      ? 1
+      : clamp(frame.snapshot.orienting.eyeWeight);
     if (this.vrm.lookAt) {
       this.gazeTarget.position.lerpVectors(
         frame.neutralTarget,
@@ -70,7 +74,9 @@ export class LifeDynamicsOrientingAdapter {
       this.vrm.lookAt.target = this.gazeTarget;
     }
 
-    const headWeight = clamp(frame.snapshot.orienting.headWeight);
+    const headWeight = frame.precomposedGaze
+      ? 1
+      : clamp(frame.snapshot.orienting.headWeight);
     if (headWeight <= 0) return;
 
     if (this.headNode) {

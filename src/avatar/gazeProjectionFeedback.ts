@@ -7,6 +7,7 @@ import {
 } from 'three';
 import type { ViewerHeadBias } from './attentionTarget.js';
 import type { GazeAllocationBasis } from './gazeAllocation.js';
+import { toVrmBonePitchDegrees } from './vrmBoneRotation.js';
 
 export interface GazeFaceFrontProvider {
   getFaceFrontQuaternion(target: Quaternion): Quaternion;
@@ -119,7 +120,7 @@ function setOffsetQuaternion(
   bias: ViewerHeadBias,
 ): void {
   euler.set(
-    MathUtils.degToRad(bias.pitchDegrees),
+    MathUtils.degToRad(toVrmBonePitchDegrees(bias.pitchDegrees)),
     MathUtils.degToRad(bias.yawDegrees),
     0,
   );

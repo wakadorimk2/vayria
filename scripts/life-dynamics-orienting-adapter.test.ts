@@ -127,6 +127,26 @@ test('adapter provides a head fallback when LookAt is unavailable', () => {
   assert.doesNotThrow(() => adapter.reset());
 });
 
+test('adapter applies the supplied VRM bone pitch without changing its sign', () => {
+  const { head, neck, vrm } = createFakeVrm();
+  const adapter = new LifeDynamicsOrientingAdapter(vrm);
+
+  adapter.apply({
+    snapshot: createSnapshot(),
+    neutralTarget: new Vector3(0, 1, 2),
+    desiredTarget: new Vector3(2, 1, 5),
+    headBias: { yawDegrees: 0, pitchDegrees: -4 },
+    neckBias: { yawDegrees: 0, pitchDegrees: -2 },
+    vrmaActive: false,
+  });
+
+  const headRotation = new Euler().setFromQuaternion(head.quaternion, 'XYZ');
+  const neckRotation = new Euler().setFromQuaternion(neck.quaternion, 'XYZ');
+  assert.ok(headRotation.x < 0);
+  assert.ok(neckRotation.x < 0);
+  adapter.reset();
+});
+
 test('adapter ignores a missing neck bone safely', () => {
   const { vrm } = createFakeVrm(true, false);
   const adapter = new LifeDynamicsOrientingAdapter(vrm);
@@ -160,4 +180,34 @@ test('adapter produces no output while VRMA is active', () => {
   assert.equal(lookAt?.target, null);
   assert.ok(head.quaternion.equals(new Quaternion()));
   assert.ok(neck.quaternion.equals(new Quaternion()));
+});
+
+test('adapter applies a precomposed gaze while the base orienting target is empty', () => {
+  const { head, neck, lookAt, vrm } = createFakeVrm();
+  const adapter = new LifeDynamicsOrientingAdapter(vrm);
+  const activeSnapshot = createSnapshot();
+  const snapshot: LifeDynamicsSnapshot = {
+    ...activeSnapshot,
+    orienting: {
+      ...activeSnapshot.orienting,
+      target: null,
+      eyeWeight: 0,
+      headWeight: 0,
+    },
+  };
+  const desiredTarget = new Vector3(2, 1, 5);
+
+  adapter.apply({
+    snapshot,
+    neutralTarget: new Vector3(0, 1, 2),
+    desiredTarget,
+    headBias: { yawDegrees: 4, pitchDegrees: -2 },
+    neckBias: { yawDegrees: 2, pitchDegrees: -1 },
+    vrmaActive: false,
+    precomposedGaze: true,
+  });
+
+  assert.ok(lookAt?.target?.position.equals(desiredTarget));
+  assert.equal(head.quaternion.equals(new Quaternion()), false);
+  assert.equal(neck.quaternion.equals(new Quaternion()), false);
 });

@@ -97,6 +97,21 @@ export interface AttentionSoftCue {
   strength: number;
 }
 
+export type AttentionGazeOverrideKind = 'card-drag' | 'card-transient';
+
+/**
+ * Temporarily redirects gaze output without replacing the underlying
+ * attention target or behavior state.
+ */
+export interface AttentionGazeOverride {
+  kind: AttentionGazeOverrideKind;
+  target: Exclude<AttentionTarget, 'none'>;
+  spatialTarget: SpatialTargetSelection;
+  elapsedMs: number;
+  energy: number;
+  viewerCheckIn: boolean;
+}
+
 export const ATTENTION_FOCUS_TARGETS = [
   'user',
   'camera',
@@ -141,6 +156,7 @@ export interface Attention {
   targetMode?: AttentionTargetMode;
   gazeStrength?: number;
   softCue?: AttentionSoftCue;
+  gazeOverride?: AttentionGazeOverride;
 }
 
 export type AttentionReader = () => Attention;

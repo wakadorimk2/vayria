@@ -6,7 +6,9 @@ import {
   DRAG_ATTENTION_MAX_GAZE_STRENGTH,
   DRAG_ATTENTION_MIN_GAZE_STRENGTH,
   DRAG_ATTENTION_MIN_DWELL_MS,
-  DRAG_ATTENTION_SALIENCE,
+  DRAG_VIEWER_CHECK_IN_MAX_DURATION_MS,
+  DRAG_VIEWER_CHECK_IN_MIN_DURATION_MS,
+  DRAG_VIEWER_CHECK_IN_START_MS,
   getDragAttentionReleaseHazard,
 } from '../src/attention/dragAttentionController.js';
 
@@ -18,6 +20,7 @@ test('drag attention always starts with a guaranteed acquire', () => {
     elapsedMs: 0,
     gazeStrength: 0.55,
     attentionEnergy: 0.55,
+    viewerCheckIn: false,
   });
   assert.equal(
     controller.update(DRAG_ATTENTION_MIN_DWELL_MS, () => 0).phase,
@@ -51,7 +54,6 @@ test('a release can occur after minimum dwell, but never before it', () => {
       priority.gazeStrength <= DRAG_ATTENTION_MAX_GAZE_STRENGTH,
   );
   assert.equal(priority.attentionEnergy, priority.gazeStrength);
-  assert.equal(DRAG_ATTENTION_SALIENCE, 0.85);
 });
 
 test('priority gaze strength changes smoothly inside the bounded range', () => {
@@ -104,5 +106,37 @@ test('ending drag attention clears the controller', () => {
     elapsedMs: 0,
     gazeStrength: 0,
     attentionEnergy: 0,
+    viewerCheckIn: false,
   });
+});
+
+test('long drags briefly check the viewer and then resume card gaze', () => {
+  const controller = new DragAttentionController();
+  controller.start();
+  controller.update(DRAG_ATTENTION_MAX_ACQUIRE_MS, () => 1);
+
+  const before = controller.update(
+    DRAG_VIEWER_CHECK_IN_START_MS - DRAG_ATTENTION_MAX_ACQUIRE_MS - 1,
+    () => 0,
+  );
+  assert.equal(before.viewerCheckIn, false);
+
+  const checking = controller.update(1, () => 0);
+  assert.equal(checking.viewerCheckIn, true);
+
+  const resumed = controller.update(
+    DRAG_VIEWER_CHECK_IN_MAX_DURATION_MS,
+    () => 0,
+  );
+  assert.equal(resumed.viewerCheckIn, false);
+  assert.ok(
+    checking.elapsedMs >= DRAG_VIEWER_CHECK_IN_START_MS &&
+      checking.elapsedMs <=
+        DRAG_VIEWER_CHECK_IN_START_MS +
+          DRAG_VIEWER_CHECK_IN_MAX_DURATION_MS,
+  );
+  assert.ok(
+    DRAG_VIEWER_CHECK_IN_MIN_DURATION_MS <=
+      DRAG_VIEWER_CHECK_IN_MAX_DURATION_MS,
+  );
 });

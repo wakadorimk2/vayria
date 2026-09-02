@@ -611,6 +611,45 @@ test('task cue mode does not become an explicit semantic target', () => {
   });
 });
 
+test('card gaze overrides do not replace viewer, thinking, or chat state', () => {
+  const gazeOverride = {
+    kind: 'card-drag' as const,
+    target: 'game' as const,
+    spatialTarget: { kind: 'game' as const, anchor: 'transient' as const },
+    elapsedMs: 400,
+    energy: 0.55,
+    viewerCheckIn: false,
+  };
+  const viewer = new AttentionStateController().update(
+    createInput({
+      viewerEngaged: true,
+      attention: createAttention({ target: 'viewer', gazeOverride }),
+    }),
+  );
+  const thinking = new AttentionStateController().update(
+    createInput({
+      thinking: true,
+      attention: createAttention({ gazeOverride }),
+    }),
+  );
+  const chat = new AttentionStateController().update(
+    createInput({
+      explicitTargetActive: true,
+      attention: createAttention({
+        target: 'chat',
+        spatialTarget: { kind: 'chat', anchor: 'default' },
+        gazeOverride,
+      }),
+    }),
+  );
+
+  assert.equal(viewer.target, 'viewer');
+  assert.equal(viewer.state, 'AttendViewer');
+  assert.equal(thinking.state, 'Thinking');
+  assert.equal(chat.target, 'chat');
+  assert.equal(chat.state, 'AttendTarget');
+});
+
 test('task cue grace avoids a transient recover frame when the hint drops', () => {
   const controller = new AttentionStateController();
   const initial = createAttention({
