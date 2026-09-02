@@ -56,12 +56,6 @@ export class IdleGazeController {
       IDLE_GAZE_TIMING.maxWaitSeconds,
     );
 
-    if (vrm.lookAt) {
-      vrm.scene.updateMatrixWorld(true);
-      vrm.lookAt.getLookAtWorldPosition(this.neutralTarget);
-      this.currentTarget.copy(this.neutralTarget);
-      this.hasNeutralTarget = true;
-    }
   }
 
   update(
@@ -143,6 +137,25 @@ export class IdleGazeController {
       IDLE_GAZE_TIMING.maxWaitSeconds,
     );
     if (this.hasNeutralTarget) {
+      this.currentTarget.copy(this.neutralTarget);
+    }
+  }
+
+  setNeutralTarget(target: Vector3): void {
+    if (
+      this.disposed ||
+      !Number.isFinite(target.x) ||
+      !Number.isFinite(target.y) ||
+      !Number.isFinite(target.z)
+    ) {
+      return;
+    }
+
+    const shouldSyncCurrentTarget =
+      !this.hasNeutralTarget || this.phase === 'waiting';
+    this.neutralTarget.copy(target);
+    this.hasNeutralTarget = true;
+    if (shouldSyncCurrentTarget) {
       this.currentTarget.copy(this.neutralTarget);
     }
   }

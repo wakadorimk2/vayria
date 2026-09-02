@@ -8,7 +8,6 @@ import {
 } from '../src/avatar/idleGaze.js';
 
 interface FakeLookAt {
-  getLookAtWorldPosition(target: Vector3): Vector3;
   resetCount: number;
   target: Object3D | null;
   reset(): void;
@@ -20,9 +19,6 @@ function createFakeVrm(withLookAt = true): {
 } {
   const lookAt: FakeLookAt | undefined = withLookAt
     ? {
-        getLookAtWorldPosition(target) {
-          return target.set(0, 1, 2);
-        },
         resetCount: 0,
         target: null,
         reset() {
@@ -40,6 +36,18 @@ function createFakeVrm(withLookAt = true): {
       },
     } as unknown as VRM,
   };
+}
+
+function createController(
+  vrm: VRM,
+  modelHeight = 2,
+  random: () => number = () => 0,
+): IdleGazeController {
+  const controller = new IdleGazeController(vrm, modelHeight, random);
+  if (vrm.lookAt) {
+    controller.setNeutralTarget(new Vector3(0, 1, 1));
+  }
+  return controller;
 }
 
 function advance(
@@ -75,9 +83,40 @@ function advanceUntil(
   throw new Error(`Condition was not reached within ${maxSeconds} seconds.`);
 }
 
-test('idle gaze waits before the first viewer glance', () => {
+test('idle gaze uses an explicit target one reference depth in front of the LookAt origin', () => {
+  const { vrm } = createFakeVrm();
+  const controller = new IdleGazeController(vrm, 2, () => 0);
+  const lookAtOrigin = new Vector3(0, 1, 0);
+  const neutralTarget = lookAtOrigin.clone().add(new Vector3(0, 0, 1));
+
+  controller.setNeutralTarget(neutralTarget);
+
+  assert.deepEqual(
+    controller.getNeutralTarget(new Vector3()).toArray(),
+    [0, 1, 1],
+  );
+});
+
+test('idle gaze refreshes the waiting target and retains it after invalid input', () => {
   const { lookAt, vrm } = createFakeVrm();
   const controller = new IdleGazeController(vrm, 2, () => 0);
+  const refreshedTarget = new Vector3(0.2, 1.1, 1);
+
+  controller.setNeutralTarget(new Vector3(0, 1, 1));
+  controller.setNeutralTarget(refreshedTarget);
+  controller.setNeutralTarget(new Vector3(Number.NaN, 0, 0));
+  controller.update(0, new Vector3(0, 1, 5), false, new Vector3(1, 1, 2));
+
+  assert.deepEqual(
+    controller.getNeutralTarget(new Vector3()).toArray(),
+    refreshedTarget.toArray(),
+  );
+  assert.deepEqual(lookAt?.target?.position.toArray(), refreshedTarget.toArray());
+});
+
+test('idle gaze waits before the first viewer glance', () => {
+  const { lookAt, vrm } = createFakeVrm();
+  const controller = createController(vrm);
 
   const waitingFrame = advance(controller, 4.9);
   assert.equal(waitingFrame.phase, 'waiting');
@@ -90,7 +129,7 @@ test('idle gaze waits before the first viewer glance', () => {
 
 test('idle gaze randomizes wait and hold durations within their ranges', () => {
   const minFixture = createFakeVrm();
-  const minController = new IdleGazeController(minFixture.vrm, 2, () => 0);
+  const minController = createController(minFixture.vrm);
   const minWaitSeconds = advanceUntil(
     minController,
     (frame) => frame.phase === 'glancing',
@@ -116,7 +155,7 @@ test('idle gaze randomizes wait and hold durations within their ranges', () => {
   );
 
   const maxFixture = createFakeVrm();
-  const maxController = new IdleGazeController(maxFixture.vrm, 2, () => 1);
+  const maxController = createController(maxFixture.vrm, 2, () => 1);
   const maxWaitSeconds = advanceUntil(
     maxController,
     (frame) => frame.phase === 'glancing',
@@ -142,7 +181,7 @@ test('idle gaze randomizes wait and hold durations within their ranges', () => {
 
 test('idle gaze holds and then returns to the neutral direction', () => {
   const { lookAt, vrm } = createFakeVrm();
-  const controller = new IdleGazeController(vrm, 2, () => 0);
+  const controller = createController(vrm);
 
   advance(controller, IDLE_GAZE_TIMING.minWaitSeconds + 0.1);
   const returningFrame = advance(
@@ -166,7 +205,7 @@ test('idle gaze holds and then returns to the neutral direction', () => {
 test('idle gaze keeps positive and negative offsets within model-relative bounds', () => {
   const positiveRandomValues = [0, 1, 1, 1];
   const positiveFixture = createFakeVrm();
-  const positiveController = new IdleGazeController(
+  const positiveController = createController(
     positiveFixture.vrm,
     2,
     () => positiveRandomValues.shift() ?? 0,
@@ -193,7 +232,7 @@ test('idle gaze keeps positive and negative offsets within model-relative bounds
 
   const negativeRandomValues = [0, 0, 0, 1];
   const negativeFixture = createFakeVrm();
-  const negativeController = new IdleGazeController(
+  const negativeController = createController(
     negativeFixture.vrm,
     2,
     () => negativeRandomValues.shift() ?? 0,
@@ -216,7 +255,7 @@ test('idle gaze keeps positive and negative offsets within model-relative bounds
 
 test('disabled idle gaze returns smoothly and re-arms without a stuck target', () => {
   const { lookAt, vrm } = createFakeVrm();
-  const controller = new IdleGazeController(vrm, 2, () => 0);
+  const controller = createController(vrm);
 
   advance(controller, IDLE_GAZE_TIMING.minWaitSeconds + 0.1);
   assert.notEqual(lookAt?.target, null);
@@ -248,7 +287,7 @@ test('disabled idle gaze returns smoothly and re-arms without a stuck target', (
 
 test('performance gaze holds the viewer target and returns after release', () => {
   const { lookAt, vrm } = createFakeVrm();
-  const controller = new IdleGazeController(vrm, 2, () => 0);
+  const controller = createController(vrm);
   const viewerTarget = new Vector3(0, 1, 5);
 
   const activeFrame = advance(
@@ -283,7 +322,7 @@ test('performance gaze holds the viewer target and returns after release', () =>
 
 test('idle gaze stays inactive while a performance plan is active', () => {
   const { lookAt, vrm } = createFakeVrm();
-  const controller = new IdleGazeController(vrm, 2, () => 0);
+  const controller = createController(vrm);
   const viewerTarget = new Vector3(0, 1, 5);
 
   let frame = controller.update(0, viewerTarget, false);
@@ -298,7 +337,7 @@ test('idle gaze stays inactive while a performance plan is active', () => {
 
 test('models without VRM LookAt use the head-yaw fallback without throwing', () => {
   const { vrm } = createFakeVrm(false);
-  const controller = new IdleGazeController(vrm, 2, () => 0);
+  const controller = createController(vrm);
 
   const waitingFrame = advance(
     controller,

@@ -52,7 +52,10 @@ import {
   type VrmLookAtBoundaryFrame,
 } from './vrmLookAtBoundary';
 import { toVrmBonePitchDegrees } from './vrmBoneRotation';
-import { SpatialTargetBridge } from './spatialTargetBridge';
+import {
+  SPATIAL_TARGET_REFERENCE_DEPTH,
+  SpatialTargetBridge,
+} from './spatialTargetBridge';
 import { SpatialTargetWorldCache } from './spatialTargetContinuity';
 import {
   DEFAULT_GAZE_HANDOFF_STATE,
@@ -1368,7 +1371,18 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 loadedVrm.lookAt ?? null,
                 gazeHeadBasisOutput,
               );
-          idleGazeController?.getNeutralTarget(lifeDynamicsNeutralTarget);
+          if (loadedVrm.lookAt && neutralBasis) {
+            loadedVrm.lookAt.getLookAtWorldPosition(lookAtWorldPosition);
+            lifeDynamicsNeutralTarget
+              .copy(lookAtWorldPosition)
+              .addScaledVector(
+                neutralBasis.forward,
+                SPATIAL_TARGET_REFERENCE_DEPTH,
+              );
+            idleGazeController?.setNeutralTarget(lifeDynamicsNeutralTarget);
+          } else {
+            idleGazeController?.getNeutralTarget(lifeDynamicsNeutralTarget);
+          }
           let spatialHeadYawBias = 0;
           let spatialHeadPitchBias = 0;
           let spatialNeckYawBias = 0;

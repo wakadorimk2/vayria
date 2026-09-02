@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Object3D, Vector3 } from 'three';
-import type { VRM } from '@pixiv/three-vrm';
+import { VRMLookAt, type VRM } from '@pixiv/three-vrm';
 import { VrmLookAtBoundaryDriver } from '../src/avatar/vrmLookAtBoundary.js';
 
 class VRMLookAtBoneApplier {
@@ -94,6 +94,61 @@ test('boundary driver calculates positive and negative target yaw once', () => {
   assert.ok((negativeFrame?.yawDegrees ?? 0) < 0);
   assert.equal(negativeFrame?.targetActive, true);
   negative.driver.restore();
+});
+
+test('real VRMLookAt preserves left, center, and right target yaw signs', () => {
+  const scene = new Object3D();
+  const head = new Object3D();
+  head.position.set(0, 1.4, 0);
+  scene.add(head);
+  scene.updateMatrixWorld(true);
+
+  const humanoid = {
+    getRawBoneNode() {
+      return head;
+    },
+    update() {
+      scene.updateMatrixWorld(true);
+    },
+  } as unknown as ConstructorParameters<typeof VRMLookAt>[0];
+  const appliedAngles: Array<readonly [number, number]> = [];
+  const applier = {
+    applyYawPitch(yaw: number, pitch: number) {
+      appliedAngles.push([yaw, pitch]);
+    },
+    lookAt() {},
+  } as ConstructorParameters<typeof VRMLookAt>[1];
+  const lookAt = new VRMLookAt(humanoid, applier);
+  lookAt.offsetFromHeadBone.set(0, 0.06, 0);
+  const target = new Object3D();
+  lookAt.target = target;
+  const vrm = { humanoid, lookAt, scene } as unknown as VRM;
+  const driver = new VrmLookAtBoundaryDriver(vrm);
+
+  const cases = [
+    { expectedSign: -1, x: -0.2 },
+    { expectedSign: 0, x: 0 },
+    { expectedSign: 1, x: 0.2 },
+  ] as const;
+
+  for (const { expectedSign, x } of cases) {
+    target.position.set(x, 1.46, 1);
+    const frame = driver.prepare();
+    assert.ok(frame);
+    assert.ok(Math.abs(frame.yawDegrees) < 90);
+    if (expectedSign === 0) {
+      assert.ok(Math.abs(frame.yawDegrees) < 0.000001);
+    } else {
+      assert.equal(Math.sign(frame.yawDegrees), expectedSign);
+    }
+
+    lookAt.update(0);
+    assert.deepEqual(appliedAngles.at(-1), [
+      frame.yawDegrees,
+      frame.pitchDegrees,
+    ]);
+    driver.restore();
+  }
 });
 
 test('boundary driver returns the center target to zero', () => {
