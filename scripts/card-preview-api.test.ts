@@ -689,6 +689,32 @@ test('conversation events validate the shared interactionAction field', () => {
   );
 });
 
+test('playback gesture telemetry accepts only safe reason classifications', () => {
+  const event = readConversationEvent({
+    at: '2026-09-02T00:00:00.000Z',
+    elapsedMs: 1_000,
+    event: 'playback_gesture_required',
+    source: 'voice',
+    turnId: 'turn-gesture-1',
+    phase: 'tts',
+    reason: 'start_timeout',
+  });
+  assert.equal(event.reason, 'start_timeout');
+
+  assert.throws(
+    () =>
+      readConversationEvent({
+        at: '2026-09-02T00:00:00.000Z',
+        elapsedMs: 1_000,
+        event: 'playback_gesture_required',
+        source: 'voice',
+        turnId: 'turn-gesture-2',
+        reason: 'private browser error detail',
+      }),
+    /playback gesture reason is invalid/,
+  );
+});
+
 test('autonomy gate events keep only bounded diagnostic fields', () => {
   const event = readConversationEvent({
     at: '2026-08-23T00:00:00.000Z',

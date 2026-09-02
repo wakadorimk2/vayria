@@ -68,10 +68,23 @@ try {
     throw 'The wrapper accepted a plaintext API key.'
   }
 
+  $plaintextCloudReferencePath = Join-Path $resolvedTestRoot 'plaintext-cloud.env'
+  Set-Content -LiteralPath $plaintextCloudReferencePath -Value @(
+    'OPENAI_API_KEY=op://vault/item/field'
+    'AIVIS_CLOUD_API_KEY=plain-cloud-test-value'
+  ) -Encoding utf8
+  $plaintextCloudExitCode = Invoke-Wrapper `
+    -ReferencePath $plaintextCloudReferencePath `
+    -FakeOpPath $fakeOpPath
+  if ($plaintextCloudExitCode -eq 0) {
+    throw 'The wrapper accepted a plaintext Aivis Cloud API key.'
+  }
+
   $validReferencePath = Join-Path $resolvedTestRoot 'vayria-op.env'
   Set-Content -LiteralPath $validReferencePath -Value @(
     '# Reference only.'
     'OPENAI_API_KEY=op://vault/item/field'
+    'AIVIS_CLOUD_API_KEY=op://vault/cloud/key'
   ) -Encoding utf8
   $validExitCode = Invoke-Wrapper -ReferencePath $validReferencePath -FakeOpPath $fakeOpPath
   if ($validExitCode -ne 23) {
@@ -89,6 +102,9 @@ try {
   }
   if ($recordedArguments.Contains('op://vault/item/field', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The wrapper exposed the 1Password reference value to the op command.'
+  }
+  if ($recordedArguments.Contains('op://vault/cloud/key', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'The wrapper exposed the Aivis Cloud reference value to the op command.'
   }
 
   Write-Output 'Vayria 1Password wrapper tests passed.'

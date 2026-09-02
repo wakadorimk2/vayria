@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { resolveHttpsOptions } from '../server/httpsConfig.js';
-import { resolveOpenAiApiKey } from '../server/secretConfig.js';
+import {
+  resolveAivisCloudApiKey,
+  resolveOpenAiApiKey,
+} from '../server/secretConfig.js';
 
 async function removeDirectory(directory: string): Promise<void> {
   await rm(directory, { recursive: true, force: true });
@@ -59,6 +62,21 @@ test('a normal process key remains available to the server', () => {
   assert.equal(
     resolveOpenAiApiKey({ OPENAI_API_KEY: 'sk-test-process-key-2' }),
     'sk-test-process-key-2',
+  );
+});
+
+test('Aivis Cloud key is resolved only from the process environment', () => {
+  assert.equal(
+    resolveAivisCloudApiKey({ AIVIS_CLOUD_API_KEY: 'aivis-test-key' }),
+    'aivis-test-key',
+  );
+  assert.equal(resolveAivisCloudApiKey({}), undefined);
+  assert.throws(
+    () =>
+      resolveAivisCloudApiKey({
+        AIVIS_CLOUD_API_KEY: 'op://vault/item/field',
+      }),
+    /unresolved 1Password reference/,
   );
 });
 

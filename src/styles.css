@@ -693,6 +693,47 @@ input {
   font-size: 0.85rem;
 }
 
+.playback-permission {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.45rem 0.55rem 0.45rem 0.7rem;
+  border: 1px solid rgb(214 184 117 / 58%);
+  border-radius: 0.7rem;
+  background: rgb(59 43 31 / 82%);
+  color: #f4efe6;
+  font-size: 0.85rem;
+}
+
+.playback-permission p {
+  margin: 0;
+}
+
+.playback-resume-button {
+  min-height: 2.35rem;
+  padding: 0.42rem 0.78rem;
+  border: 1px solid rgb(236 207 143 / 74%);
+  border-radius: 999px;
+  background: #e8c984;
+  color: #271d19;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.playback-resume-button:hover,
+.playback-resume-button:focus-visible {
+  background: #f1d99f;
+}
+
+.playback-resume-button:focus-visible {
+  outline: 3px solid rgb(245 224 177 / 52%);
+  outline-offset: 2px;
+}
+
 .voice-input-hint {
   color: #b8b1a7;
   font-size: 0.75rem;
@@ -2181,6 +2222,10 @@ input {
 .app-shell[data-app-mode="exhibition"] .conversation-error {
   border-color: rgb(240 184 183 / 58%);
   background: rgb(82 26 31 / 72%);
+}
+
+.app-shell[data-app-mode="exhibition"] .playback-permission {
+  box-shadow: 0 6px 18px rgb(31 22 8 / 28%);
 }
 
 @media (prefers-reduced-motion: reduce) {

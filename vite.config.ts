@@ -1,7 +1,10 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { localApiPlugin } from './server/localApi';
-import { resolveOpenAiApiKey } from './server/secretConfig';
+import {
+  resolveAivisCloudApiKey,
+  resolveOpenAiApiKey,
+} from './server/secretConfig';
 import { resolveHttpsOptions } from './server/httpsConfig';
 import { voiceStreamProxyPlugin } from './server/voiceStreamProxy';
 import {
@@ -104,6 +107,10 @@ export default defineConfig(({ mode }) => {
       aivisIntonationScale: serverEnvironment.AIVIS_INTONATION_SCALE,
       aivisTempoDynamicsScale:
         serverEnvironment.AIVIS_TEMPO_DYNAMICS_SCALE,
+      ttsBackend: serverEnvironment.VAYRIA_TTS_BACKEND,
+      aivisCloudApiKey: resolveAivisCloudApiKey(),
+      aivisCloudBaseUrl: serverEnvironment.AIVIS_CLOUD_BASE_URL,
+      aivisCloudModelUuid: serverEnvironment.AIVIS_CLOUD_MODEL_UUID,
       playcheckRoot: serverEnvironment.VAYRIA_PLAYCHECK_ROOT,
       exhibitionCaptureEnabled: appMode === 'exhibition',
       mode: appMode,

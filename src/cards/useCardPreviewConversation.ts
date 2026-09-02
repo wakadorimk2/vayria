@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
 import { apiUrl } from '../runtimeConfig';
+import { readAudioPlaybackSource } from '../audio/audioPlaybackSource.js';
 import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
   PerformancePlan,
@@ -206,9 +207,9 @@ export function useCardPreviewConversation(
           );
         }
 
-        const audioData = await ttsResponse.arrayBuffer();
+        const audioSource = await readAudioPlaybackSource(ttsResponse);
         if (generation !== generationRef.current) return;
-        const playbackResult = await playback.play(plan, audioData, {
+        const playbackResult = await playback.play(plan, audioSource, {
           onSpeechStart: (startedAt) => {
             speechStartedAt = startedAt;
             if (generation === generationRef.current) setStatus('speaking');

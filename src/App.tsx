@@ -507,6 +507,7 @@ export default function App() {
     isReactionPlaying,
     isSpeaking,
     mouthOpen,
+    needsPlaybackGesture,
     play,
     playReaction,
     prepare,
@@ -2910,7 +2911,20 @@ export default function App() {
                 : conversationStatusLabel}
             </p>
           )}
-          {conversationError && (
+          {needsPlaybackGesture && (
+            <div className="playback-permission" role="alert">
+              <p>音声の再生許可が必要です。</p>
+              <button
+                autoFocus
+                className="playback-resume-button"
+                type="button"
+                onClick={() => void prepare()}
+              >
+                音声を再開
+              </button>
+            </div>
+          )}
+          {conversationError && !needsPlaybackGesture && (
             <p className="conversation-error" role="alert">
               {conversationError}
             </p>

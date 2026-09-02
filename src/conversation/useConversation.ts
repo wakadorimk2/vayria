@@ -52,6 +52,7 @@ import type {
 } from '../performer/types';
 import { isConversationActionDecision } from '../performer/types';
 import type { VoiceInputEvent } from '../voice/voiceInput';
+import { readAudioPlaybackSource } from '../audio/audioPlaybackSource.js';
 
 export type ConversationStatus =
   | 'idle'
@@ -993,18 +994,28 @@ export function useConversation(
           );
         }
 
-        const audioData = await ttsResponse.arrayBuffer();
-        eventEmitter.emit('tts_ready', {
-          durationMs: performance.now() - ttsStartedAt,
-          phase: 'tts',
-        });
-        timeline.record({
-          kind: 'tts_event',
-          at: Date.now(),
-          phase: 'ready',
-          channel: 'server_tts',
-          durationMs: performance.now() - ttsStartedAt,
-        });
+        const audioSource = await readAudioPlaybackSource(ttsResponse);
+        if (audioSource.kind === 'buffer') {
+          eventEmitter.emit('tts_first_audio', {
+            durationMs: performance.now() - ttsStartedAt,
+            phase: 'tts',
+          });
+          eventEmitter.emit('tts_completed', {
+            durationMs: performance.now() - ttsStartedAt,
+            phase: 'tts',
+          });
+          eventEmitter.emit('tts_ready', {
+            durationMs: performance.now() - ttsStartedAt,
+            phase: 'tts',
+          });
+          timeline.record({
+            kind: 'tts_event',
+            at: Date.now(),
+            phase: 'ready',
+            channel: 'server_tts',
+            durationMs: performance.now() - ttsStartedAt,
+          });
+        }
         if (abortControllerRef.current === ttsController) {
           abortControllerRef.current = null;
         }
@@ -1031,7 +1042,30 @@ export function useConversation(
           };
         }
 
-        const playbackResult = await playback.play(plan, audioData, {
+        const playbackResult = await playback.play(plan, audioSource, {
+          onFirstAudioReady: (readyAt) => {
+            eventEmitter.emit('tts_first_audio', {
+              durationMs: readyAt - ttsStartedAt,
+              phase: 'tts',
+            });
+          },
+          onAudioComplete: (completedAt) => {
+            eventEmitter.emit('tts_completed', {
+              durationMs: completedAt - ttsStartedAt,
+              phase: 'tts',
+            });
+            eventEmitter.emit('tts_ready', {
+              durationMs: completedAt - ttsStartedAt,
+              phase: 'tts',
+            });
+            timeline.record({
+              kind: 'tts_event',
+              at: Date.now(),
+              phase: 'ready',
+              channel: 'server_tts',
+              durationMs: completedAt - ttsStartedAt,
+            });
+          },
           onMotionReady: () => {
             eventEmitter.emit('motion_ready');
           },
@@ -1039,8 +1073,18 @@ export function useConversation(
             motionStartedAt = startedAt;
             eventEmitter.emit('motion_start');
           },
+          onPlaybackGestureRequired: (reason) => {
+            eventEmitter.emit('playback_gesture_required', {
+              phase: 'tts',
+              reason,
+            });
+          },
           onSpeechStart: (startedAt) => {
             speechStartedAt = startedAt;
+            eventEmitter.emit('playback_started', {
+              durationMs: startedAt - ttsStartedAt,
+              phase: 'tts',
+            });
             if (generation === generationRef.current) {
               eventEmitter.emit('animation_start');
               setConversationState('speaking', turnSource);

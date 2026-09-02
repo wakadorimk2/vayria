@@ -288,12 +288,15 @@ try {
   }
 
   foreach ($envPath in @($worktreeOneEnv, $worktreeTwoEnv)) {
+    if ((Get-EnvironmentValue -Path $envPath -Name 'VAYRIA_TTS_BACKEND') -ne 'cloud-with-fallback') {
+      throw "The generated environment has an unexpected TTS backend: $envPath"
+    }
     if (-not [string]::IsNullOrWhiteSpace((Get-EnvironmentValue -Path $envPath -Name 'OPENAI_API_KEY'))) {
       throw "The generated environment contains a non-empty OPENAI_API_KEY: $envPath"
     }
 
     $environmentContent = Get-Content -Raw -LiteralPath $envPath
-    if ($environmentContent -match 'OPENAI_API_KEY|op://') {
+    if ($environmentContent -match 'OPENAI_API_KEY|AIVIS_CLOUD_API_KEY|op://') {
       throw "The generated environment contains a secret-related setting: $envPath"
     }
 
@@ -429,12 +432,15 @@ try {
   }
 
   foreach ($envPath in @($worktreeThreeEnv, $worktreeFiveEnv, $worktreeSixEnv)) {
+    if ((Get-EnvironmentValue -Path $envPath -Name 'VAYRIA_TTS_BACKEND') -ne 'cloud-with-fallback') {
+      throw "The generated environment has an unexpected TTS backend: $envPath"
+    }
     if (-not [string]::IsNullOrWhiteSpace((Get-EnvironmentValue -Path $envPath -Name 'OPENAI_API_KEY'))) {
       throw "The generated environment contains a non-empty OPENAI_API_KEY: $envPath"
     }
 
     $environmentContent = Get-Content -Raw -LiteralPath $envPath
-    if ($environmentContent -match 'OPENAI_API_KEY|op://') {
+    if ($environmentContent -match 'OPENAI_API_KEY|AIVIS_CLOUD_API_KEY|op://') {
       throw "The generated environment contains a secret-related setting: $envPath"
     }
 
