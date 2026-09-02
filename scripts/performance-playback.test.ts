@@ -4,6 +4,11 @@ import type { PlayAudio } from '../src/audio/useAudioLipSync.js';
 import { readAudioPlaybackSource } from '../src/audio/audioPlaybackSource.js';
 import { pumpMediaSourceAudio } from '../src/audio/mediaSourceStream.js';
 import {
+  isPlaybackGestureError,
+  PlaybackGestureGate,
+  PersistentStreamingAudio,
+} from '../src/audio/persistentStreamingAudio.js';
+import {
   readTtsFallback,
   summarizeTtsBenchmark,
   type TtsBenchmarkSample,
@@ -22,6 +27,170 @@ function bufferSource() {
     mimeType: 'audio/wav',
   };
 }
+
+class FakeStreamingAudioElement {
+  currentTime = 0;
+  disableRemotePlayback = false;
+  preload = '';
+  src = '';
+  playCalls = 0;
+  readonly events: string[];
+
+  constructor(events: string[]) {
+    this.events = events;
+  }
+
+  load(): void {
+    this.events.push('load');
+  }
+
+  pause(): void {
+    this.events.push('pause');
+  }
+
+  play(): Promise<void> {
+    this.playCalls += 1;
+    this.events.push('play');
+    return Promise.resolve();
+  }
+
+  removeAttribute(name: string): void {
+    if (name === 'src') this.src = '';
+  }
+}
+
+test('persistent streaming audio reuses one element and one source node', () => {
+  const events: string[] = [];
+  let elementCount = 0;
+  let sourceCount = 0;
+  const audio = new FakeStreamingAudioElement(events);
+  const source = { disconnect: () => events.push('disconnect') };
+  const context = {
+    createMediaElementSource: (element: HTMLMediaElement) => {
+      assert.equal(element, audio as unknown as HTMLAudioElement);
+      sourceCount += 1;
+      return source;
+    },
+    state: 'running',
+  } as unknown as AudioContext;
+  const carrier = new PersistentStreamingAudio(() => {
+    elementCount += 1;
+    return audio as unknown as HTMLAudioElement;
+  });
+
+  const first = carrier.ensure(context);
+  carrier.setSource('blob:first');
+  carrier.disconnect();
+  const second = carrier.ensure(context);
+
+  assert.equal(first.audio, second.audio);
+  assert.equal(first.source, second.source);
+  assert.equal(elementCount, 1);
+  assert.equal(sourceCount, 1);
+});
+
+test('audio context and persistent element unlock start synchronously', async () => {
+  const events: string[] = [];
+  const audio = new FakeStreamingAudioElement(events);
+  const context = {
+    createMediaElementSource: () => ({ disconnect: () => undefined }),
+    resume: () => {
+      events.push('resume');
+      return Promise.resolve();
+    },
+    state: 'suspended',
+  } as unknown as AudioContext;
+  const carrier = new PersistentStreamingAudio(
+    () => audio as unknown as HTMLAudioElement,
+  );
+
+  const preparation = carrier.prepare(context, false);
+  assert.deepEqual(
+    events.filter((event) => event === 'resume' || event === 'play'),
+    ['resume', 'play'],
+  );
+  await preparation;
+});
+
+test('gesture recovery resumes the same streaming element and source', async () => {
+  const events: string[] = [];
+  const audio = new FakeStreamingAudioElement(events);
+  const context = {
+    createMediaElementSource: () => ({ disconnect: () => undefined }),
+    state: 'running',
+  } as unknown as AudioContext;
+  const carrier = new PersistentStreamingAudio(
+    () => audio as unknown as HTMLAudioElement,
+  );
+  carrier.ensure(context);
+  carrier.setSource('blob:held-stream');
+
+  await carrier.prepare(context, true);
+
+  assert.equal(audio.src, 'blob:held-stream');
+  assert.equal(audio.playCalls, 1);
+  assert.equal(carrier.ensure(context).audio, audio as unknown as HTMLAudioElement);
+});
+
+test('normal cleanup retains the carrier and unmount disposal releases it', () => {
+  const events: string[] = [];
+  let elementCount = 0;
+  const context = {
+    createMediaElementSource: () => ({ disconnect: () => events.push('disconnect') }),
+    state: 'running',
+  } as unknown as AudioContext;
+  const carrier = new PersistentStreamingAudio(() => {
+    elementCount += 1;
+    return new FakeStreamingAudioElement(events) as unknown as HTMLAudioElement;
+  });
+
+  const original = carrier.ensure(context).audio;
+  carrier.setSource('blob:active-stream');
+  carrier.clearSource();
+  assert.equal(carrier.ensure(context).audio, original);
+  assert.equal(elementCount, 1);
+
+  carrier.dispose();
+  assert.notEqual(carrier.ensure(context).audio, original);
+  assert.equal(elementCount, 2);
+});
+
+test('playback gesture errors are classified without exposing message text', () => {
+  assert.equal(
+    isPlaybackGestureError({
+      message: 'platform-specific private detail',
+      name: 'NotAllowedError',
+    }),
+    true,
+  );
+  assert.equal(isPlaybackGestureError(new Error('NotAllowedError')), false);
+});
+
+test('playback gesture gate resumes once and cancels pending playback', async () => {
+  const gate = new PlaybackGestureGate();
+  const waiting = gate.wait();
+  let attempts = 0;
+  const firstResume = gate.resume(async () => {
+    attempts += 1;
+    return true;
+  });
+  const duplicateResume = gate.resume(async () => {
+    attempts += 1;
+    return true;
+  });
+
+  assert.equal(await firstResume, true);
+  assert.equal(await duplicateResume, true);
+  await waiting;
+  assert.equal(attempts, 1);
+  assert.equal(gate.isWaiting, false);
+
+  const cancelledGate = new PlaybackGestureGate();
+  const cancelled = cancelledGate.wait();
+  cancelledGate.cancel(new DOMException('Playback aborted.', 'AbortError'));
+  await assert.rejects(cancelled, { name: 'AbortError' });
+  assert.equal(cancelledGate.isWaiting, false);
+});
 import type { PerformancePlan } from '../src/performer/types.js';
 
 class FakeClock implements PerformancePlaybackClock {
