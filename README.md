@@ -255,18 +255,35 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    OPENAI_API_KEY=op://Vault/Item/Field
    ```
 
+   Aivis Cloudを使う場合は、Cloud API keyの参照も任意で追加できます。
+
+   ```powershell
+   pwsh -NoProfile -File .\scripts\Configure-VayriaOnePassword.ps1 `
+     -AivisCloudSecretReference 'op://Vault/AivisCloud/Field'
+   ```
+
+   参照ファイルには、次の2行が保存されます。
+
+   ```dotenv
+   OPENAI_API_KEY=op://Vault/OpenAI/Field
+   AIVIS_CLOUD_API_KEY=op://Vault/AivisCloud/Field
+   ```
+
    `op://`の右辺をAPI key本体へ置き換えないでください。
    新しいworktreeへ`.env`ファイルをコピーする必要はありません。
 
-6. `.env.local`にはAivisSpeechの設定だけを記述します。
+6. `.env.local`には秘密情報ではないTTS設定だけを記述します。
 
    ```dotenv
    VAYRIA_HTTPS_CONFIG_FILE=
+   VAYRIA_TTS_BACKEND=local
    AIVIS_BASE_URL=http://127.0.0.1:10101
    AIVIS_SPEED_SCALE=1.15
    AIVIS_PITCH_SCALE=0
    AIVIS_INTONATION_SCALE=1.0
    AIVIS_TEMPO_DYNAMICS_SCALE=1.0
+   AIVIS_CLOUD_BASE_URL=https://api.aivis-project.com
+   AIVIS_CLOUD_MODEL_UUID=
    ```
 
    `VAYRIA_HTTPS_CONFIG_FILE`を設定した場合、共有ファイルのHTTPS設定を優先します。
@@ -284,6 +301,12 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
    zonoko の一部スタイルでは、AivisSpeech が
    `AIVIS_INTONATION_SCALE` を無視する場合があります。
+
+   `VAYRIA_TTS_BACKEND`の既定値は`local`です。
+   Cloudを使う場合は`aivis-cloud`を指定し、対象のmodel UUIDを設定します。
+   設定変更後は開発サーバーを再起動します。
+   `AIVIS_CLOUD_API_KEY`は`.env.local`へ書きません。
+   server processは1Password起動時のprocess environmentだけからkeyを読みます。
 
 7. 展示音声入力用のPython環境を作成します。
 
@@ -683,6 +706,25 @@ npm run typecheck
 npm run build
 ```
 
+## TTS TTFA比較
+
+通常UIからリンクしない開発用ページを用意しています。
+開発サーバーを起動し、`/tts-benchmark.html`を開きます。
+
+ページは短文、通常文、長文を直列で再生します。
+各fixtureはwarm-upを1回実行します。
+その後、10回を計測します。
+結果はTTFA、first-audio latency、total synthesis timeのp50とp95です。
+
+計測ページはproductionと同じ`/api/tts`と再生経路を使います。
+backendはserver environmentだけで選択します。
+ページからbackend、model、API keyは変更できません。
+download JSONは`schemaVersion: 1`を使います。
+JSONには発話本文と秘密情報を含めません。
+
+Aivis Cloudの初回検証はmock serverを使います。
+Cloud実測、Windows Chrome、iPad SafariのOwner Playcheckは、keyとmodelの準備後に実施します。
+
 ## 展示向け同時操作ストレステスト
 
 開発サーバーとAivisSpeechを起動した状態で、仮想5ユーザーの短時間バーストを実行できます。
@@ -776,7 +818,8 @@ Gitには`docs/evaluation/results/`の匿名集計だけを保存します。
 
 ブラウザーは開発時に、次の会話イベントを構造化ログへ出力します。
 
-`input_received`、`llm_start`、`llm_done`、`tts_start`、`tts_ready`、
+`input_received`、`llm_start`、`llm_done`、`tts_start`、`tts_first_audio`、
+`tts_ready`、`playback_started`、`tts_completed`、
 `motion_ready`、`motion_start`、`animation_start`、`turn_completed`、
 `turn_aborted`、`turn_failed`
 
@@ -801,7 +844,7 @@ serverは既存clientの`X-Wildcard-Turn-Id`も互換目的で受理します。
 - provider とキャラクターの選択 UI
 - カードのweight、TTL、コスト、自動ランダム交換
 - コメント取得、fake audience、配信サービス連携
-- TTSキュー、発話分割、ストリーミング、割り込み再開
+- TTSキュー、発話分割、割り込み再開
 - 話題の永続記憶
 - ARDY runtime generation、自由な motion selector、複雑なVRMAタイムライン制御
 - 長期的な mood、感情履歴

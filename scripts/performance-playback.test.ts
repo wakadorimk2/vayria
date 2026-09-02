@@ -1,12 +1,26 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PlayAudio } from '../src/audio/useAudioLipSync.js';
+import { readAudioPlaybackSource } from '../src/audio/audioPlaybackSource.js';
+import { pumpMediaSourceAudio } from '../src/audio/mediaSourceStream.js';
+import {
+  summarizeTtsBenchmark,
+  type TtsBenchmarkSample,
+} from '../src/audio/ttsBenchmark.js';
 import {
   PerformancePlaybackCoordinator,
   type PerformanceMotionPort,
   type PerformancePlaybackClock,
   type PerformancePlaybackTimerHandle,
 } from '../src/performer/performancePlayback.js';
+
+function bufferSource() {
+  return {
+    kind: 'buffer' as const,
+    data: new ArrayBuffer(0),
+    mimeType: 'audio/wav',
+  };
+}
 import type { PerformancePlan } from '../src/performer/types.js';
 
 class FakeClock implements PerformancePlaybackClock {
@@ -129,7 +143,7 @@ test('motion starts before audio and finishes after the speech hold', async () =
   });
 
   coordinator.prepare(plan);
-  const result = await coordinator.play(plan, new ArrayBuffer(0), {
+  const result = await coordinator.play(plan, bufferSource(), {
     onMotionReady: () => events.push('motion_ready'),
     onMotionStart: () => events.push('motion_started_callback'),
     onSpeechStart: () => events.push('speech_started_callback'),
@@ -201,7 +215,7 @@ test('motion preparation timeout falls back to immediate audio', async () => {
   });
 
   coordinator.prepare(plan);
-  const result = await coordinator.play(plan, new ArrayBuffer(0));
+  const result = await coordinator.play(plan, bufferSource());
 
   assert.equal(requestedDelayMs, 0);
   assert.deepEqual(events, ['audio_start', 'motion_finish']);
@@ -246,7 +260,7 @@ test('card reaction uses the longer expression hold as the single tail', async (
   });
 
   coordinator.prepare(plan);
-  const playback = coordinator.play(plan, new ArrayBuffer(0), {
+  const playback = coordinator.play(plan, bufferSource(), {
     onSpeechEnd: () => queueMicrotask(() => clock.advance(49)),
   });
   await flushPlaybackMicrotasks();
@@ -298,7 +312,7 @@ test('speech tail keeps the longer post-speech hold when it exceeds expression h
   });
 
   coordinator.prepare(plan);
-  const playback = coordinator.play(plan, new ArrayBuffer(0));
+  const playback = coordinator.play(plan, bufferSource());
   await flushPlaybackMicrotasks();
 
   clock.advance(49);
@@ -378,7 +392,7 @@ test('cancellation stops waiting playback and ignores stale motion', async () =>
   });
 
   coordinator.prepare(plan);
-  const playback = coordinator.play(plan, new ArrayBuffer(0));
+  const playback = coordinator.play(plan, bufferSource());
   coordinator.stop();
 
   assert.equal(await playback, null);
@@ -415,7 +429,7 @@ test('cancellation before audio completion suppresses stale speech end and finis
   });
 
   coordinator.prepare(plan);
-  const playback = coordinator.play(plan, new ArrayBuffer(0), {
+  const playback = coordinator.play(plan, bufferSource(), {
     onSpeechEnd: () => events.push('speech_end_callback'),
   });
   await flushPlaybackMicrotasks();
@@ -429,6 +443,99 @@ test('cancellation before audio completion suppresses stale speech end and finis
   assert.equal(events.includes('speech_end_port'), false);
   assert.equal(events.includes('speech_end_callback'), false);
   assert.equal(events.includes('motion_finish'), false);
+});
+
+test('audio response keeps MP3 as a stream and buffers WAV', async () => {
+  const mp3 = await readAudioPlaybackSource(
+    new Response(new Uint8Array([1, 2, 3]), {
+      headers: { 'Content-Type': 'audio/mpeg' },
+    }),
+  );
+  assert.equal(mp3.kind, 'stream');
+
+  const wav = await readAudioPlaybackSource(
+    new Response(new Uint8Array([4, 5]), {
+      headers: { 'Content-Type': 'audio/wav' },
+    }),
+  );
+  assert.equal(wav.kind, 'buffer');
+  if (wav.kind === 'buffer') assert.deepEqual([...new Uint8Array(wav.data)], [4, 5]);
+});
+
+test('media source pump preserves chunk order and reports stream boundaries', async () => {
+  const chunks: number[][] = [];
+  const events: string[] = [];
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array([1, 2]));
+      controller.enqueue(new Uint8Array([3]));
+      controller.close();
+    },
+  });
+
+  await pumpMediaSourceAudio(stream.getReader(), {
+    addChunk: (chunk) => chunks.push([...chunk]),
+    end: () => events.push('end'),
+    isUpdating: () => false,
+    waitForUpdate: async () => undefined,
+  }, {
+    onFirstChunk: () => events.push('first'),
+    onComplete: () => events.push('complete'),
+  });
+
+  assert.deepEqual(chunks, [[1, 2], [3]]);
+  assert.deepEqual(events, ['first', 'end', 'complete']);
+});
+
+test('media source pump rejects an empty or interrupted stream safely', async () => {
+  const target = {
+    addChunk: () => undefined,
+    end: () => undefined,
+    isUpdating: () => false,
+    waitForUpdate: async () => undefined,
+  };
+  const empty = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.close();
+    },
+  });
+  await assert.rejects(
+    pumpMediaSourceAudio(empty.getReader(), target),
+    /response was empty/,
+  );
+
+  const interrupted = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.error(new Error('fixture network detail'));
+    },
+  });
+  await assert.rejects(pumpMediaSourceAudio(interrupted.getReader(), target));
+});
+
+test('TTS benchmark summaries use nearest-rank p50 and p95', () => {
+  const samples: TtsBenchmarkSample[] = Array.from({ length: 10 }, (_, index) => ({
+    backend: 'local',
+    fixtureId: 'short',
+    iteration: index + 1,
+    textLength: 8,
+    timestamps: {
+      text_ready_at: 0,
+      tts_request_at: 0,
+      first_audio_at: 0,
+      playback_started_at: 0,
+      tts_completed_at: 0,
+    },
+    durationsMs: {
+      firstAudio: index + 1,
+      synthesis: (index + 1) * 10,
+      ttfa: (index + 1) * 100,
+    },
+  }));
+  const summary = summarizeTtsBenchmark(samples)[0];
+  assert.equal(summary.sampleCount, 10);
+  assert.deepEqual(summary.firstAudioMs, { p50: 5, p95: 10 });
+  assert.deepEqual(summary.synthesisMs, { p50: 50, p95: 100 });
+  assert.deepEqual(summary.ttfaMs, { p50: 500, p95: 1_000 });
 });
 
 test('voice pending plans reprepare motion when the same turn takes the floor', () => {

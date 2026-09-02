@@ -1,4 +1,5 @@
 import type { PlayAudio } from '../audio/useAudioLipSync.js';
+import type { AudioPlaybackSource } from '../audio/audioPlaybackSource.js';
 import type { PerformancePlan } from './types.js';
 
 export interface PerformanceMotionPort {
@@ -25,6 +26,8 @@ export interface PerformancePlaybackClock {
 }
 
 export interface PerformancePlaybackCallbacks {
+  onAudioComplete?: (completedAt: number) => void;
+  onFirstAudioReady?: (readyAt: number) => void;
   onMotionReady?: (readyAt: number) => void;
   onMotionStart?: (startedAt: number) => void;
   onSpeechStart?: (startedAt: number) => void;
@@ -41,7 +44,7 @@ export interface PerformancePlayback {
   prepare(plan: PerformancePlan): void;
   play(
     plan: PerformancePlan,
-    audioData: ArrayBuffer,
+    audioSource: AudioPlaybackSource,
     callbacks?: PerformancePlaybackCallbacks,
   ): Promise<PerformancePlaybackResult | null>;
   stop(): void;
@@ -117,7 +120,7 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
 
   async play(
     plan: PerformancePlan,
-    audioData: ArrayBuffer,
+    audioSource: AudioPlaybackSource,
     callbacks: PerformancePlaybackCallbacks = {},
   ): Promise<PerformancePlaybackResult | null> {
     const assetId = plan.motion?.assetId ?? null;
@@ -149,8 +152,10 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
 
       let motionStartedAt: number | undefined;
       let speechStartedAt: number | undefined;
-      await this.playAudio(audioData, {
+      await this.playAudio(audioSource, {
         startDelayMs: motionReady ? plan.timing.motionLeadMs : 0,
+        onComplete: callbacks.onAudioComplete,
+        onFirstAudioReady: callbacks.onFirstAudioReady,
         onReadyToStart: () => {
           if (!motionReady || !this.isCurrent(plan.planId, generation, controller)) {
             return false;

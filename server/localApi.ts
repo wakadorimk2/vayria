@@ -3,7 +3,13 @@ import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { performance } from 'node:perf_hooks';
+import { once } from 'node:events';
 import type { Plugin } from 'vite';
+import {
+  AivisCloudError,
+  synthesizeAivisCloudSpeech,
+  type AivisCloudSynthesisResult,
+} from './tts/aivisCloud.js';
 import type { Message } from '@aituber-onair/chat';
 import { isPlaycheckRunId } from '../src/playcheck.js';
 import {
@@ -182,7 +188,10 @@ const CONVERSATION_EVENTS = [
   'llm_start',
   'llm_done',
   'tts_start',
+  'tts_first_audio',
   'tts_ready',
+  'playback_started',
+  'tts_completed',
   'motion_ready',
   'motion_start',
   'animation_start',
@@ -204,6 +213,10 @@ export interface LocalApiConfig {
   aivisPitchScale?: string;
   aivisIntonationScale?: string;
   aivisTempoDynamicsScale?: string;
+  ttsBackend?: string;
+  aivisCloudApiKey?: string;
+  aivisCloudBaseUrl?: string;
+  aivisCloudModelUuid?: string;
   playcheckRoot?: string;
   exhibitionCaptureEnabled?: boolean;
   exhibitionCapture?: ExhibitionCaptureWriter;
@@ -245,6 +258,8 @@ interface AivisTtsSettings {
   intonationScale: number;
   tempoDynamicsScale: number;
 }
+
+type TtsBackend = 'aivis-cloud' | 'local';
 
 interface AivisStyle {
   id: number;
@@ -483,6 +498,7 @@ const PLAYCHECK_RECORD_FIELDS = [
   'interactionAction',
   'activeRequests',
   'audioBytes',
+  'provider',
   'providerCallCount',
   'gateEvent',
   'gatePhase',
@@ -507,6 +523,13 @@ const SAFE_PLAYCHECK_REASONS = new Set([
   'superseded',
   'request_invalid',
   'provider_error',
+  'authentication',
+  'configuration',
+  'invalid_request',
+  'model',
+  'quota',
+  'rate_limit',
+  'timeout',
   'silence',
   'take_floor',
   'listen',
@@ -3149,6 +3172,67 @@ function readAivisTtsSettings(config: LocalApiConfig): AivisTtsSettings {
     ),
   };
 }
+
+function readTtsBackend(value: string | undefined): TtsBackend {
+  const normalized = value?.trim().toLowerCase() || 'local';
+  if (normalized === 'local' || normalized === 'aivis-cloud') {
+    return normalized;
+  }
+  throw new RequestError(
+    'VAYRIA_TTS_BACKEND must be local or aivis-cloud.',
+    503,
+  );
+}
+
+async function streamAivisCloudAudio(
+  result: AivisCloudSynthesisResult,
+  request: IncomingMessage,
+  response: ServerResponse,
+  onFirstChunk: (audioBytes: number) => Promise<void>,
+): Promise<number> {
+  const reader = result.body.getReader();
+  let audioBytes = 0;
+  let firstChunk = true;
+  const abortUpstream = () => result.dispose();
+  const abortOnEarlyClose = () => {
+    if (!response.writableEnded) abortUpstream();
+  };
+  request.once('aborted', abortUpstream);
+  response.once('close', abortOnEarlyClose);
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      audioBytes += value.byteLength;
+      if (firstChunk) {
+        firstChunk = false;
+        await onFirstChunk(value.byteLength);
+      }
+      if (!response.write(Buffer.from(value))) {
+        await once(response, 'drain');
+      }
+    }
+    response.end();
+    return audioBytes;
+  } catch {
+    throw result.didTimeout()
+      ? new AivisCloudError(
+          'timeout',
+          'Aivis Cloud API synthesis timed out.',
+        )
+      : new AivisCloudError(
+          'provider',
+          'Aivis Cloud audio streaming was interrupted.',
+        );
+  } finally {
+    request.off('aborted', abortUpstream);
+    response.off('close', abortOnEarlyClose);
+    result.dispose();
+    reader.releaseLock();
+  }
+}
+
 function createAivisUrl(
   baseUrl: URL,
   pathname: string,
@@ -3665,7 +3749,7 @@ async function handleRequest(
 
     requestPhase = 'tts';
     const { text, emotion, ttsProfile } = readTtsRequest(payload);
-    const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
+    const ttsBackend = readTtsBackend(config.ttsBackend);
     const settings = readAivisTtsSettings(config);
     const effectiveSettings = ttsProfile
       ? {
@@ -3686,8 +3770,59 @@ async function handleRequest(
       requestId,
       runId: playcheckRunId,
       turnId: headerTurnId,
+      provider: ttsBackend,
       activeRequests: activeProviderRequests,
     });
+    if (ttsBackend === 'aivis-cloud') {
+      const styleName = VOICE_STYLE_BY_EMOTION[emotion];
+      const cloudResult = await synthesizeAivisCloudSpeech({
+        apiKey: config.aivisCloudApiKey ?? '',
+        baseUrl: config.aivisCloudBaseUrl,
+        emotionalIntensity: effectiveSettings.intonationScale,
+        modelUuid: config.aivisCloudModelUuid ?? '',
+        pitch: effectiveSettings.pitchScale,
+        speakingRate: effectiveSettings.speedScale,
+        styleName,
+        tempoDynamics: effectiveSettings.tempoDynamicsScale,
+        text,
+      });
+      response.writeHead(200, {
+        'Cache-Control': 'no-store',
+        'Content-Type': cloudResult.contentType,
+        'X-Content-Type-Options': 'nosniff',
+        'X-Vayria-Tts-Backend': ttsBackend,
+      });
+      const audioBytes = await streamAivisCloudAudio(
+        cloudResult,
+        request,
+        response,
+        async (firstChunkBytes) => {
+          await recordStructuredEvent(config, 'tts_first_audio', {
+            origin: 'server',
+            requestId,
+            runId: playcheckRunId,
+            turnId: headerTurnId,
+            provider: ttsBackend,
+            durationMs: Math.round(performance.now() - startedAt),
+            audioBytes: firstChunkBytes,
+            activeRequests: activeProviderRequests,
+          });
+        },
+      );
+      await recordStructuredEvent(config, 'tts_completed', {
+        origin: 'server',
+        requestId,
+        runId: playcheckRunId,
+        turnId: headerTurnId,
+        provider: ttsBackend,
+        durationMs: Math.round(performance.now() - startedAt),
+        audioBytes,
+        activeRequests: activeProviderRequests,
+      });
+      return;
+    }
+
+    const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
     const speakers = await loadAivisSpeakers(baseUrl);
     const style = resolveZonokoStyle(speakers, emotion);
     console.info('Performer TTS:', {
@@ -3699,11 +3834,22 @@ async function handleRequest(
     const audio = Buffer.from(
       await synthesizeSpeech(baseUrl, style.id, effectiveSettings, text),
     );
-    await recordStructuredEvent(config, 'tts_ready', {
+    await recordStructuredEvent(config, 'tts_first_audio', {
       origin: 'server',
       requestId,
       runId: playcheckRunId,
       turnId: headerTurnId,
+      provider: ttsBackend,
+      durationMs: Math.round(performance.now() - startedAt),
+      audioBytes: audio.byteLength,
+      activeRequests: activeProviderRequests,
+    });
+    await recordStructuredEvent(config, 'tts_completed', {
+      origin: 'server',
+      requestId,
+      runId: playcheckRunId,
+      turnId: headerTurnId,
+      provider: ttsBackend,
       durationMs: Math.round(performance.now() - startedAt),
       audioBytes: audio.byteLength,
       activeRequests: activeProviderRequests,
@@ -3713,6 +3859,7 @@ async function handleRequest(
       'Content-Length': audio.byteLength,
       'Content-Type': 'audio/wav',
       'X-Content-Type-Options': 'nosniff',
+      'X-Vayria-Tts-Backend': ttsBackend,
     });
     response.end(audio);
   } catch (error) {
@@ -3748,6 +3895,32 @@ async function handleRequest(
       return;
     }
 
+    if (error instanceof AivisCloudError) {
+      if (requestPhase) {
+        await recordStructuredEvent(config, 'turn_failed', {
+          origin: 'server',
+          requestId,
+          runId: playcheckRunId,
+          turnId: headerTurnId,
+          phase: requestPhase,
+          reason: error.kind,
+          activeRequests: activeProviderRequests,
+        });
+      }
+      console.error('Aivis Cloud API request failed.', {
+        kind: error.kind,
+        upstreamStatus: error.upstreamStatus,
+      });
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      sendJson(response, error.kind === 'timeout' ? 504 : error.kind === 'configuration' ? 503 : 502, {
+        error: error.userMessage,
+      });
+      return;
+    }
+
     if (requestPhase) {
       await recordStructuredEvent(config, 'turn_failed', {
         origin: 'server',
@@ -3766,6 +3939,10 @@ async function handleRequest(
         : 'Local TTS provider request failed.',
       error,
     );
+    if (response.headersSent) {
+      response.destroy();
+      return;
+    }
     sendJson(response, 502, {
       error:
         isLlmRequest
@@ -3837,7 +4014,9 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
         });
       }
 
-      void reportAivisSelection(config);
+      if (readTtsBackend(config.ttsBackend) === 'local') {
+        void reportAivisSelection(config);
+      }
       server.middlewares.use((request, response, next) => {
         const pathname = new URL(
           request.url ?? '/',

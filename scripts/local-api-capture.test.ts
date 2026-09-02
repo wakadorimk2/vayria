@@ -190,11 +190,17 @@ async function postEvent(
 async function requestRoute(
   handler: Middleware,
   options: {
+    backpressureOnFirstWrite?: boolean;
     method: string;
     url: string;
     body?: object;
   },
-): Promise<{ statusCode: number; body: string }> {
+): Promise<{
+  statusCode: number;
+  body: string;
+  chunks: Buffer[];
+  headers: Record<string, string | number | readonly string[]>;
+}> {
   const requestBody = options.body === undefined ? [] : [JSON.stringify(options.body)];
   const request = Object.assign(
     Readable.from(requestBody),
@@ -206,19 +212,53 @@ async function requestRoute(
   ) as unknown as IncomingMessage;
   let statusCode = 0;
   let body = '';
+  const chunks: Buffer[] = [];
+  let headers: Record<string, string | number | readonly string[]> = {};
+  let writeCount = 0;
+  let responseHeadersSent = false;
+  let responseWritableEnded = false;
   let resolveEnded: () => void = () => undefined;
   const ended = new Promise<void>((resolve) => {
     resolveEnded = resolve;
   });
-  const response = {
-    writeHead(status: number) {
+  const responseEmitter = new EventEmitter();
+  Object.defineProperties(responseEmitter, {
+    headersSent: { get: () => responseHeadersSent },
+    writableEnded: { get: () => responseWritableEnded },
+  });
+  const response = Object.assign(responseEmitter, {
+    writeHead(status: number, nextHeaders: Record<string, string | number | readonly string[]> = {}) {
       statusCode = status;
+      headers = nextHeaders;
+      responseHeadersSent = true;
+      return response;
+    },
+    write(chunk: string | Buffer) {
+      writeCount += 1;
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(value);
+      body += value.toString();
+      if (options.backpressureOnFirstWrite && writeCount === 1) {
+        setImmediate(() => response.emit('drain'));
+        return false;
+      }
+      return true;
     },
     end(chunk?: string | Buffer) {
-      if (chunk !== undefined) body += chunk.toString();
+      if (chunk !== undefined) {
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        chunks.push(value);
+        body += value.toString();
+      }
+      responseWritableEnded = true;
       resolveEnded();
     },
-  } as unknown as ServerResponse;
+    destroy() {
+      responseWritableEnded = true;
+      resolveEnded();
+      return response;
+    },
+  }) as unknown as ServerResponse;
   handler(request, response, () => undefined);
   await Promise.race([
     ended,
@@ -226,7 +266,7 @@ async function requestRoute(
       setTimeout(resolve, 100);
     }),
   ]);
-  return { statusCode, body };
+  return { statusCode, body, chunks, headers };
 }
 
 function configurePlugin(
@@ -316,6 +356,52 @@ test('health endpoint reports local availability when the Internet probe fails',
     body: {},
   });
   assert.equal(invalidMethod.statusCode, 405);
+});
+
+test('Cloud TTS middleware forwards MP3 chunks and honors response backpressure', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+  globalThis.fetch = async (_input, init) => {
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get('Authorization'), 'Bearer route-cloud-key');
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2]));
+          controller.enqueue(new Uint8Array([3, 4]));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'audio/mpeg' } },
+    );
+  };
+
+  try {
+    const fake = createFakeServer();
+    configurePlugin({
+      ttsBackend: 'aivis-cloud',
+      aivisCloudApiKey: 'route-cloud-key',
+      aivisCloudBaseUrl: 'https://cloud.example.test',
+      aivisCloudModelUuid: '11111111-2222-4333-8444-555555555555',
+    }, fake.server);
+
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'route fixture', emotion: 'joy' },
+      backpressureOnFirstWrite: true,
+    });
+
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.headers['Content-Type'], 'audio/mpeg');
+    assert.equal(result.headers['X-Vayria-Tts-Backend'], 'aivis-cloud');
+    assert.deepEqual(result.chunks.map((chunk) => [...chunk]), [[1, 2], [3, 4]]);
+    assert.equal(requestBody?.text, 'route fixture');
+    assert.equal(requestBody?.style_name, 'C');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('exhibition local API captures safe events and keeps Playcheck raw priority', async () => {

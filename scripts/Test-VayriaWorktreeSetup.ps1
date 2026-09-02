@@ -293,7 +293,7 @@ try {
     }
 
     $environmentContent = Get-Content -Raw -LiteralPath $envPath
-    if ($environmentContent -match 'OPENAI_API_KEY|op://') {
+    if ($environmentContent -match 'OPENAI_API_KEY|AIVIS_CLOUD_API_KEY|op://') {
       throw "The generated environment contains a secret-related setting: $envPath"
     }
 
@@ -434,7 +434,7 @@ try {
     }
 
     $environmentContent = Get-Content -Raw -LiteralPath $envPath
-    if ($environmentContent -match 'OPENAI_API_KEY|op://') {
+    if ($environmentContent -match 'OPENAI_API_KEY|AIVIS_CLOUD_API_KEY|op://') {
       throw "The generated environment contains a secret-related setting: $envPath"
     }
 

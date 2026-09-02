@@ -3,6 +3,11 @@ import {
   BARGE_IN_DUCK_GAIN,
   BARGE_IN_GAIN_RAMP_MS,
 } from '../voice/audioLab.js';
+import type { AudioPlaybackSource } from './audioPlaybackSource.js';
+import {
+  createMediaSourceStreamTarget,
+  pumpMediaSourceAudio,
+} from './mediaSourceStream.js';
 
 const SMOOTHING_FACTOR = 0.5;
 const RMS_CEILING = 0.12;
@@ -13,12 +18,14 @@ const isDevelopmentBuild =
 
 export interface PlayAudioOptions {
   startDelayMs?: number;
+  onComplete?: (completedAt: number) => void;
+  onFirstAudioReady?: (readyAt: number) => void;
   onReadyToStart?: (scheduledStartAt: number) => boolean | void;
   onStart?: (startedAt: number) => void;
 }
 
 export type PlayAudio = (
-  audioData: ArrayBuffer,
+  source: AudioPlaybackSource,
   options?: PlayAudioOptions,
 ) => Promise<void>;
 
@@ -27,6 +34,46 @@ export type PlayReactionAudio = (audioData: ArrayBuffer) => Promise<boolean>;
 function clampVolume(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.max(0, Math.min(value, 1));
+}
+
+interface WindowWithManagedMediaSource {
+  MediaSource?: typeof MediaSource;
+  ManagedMediaSource?: typeof MediaSource;
+}
+
+function readStreamingMediaSourceConstructor(): typeof MediaSource | null {
+  const mediaWindow = window as unknown as WindowWithManagedMediaSource;
+  return mediaWindow.ManagedMediaSource ?? mediaWindow.MediaSource ?? null;
+}
+
+async function collectAudioStream(
+  stream: ReadableStream<Uint8Array>,
+  onFirstAudioReady?: (readyAt: number) => void,
+  onComplete?: (completedAt: number) => void,
+): Promise<ArrayBuffer> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  let first = true;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!value?.byteLength) continue;
+    if (first) {
+      first = false;
+      onFirstAudioReady?.(performance.now());
+    }
+    chunks.push(value);
+    byteLength += value.byteLength;
+  }
+  onComplete?.(performance.now());
+  const combined = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return combined.buffer;
 }
 
 export function useAudioLipSync(volume = 1) {
@@ -39,6 +86,11 @@ export function useAudioLipSync(volume = 1) {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const mediaElementRef = useRef<HTMLAudioElement | null>(null);
+  const mediaElementSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const mediaSourceUrlRef = useRef<string | null>(null);
+  const streamReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  const streamCancelRef = useRef<(() => void) | null>(null);
   const reactionAnalyserRef = useRef<AnalyserNode | null>(null);
   const reactionGainRef = useRef<GainNode | null>(null);
   const reactionSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -121,6 +173,25 @@ export function useAudioLipSync(volume = 1) {
       sourceRef.current = null;
     }
 
+    streamCancelRef.current?.();
+    streamCancelRef.current = null;
+    if (streamReaderRef.current) {
+      void streamReaderRef.current.cancel().catch(() => undefined);
+      streamReaderRef.current = null;
+    }
+    if (mediaElementRef.current) {
+      mediaElementRef.current.pause();
+      mediaElementRef.current.removeAttribute('src');
+      mediaElementRef.current.load();
+      mediaElementRef.current = null;
+    }
+    mediaElementSourceRef.current?.disconnect();
+    mediaElementSourceRef.current = null;
+    if (mediaSourceUrlRef.current) {
+      URL.revokeObjectURL(mediaSourceUrlRef.current);
+      mediaSourceUrlRef.current = null;
+    }
+
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = 0;
@@ -192,7 +263,7 @@ export function useAudioLipSync(volume = 1) {
   }, []);
 
   const play = useCallback<PlayAudio>(
-    async (audioData, options) => {
+    async (requestedSource, options) => {
       const generation = generationRef.current + 1;
       generationRef.current = generation;
       reactionGenerationRef.current += 1;
@@ -210,7 +281,147 @@ export function useAudioLipSync(volume = 1) {
         }
         setIsAudioUnlocked(true);
 
-        const decodedAudio = await context.decodeAudioData(audioData.slice(0));
+        let audioSource = requestedSource;
+        const MediaSourceConstructor = readStreamingMediaSourceConstructor();
+        if (
+          audioSource.kind === 'stream' &&
+          (!MediaSourceConstructor ||
+            !MediaSourceConstructor.isTypeSupported(audioSource.mimeType))
+        ) {
+          audioSource = {
+            kind: 'buffer',
+            mimeType: audioSource.mimeType,
+            data: await collectAudioStream(
+              audioSource.stream,
+              options?.onFirstAudioReady,
+              options?.onComplete,
+            ),
+          };
+        }
+
+        if (audioSource.kind === 'stream' && MediaSourceConstructor) {
+          const mediaSource = new MediaSourceConstructor();
+          const audio = new Audio();
+          audio.disableRemotePlayback = true;
+          const mediaUrl = URL.createObjectURL(mediaSource);
+          audio.src = mediaUrl;
+          mediaElementRef.current = audio;
+          mediaSourceUrlRef.current = mediaUrl;
+
+          const analyser = context.createAnalyser();
+          analyser.fftSize = 2048;
+          const elementSource = context.createMediaElementSource(audio);
+          elementSource.connect(analyser);
+          analyser.connect(gainRef.current!);
+          mediaElementSourceRef.current = elementSource;
+          analyserRef.current = analyser;
+
+          await new Promise<void>((resolve, reject) => {
+            mediaSource.addEventListener('sourceopen', () => resolve(), { once: true });
+            mediaSource.addEventListener(
+              'error',
+              () => reject(new Error('Streaming media source failed.')),
+              { once: true },
+            );
+          });
+          if (generation !== generationRef.current) return;
+
+          const sourceBuffer = mediaSource.addSourceBuffer(audioSource.mimeType);
+          const reader = audioSource.stream.getReader();
+          streamReaderRef.current = reader;
+          let resolveFirstAudio: () => void = () => undefined;
+          let rejectPlayback: (error: unknown) => void = () => undefined;
+          const firstAudio = new Promise<void>((resolve) => {
+            resolveFirstAudio = resolve;
+          });
+          const interrupted = new Promise<never>((_resolve, reject) => {
+            rejectPlayback = reject;
+          });
+          streamCancelRef.current = () =>
+            rejectPlayback(new DOMException('Playback aborted.', 'AbortError'));
+
+          const pump = pumpMediaSourceAudio(
+            reader,
+            createMediaSourceStreamTarget(mediaSource, sourceBuffer),
+            {
+              onFirstChunk: () => {
+                options?.onFirstAudioReady?.(performance.now());
+                resolveFirstAudio();
+              },
+              onComplete: () => options?.onComplete?.(performance.now()),
+            },
+          );
+
+          await Promise.race([firstAudio, interrupted, pump]);
+          if (generation !== generationRef.current) return;
+
+          const samples = new Float32Array(analyser.fftSize);
+          const updateMouth = () => {
+            if (
+              generation !== generationRef.current ||
+              analyserRef.current !== analyser
+            ) {
+              return;
+            }
+            analyser.getFloatTimeDomainData(samples);
+            let squaredTotal = 0;
+            for (const sample of samples) squaredTotal += sample * sample;
+            const rms = Math.sqrt(squaredTotal / samples.length);
+            smoothedRmsRef.current =
+              smoothedRmsRef.current * SMOOTHING_FACTOR +
+              rms * (1 - SMOOTHING_FACTOR);
+            primaryMouthOpenRef.current = Math.min(
+              smoothedRmsRef.current / RMS_CEILING,
+              1,
+            );
+            setMouthOpen(
+              Math.max(primaryMouthOpenRef.current, reactionMouthOpenRef.current),
+            );
+            animationFrameRef.current = requestAnimationFrame(updateMouth);
+          };
+
+          const requestedDelayMs = options?.startDelayMs ?? 0;
+          const startDelayMs = Number.isFinite(requestedDelayMs)
+            ? Math.max(0, Math.min(requestedDelayMs, 10_000))
+            : 0;
+          const scheduledStartAt = performance.now() + startDelayMs;
+          const readyToStart = options?.onReadyToStart?.(scheduledStartAt);
+          const effectiveStartDelayMs = readyToStart === false ? 0 : startDelayMs;
+          const ended = new Promise<void>((resolve, reject) => {
+            audio.addEventListener('ended', () => resolve(), { once: true });
+            audio.addEventListener(
+              'error',
+              () => reject(new Error('Streaming audio playback failed.')),
+              { once: true },
+            );
+          });
+          if (effectiveStartDelayMs > 0) {
+            await new Promise<void>((resolve) => {
+              startTimerRef.current = window.setTimeout(() => {
+                startTimerRef.current = null;
+                resolve();
+              }, effectiveStartDelayMs);
+            });
+          }
+          audio.addEventListener(
+            'playing',
+            () => {
+              setIsSpeaking(true);
+              animationFrameRef.current = requestAnimationFrame(updateMouth);
+              options?.onStart?.(performance.now());
+            },
+            { once: true },
+          );
+          await audio.play();
+          await Promise.race([Promise.all([pump, ended]), interrupted]);
+          if (generation === generationRef.current) clearPlayback();
+          return;
+        }
+
+        if (audioSource.kind !== 'buffer') {
+          throw new Error('Streaming audio is not supported in this browser.');
+        }
+        const decodedAudio = await context.decodeAudioData(audioSource.data.slice(0));
         if (generation !== generationRef.current) return;
 
         const source = context.createBufferSource();

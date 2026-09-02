@@ -44,13 +44,16 @@ $lines = @(
   'AIVIS_PITCH_SCALE=0'
   'AIVIS_INTONATION_SCALE=1.0'
   'AIVIS_TEMPO_DYNAMICS_SCALE=1.0'
+  'VAYRIA_TTS_BACKEND=local'
+  'AIVIS_CLOUD_BASE_URL=https://api.aivis-project.com'
+  'AIVIS_CLOUD_MODEL_UUID='
   'VAYRIA_BIND_HOST=127.0.0.1'
   "VAYRIA_PORT=$Port"
   "VITE_APP_MODE=$AppMode"
   'VITE_API_BASE_URL=/'
 )
 
-if ($PSCmdlet.ShouldProcess($envPath, 'Create worktree .env.local without an API key')) {
+if ($PSCmdlet.ShouldProcess($envPath, 'Create worktree .env.local without API keys')) {
   Set-Content -LiteralPath $envPath -Value $lines -Encoding utf8
   Write-Output "Created $envPath"
   if ($resolvedHttpsConfigFile) {
