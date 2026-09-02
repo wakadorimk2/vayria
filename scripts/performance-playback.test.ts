@@ -4,6 +4,12 @@ import type { PlayAudio } from '../src/audio/useAudioLipSync.js';
 import { readAudioPlaybackSource } from '../src/audio/audioPlaybackSource.js';
 import { pumpMediaSourceAudio } from '../src/audio/mediaSourceStream.js';
 import {
+  createRmsEnvelope,
+  sampleRmsEnvelope,
+  selectLipSyncRms,
+  StreamingAudioCapture,
+} from '../src/audio/rmsEnvelope.js';
+import {
   createSilentWavBytes,
   isPlaybackGestureError,
   monitorPlaybackStart,
@@ -105,6 +111,67 @@ test('RMS diagnostics require three consecutive active frames', () => {
   assert.equal(result.firstNonzeroAt, 60);
   assert.ok(Math.abs(result.max - 0.001) < 0.000001);
   assert.equal(result.totalFrames, 6);
+});
+
+test('RMS envelope uses 20 ms frames and averages channel power', () => {
+  const left = new Float32Array(40).fill(0.5);
+  const right = new Float32Array(40).fill(-0.5);
+  const envelope = createRmsEnvelope({
+    duration: 0.04,
+    length: 40,
+    numberOfChannels: 2,
+    sampleRate: 1_000,
+    getChannelData: (channel) => channel === 0 ? left : right,
+  });
+
+  assert.equal(envelope.frameDurationSeconds, 0.02);
+  assert.equal(envelope.values.length, 2);
+  assert.ok(Math.abs(envelope.values[0] - 0.5) < 0.000001);
+  assert.ok(Math.abs(envelope.values[1] - 0.5) < 0.000001);
+});
+
+test('RMS envelope interpolates frames and returns zero outside playback', () => {
+  const samples = new Float32Array([
+    ...new Float32Array(20).fill(0),
+    ...new Float32Array(20).fill(1),
+  ]);
+  const envelope = createRmsEnvelope({
+    duration: 0.04,
+    length: samples.length,
+    numberOfChannels: 1,
+    sampleRate: 1_000,
+    getChannelData: () => samples,
+  });
+
+  assert.equal(sampleRmsEnvelope(envelope, -0.01), 0);
+  assert.equal(sampleRmsEnvelope(envelope, 0.01), 0);
+  assert.ok(Math.abs(sampleRmsEnvelope(envelope, 0.02) - 0.5) < 0.000001);
+  assert.equal(sampleRmsEnvelope(envelope, 0.03), 1);
+  assert.equal(sampleRmsEnvelope(envelope, 0.04), 0);
+});
+
+test('lip sync RMS prefers live audio and falls back to the decoded envelope', () => {
+  const envelope = {
+    durationSeconds: 1,
+    frameDurationSeconds: 0.02,
+    values: new Float32Array([0.4, 0.4]),
+  };
+
+  assert.equal(selectLipSyncRms(0.2, envelope, 0.01, 0.0001), 0.2);
+  assert.ok(Math.abs(selectLipSyncRms(0, envelope, 0.01, 0.0001) - 0.4) < 0.000001);
+  assert.equal(selectLipSyncRms(0, null, 0.01, 0.0001), 0);
+});
+
+test('streaming audio capture preserves chunks and disables at its byte limit', () => {
+  const capture = new StreamingAudioCapture(4);
+  capture.addChunk(new Uint8Array([1, 2]));
+  capture.addChunk(new Uint8Array([3, 4]));
+  assert.deepEqual([...new Uint8Array(capture.finish()!)], [1, 2, 3, 4]);
+
+  const oversized = new StreamingAudioCapture(3);
+  oversized.addChunk(new Uint8Array([1, 2]));
+  oversized.addChunk(new Uint8Array([3, 4]));
+  assert.equal(oversized.finish(), null);
 });
 
 test('playback diagnostics calculate nullable durations and summaries', () => {
@@ -825,6 +892,8 @@ test('audio response keeps MP3 as a stream and buffers WAV', async () => {
 
 test('media source pump preserves chunk order and reports stream boundaries', async () => {
   const chunks: number[][] = [];
+  const capturedChunks: Uint8Array[] = [];
+  const targetChunks: Uint8Array[] = [];
   const events: string[] = [];
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -835,16 +904,22 @@ test('media source pump preserves chunk order and reports stream boundaries', as
   });
 
   await pumpMediaSourceAudio(stream.getReader(), {
-    addChunk: (chunk) => chunks.push([...chunk]),
+    addChunk: (chunk) => {
+      targetChunks.push(chunk);
+      chunks.push([...chunk]);
+    },
     end: () => events.push('end'),
     isUpdating: () => false,
     waitForUpdate: async () => undefined,
   }, {
+    onChunk: (chunk) => capturedChunks.push(chunk),
     onFirstChunk: () => events.push('first'),
     onComplete: () => events.push('complete'),
   });
 
   assert.deepEqual(chunks, [[1, 2], [3]]);
+  assert.deepEqual(capturedChunks.map((chunk) => [...chunk]), [[1, 2], [3]]);
+  assert.notEqual(capturedChunks[0], targetChunks[0]);
   assert.deepEqual(events, ['first', 'end', 'complete']);
 });
 

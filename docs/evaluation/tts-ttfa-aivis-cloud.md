@@ -31,6 +31,28 @@ CloudはLocalに対してTTFA p50を31%から88%短縮した。
 短文は31%、通常文は70%、長文は88%短縮した。
 iPad SafariでCloudのstreaming再生を確認した。
 
+## iPad Safari playback diagnostics
+
+iPad Safariで3種類のCloud MP3再生経路を比較した。
+各経路は、短文、通常文、長文を3回ずつ計測した。
+
+`media-source`は9件すべてで音声を再生した。
+有効RMSは0件だった。
+これは、MediaSource音源がAnalyserNodeへ音声sampleを渡さない現象と一致する。
+
+`media-element-blob`は9件すべてで有効RMSを検出した。
+再生開始から有効RMSまでの中央値は430 msから434 msだった。
+Ownerは、発話冒頭がかすれて聞こえる場合があると評価した。
+
+`audio-buffer`は9件すべてで有効RMSを検出した。
+再生開始から有効RMSまでは49 msから64 msだった。
+decode時間は6 msから33 msだった。
+Ownerは、発話冒頭の欠落を検出しなかった。
+
+この結果に基づき、音声はMediaSourceでstreaming再生する。
+同じMP3からdecodeしたRMS envelopeをlip sync解析に使用する。
+この方式は音声を再生し直さない。
+
 ## Owner observation
 
 Ownerは、LocalとCloudの声質が同じに聞こえたと評価した。
@@ -46,4 +68,4 @@ model同一性を技術的に証明するものではない。
 - 実通信切断時の自動fallbackと会話継続
 - Cloud再生開始後のstream切断時に重複発話とhangが発生しないこと
 
-raw benchmark JSON、発話本文、model UUID、API keyはrepositoryへ保存しない。
+raw benchmark JSON、raw playback diagnostics JSON、発話本文、model UUID、API keyはrepositoryへ保存しない。

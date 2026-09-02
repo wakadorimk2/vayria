@@ -9,6 +9,12 @@ import {
   pumpMediaSourceAudio,
 } from './mediaSourceStream.js';
 import {
+  createRmsEnvelope,
+  selectLipSyncRms,
+  StreamingAudioCapture,
+  type RmsEnvelope,
+} from './rmsEnvelope.js';
+import {
   isPlaybackGestureError,
   monitorPlaybackStart,
   PlaybackGestureGate,
@@ -18,6 +24,7 @@ import {
 
 const SMOOTHING_FACTOR = 0.5;
 const RMS_CEILING = 0.12;
+const LIVE_ANALYSER_RMS_THRESHOLD = 0.0001;
 const REACTION_GAIN_SCALE = 0.55;
 const DEV_RESOURCE_CLEANUP_GRACE_MS = 100;
 const isDevelopmentBuild =
@@ -99,6 +106,8 @@ export function useAudioLipSync(volume = 1) {
   const mediaSourceUrlRef = useRef<string | null>(null);
   const mediaSourceCleanupRef = useRef<(() => void) | null>(null);
   const sourceBufferRef = useRef<SourceBuffer | null>(null);
+  const streamingAudioCaptureRef = useRef<StreamingAudioCapture | null>(null);
+  const streamingRmsEnvelopeRef = useRef<RmsEnvelope | null>(null);
   const streamReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const streamCancelRef = useRef<(() => void) | null>(null);
   const reactionAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -208,6 +217,9 @@ export function useAudioLipSync(volume = 1) {
 
     streamCancelRef.current?.();
     streamCancelRef.current = null;
+    streamingAudioCaptureRef.current?.clear();
+    streamingAudioCaptureRef.current = null;
+    streamingRmsEnvelopeRef.current = null;
     const gestureWait = playbackGestureWaitRef.current;
     playbackGestureWaitRef.current = null;
     if (gestureWait) {
@@ -395,10 +407,14 @@ export function useAudioLipSync(volume = 1) {
           streamCancelRef.current = () =>
             rejectPlayback(new DOMException('Playback aborted.', 'AbortError'));
 
+          const audioCapture = new StreamingAudioCapture();
+          streamingAudioCaptureRef.current = audioCapture;
+
           const pump = pumpMediaSourceAudio(
             reader,
             createMediaSourceStreamTarget(mediaSource, sourceBuffer),
             {
+              onChunk: (chunk) => audioCapture.addChunk(chunk),
               onFirstChunk: () => {
                 options?.onFirstAudioReady?.(performance.now());
                 resolveFirstAudio();
@@ -407,6 +423,24 @@ export function useAudioLipSync(volume = 1) {
             },
           );
           void pump.catch(() => undefined);
+          const prepareRmsEnvelope = pump
+            .then(async () => {
+              const encodedAudio = audioCapture.finish();
+              if (streamingAudioCaptureRef.current === audioCapture) {
+                streamingAudioCaptureRef.current = null;
+              }
+              if (!encodedAudio || generation !== generationRef.current) return;
+              const decodedAudio = await context.decodeAudioData(encodedAudio);
+              if (generation !== generationRef.current) return;
+              streamingRmsEnvelopeRef.current = createRmsEnvelope(decodedAudio);
+            })
+            .catch(() => {
+              audioCapture.clear();
+              if (streamingAudioCaptureRef.current === audioCapture) {
+                streamingAudioCaptureRef.current = null;
+              }
+            });
+          void prepareRmsEnvelope;
 
           await Promise.race([firstAudio, interrupted, pump]);
           if (generation !== generationRef.current) return;
@@ -422,7 +456,13 @@ export function useAudioLipSync(volume = 1) {
             analyser.getFloatTimeDomainData(samples);
             let squaredTotal = 0;
             for (const sample of samples) squaredTotal += sample * sample;
-            const rms = Math.sqrt(squaredTotal / samples.length);
+            const liveRms = Math.sqrt(squaredTotal / samples.length);
+            const rms = selectLipSyncRms(
+              liveRms,
+              streamingRmsEnvelopeRef.current,
+              audio.currentTime,
+              LIVE_ANALYSER_RMS_THRESHOLD,
+            );
             smoothedRmsRef.current =
               smoothedRmsRef.current * SMOOTHING_FACTOR +
               rms * (1 - SMOOTHING_FACTOR);

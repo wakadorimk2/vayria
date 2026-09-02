@@ -35,6 +35,7 @@ export async function pumpMediaSourceAudio(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   target: MediaSourceStreamTarget,
   callbacks: {
+    onChunk?: (chunk: Uint8Array) => void;
     onComplete?: () => void;
     onFirstChunk?: () => void;
   } = {},
@@ -44,6 +45,7 @@ export async function pumpMediaSourceAudio(
     const { value, done } = await reader.read();
     if (done) break;
     if (!value?.byteLength) continue;
+    callbacks.onChunk?.(value.slice());
     if (target.isUpdating()) await target.waitForUpdate();
     target.addChunk(value);
     await target.waitForUpdate();
