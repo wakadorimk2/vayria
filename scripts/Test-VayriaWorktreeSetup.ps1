@@ -288,6 +288,9 @@ try {
   }
 
   foreach ($envPath in @($worktreeOneEnv, $worktreeTwoEnv)) {
+    if ((Get-EnvironmentValue -Path $envPath -Name 'VAYRIA_TTS_BACKEND') -ne 'cloud-with-fallback') {
+      throw "The generated environment has an unexpected TTS backend: $envPath"
+    }
     if (-not [string]::IsNullOrWhiteSpace((Get-EnvironmentValue -Path $envPath -Name 'OPENAI_API_KEY'))) {
       throw "The generated environment contains a non-empty OPENAI_API_KEY: $envPath"
     }
@@ -429,6 +432,9 @@ try {
   }
 
   foreach ($envPath in @($worktreeThreeEnv, $worktreeFiveEnv, $worktreeSixEnv)) {
+    if ((Get-EnvironmentValue -Path $envPath -Name 'VAYRIA_TTS_BACKEND') -ne 'cloud-with-fallback') {
+      throw "The generated environment has an unexpected TTS backend: $envPath"
+    }
     if (-not [string]::IsNullOrWhiteSpace((Get-EnvironmentValue -Path $envPath -Name 'OPENAI_API_KEY'))) {
       throw "The generated environment contains a non-empty OPENAI_API_KEY: $envPath"
     }

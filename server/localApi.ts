@@ -188,6 +188,8 @@ const CONVERSATION_EVENTS = [
   'llm_start',
   'llm_done',
   'tts_start',
+  'tts_fallback_started',
+  'tts_fallback_completed',
   'tts_first_audio',
   'tts_ready',
   'playback_started',
@@ -216,7 +218,9 @@ export interface LocalApiConfig {
   ttsBackend?: string;
   aivisCloudApiKey?: string;
   aivisCloudBaseUrl?: string;
+  aivisCloudFirstAudioTimeoutMs?: number;
   aivisCloudModelUuid?: string;
+  aivisCloudTimeoutMs?: number;
   playcheckRoot?: string;
   exhibitionCaptureEnabled?: boolean;
   exhibitionCapture?: ExhibitionCaptureWriter;
@@ -259,7 +263,10 @@ interface AivisTtsSettings {
   tempoDynamicsScale: number;
 }
 
-type TtsBackend = 'aivis-cloud' | 'local';
+export type TtsBackend =
+  | 'aivis-cloud'
+  | 'cloud-with-fallback'
+  | 'local';
 
 interface AivisStyle {
   id: number;
@@ -3174,25 +3181,88 @@ function readAivisTtsSettings(config: LocalApiConfig): AivisTtsSettings {
 }
 
 function readTtsBackend(value: string | undefined): TtsBackend {
-  const normalized = value?.trim().toLowerCase() || 'local';
-  if (normalized === 'local' || normalized === 'aivis-cloud') {
+  const normalized = value?.trim().toLowerCase() || 'cloud-with-fallback';
+  if (
+    normalized === 'local' ||
+    normalized === 'aivis-cloud' ||
+    normalized === 'cloud-with-fallback'
+  ) {
     return normalized;
   }
   throw new RequestError(
-    'VAYRIA_TTS_BACKEND must be local or aivis-cloud.',
+    'VAYRIA_TTS_BACKEND must be local, aivis-cloud, or cloud-with-fallback.',
     503,
   );
 }
 
-async function streamAivisCloudAudio(
+interface PreparedAivisCloudAudio {
+  firstChunk: Uint8Array;
+  reader: ReadableStreamDefaultReader<Uint8Array>;
+  result: AivisCloudSynthesisResult;
+}
+
+function createCloudStreamError(
   result: AivisCloudSynthesisResult,
+  request: IncomingMessage,
+): AivisCloudError {
+  if (request.aborted) {
+    return new AivisCloudError(
+      'aborted',
+      'Aivis Cloud API synthesis was cancelled.',
+    );
+  }
+  const timeoutKind = result.timeoutKind();
+  if (timeoutKind) {
+    return new AivisCloudError(
+      timeoutKind,
+      timeoutKind === 'first_audio_timeout'
+        ? 'Aivis Cloud API did not return audio within two seconds.'
+        : 'Aivis Cloud API synthesis timed out.',
+    );
+  }
+  return new AivisCloudError(
+    'provider',
+    'Aivis Cloud audio streaming was interrupted.',
+  );
+}
+
+async function prepareAivisCloudAudio(
+  result: AivisCloudSynthesisResult,
+  request: IncomingMessage,
+): Promise<PreparedAivisCloudAudio> {
+  const reader = result.body.getReader();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        throw new AivisCloudError(
+          'provider',
+          'Aivis Cloud API returned an empty audio stream.',
+        );
+      }
+      if (!value?.byteLength) continue;
+      if (request.aborted || result.timeoutKind()) {
+        throw createCloudStreamError(result, request);
+      }
+      result.markFirstAudioReceived();
+      return { firstChunk: value, reader, result };
+    }
+  } catch (error) {
+    result.dispose();
+    reader.releaseLock();
+    if (error instanceof AivisCloudError) throw error;
+    throw createCloudStreamError(result, request);
+  }
+}
+
+async function streamAivisCloudAudio(
+  prepared: PreparedAivisCloudAudio,
   request: IncomingMessage,
   response: ServerResponse,
   onFirstChunk: (audioBytes: number) => Promise<void>,
 ): Promise<number> {
-  const reader = result.body.getReader();
+  const { firstChunk, reader, result } = prepared;
   let audioBytes = 0;
-  let firstChunk = true;
   const abortUpstream = () => result.dispose();
   const abortOnEarlyClose = () => {
     if (!response.writableEnded) abortUpstream();
@@ -3200,15 +3270,16 @@ async function streamAivisCloudAudio(
   request.once('aborted', abortUpstream);
   response.once('close', abortOnEarlyClose);
   try {
+    audioBytes = firstChunk.byteLength;
+    await onFirstChunk(firstChunk.byteLength);
+    if (!response.write(Buffer.from(firstChunk))) {
+      await once(response, 'drain');
+    }
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
       if (!value?.byteLength) continue;
       audioBytes += value.byteLength;
-      if (firstChunk) {
-        firstChunk = false;
-        await onFirstChunk(value.byteLength);
-      }
       if (!response.write(Buffer.from(value))) {
         await once(response, 'drain');
       }
@@ -3216,15 +3287,7 @@ async function streamAivisCloudAudio(
     response.end();
     return audioBytes;
   } catch {
-    throw result.didTimeout()
-      ? new AivisCloudError(
-          'timeout',
-          'Aivis Cloud API synthesis timed out.',
-        )
-      : new AivisCloudError(
-          'provider',
-          'Aivis Cloud audio streaming was interrupted.',
-        );
+    throw createCloudStreamError(result, request);
   } finally {
     request.off('aborted', abortUpstream);
     response.off('close', abortOnEarlyClose);
@@ -3284,10 +3347,13 @@ async function requestAivis(
   return response;
 }
 
-async function loadAivisSpeakers(baseUrl: URL): Promise<AivisSpeaker[]> {
+async function loadAivisSpeakers(
+  baseUrl: URL,
+  signal?: AbortSignal,
+): Promise<AivisSpeaker[]> {
   const response = await requestAivis(
     createAivisUrl(baseUrl, '/speakers'),
-    { method: 'GET' },
+    { method: 'GET', signal },
     '/speakers',
   );
 
@@ -3349,11 +3415,12 @@ async function synthesizeSpeech(
   styleId: number,
   settings: AivisTtsSettings,
   text: string,
+  signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
   const speaker = String(styleId);
   const audioQueryResponse = await requestAivis(
     createAivisUrl(baseUrl, '/audio_query', { text, speaker }),
-    { method: 'POST' },
+    { method: 'POST', signal },
     '/audio_query',
     styleId,
   );
@@ -3385,11 +3452,34 @@ async function synthesizeSpeech(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(audioQuery),
+      signal,
     },
     '/synthesis',
     styleId,
   );
   return synthesisResponse.arrayBuffer();
+}
+
+async function synthesizeLocalSpeech(
+  config: LocalApiConfig,
+  emotion: Emotion,
+  settings: AivisTtsSettings,
+  text: string,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
+  const speakers = await loadAivisSpeakers(baseUrl, signal);
+  const style = resolveZonokoStyle(speakers, emotion);
+  console.info('Performer TTS:', {
+    emotion,
+    provider: 'local',
+    speaker: ZONOKO_SPEAKER_NAME,
+    style: style.name,
+    styleId: style.id,
+  });
+  return Buffer.from(
+    await synthesizeSpeech(baseUrl, style.id, settings, text, signal),
+  );
 }
 
 async function reportAivisSelection(config: LocalApiConfig): Promise<void> {
@@ -3773,27 +3863,128 @@ async function handleRequest(
       provider: ttsBackend,
       activeRequests: activeProviderRequests,
     });
-    if (ttsBackend === 'aivis-cloud') {
+    if (ttsBackend !== 'local') {
       const styleName = VOICE_STYLE_BY_EMOTION[emotion];
-      const cloudResult = await synthesizeAivisCloudSpeech({
-        apiKey: config.aivisCloudApiKey ?? '',
-        baseUrl: config.aivisCloudBaseUrl,
-        emotionalIntensity: effectiveSettings.intonationScale,
-        modelUuid: config.aivisCloudModelUuid ?? '',
-        pitch: effectiveSettings.pitchScale,
-        speakingRate: effectiveSettings.speedScale,
-        styleName,
-        tempoDynamics: effectiveSettings.tempoDynamicsScale,
-        text,
-      });
+      const cloudAbortController = new AbortController();
+      const abortCloud = () => cloudAbortController.abort();
+      request.once('aborted', abortCloud);
+      let preparedCloud: PreparedAivisCloudAudio;
+      try {
+        const cloudResult = await synthesizeAivisCloudSpeech({
+          apiKey: config.aivisCloudApiKey ?? '',
+          baseUrl: config.aivisCloudBaseUrl,
+          emotionalIntensity: effectiveSettings.intonationScale,
+          firstAudioTimeoutMs: config.aivisCloudFirstAudioTimeoutMs ?? 2_000,
+          modelUuid: config.aivisCloudModelUuid ?? '',
+          pitch: effectiveSettings.pitchScale,
+          signal: cloudAbortController.signal,
+          speakingRate: effectiveSettings.speedScale,
+          styleName,
+          tempoDynamics: effectiveSettings.tempoDynamicsScale,
+          text,
+          timeoutMs: config.aivisCloudTimeoutMs,
+        });
+        preparedCloud = await prepareAivisCloudAudio(cloudResult, request);
+      } catch (error) {
+        request.off('aborted', abortCloud);
+        if (
+          request.aborted ||
+          (error instanceof AivisCloudError && error.kind === 'aborted')
+        ) {
+          if (!response.destroyed) response.destroy();
+          return;
+        }
+        if (
+          ttsBackend !== 'cloud-with-fallback' ||
+          !(error instanceof AivisCloudError)
+        ) {
+          throw error;
+        }
+
+        console.warn('Aivis Cloud TTS is falling back to local synthesis.', {
+          kind: error.kind,
+          upstreamStatus: error.upstreamStatus,
+        });
+        await recordStructuredEvent(config, 'tts_fallback_started', {
+          origin: 'server',
+          requestId,
+          runId: playcheckRunId,
+          turnId: headerTurnId,
+          provider: 'local',
+          reason: error.kind,
+          durationMs: Math.round(performance.now() - startedAt),
+        });
+        const localAbortController = new AbortController();
+        const abortLocal = () => localAbortController.abort();
+        request.once('aborted', abortLocal);
+        let audio: Buffer;
+        try {
+          audio = await synthesizeLocalSpeech(
+            config,
+            emotion,
+            effectiveSettings,
+            text,
+            localAbortController.signal,
+          );
+        } finally {
+          request.off('aborted', abortLocal);
+        }
+        if (request.aborted) {
+          if (!response.destroyed) response.destroy();
+          return;
+        }
+        await recordStructuredEvent(config, 'tts_first_audio', {
+          origin: 'server',
+          requestId,
+          runId: playcheckRunId,
+          turnId: headerTurnId,
+          provider: 'local',
+          reason: error.kind,
+          durationMs: Math.round(performance.now() - startedAt),
+          audioBytes: audio.byteLength,
+          activeRequests: activeProviderRequests,
+        });
+        await recordStructuredEvent(config, 'tts_completed', {
+          origin: 'server',
+          requestId,
+          runId: playcheckRunId,
+          turnId: headerTurnId,
+          provider: 'local',
+          reason: error.kind,
+          durationMs: Math.round(performance.now() - startedAt),
+          audioBytes: audio.byteLength,
+          activeRequests: activeProviderRequests,
+        });
+        await recordStructuredEvent(config, 'tts_fallback_completed', {
+          origin: 'server',
+          requestId,
+          runId: playcheckRunId,
+          turnId: headerTurnId,
+          provider: 'local',
+          reason: error.kind,
+          durationMs: Math.round(performance.now() - startedAt),
+        });
+        response.writeHead(200, {
+          'Cache-Control': 'no-store',
+          'Content-Length': audio.byteLength,
+          'Content-Type': 'audio/wav',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Vayria-Tts-Backend': 'local',
+          'X-Vayria-Tts-Fallback-From': 'aivis-cloud',
+          'X-Vayria-Tts-Fallback-Reason': error.kind,
+        });
+        response.end(audio);
+        return;
+      }
+      request.off('aborted', abortCloud);
       response.writeHead(200, {
         'Cache-Control': 'no-store',
-        'Content-Type': cloudResult.contentType,
+        'Content-Type': preparedCloud.result.contentType,
         'X-Content-Type-Options': 'nosniff',
-        'X-Vayria-Tts-Backend': ttsBackend,
+        'X-Vayria-Tts-Backend': 'aivis-cloud',
       });
       const audioBytes = await streamAivisCloudAudio(
-        cloudResult,
+        preparedCloud,
         request,
         response,
         async (firstChunkBytes) => {
@@ -3802,7 +3993,7 @@ async function handleRequest(
             requestId,
             runId: playcheckRunId,
             turnId: headerTurnId,
-            provider: ttsBackend,
+            provider: 'aivis-cloud',
             durationMs: Math.round(performance.now() - startedAt),
             audioBytes: firstChunkBytes,
             activeRequests: activeProviderRequests,
@@ -3814,7 +4005,7 @@ async function handleRequest(
         requestId,
         runId: playcheckRunId,
         turnId: headerTurnId,
-        provider: ttsBackend,
+        provider: 'aivis-cloud',
         durationMs: Math.round(performance.now() - startedAt),
         audioBytes,
         activeRequests: activeProviderRequests,
@@ -3822,18 +4013,25 @@ async function handleRequest(
       return;
     }
 
-    const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
-    const speakers = await loadAivisSpeakers(baseUrl);
-    const style = resolveZonokoStyle(speakers, emotion);
-    console.info('Performer TTS:', {
-      emotion,
-      speaker: ZONOKO_SPEAKER_NAME,
-      style: style.name,
-      styleId: style.id,
-    });
-    const audio = Buffer.from(
-      await synthesizeSpeech(baseUrl, style.id, effectiveSettings, text),
-    );
+    const localAbortController = new AbortController();
+    const abortLocal = () => localAbortController.abort();
+    request.once('aborted', abortLocal);
+    let audio: Buffer;
+    try {
+      audio = await synthesizeLocalSpeech(
+        config,
+        emotion,
+        effectiveSettings,
+        text,
+        localAbortController.signal,
+      );
+    } finally {
+      request.off('aborted', abortLocal);
+    }
+    if (request.aborted) {
+      if (!response.destroyed) response.destroy();
+      return;
+    }
     await recordStructuredEvent(config, 'tts_first_audio', {
       origin: 'server',
       requestId,
@@ -3863,6 +4061,10 @@ async function handleRequest(
     });
     response.end(audio);
   } catch (error) {
+    if (request.aborted) {
+      if (!response.destroyed) response.destroy();
+      return;
+    }
     if (error instanceof RequestError) {
       if (requestPhase) {
         await recordStructuredEvent(config, 'turn_failed', {

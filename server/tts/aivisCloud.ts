@@ -1,10 +1,13 @@
 const DEFAULT_AIVIS_CLOUD_BASE_URL = 'https://api.aivis-project.com';
+const DEFAULT_AIVIS_CLOUD_FIRST_AUDIO_TIMEOUT_MS = 2_000;
 const DEFAULT_AIVIS_CLOUD_TIMEOUT_MS = 15_000;
 const MODEL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 export type AivisCloudErrorKind =
+  | 'aborted'
   | 'authentication'
   | 'configuration'
+  | 'first_audio_timeout'
   | 'invalid_request'
   | 'model'
   | 'provider'
@@ -34,6 +37,8 @@ export interface AivisCloudSynthesisInput {
   styleName: string;
   tempoDynamics: number;
   text: string;
+  firstAudioTimeoutMs?: number;
+  signal?: AbortSignal;
   timeoutMs?: number;
 }
 
@@ -41,6 +46,8 @@ export interface AivisCloudSynthesisResult {
   body: ReadableStream<Uint8Array>;
   contentType: 'audio/mpeg';
   didTimeout(): boolean;
+  markFirstAudioReceived(): void;
+  timeoutKind(): 'first_audio_timeout' | 'timeout' | null;
   dispose(): void;
 }
 
@@ -64,7 +71,7 @@ function readRequired(value: string, variableName: string): string {
   if (!normalized) {
     throw new AivisCloudError(
       'configuration',
-      `${variableName} is required when VAYRIA_TTS_BACKEND is aivis-cloud.`,
+      `${variableName} is required for an Aivis Cloud TTS backend.`,
     );
   }
   return normalized;
@@ -125,14 +132,33 @@ export async function synthesizeAivisCloudSpeech(
 
   const endpoint = new URL('/v1/tts/synthesize', readBaseUrl(input.baseUrl));
   const controller = new AbortController();
+  const firstAudioTimeoutMs =
+    input.firstAudioTimeoutMs ?? DEFAULT_AIVIS_CLOUD_FIRST_AUDIO_TIMEOUT_MS;
   const timeoutMs = input.timeoutMs ?? DEFAULT_AIVIS_CLOUD_TIMEOUT_MS;
-  let timedOut = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
+  let timeoutFailure: 'first_audio_timeout' | 'timeout' | null = null;
+  let disposed = false;
+  const abortForTimeout = (kind: 'first_audio_timeout' | 'timeout') => {
+    if (timeoutFailure || disposed) return;
+    timeoutFailure = kind;
     controller.abort();
-  }, timeoutMs);
-  const dispose = () => {
+  };
+  const firstAudioTimeout = setTimeout(
+    () => abortForTimeout('first_audio_timeout'),
+    firstAudioTimeoutMs,
+  );
+  const timeout = setTimeout(() => abortForTimeout('timeout'), timeoutMs);
+  const abortFromCaller = () => controller.abort();
+  input.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  if (input.signal?.aborted) controller.abort();
+  const clearResources = () => {
+    clearTimeout(firstAudioTimeout);
     clearTimeout(timeout);
+    input.signal?.removeEventListener('abort', abortFromCaller);
+  };
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    clearResources();
     controller.abort();
   };
 
@@ -163,11 +189,20 @@ export async function synthesizeAivisCloudSpeech(
       signal: controller.signal,
     });
   } catch {
-    clearTimeout(timeout);
-    if (controller.signal.aborted) {
+    clearResources();
+    disposed = true;
+    if (input.signal?.aborted) {
       throw new AivisCloudError(
-        'timeout',
-        'Aivis Cloud API synthesis timed out.',
+        'aborted',
+        'Aivis Cloud API synthesis was cancelled.',
+      );
+    }
+    if (timeoutFailure) {
+      throw new AivisCloudError(
+        timeoutFailure,
+        timeoutFailure === 'first_audio_timeout'
+          ? 'Aivis Cloud API did not return audio within two seconds.'
+          : 'Aivis Cloud API synthesis timed out.',
       );
     }
     throw new AivisCloudError(
@@ -191,7 +226,9 @@ export async function synthesizeAivisCloudSpeech(
   return {
     body: response.body,
     contentType: 'audio/mpeg',
-    didTimeout: () => timedOut,
+    didTimeout: () => timeoutFailure !== null,
+    markFirstAudioReceived: () => clearTimeout(firstAudioTimeout),
+    timeoutKind: () => timeoutFailure,
     dispose,
   };
 }

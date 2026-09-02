@@ -6,6 +6,7 @@ import {
   summarizeTtsBenchmark,
   TTS_BENCHMARK_FIXTURES,
   TTS_BENCHMARK_SAMPLE_COUNT,
+  readTtsFallback,
   type TtsBenchmarkSample,
 } from './audio/ttsBenchmark.js';
 import { apiUrl } from './runtimeConfig.js';
@@ -14,6 +15,7 @@ import './ttsBenchmark.css';
 interface BenchmarkReport {
   backend: string;
   completedAt: string;
+  fallbackCount?: number;
   failure?: { kind: string; status?: number };
   sampleCount: number;
   samples: TtsBenchmarkSample[];
@@ -48,7 +50,12 @@ export function BenchmarkApp() {
     });
     const selectedBackend =
       response.headers.get('X-Vayria-Tts-Backend') || 'unknown';
-    setBackend(selectedBackend);
+    const fallback = readTtsFallback(response.headers);
+    setBackend(
+      fallback
+        ? `${selectedBackend} (fallback: ${fallback.reason})`
+        : selectedBackend,
+    );
     if (!response.ok) {
       const error = new Error(`TTS request returned HTTP ${response.status}.`);
       Object.assign(error, { status: response.status });
@@ -76,6 +83,7 @@ export function BenchmarkApp() {
 
     return {
       backend: selectedBackend,
+      ...(fallback ? { fallback } : {}),
       fixtureId: fixture.id,
       iteration,
       textLength: fixture.text.length,
@@ -137,6 +145,7 @@ export function BenchmarkApp() {
         schemaVersion: 1,
         backend: selectedBackend,
         completedAt: new Date().toISOString(),
+        fallbackCount: samples.filter((sample) => sample.fallback).length,
         sampleCount: samples.length,
         samples,
         summaries: summarizeTtsBenchmark(samples),
@@ -195,18 +204,34 @@ export function BenchmarkApp() {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Fixture</th><th>Samples</th><th>TTFA p50 / p95</th><th>First audio p50 / p95</th><th>Synthesis p50 / p95</th></tr></thead>
+            <thead><tr><th>Fixture</th><th>Samples</th><th>Fallbacks</th><th>TTFA p50 / p95</th><th>First audio p50 / p95</th><th>Synthesis p50 / p95</th></tr></thead>
             <tbody>
               {(report?.summaries ?? []).map((summary) => (
                 <tr key={summary.fixtureId}>
                   <th>{summary.fixtureId}</th>
                   <td>{summary.sampleCount}</td>
+                  <td>
+                    {summary.fallbackCount === 0
+                      ? '0'
+                      : `${summary.fallbackCount} (${[
+                          ...new Set(
+                            report!.samples
+                              .filter(
+                                (sample) =>
+                                  sample.fixtureId === summary.fixtureId,
+                              )
+                              .flatMap((sample) =>
+                                sample.fallback ? [sample.fallback.reason] : [],
+                              ),
+                          ),
+                        ].join(', ')})`}
+                  </td>
                   <td>{summary.ttfaMs.p50} / {summary.ttfaMs.p95} ms</td>
                   <td>{summary.firstAudioMs.p50} / {summary.firstAudioMs.p95} ms</td>
                   <td>{summary.synthesisMs.p50} / {summary.synthesisMs.p95} ms</td>
                 </tr>
               ))}
-              {!report && <tr><td colSpan={5} className="empty">No measured run yet.</td></tr>}
+              {!report && <tr><td colSpan={6} className="empty">No measured run yet.</td></tr>}
             </tbody>
           </table>
         </div>

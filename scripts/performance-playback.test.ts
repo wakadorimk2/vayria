@@ -4,6 +4,7 @@ import type { PlayAudio } from '../src/audio/useAudioLipSync.js';
 import { readAudioPlaybackSource } from '../src/audio/audioPlaybackSource.js';
 import { pumpMediaSourceAudio } from '../src/audio/mediaSourceStream.js';
 import {
+  readTtsFallback,
   summarizeTtsBenchmark,
   type TtsBenchmarkSample,
 } from '../src/audio/ttsBenchmark.js';
@@ -515,6 +516,14 @@ test('media source pump rejects an empty or interrupted stream safely', async ()
 test('TTS benchmark summaries use nearest-rank p50 and p95', () => {
   const samples: TtsBenchmarkSample[] = Array.from({ length: 10 }, (_, index) => ({
     backend: 'local',
+    ...(index === 0
+      ? {
+          fallback: {
+            from: 'aivis-cloud' as const,
+            reason: 'first_audio_timeout' as const,
+          },
+        }
+      : {}),
     fixtureId: 'short',
     iteration: index + 1,
     textLength: 8,
@@ -533,9 +542,32 @@ test('TTS benchmark summaries use nearest-rank p50 and p95', () => {
   }));
   const summary = summarizeTtsBenchmark(samples)[0];
   assert.equal(summary.sampleCount, 10);
+  assert.equal(summary.fallbackCount, 1);
   assert.deepEqual(summary.firstAudioMs, { p50: 5, p95: 10 });
   assert.deepEqual(summary.synthesisMs, { p50: 50, p95: 100 });
   assert.deepEqual(summary.ttfaMs, { p50: 500, p95: 1_000 });
+});
+
+test('TTS benchmark keeps only safe fallback metadata', () => {
+  const valid = readTtsFallback(
+    new Headers({
+      'X-Vayria-Tts-Fallback-From': 'aivis-cloud',
+      'X-Vayria-Tts-Fallback-Reason': 'first_audio_timeout',
+    }),
+  );
+  assert.deepEqual(valid, {
+    from: 'aivis-cloud',
+    reason: 'first_audio_timeout',
+  });
+  assert.equal(
+    readTtsFallback(
+      new Headers({
+        'X-Vayria-Tts-Fallback-From': 'aivis-cloud',
+        'X-Vayria-Tts-Fallback-Reason': 'secret upstream response',
+      }),
+    ),
+    undefined,
+  );
 });
 
 test('voice pending plans reprepare motion when the same turn takes the floor', () => {

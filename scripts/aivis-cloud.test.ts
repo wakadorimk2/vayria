@@ -125,6 +125,82 @@ test('Cloud synthesis aborts a request after the bounded timeout', async () => {
   );
 });
 
+test('Cloud synthesis applies the first-audio timeout while the stream is silent', async () => {
+  const fetchImpl: typeof fetch = async (_input, init) =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'audio/mpeg' } },
+    );
+  const result = await synthesizeAivisCloudSpeech({
+    ...createInput(fetchImpl),
+    firstAudioTimeoutMs: 5,
+  });
+
+  await assert.rejects(result.body.getReader().read());
+  assert.equal(result.timeoutKind(), 'first_audio_timeout');
+  result.dispose();
+});
+
+test('Cloud synthesis clears only the first-audio timer after audio arrives', async () => {
+  const fetchImpl: typeof fetch = async (_input, init) =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+          init?.signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'audio/mpeg' } },
+    );
+  const result = await synthesizeAivisCloudSpeech({
+    ...createInput(fetchImpl),
+    firstAudioTimeoutMs: 5,
+    timeoutMs: 20,
+  });
+  const reader = result.body.getReader();
+  assert.deepEqual([...(await reader.read()).value!], [1]);
+  result.markFirstAudioReceived();
+
+  await assert.rejects(reader.read());
+  assert.equal(result.timeoutKind(), 'timeout');
+  result.dispose();
+});
+
+test('Cloud synthesis maps a caller abort without converting it to a timeout', async () => {
+  const controller = new AbortController();
+  const fetchImpl: typeof fetch = async (_input, init) =>
+    await new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        'abort',
+        () => reject(new DOMException('aborted', 'AbortError')),
+        { once: true },
+      );
+    });
+  const synthesis = synthesizeAivisCloudSpeech({
+    ...createInput(fetchImpl),
+    signal: controller.signal,
+  });
+  controller.abort();
+
+  await assert.rejects(
+    synthesis,
+    (error: unknown) =>
+      error instanceof AivisCloudError && error.kind === 'aborted',
+  );
+});
+
 test('Cloud synthesis keeps the timeout active while the audio stream is open', async () => {
   const fetchImpl: typeof fetch = async (_input, init) =>
     new Response(

@@ -276,7 +276,7 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
 
    ```dotenv
    VAYRIA_HTTPS_CONFIG_FILE=
-   VAYRIA_TTS_BACKEND=local
+   VAYRIA_TTS_BACKEND=cloud-with-fallback
    AIVIS_BASE_URL=http://127.0.0.1:10101
    AIVIS_SPEED_SCALE=1.15
    AIVIS_PITCH_SCALE=0
@@ -302,8 +302,12 @@ Session Resetは実行中の処理を停止し、Sessionを初期状態へ戻し
    zonoko の一部スタイルでは、AivisSpeech が
    `AIVIS_INTONATION_SCALE` を無視する場合があります。
 
-   `VAYRIA_TTS_BACKEND`の既定値は`local`です。
-   Cloudを使う場合は`aivis-cloud`を指定し、対象のmodel UUIDを設定します。
+   `VAYRIA_TTS_BACKEND`の既定値は`cloud-with-fallback`です。
+   このモードはAivis Cloudを優先します。
+   Cloudのfirst audioが2秒以内に届かない場合は、Local AivisSpeechへ1回だけ切り替えます。
+   Cloudの最初の音声chunkを送信した後にstreamが切断した場合は、重複発話を防ぐためLocalへ切り替えません。
+   `local`と`aivis-cloud`は単独providerモードとして使用できます。
+   Cloudを使う場合は対象のmodel UUIDを設定します。
    設定変更後は開発サーバーを再起動します。
    `AIVIS_CLOUD_API_KEY`は`.env.local`へ書きません。
    server processは1Password起動時のprocess environmentだけからkeyを読みます。
@@ -721,9 +725,12 @@ backendはserver environmentだけで選択します。
 ページからbackend、model、API keyは変更できません。
 download JSONは`schemaVersion: 1`を使います。
 JSONには発話本文と秘密情報を含めません。
+fallbackが発生した場合、画面は回数と安全な失敗分類を表示します。
+JSONは各sampleへ任意の`fallback` fieldを保存します。
 
-Aivis Cloudの初回検証はmock serverを使います。
-Cloud実測、Windows Chrome、iPad SafariのOwner Playcheckは、keyとmodelの準備後に実施します。
+Aivis Cloudのprovider failureとfallbackはmock serverを使って検証します。
+iPad Safariの実測結果は[`docs/evaluation/tts-ttfa-aivis-cloud.md`](docs/evaluation/tts-ttfa-aivis-cloud.md)へ記録しています。
+展示用ノートPC、本番予定network、実通信切断のOwner Playcheckは未完了です。
 
 ## 展示向け同時操作ストレステスト
 
@@ -818,7 +825,8 @@ Gitには`docs/evaluation/results/`の匿名集計だけを保存します。
 
 ブラウザーは開発時に、次の会話イベントを構造化ログへ出力します。
 
-`input_received`、`llm_start`、`llm_done`、`tts_start`、`tts_first_audio`、
+`input_received`、`llm_start`、`llm_done`、`tts_start`、`tts_fallback_started`、
+`tts_fallback_completed`、`tts_first_audio`、
 `tts_ready`、`playback_started`、`tts_completed`、
 `motion_ready`、`motion_start`、`animation_start`、`turn_completed`、
 `turn_aborted`、`turn_failed`

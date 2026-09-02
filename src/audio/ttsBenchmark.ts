@@ -15,6 +15,53 @@ export const TTS_BENCHMARK_FIXTURES = [
 export type TtsBenchmarkFixtureId =
   (typeof TTS_BENCHMARK_FIXTURES)[number]['id'];
 
+const TTS_FALLBACK_REASONS = new Set([
+  'authentication',
+  'configuration',
+  'first_audio_timeout',
+  'invalid_request',
+  'model',
+  'provider',
+  'quota',
+  'rate_limit',
+  'timeout',
+] as const);
+
+export type TtsFallbackReason =
+  | 'authentication'
+  | 'configuration'
+  | 'first_audio_timeout'
+  | 'invalid_request'
+  | 'model'
+  | 'provider'
+  | 'quota'
+  | 'rate_limit'
+  | 'timeout';
+
+export interface TtsFallbackMetadata {
+  from: 'aivis-cloud';
+  reason: TtsFallbackReason;
+}
+
+interface HeaderReader {
+  get(name: string): string | null;
+}
+
+export function readTtsFallback(
+  headers: HeaderReader,
+): TtsFallbackMetadata | undefined {
+  const from = headers.get('X-Vayria-Tts-Fallback-From');
+  const reason = headers.get('X-Vayria-Tts-Fallback-Reason');
+  if (
+    from !== 'aivis-cloud' ||
+    !reason ||
+    !TTS_FALLBACK_REASONS.has(reason as TtsFallbackReason)
+  ) {
+    return undefined;
+  }
+  return { from, reason: reason as TtsFallbackReason };
+}
+
 export interface TtsBenchmarkSample {
   backend: string;
   durationsMs: {
@@ -23,6 +70,7 @@ export interface TtsBenchmarkSample {
     ttfa: number;
   };
   fixtureId: TtsBenchmarkFixtureId;
+  fallback?: TtsFallbackMetadata;
   iteration: number;
   textLength: number;
   timestamps: {
@@ -35,6 +83,7 @@ export interface TtsBenchmarkSample {
 }
 
 export interface TtsBenchmarkSummary {
+  fallbackCount: number;
   fixtureId: TtsBenchmarkFixtureId;
   firstAudioMs: { p50: number; p95: number };
   sampleCount: number;
@@ -65,6 +114,7 @@ export function summarizeTtsBenchmark(
     );
     return {
       fixtureId: fixture.id,
+      fallbackCount: fixtureSamples.filter((sample) => sample.fallback).length,
       sampleCount: fixtureSamples.length,
       firstAudioMs: summarizeValues(
         fixtureSamples.map((sample) => sample.durationsMs.firstAudio),
