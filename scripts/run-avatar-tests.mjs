@@ -13,6 +13,7 @@ const testFiles = [
     'node_modules/.tmp/avatar-test/scripts/attention-engagement.test.js',
   ),
   resolve('node_modules/.tmp/avatar-test/scripts/attention-target.test.js'),
+  resolve('node_modules/.tmp/avatar-test/scripts/card-gaze-override.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/idle-gaze.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/life-dynamics.test.js'),
   resolve(

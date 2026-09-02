@@ -181,3 +181,33 @@ test('adapter produces no output while VRMA is active', () => {
   assert.ok(head.quaternion.equals(new Quaternion()));
   assert.ok(neck.quaternion.equals(new Quaternion()));
 });
+
+test('adapter applies a precomposed gaze while the base orienting target is empty', () => {
+  const { head, neck, lookAt, vrm } = createFakeVrm();
+  const adapter = new LifeDynamicsOrientingAdapter(vrm);
+  const activeSnapshot = createSnapshot();
+  const snapshot: LifeDynamicsSnapshot = {
+    ...activeSnapshot,
+    orienting: {
+      ...activeSnapshot.orienting,
+      target: null,
+      eyeWeight: 0,
+      headWeight: 0,
+    },
+  };
+  const desiredTarget = new Vector3(2, 1, 5);
+
+  adapter.apply({
+    snapshot,
+    neutralTarget: new Vector3(0, 1, 2),
+    desiredTarget,
+    headBias: { yawDegrees: 4, pitchDegrees: -2 },
+    neckBias: { yawDegrees: 2, pitchDegrees: -1 },
+    vrmaActive: false,
+    precomposedGaze: true,
+  });
+
+  assert.ok(lookAt?.target?.position.equals(desiredTarget));
+  assert.equal(head.quaternion.equals(new Quaternion()), false);
+  assert.equal(neck.quaternion.equals(new Quaternion()), false);
+});

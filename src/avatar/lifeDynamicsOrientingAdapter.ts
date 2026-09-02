@@ -21,6 +21,8 @@ export interface LifeDynamicsOrientingFrame {
   readonly headBias: VrmBoneBias;
   readonly neckBias: VrmBoneBias;
   readonly vrmaActive: boolean;
+  /** The caller already applied the gaze-layer participation weights. */
+  readonly precomposedGaze?: boolean;
 }
 
 /**
@@ -54,13 +56,15 @@ export class LifeDynamicsOrientingAdapter {
 
     if (
       frame.vrmaActive ||
-      frame.snapshot.orienting.target === null ||
+      (!frame.precomposedGaze && frame.snapshot.orienting.target === null) ||
       frame.desiredTarget === null
     ) {
       return;
     }
 
-    const eyeWeight = clamp(frame.snapshot.orienting.eyeWeight);
+    const eyeWeight = frame.precomposedGaze
+      ? 1
+      : clamp(frame.snapshot.orienting.eyeWeight);
     if (this.vrm.lookAt) {
       this.gazeTarget.position.lerpVectors(
         frame.neutralTarget,
@@ -70,7 +74,9 @@ export class LifeDynamicsOrientingAdapter {
       this.vrm.lookAt.target = this.gazeTarget;
     }
 
-    const headWeight = clamp(frame.snapshot.orienting.headWeight);
+    const headWeight = frame.precomposedGaze
+      ? 1
+      : clamp(frame.snapshot.orienting.headWeight);
     if (headWeight <= 0) return;
 
     if (this.headNode) {

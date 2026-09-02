@@ -8,14 +8,17 @@ export type DragAttentionPhase = 'idle' | 'acquire' | 'priority';
 
 export type DragAttentionRandom = () => number;
 
-export const DRAG_ATTENTION_SALIENCE = 0.85;
 export const DRAG_ATTENTION_MIN_DWELL_MS = 200;
 export const DRAG_ATTENTION_MAX_ACQUIRE_MS = 1_200;
 export const DRAG_ATTENTION_TICK_MS = 50;
-export const DRAG_ATTENTION_POST_END_HOLD_MS = 300;
 export const DRAG_ATTENTION_MIN_GAZE_STRENGTH = 0.33;
 export const DRAG_ATTENTION_START_GAZE_STRENGTH = 0.55;
 export const DRAG_ATTENTION_MAX_GAZE_STRENGTH = 0.55;
+export const DRAG_VIEWER_CHECK_IN_START_MS = 2_000;
+export const DRAG_VIEWER_CHECK_IN_MIN_INTERVAL_MS = 900;
+export const DRAG_VIEWER_CHECK_IN_MAX_INTERVAL_MS = 1_400;
+export const DRAG_VIEWER_CHECK_IN_MIN_DURATION_MS = 160;
+export const DRAG_VIEWER_CHECK_IN_MAX_DURATION_MS = 240;
 
 const DRAG_ATTENTION_HAZARD_WINDOWS = [
   { endMs: 500, hazardPerSecond: 0.5 },
@@ -28,6 +31,7 @@ export interface DragAttentionSnapshot {
   readonly elapsedMs: number;
   readonly gazeStrength: number;
   readonly attentionEnergy: number;
+  readonly viewerCheckIn: boolean;
 }
 
 /**
@@ -40,6 +44,8 @@ export class DragAttentionController {
   private elapsedMs = 0;
   private gazeStrength = 0;
   private attentionEnergy = 0;
+  private nextViewerCheckInAtMs = DRAG_VIEWER_CHECK_IN_START_MS;
+  private viewerCheckInRemainingMs = 0;
 
   start(currentGazeStrength = 0.25): DragAttentionSnapshot {
     this.phase = 'acquire';
@@ -49,6 +55,8 @@ export class DragAttentionController {
       DRAG_ATTENTION_START_GAZE_STRENGTH,
     );
     this.gazeStrength = this.attentionEnergy;
+    this.nextViewerCheckInAtMs = DRAG_VIEWER_CHECK_IN_START_MS;
+    this.viewerCheckInRemainingMs = 0;
     return this.snapshot();
   }
 
@@ -62,6 +70,7 @@ export class DragAttentionController {
     if (this.phase === 'priority') {
       this.elapsedMs += delta;
       this.updateAttentionEnergy(delta, speedPxPerSecond);
+      this.updateViewerCheckIn(delta, random);
       return this.snapshot();
     }
 
@@ -96,6 +105,8 @@ export class DragAttentionController {
     this.elapsedMs = 0;
     this.gazeStrength = 0;
     this.attentionEnergy = 0;
+    this.nextViewerCheckInAtMs = DRAG_VIEWER_CHECK_IN_START_MS;
+    this.viewerCheckInRemainingMs = 0;
     return this.snapshot();
   }
 
@@ -105,6 +116,7 @@ export class DragAttentionController {
       elapsedMs: this.elapsedMs,
       gazeStrength: this.gazeStrength,
       attentionEnergy: this.attentionEnergy,
+      viewerCheckIn: this.viewerCheckInRemainingMs > 0,
     };
   }
 
@@ -125,6 +137,38 @@ export class DragAttentionController {
     );
     this.gazeStrength = this.attentionEnergy;
   }
+
+  private updateViewerCheckIn(
+    deltaMs: number,
+    random: DragAttentionRandom,
+  ): void {
+    if (this.viewerCheckInRemainingMs > 0) {
+      this.viewerCheckInRemainingMs = Math.max(
+        0,
+        this.viewerCheckInRemainingMs - deltaMs,
+      );
+      return;
+    }
+    if (this.elapsedMs < this.nextViewerCheckInAtMs) return;
+
+    const durationMs = randomBetween(
+      DRAG_VIEWER_CHECK_IN_MIN_DURATION_MS,
+      DRAG_VIEWER_CHECK_IN_MAX_DURATION_MS,
+      random(),
+    );
+    const intervalMs = randomBetween(
+      DRAG_VIEWER_CHECK_IN_MIN_INTERVAL_MS,
+      DRAG_VIEWER_CHECK_IN_MAX_INTERVAL_MS,
+      random(),
+    );
+    this.viewerCheckInRemainingMs = durationMs;
+    this.nextViewerCheckInAtMs = this.elapsedMs + durationMs + intervalMs;
+  }
+}
+
+function randomBetween(minimum: number, maximum: number, value: number): number {
+  const level = Number.isFinite(value) ? Math.max(0, Math.min(value, 1)) : 0.5;
+  return minimum + (maximum - minimum) * level;
 }
 
 export function getDragAttentionReleaseHazard(
