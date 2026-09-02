@@ -16,6 +16,12 @@ import {
   type TtsBenchmarkSample,
 } from '../src/audio/ttsBenchmark.js';
 import {
+  calculatePlaybackDiagnosticDurations,
+  ConsecutiveRmsTracker,
+  summarizePlaybackDiagnostics,
+  type TtsPlaybackDiagnosticSample,
+} from '../src/audio/ttsPlaybackDiagnostics.js';
+import {
   PerformancePlaybackCoordinator,
   type PerformanceMotionPort,
   type PerformancePlaybackClock,
@@ -79,6 +85,84 @@ test('silent unlock WAV has a valid 100 ms PCM structure', () => {
   assert.equal(view.getUint16(34, true), 16);
   assert.equal(view.getUint32(40, true), 1_600);
   assert.equal(bytes.byteLength, 1_644);
+});
+
+test('RMS diagnostics require three consecutive active frames', () => {
+  const tracker = new ConsecutiveRmsTracker();
+  const silence = new Float32Array([0, 0]);
+  const active = new Float32Array([0.001, -0.001]);
+
+  tracker.sample(active, 10);
+  tracker.sample(active, 20);
+  tracker.sample(silence, 30);
+  tracker.sample(active, 40);
+  tracker.sample(active, 50);
+  assert.equal(tracker.result().firstNonzeroAt, null);
+  tracker.sample(active, 60);
+
+  const result = tracker.result();
+  assert.equal(result.activeFrames, 5);
+  assert.equal(result.firstNonzeroAt, 60);
+  assert.ok(Math.abs(result.max - 0.001) < 0.000001);
+  assert.equal(result.totalFrames, 6);
+});
+
+test('playback diagnostics calculate nullable durations and summaries', () => {
+  const timestamps = {
+    current_time_advanced_at: 150,
+    decode_complete_at: 130,
+    ended_at: 1_000,
+    first_chunk_at: 20,
+    first_nonzero_rms_at: 180,
+    play_called_at: 100,
+    playing_at: 120,
+    request_at: 0,
+    response_complete_at: 90,
+    response_headers_at: 10,
+  };
+  const durationsMs = calculatePlaybackDiagnosticDurations(timestamps);
+  assert.deepEqual(durationsMs, {
+    decode: 40,
+    download: 90,
+    firstChunk: 20,
+    playToPlaying: 20,
+    playingToCurrentTime: 30,
+    playingToFirstRms: 60,
+    total: 1_000,
+  });
+
+  const createSample = (
+    strategy: TtsPlaybackDiagnosticSample['strategy'],
+    rmsDelay: number | null,
+  ): TtsPlaybackDiagnosticSample => ({
+    backend: 'aivis-cloud',
+    durationsMs: { ...durationsMs, playingToFirstRms: rmsDelay },
+    fixtureId: 'short',
+    iteration: 1,
+    mediaType: 'audio/mpeg',
+    rms: {
+      activeFrames: rmsDelay === null ? 0 : 4,
+      firstNonzeroDetected: rmsDelay !== null,
+      max: rmsDelay === null ? 0 : 0.01,
+      totalFrames: 10,
+    },
+    strategy,
+    textLength: 8,
+    timestamps,
+  });
+  const summaries = summarizePlaybackDiagnostics([
+    createSample('media-source', null),
+    createSample('media-source', 30),
+    createSample('media-source', 10),
+  ]);
+  assert.deepEqual(summaries[0], {
+    fixtureId: 'short',
+    firstRmsCount: 2,
+    firstRmsDelayMs: { max: 30, median: 20 },
+    sampleCount: 3,
+    strategy: 'media-source',
+  });
+  assert.equal(summaries.length, 9);
 });
 
 test('playback start monitor handles success, rejection, and pending playback', async () => {

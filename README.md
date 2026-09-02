@@ -715,6 +715,17 @@ npm run build
 通常UIからリンクしない開発用ページを用意しています。
 開発サーバーを起動し、`/tts-benchmark.html`を開きます。
 
+ページ上段のlip sync診断は、次の再生経路を比較します。
+
+- MP3をMediaSourceへstream転送する経路
+- MP3を全取得して永続Audio要素のBlob URLで再生する経路
+- MP3を全取得してAudioBufferSourceNodeで再生する経路
+
+各経路は短文、通常文、長文をwarm-up 1回、計測3回実行します。
+RMSが`0.0001`を3 frame連続で超えると、有効な解析値として記録します。
+診断JSONはbrowser内時刻とRMS統計だけを保存します。
+物理スピーカーの出力時刻、発話本文、秘密情報は保存しません。
+
 ページは短文、通常文、長文を直列で再生します。
 各fixtureはwarm-upを1回実行します。
 その後、10回を計測します。

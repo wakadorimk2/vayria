@@ -10,6 +10,7 @@ import {
   type TtsBenchmarkSample,
 } from './audio/ttsBenchmark.js';
 import { apiUrl } from './runtimeConfig.js';
+import { TtsPlaybackDiagnosticsPanel } from './TtsPlaybackDiagnosticsPanel.js';
 import './ttsBenchmark.css';
 
 interface BenchmarkReport {
@@ -175,22 +176,25 @@ export function BenchmarkApp() {
     <main>
       <header>
         <p className="eyebrow">Vayria development tool</p>
-        <h1>TTS TTFA benchmark</h1>
+        <h1>TTS playback diagnostics</h1>
         <p className="lede">
-          The server selects the backend. This page runs one warm-up and ten measured plays for each fixture.
+          Measure lip sync playback paths first. The existing TTFA benchmark remains available below.
         </p>
       </header>
 
-      <section className="run-panel" aria-labelledby="run-heading">
+      <TtsPlaybackDiagnosticsPanel />
+
+      <section className="run-panel ttfa-run-panel" aria-labelledby="run-heading">
         <div>
-          <h2 id="run-heading">Run</h2>
+          <p className="section-kicker">Existing measurement</p>
+          <h2 id="run-heading">TTFA benchmark</h2>
           <dl>
             <div><dt>Backend</dt><dd>{backend}</dd></div>
             <div><dt>Status</dt><dd aria-live="polite">{progress}</dd></div>
           </dl>
         </div>
         <div className="actions">
-          <button className="primary" disabled={running} onClick={() => void start()}>
+          <button disabled={running} onClick={() => void start()}>
             Start benchmark
           </button>
           <button disabled={!running} onClick={stopBenchmark}>Stop</button>

@@ -14,6 +14,7 @@
     "src/audio/audioPlaybackSource.ts",
     "src/audio/mediaSourceStream.ts",
     "src/audio/persistentStreamingAudio.ts",
+    "src/audio/ttsPlaybackDiagnostics.ts",
     "src/audio/ttsBenchmark.ts",
     "src/performer/performancePlayback.ts",
     "src/performer/types.ts",
