@@ -1,4 +1,7 @@
-import type { PlayAudio } from '../audio/useAudioLipSync.js';
+import type {
+  PlayAudio,
+  PlayAudioOptions,
+} from '../audio/useAudioLipSync.js';
 import type { AudioPlaybackSource } from '../audio/audioPlaybackSource.js';
 import type { PerformancePlan } from './types.js';
 
@@ -30,6 +33,7 @@ export interface PerformancePlaybackCallbacks {
   onFirstAudioReady?: (readyAt: number) => void;
   onMotionReady?: (readyAt: number) => void;
   onMotionStart?: (startedAt: number) => void;
+  onPlaybackGestureRequired?: PlayAudioOptions['onPlaybackGestureRequired'];
   onSpeechStart?: (startedAt: number) => void;
   onSpeechEnd?: (endedAt: number) => void;
 }
@@ -156,6 +160,7 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
         startDelayMs: motionReady ? plan.timing.motionLeadMs : 0,
         onComplete: callbacks.onAudioComplete,
         onFirstAudioReady: callbacks.onFirstAudioReady,
+        onPlaybackGestureRequired: callbacks.onPlaybackGestureRequired,
         onReadyToStart: () => {
           if (!motionReady || !this.isCurrent(plan.planId, generation, controller)) {
             return false;

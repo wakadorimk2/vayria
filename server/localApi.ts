@@ -193,6 +193,7 @@ const CONVERSATION_EVENTS = [
   'tts_first_audio',
   'tts_ready',
   'playback_started',
+  'playback_gesture_required',
   'tts_completed',
   'motion_ready',
   'motion_start',
@@ -201,6 +202,10 @@ const CONVERSATION_EVENTS = [
   'turn_aborted',
   'turn_failed',
   'autonomy_gate',
+] as const;
+const PLAYBACK_GESTURE_REASONS = [
+  'not_allowed',
+  'start_timeout',
 ] as const;
 const CARD_BY_ID: ReadonlyMap<string, WildcardCardData> = new Map(
   cardPool.map((card) => [card.id, card]),
@@ -705,6 +710,13 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     !(CONVERSATION_EVENTS as readonly string[]).includes(event)
   ) {
     throw new RequestError('event is invalid.', 400);
+  }
+  if (
+    event === 'playback_gesture_required' &&
+    (typeof record.reason !== 'string' ||
+      !(PLAYBACK_GESTURE_REASONS as readonly string[]).includes(record.reason))
+  ) {
+    throw new RequestError('playback gesture reason is invalid.', 400);
   }
 
   const gateFields = [

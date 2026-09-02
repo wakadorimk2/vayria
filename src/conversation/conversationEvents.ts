@@ -22,6 +22,7 @@ export const CONVERSATION_EVENTS = [
   'tts_first_audio',
   'tts_ready',
   'playback_started',
+  'playback_gesture_required',
   'tts_completed',
   'motion_ready',
   'motion_start',

@@ -4,7 +4,9 @@ import type { PlayAudio } from '../src/audio/useAudioLipSync.js';
 import { readAudioPlaybackSource } from '../src/audio/audioPlaybackSource.js';
 import { pumpMediaSourceAudio } from '../src/audio/mediaSourceStream.js';
 import {
+  createSilentWavBytes,
   isPlaybackGestureError,
+  monitorPlaybackStart,
   PlaybackGestureGate,
   PersistentStreamingAudio,
 } from '../src/audio/persistentStreamingAudio.js';
@@ -34,6 +36,7 @@ class FakeStreamingAudioElement {
   preload = '';
   src = '';
   playCalls = 0;
+  playImplementation: () => Promise<void> = () => Promise.resolve();
   readonly events: string[];
 
   constructor(events: string[]) {
@@ -51,13 +54,79 @@ class FakeStreamingAudioElement {
   play(): Promise<void> {
     this.playCalls += 1;
     this.events.push('play');
-    return Promise.resolve();
+    return this.playImplementation();
   }
 
   removeAttribute(name: string): void {
     if (name === 'src') this.src = '';
   }
 }
+
+test('silent unlock WAV has a valid 100 ms PCM structure', () => {
+  const bytes = createSilentWavBytes();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const ascii = (offset: number, length: number) =>
+    String.fromCharCode(...bytes.slice(offset, offset + length));
+
+  assert.equal(ascii(0, 4), 'RIFF');
+  assert.equal(ascii(8, 4), 'WAVE');
+  assert.equal(ascii(12, 4), 'fmt ');
+  assert.equal(ascii(36, 4), 'data');
+  assert.equal(view.getUint32(4, true) + 8, bytes.byteLength);
+  assert.equal(view.getUint16(20, true), 1);
+  assert.equal(view.getUint16(22, true), 1);
+  assert.equal(view.getUint32(24, true), 8_000);
+  assert.equal(view.getUint16(34, true), 16);
+  assert.equal(view.getUint32(40, true), 1_600);
+  assert.equal(bytes.byteLength, 1_644);
+});
+
+test('playback start monitor handles success, rejection, and pending playback', async () => {
+  assert.equal(
+    await monitorPlaybackStart(Promise.resolve(), new Promise(() => undefined), 20),
+    'started',
+  );
+  assert.equal(
+    await monitorPlaybackStart(
+      Promise.reject({ name: 'NotAllowedError' }),
+      new Promise(() => undefined),
+      20,
+    ),
+    'not_allowed',
+  );
+  assert.equal(
+    await monitorPlaybackStart(
+      new Promise(() => undefined),
+      new Promise(() => undefined),
+      5,
+    ),
+    'start_timeout',
+  );
+  await assert.rejects(
+    monitorPlaybackStart(
+      Promise.reject(new Error('decoder failed')),
+      new Promise(() => undefined),
+      20,
+    ),
+    /decoder failed/,
+  );
+});
+
+test('pending unlock returns false at its deadline and keeps no silent source', async () => {
+  const events: string[] = [];
+  const audio = new FakeStreamingAudioElement(events);
+  audio.playImplementation = () => new Promise(() => undefined);
+  const context = {
+    createMediaElementSource: () => ({ disconnect: () => undefined }),
+    state: 'running',
+  } as unknown as AudioContext;
+  const carrier = new PersistentStreamingAudio(
+    () => audio as unknown as HTMLAudioElement,
+  );
+
+  assert.equal(await carrier.prepare(context, false, 5), false);
+  assert.equal(audio.src, '');
+});
 
 test('persistent streaming audio reuses one element and one source node', () => {
   const events: string[] = [];
@@ -190,6 +259,23 @@ test('playback gesture gate resumes once and cancels pending playback', async ()
   cancelledGate.cancel(new DOMException('Playback aborted.', 'AbortError'));
   await assert.rejects(cancelled, { name: 'AbortError' });
   assert.equal(cancelledGate.isWaiting, false);
+});
+
+test('a late playing event completes an in-flight gesture resume', async () => {
+  const gate = new PlaybackGestureGate();
+  const waiting = gate.wait();
+  let resolveAttempt: ((ready: boolean) => void) | undefined;
+  const resume = gate.resume(
+    () =>
+      new Promise<boolean>((resolve) => {
+        resolveAttempt = resolve;
+      }),
+  );
+
+  gate.complete();
+  await waiting;
+  resolveAttempt?.(true);
+  assert.equal(await resume, true);
 });
 import type { PerformancePlan } from '../src/performer/types.js';
 
@@ -613,6 +699,27 @@ test('cancellation before audio completion suppresses stale speech end and finis
   assert.equal(events.includes('speech_end_port'), false);
   assert.equal(events.includes('speech_end_callback'), false);
   assert.equal(events.includes('motion_finish'), false);
+});
+
+test('playback coordinator forwards a safe gesture requirement reason', async () => {
+  let receivedReason: string | undefined;
+  const coordinator = new PerformancePlaybackCoordinator({
+    getMotionPort: () => null,
+    playAudio: async (_audioData, options) => {
+      options?.onPlaybackGestureRequired?.('start_timeout');
+      options?.onStart?.(1_000);
+    },
+    stopAudio: () => undefined,
+    now: () => 1_000,
+  });
+
+  await coordinator.play(createPlan({ motion: undefined }), bufferSource(), {
+    onPlaybackGestureRequired: (reason) => {
+      receivedReason = reason;
+    },
+  });
+
+  assert.equal(receivedReason, 'start_timeout');
 });
 
 test('audio response keeps MP3 as a stream and buffers WAV', async () => {

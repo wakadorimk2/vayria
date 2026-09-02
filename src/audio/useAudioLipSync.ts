@@ -10,8 +10,10 @@ import {
 } from './mediaSourceStream.js';
 import {
   isPlaybackGestureError,
+  monitorPlaybackStart,
   PlaybackGestureGate,
   PersistentStreamingAudio,
+  type PlaybackGestureReason,
 } from './persistentStreamingAudio.js';
 
 const SMOOTHING_FACTOR = 0.5;
@@ -25,6 +27,7 @@ export interface PlayAudioOptions {
   startDelayMs?: number;
   onComplete?: (completedAt: number) => void;
   onFirstAudioReady?: (readyAt: number) => void;
+  onPlaybackGestureRequired?: (reason: PlaybackGestureReason) => void;
   onReadyToStart?: (scheduledStartAt: number) => boolean | void;
   onStart?: (startedAt: number) => void;
 }
@@ -440,7 +443,12 @@ export function useAudioLipSync(volume = 1) {
           const scheduledStartAt = performance.now() + startDelayMs;
           const readyToStart = options?.onReadyToStart?.(scheduledStartAt);
           const effectiveStartDelayMs = readyToStart === false ? 0 : startDelayMs;
+          let resolvePlaying: () => void = () => undefined;
+          const playing = new Promise<void>((resolve) => {
+            resolvePlaying = resolve;
+          });
           const handlePlaying = () => {
+            resolvePlaying();
             setIsSpeaking(true);
             animationFrameRef.current = requestAnimationFrame(updateMouth);
             options?.onStart?.(performance.now());
@@ -479,15 +487,36 @@ export function useAudioLipSync(volume = 1) {
               interrupted,
             ]);
           }
-          try {
-            await audio.play();
-          } catch (error) {
-            if (!isPlaybackGestureError(error)) throw error;
+          const playAttempt = audio.play();
+          void playAttempt.catch(() => undefined);
+          const startOutcome = await monitorPlaybackStart(
+            playAttempt,
+            playing,
+            undefined,
+            interrupted,
+          );
+          if (startOutcome !== 'started') {
             if (generation !== generationRef.current) return;
             const gate = new PlaybackGestureGate();
             playbackGestureWaitRef.current = { gate, generation };
             setNeedsPlaybackGesture(true);
-            await gate.wait();
+            options?.onPlaybackGestureRequired?.(startOutcome);
+            const eventualStart = Promise.race([
+              playing,
+              playAttempt.catch((error) => {
+                if (isPlaybackGestureError(error)) {
+                  return new Promise<void>(() => undefined);
+                }
+                throw error;
+              }),
+            ]);
+            void eventualStart.catch(() => undefined);
+            await Promise.race([eventualStart, gate.wait(), interrupted]);
+            if (playbackGestureWaitRef.current?.gate === gate) {
+              gate.complete();
+              playbackGestureWaitRef.current = null;
+              setNeedsPlaybackGesture(false);
+            }
           }
           await Promise.race([Promise.all([pump, ended]), interrupted]);
           if (generation === generationRef.current) clearPlayback();

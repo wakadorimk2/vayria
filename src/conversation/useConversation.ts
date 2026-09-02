@@ -1073,6 +1073,12 @@ export function useConversation(
             motionStartedAt = startedAt;
             eventEmitter.emit('motion_start');
           },
+          onPlaybackGestureRequired: (reason) => {
+            eventEmitter.emit('playback_gesture_required', {
+              phase: 'tts',
+              reason,
+            });
+          },
           onSpeechStart: (startedAt) => {
             speechStartedAt = startedAt;
             eventEmitter.emit('playback_started', {

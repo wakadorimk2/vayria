@@ -1,5 +1,42 @@
-const SILENT_WAV_DATA_URL =
-  'data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAA';
+const SILENT_WAV_DURATION_MS = 100;
+const SILENT_WAV_SAMPLE_RATE = 8_000;
+export const STREAMING_PLAYBACK_START_TIMEOUT_MS = 1_000;
+
+export function createSilentWavBytes(): Uint8Array {
+  const sampleCount = Math.round(
+    (SILENT_WAV_SAMPLE_RATE * SILENT_WAV_DURATION_MS) / 1_000,
+  );
+  const dataByteLength = sampleCount * 2;
+  const bytes = new Uint8Array(44 + dataByteLength);
+  const view = new DataView(bytes.buffer);
+  const writeAscii = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      bytes[offset + index] = value.charCodeAt(index);
+    }
+  };
+
+  writeAscii(0, 'RIFF');
+  view.setUint32(4, bytes.byteLength - 8, true);
+  writeAscii(8, 'WAVE');
+  writeAscii(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, SILENT_WAV_SAMPLE_RATE, true);
+  view.setUint32(28, SILENT_WAV_SAMPLE_RATE * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(36, 'data');
+  view.setUint32(40, dataByteLength, true);
+  return bytes;
+}
+
+function createSilentWavDataUrl(): string {
+  const bytes = createSilentWavBytes();
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
 
 export type StreamingAudioElementFactory = () => HTMLAudioElement;
 
@@ -13,7 +50,45 @@ export function isPlaybackGestureError(error: unknown): boolean {
   );
 }
 
+export type PlaybackGestureReason = 'not_allowed' | 'start_timeout';
+export type PlaybackStartOutcome = 'started' | PlaybackGestureReason;
+
+export function monitorPlaybackStart(
+  playPromise: Promise<void>,
+  playingPromise: Promise<void>,
+  timeoutMs = STREAMING_PLAYBACK_START_TIMEOUT_MS,
+  interrupted?: Promise<never>,
+): Promise<PlaybackStartOutcome> {
+  const playOutcome = playPromise.then<
+    PlaybackStartOutcome,
+    PlaybackStartOutcome
+  >(
+    () => 'started',
+    (error) => {
+      if (isPlaybackGestureError(error)) return 'not_allowed';
+      throw error;
+    },
+  );
+  const playingOutcome = playingPromise.then<PlaybackStartOutcome>(
+    () => 'started',
+  );
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<PlaybackStartOutcome>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve('start_timeout'), timeoutMs);
+  });
+  return Promise.race([
+    playOutcome,
+    playingOutcome,
+    timeout,
+    ...(interrupted ? [interrupted] : []),
+  ]).finally(() => {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+  });
+}
+
 export class PlaybackGestureGate {
+  private cancelled = false;
+  private completed = false;
   private completion: Promise<void> | null = null;
   private rejectCompletion: ((error: unknown) => void) | null = null;
   private resolveCompletion: (() => void) | null = null;
@@ -25,6 +100,8 @@ export class PlaybackGestureGate {
 
   wait(): Promise<void> {
     if (!this.completion) {
+      this.cancelled = false;
+      this.completed = false;
       this.completion = new Promise<void>((resolve, reject) => {
         this.resolveCompletion = resolve;
         this.rejectCompletion = reject;
@@ -39,9 +116,8 @@ export class PlaybackGestureGate {
 
     const resumePromise = attempt()
       .then((ready) => {
-        if (!ready || this.completion === null) return false;
-        this.resolveCompletion?.();
-        this.clear();
+        if (!ready || this.cancelled) return false;
+        if (!this.completed) this.complete();
         return true;
       })
       .finally(() => {
@@ -53,7 +129,15 @@ export class PlaybackGestureGate {
 
   cancel(error: unknown): void {
     if (!this.completion) return;
+    this.cancelled = true;
     this.rejectCompletion?.(error);
+    this.clear();
+  }
+
+  complete(): void {
+    if (!this.completion) return;
+    this.completed = true;
+    this.resolveCompletion?.();
     this.clear();
   }
 
@@ -98,36 +182,52 @@ export class PersistentStreamingAudio {
     return { audio: this.audioElement, source: this.elementSource };
   }
 
-  prepare(context: AudioContext, resumeActiveSource: boolean): Promise<boolean> {
+  prepare(
+    context: AudioContext,
+    resumeActiveSource: boolean,
+    timeoutMs = STREAMING_PLAYBACK_START_TIMEOUT_MS,
+  ): Promise<boolean> {
     const { audio } = this.ensure(context);
     const contextReady =
       context.state === 'running' ? Promise.resolve() : context.resume();
 
+    let readiness: Promise<boolean>;
     if (!resumeActiveSource && this.unlocked) {
-      return contextReady
+      readiness = contextReady
         .then(() => context.state === 'running')
         .catch(() => false);
-    }
+    } else {
+      const usesSilentSource = !resumeActiveSource;
+      if (usesSilentSource) {
+        audio.pause();
+        audio.src = createSilentWavDataUrl();
+        audio.load();
+      }
 
-    const usesSilentSource = !resumeActiveSource;
-    if (usesSilentSource) {
-      audio.pause();
-      audio.src = SILENT_WAV_DATA_URL;
-      audio.load();
+      // Both operations must start before the first await to preserve user activation.
+      const audioReady = audio.play();
+      readiness = Promise.all([contextReady, audioReady])
+        .then(() => {
+          this.unlocked = true;
+          if (usesSilentSource) this.clearSource();
+          return context.state === 'running';
+        })
+        .catch(() => {
+          if (usesSilentSource) this.clearSource();
+          return false;
+        });
     }
-
-    // Both operations must start before the first await to preserve user activation.
-    const audioReady = audio.play();
-    return Promise.all([contextReady, audioReady])
-      .then(() => {
-        this.unlocked = true;
-        if (usesSilentSource) this.clearSource();
-        return context.state === 'running';
-      })
-      .catch(() => {
-        if (usesSilentSource) this.clearSource();
-        return false;
-      });
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<false>((resolve) => {
+      timeoutHandle = setTimeout(
+        () => resolve(false),
+        timeoutMs,
+      );
+    });
+    return Promise.race([readiness, timeout]).finally(() => {
+      if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+      if (!resumeActiveSource && !this.unlocked) this.clearSource();
+    });
   }
 
   setSource(url: string): HTMLAudioElement {
