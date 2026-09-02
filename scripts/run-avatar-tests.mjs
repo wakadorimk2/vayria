@@ -17,6 +17,9 @@ const testFiles = [
   resolve('node_modules/.tmp/avatar-test/scripts/idle-gaze.test.js'),
   resolve('node_modules/.tmp/avatar-test/scripts/life-dynamics.test.js'),
   resolve(
+    'node_modules/.tmp/avatar-test/scripts/life-dynamics-runtime.test.js',
+  ),
+  resolve(
     'node_modules/.tmp/avatar-test/scripts/life-dynamics-blink-adapter.test.js',
   ),
   resolve(

@@ -338,17 +338,18 @@ LLM → TTS → playback
 - `motionPreparationTimeoutMs` bounds the wait for a prepared VRMA.
 - `postSpeechHoldMs` keeps the motion pose after audio ends.
 
-通常の `speak` plan は、既定で保存済みVRMA `speech-gentle` を使います。
-`speech-gentle` は、通常発話向けに手元の動きを中心とした暫定assetです。カード用VRMAは通常発話の既定値に使いません。
-発話前は `preReaction.gaze` と `IdleController` が、視線・呼吸・微細な揺れを担当します。
-VRMAの開始と終了では、IdleとVRMAを境界だけクロスフェードします。VRMAの主再生中はIdleを停止し、同じ骨へ手続き型動作とVRMAを重ねません。
-`MotionPlayer` はVRMA clip生成後に `MotionPlaybackProfile` を適用します。hipsの初期位置を保持し、hips・上体の回転を60%、首・頭・look-atを35%へ縮小します。腕、脚、表情トラックは変更しません。
+通常経路はLifeDynamicsを使います。
+Life、Blink、Orientingの各Adapterが、呼吸、微細な揺れ、瞬き、視線を描画します。
+GestureはLifeDynamicsの内部状態だけを保持します。
+通常経路は`MotionPlayer`と旧`BlinkController`を生成しないため、発話中もVRMAを再生しません。
 
-LifeDynamics is a future session-scoped design for procedural temporal state.
-It owns the timing state for Life, Blink, Orienting, and Gesture.
-Avatar adapters own VRM expressions, LookAt, bone transforms, and AnimationMixer operations.
+`?life-dynamics=legacy`は、保存済みVRMA `speech-gentle`、`IdleController`、旧`BlinkController`を使うロールバック経路です。
+この経路では、VRMAの開始と終了でIdleとVRMAを境界だけクロスフェードします。
+`MotionPlayer`はVRMA clip生成後に`MotionPlaybackProfile`を適用します。
+
+LifeDynamics owns the timing state for Life, Blink, Orienting, and Gesture.
+Avatar adapters own VRM expressions, LookAt, and bone transforms.
 The design is documented in [`life-dynamics.md`](life-dynamics.md).
-It does not change the current v0.1 VRMA boundary or enable a new procedural overlay.
 
 `leadBeforeSpeechMs` and `motionLeadMs` have different meanings.
 

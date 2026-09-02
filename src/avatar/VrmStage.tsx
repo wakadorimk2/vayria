@@ -40,10 +40,13 @@ import { applyBasePose, IdleController } from './idleMotion';
 import {
   createLifeDynamicsProfile,
   LifeDynamics,
-  resolveLifeDynamicsProfileId,
   type LifeDynamicsInputs,
   type LifeDynamicsSnapshot,
 } from './lifeDynamics';
+import {
+  resolveLifeDynamicsRuntimeOptions,
+  type LifeDynamicsGazeProbeMode as GazeProbeMode,
+} from './lifeDynamicsRuntime';
 import { LifeDynamicsBlinkAdapter } from './lifeDynamicsBlinkAdapter';
 import { LifeDynamicsLifeAdapter } from './lifeDynamicsLifeAdapter';
 import { LifeDynamicsOrientingAdapter } from './lifeDynamicsOrientingAdapter';
@@ -251,19 +254,6 @@ export interface VrmStageHandle {
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error';
 
-interface LifeDynamicsPocOptions {
-  enabled: boolean;
-  debug: boolean;
-  profileId: ReturnType<typeof resolveLifeDynamicsProfileId>;
-  gazeProbe: GazeProbeMode;
-}
-
-type GazeProbeMode =
-  | 'full'
-  | 'eye-only'
-  | 'no-neck'
-  | 'fixed-target';
-
 interface SpatialTargetDebugSnapshot {
   readonly baseState: string;
   readonly baseTarget: string;
@@ -358,45 +348,6 @@ class GazeDebugHistory {
 
   toArray(): readonly GazeDebugSample[] {
     return this.samples.map((sample) => ({ ...sample }));
-  }
-}
-
-function getLifeDynamicsPocOptions(): LifeDynamicsPocOptions {
-  if (typeof window === 'undefined') {
-    return {
-      enabled: false,
-      debug: false,
-      profileId: '1.0x',
-      gazeProbe: 'full',
-    };
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  const enabled = params.get('life-dynamics-poc') === '1';
-  const debug = enabled && params.get('life-dynamics-debug') === '1';
-  return {
-    enabled,
-    debug,
-    profileId: resolveLifeDynamicsProfileId(
-      params.get('life-dynamics-profile'),
-    ),
-    gazeProbe: debug
-      ? readGazeProbe(
-          params.get('gazeProbe') ??
-            params.get('life-dynamics-gaze-probe'),
-        )
-      : 'full',
-  };
-}
-
-function readGazeProbe(value: string | null): GazeProbeMode {
-  switch (value) {
-    case 'eye-only':
-    case 'no-neck':
-    case 'fixed-target':
-      return value;
-    default:
-      return 'full';
   }
 }
 
@@ -539,10 +490,12 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     },
     ref,
   ) {
-    const lifeDynamicsPocOptions = getLifeDynamicsPocOptions();
-    const lifeDynamicsPocEnabled = lifeDynamicsPocOptions.enabled;
-    const lifeDynamicsDebugEnabled = lifeDynamicsPocOptions.debug;
-    const lifeDynamicsProfileId = lifeDynamicsPocOptions.profileId;
+    const lifeDynamicsRuntimeOptions = resolveLifeDynamicsRuntimeOptions(
+      typeof window === 'undefined' ? '' : window.location.search,
+    );
+    const lifeDynamicsEnabled = lifeDynamicsRuntimeOptions.enabled;
+    const lifeDynamicsDebugEnabled = lifeDynamicsRuntimeOptions.debug;
+    const lifeDynamicsProfileId = lifeDynamicsRuntimeOptions.profileId;
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const mouthOpenRef = useRef(mouthOpen);
@@ -1163,14 +1116,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               vrm,
               gazeModelHeight,
             );
-            motionPlayerRef.current = lifeDynamicsPocEnabled
+            motionPlayerRef.current = lifeDynamicsEnabled
               ? null
               : new MotionPlayer(vrm.scene);
-            blinkController = lifeDynamicsPocEnabled
+            blinkController = lifeDynamicsEnabled
               ? null
               : new BlinkController(vrm);
             emotionController = new EmotionExpressionController(vrm);
-            if (lifeDynamicsPocEnabled) {
+            if (lifeDynamicsEnabled) {
               const lifeDynamics = new LifeDynamics(
                 createLifeDynamicsProfile(lifeDynamicsProfileId),
               );
@@ -1488,7 +1441,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               attentionFrame.target === 'none' ? 'released' : 'none',
             gazeStrength: attentionFrame.gazeStrength,
             sourceTransition: lastSourceTransition,
-            probeMode: lifeDynamicsPocOptions.gazeProbe,
+            probeMode: lifeDynamicsRuntimeOptions.gazeProbe,
           };
           const hasSpatialHint =
             attention.priorityHint?.spatialTarget?.kind === 'game' ||
@@ -1527,7 +1480,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               releaseReason: 'none',
               gazeStrength: attentionFrame.gazeStrength,
               sourceTransition: lastSourceTransition,
-              probeMode: lifeDynamicsPocOptions.gazeProbe,
+              probeMode: lifeDynamicsRuntimeOptions.gazeProbe,
             };
           } else if (attentionFrame.state === 'AttendViewer') {
             let viewerAllocation: GazeAllocationResult | null = null;
@@ -1573,7 +1526,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               if (viewerAllocation) {
                 viewerProjection = applyGazeProbe(
                   viewerAllocation,
-                  lifeDynamicsPocOptions.gazeProbe,
+                  lifeDynamicsRuntimeOptions.gazeProbe,
                 );
                 performanceGazeTarget = viewerAllocation.eyeTarget;
                 spatialHeadYawBias =
@@ -1620,7 +1573,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 performanceGazeTarget === null ? 'camera-invalid' : 'none',
               gazeStrength: attentionFrame.gazeStrength,
               sourceTransition: lastSourceTransition,
-              probeMode: lifeDynamicsPocOptions.gazeProbe,
+              probeMode: lifeDynamicsRuntimeOptions.gazeProbe,
             };
             if (viewerAllocation) {
               spatialTargetDebug = {
@@ -1670,7 +1623,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 fixedProbeSelectionKey = null;
               }
               gazeFeedbackSelectionKey = allocationSelectionKey;
-              if (lifeDynamicsPocOptions.gazeProbe === 'fixed-target') {
+              if (lifeDynamicsRuntimeOptions.gazeProbe === 'fixed-target') {
                 if (fixedProbeSelectionKey !== requestedSpatialTargetKey) {
                   fixedProbeTarget = null;
                   fixedProbeSelectionKey = requestedSpatialTargetKey;
@@ -1697,7 +1650,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 gazeHandoffState = spatialResolution.handoffState;
               }
               if (
-                lifeDynamicsPocOptions.gazeProbe === 'fixed-target' &&
+                lifeDynamicsRuntimeOptions.gazeProbe === 'fixed-target' &&
                 fixedProbeTarget === null &&
                 spatialResolution !== null
               ) {
@@ -1722,7 +1675,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 });
                 const worldProjection = applyGazeProbe(
                   worldResolution,
-                  lifeDynamicsPocOptions.gazeProbe,
+                  lifeDynamicsRuntimeOptions.gazeProbe,
                 );
                 primaryWorldTarget = worldResolution.target;
                 performanceGazeTarget =
@@ -1757,7 +1710,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                         : worldResolution.reason,
                   gazeStrength: attentionFrame.gazeStrength,
                   sourceTransition: lastSourceTransition,
-                  probeMode: lifeDynamicsPocOptions.gazeProbe,
+                  probeMode: lifeDynamicsRuntimeOptions.gazeProbe,
                   ...createAllocationDebug(worldResolution, worldProjection),
                 };
               } else {
@@ -1779,7 +1732,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   releaseReason: 'registry-unavailable',
                   gazeStrength: attentionFrame.gazeStrength,
                   sourceTransition: lastSourceTransition,
-                  probeMode: lifeDynamicsPocOptions.gazeProbe,
+                  probeMode: lifeDynamicsRuntimeOptions.gazeProbe,
                 };
               }
             } else {
@@ -1885,7 +1838,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             });
             const overrideProjection = applyGazeProbe(
               overrideWorldResolution,
-              lifeDynamicsPocOptions.gazeProbe,
+              lifeDynamicsRuntimeOptions.gazeProbe,
             );
             const overrideContext: CardGazeBaseContext =
               attentionFrame.target === 'chat' ||
@@ -2124,7 +2077,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             cameraHeadPitchBias,
           );
           let lifeDynamicsSnapshot: LifeDynamicsSnapshot | null = null;
-          if (lifeDynamicsPocEnabled) {
+          if (lifeDynamicsEnabled) {
             const attentionTarget =
               attentionFrame.target === 'none'
                 ? null
@@ -2266,7 +2219,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               });
             }
           }
-          if (!lifeDynamicsPocEnabled) {
+          if (!lifeDynamicsEnabled) {
             const idleGazeFrame = idleGazeController?.update(
               delta,
               camera.position,
@@ -2328,7 +2281,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 gazeDirectness *
                 safeMotionScale,
             };
-            const adapterWeight = lifeDynamicsPocEnabled
+            const adapterWeight = lifeDynamicsEnabled
               ? attention.gazeOverride !== undefined || gazeOverrideWasActive
                 ? 1
                 : clampGazeStrength(
@@ -2336,7 +2289,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                   )
               : 1;
             const hasAppliedGaze =
-              !lifeDynamicsPocEnabled ||
+              !lifeDynamicsEnabled ||
               ((attention.gazeOverride !== undefined ||
                 gazeOverrideWasActive ||
                 lifeDynamicsSnapshot?.orienting.target !== null) &&
@@ -2369,7 +2322,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             appliedEmotion = emotionRef.current;
           }
           emotionController?.update(delta);
-          if (!lifeDynamicsPocEnabled) {
+          if (!lifeDynamicsEnabled) {
             blinkController?.update(delta);
           }
           if (mouthExpression) {
@@ -2465,9 +2418,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     }, [
       isExhibitionMode,
       lifeDynamicsDebugEnabled,
-      lifeDynamicsPocEnabled,
+      lifeDynamicsEnabled,
       lifeDynamicsProfileId,
-      lifeDynamicsPocOptions.gazeProbe,
+      lifeDynamicsRuntimeOptions.gazeProbe,
       spatialTargetRegistry,
       stageVariant,
       stopMotion,
@@ -2482,7 +2435,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           className="vrm-canvas"
           ref={canvasRef}
         />
-        {lifeDynamicsPocEnabled &&
+        {lifeDynamicsEnabled &&
           lifeDynamicsDebugEnabled &&
           lifeDynamicsDebugSnapshot && (
             <aside
