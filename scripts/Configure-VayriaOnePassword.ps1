@@ -4,6 +4,8 @@ param(
 
   [string]$SecretReference,
 
+  [string]$AivisCloudSecretReference,
+
   [string]$Vault,
 
   [string]$Item,
@@ -90,9 +92,36 @@ foreach ($component in $referenceComponents) {
   }
 }
 
-$content = "OPENAI_API_KEY=$SecretReference"
+function Assert-SecretReference {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Value,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Name
+  )
+
+  $normalized = $Value.Trim()
+  if (-not $normalized.StartsWith('op://', [StringComparison]::OrdinalIgnoreCase)) {
+    throw "$Name must start with op://."
+  }
+  $components = $normalized.Substring(5).Split('/')
+  if ($components.Count -ne 3 -or
+      @($components | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+    throw "$Name must have the form op://vault/item/field."
+  }
+  return $normalized
+}
+
+$content = @("OPENAI_API_KEY=$SecretReference")
+if (-not [string]::IsNullOrWhiteSpace($AivisCloudSecretReference)) {
+  $cloudReference = Assert-SecretReference `
+    -Value $AivisCloudSecretReference `
+    -Name 'AivisCloudSecretReference'
+  $content += "AIVIS_CLOUD_API_KEY=$cloudReference"
+}
 
 New-Item -ItemType Directory -Path $referenceDirectory -Force | Out-Null
-Set-Content -LiteralPath $resolvedReferenceFile -Value ($content + [Environment]::NewLine) -Encoding utf8NoBOM
+Set-Content -LiteralPath $resolvedReferenceFile -Value $content -Encoding utf8NoBOM
 Write-Output "Saved 1Password reference to $resolvedReferenceFile"
 Write-Output 'The file contains only the op:// reference; use a Vayria :op command to inject the secret at process launch.'

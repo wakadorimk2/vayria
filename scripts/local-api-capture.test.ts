@@ -190,11 +190,19 @@ async function postEvent(
 async function requestRoute(
   handler: Middleware,
   options: {
+    abortAfterMs?: number;
+    backpressureOnFirstWrite?: boolean;
     method: string;
     url: string;
     body?: object;
   },
-): Promise<{ statusCode: number; body: string }> {
+): Promise<{
+  statusCode: number;
+  body: string;
+  chunks: Buffer[];
+  destroyed: boolean;
+  headers: Record<string, string | number | readonly string[]>;
+}> {
   const requestBody = options.body === undefined ? [] : [JSON.stringify(options.body)];
   const request = Object.assign(
     Readable.from(requestBody),
@@ -204,29 +212,82 @@ async function requestRoute(
       headers: {},
     },
   ) as unknown as IncomingMessage;
+  let requestAborted = false;
+  Object.defineProperty(request, 'aborted', {
+    configurable: true,
+    get: () => requestAborted,
+  });
   let statusCode = 0;
   let body = '';
+  const chunks: Buffer[] = [];
+  let headers: Record<string, string | number | readonly string[]> = {};
+  let writeCount = 0;
+  let responseHeadersSent = false;
+  let responseWritableEnded = false;
+  let responseDestroyed = false;
   let resolveEnded: () => void = () => undefined;
   const ended = new Promise<void>((resolve) => {
     resolveEnded = resolve;
   });
-  const response = {
-    writeHead(status: number) {
+  const responseEmitter = new EventEmitter();
+  Object.defineProperties(responseEmitter, {
+    headersSent: { get: () => responseHeadersSent },
+    writableEnded: { get: () => responseWritableEnded },
+  });
+  const response = Object.assign(responseEmitter, {
+    writeHead(status: number, nextHeaders: Record<string, string | number | readonly string[]> = {}) {
       statusCode = status;
+      headers = nextHeaders;
+      responseHeadersSent = true;
+      return response;
+    },
+    write(chunk: string | Buffer) {
+      writeCount += 1;
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(value);
+      body += value.toString();
+      if (options.backpressureOnFirstWrite && writeCount === 1) {
+        setImmediate(() => response.emit('drain'));
+        return false;
+      }
+      return true;
     },
     end(chunk?: string | Buffer) {
-      if (chunk !== undefined) body += chunk.toString();
+      if (chunk !== undefined) {
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        chunks.push(value);
+        body += value.toString();
+      }
+      responseWritableEnded = true;
       resolveEnded();
     },
-  } as unknown as ServerResponse;
+    destroy() {
+      responseDestroyed = true;
+      responseWritableEnded = true;
+      resolveEnded();
+      return response;
+    },
+  }) as unknown as ServerResponse;
   handler(request, response, () => undefined);
+  if (options.abortAfterMs !== undefined) {
+    setTimeout(() => {
+      requestAborted = true;
+      request.emit('aborted');
+    }, options.abortAfterMs);
+  }
   await Promise.race([
     ended,
     new Promise<void>((resolve) => {
       setTimeout(resolve, 100);
     }),
   ]);
-  return { statusCode, body };
+  return {
+    statusCode,
+    body,
+    chunks,
+    destroyed: responseDestroyed,
+    headers,
+  };
 }
 
 function configurePlugin(
@@ -316,6 +377,356 @@ test('health endpoint reports local availability when the Internet probe fails',
     body: {},
   });
   assert.equal(invalidMethod.statusCode, 405);
+});
+
+test('Cloud TTS middleware forwards MP3 chunks and honors response backpressure', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+  globalThis.fetch = async (_input, init) => {
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get('Authorization'), 'Bearer route-cloud-key');
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2]));
+          controller.enqueue(new Uint8Array([3, 4]));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'audio/mpeg' } },
+    );
+  };
+
+  try {
+    const fake = createFakeServer();
+    configurePlugin({
+      ttsBackend: 'aivis-cloud',
+      aivisCloudApiKey: 'route-cloud-key',
+      aivisCloudBaseUrl: 'https://cloud.example.test',
+      aivisCloudModelUuid: '11111111-2222-4333-8444-555555555555',
+    }, fake.server);
+
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'route fixture', emotion: 'joy' },
+      backpressureOnFirstWrite: true,
+    });
+
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.headers['Content-Type'], 'audio/mpeg');
+    assert.equal(result.headers['X-Vayria-Tts-Backend'], 'aivis-cloud');
+    assert.deepEqual(result.chunks.map((chunk) => [...chunk]), [[1, 2], [3, 4]]);
+    assert.equal(requestBody?.text, 'route fixture');
+    assert.equal(requestBody?.style_name, 'C');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('explicit Local TTS mode keeps the WAV provider contract', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) =>
+    createLocalTtsResponse(input) ?? new Response(null, { status: 500 });
+  try {
+    const fake = createFakeServer();
+    configurePlugin({ ttsBackend: 'local' }, fake.server);
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'local fixture', emotion: 'neutral' },
+    });
+
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.headers['Content-Type'], 'audio/wav');
+    assert.equal(result.headers['X-Vayria-Tts-Backend'], 'local');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('explicit Cloud TTS mode does not call Local after a Cloud failure', async () => {
+  const originalFetch = globalThis.fetch;
+  let localCalls = 0;
+  globalThis.fetch = async (input) => {
+    if (createLocalTtsResponse(input)) localCalls += 1;
+    return new Response('private cloud response', { status: 401 });
+  };
+  try {
+    const fake = createFakeServer();
+    configurePlugin({
+      ttsBackend: 'aivis-cloud',
+      aivisCloudApiKey: 'route-cloud-key',
+      aivisCloudBaseUrl: 'https://cloud.example.test',
+      aivisCloudModelUuid: '11111111-2222-4333-8444-555555555555',
+    }, fake.server);
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'cloud fixture', emotion: 'neutral' },
+    });
+
+    assert.equal(result.statusCode, 502);
+    assert.equal(localCalls, 0);
+    assert.equal(result.body.includes('private cloud response'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+const LOCAL_WAV_FIXTURE = new Uint8Array([82, 73, 70, 70]);
+
+function createLocalTtsResponse(
+  input: Parameters<typeof fetch>[0],
+): Response | undefined {
+  const pathname = new URL(String(input)).pathname;
+  if (pathname === '/speakers') {
+    return Response.json([
+      {
+        name: 'zonoko',
+        styles: [
+          { id: 1, name: 'ノーマル' },
+          { id: 2, name: 'ノーマル（Happy）' },
+          { id: 3, name: 'ノーマル（Sad）' },
+          { id: 4, name: 'ノーマル（Angry）' },
+        ],
+      },
+    ]);
+  }
+  if (pathname === '/audio_query') return Response.json({});
+  if (pathname === '/synthesis') return new Response(LOCAL_WAV_FIXTURE);
+  return undefined;
+}
+
+test('Cloud-with-fallback selects Local once for safe pre-audio failures', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalConsoleInfo = console.info;
+  const fallbackEvents: string[] = [];
+  const cases = [
+    { name: 'configuration', expected: 'configuration' },
+    { name: '401', expected: 'authentication' },
+    { name: '402', expected: 'quota' },
+    { name: '404', expected: 'model' },
+    { name: '422', expected: 'invalid_request' },
+    { name: '429', expected: 'rate_limit' },
+    { name: 'connection', expected: 'provider' },
+    { name: 'empty', expected: 'provider' },
+    { name: 'first-audio-timeout', expected: 'first_audio_timeout' },
+    { name: 'total-timeout', expected: 'timeout' },
+  ] as const;
+
+  try {
+    console.info = (...values: unknown[]) => {
+      if (values[0] !== '[performer-event]' || typeof values[1] !== 'string') {
+        return;
+      }
+      const event = JSON.parse(values[1]) as { event?: unknown };
+      if (typeof event.event === 'string') fallbackEvents.push(event.event);
+    };
+    for (const fixture of cases) {
+      let localSynthesisCalls = 0;
+      globalThis.fetch = async (input, init) => {
+        const local = createLocalTtsResponse(input);
+        if (local) {
+          if (new URL(String(input)).pathname === '/synthesis') {
+            localSynthesisCalls += 1;
+          }
+          return local;
+        }
+        if (fixture.name === 'connection') throw new Error('private network detail');
+        if (fixture.name === 'empty') {
+          return new Response(
+            new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } }),
+            { status: 200 },
+          );
+        }
+        if (
+          fixture.name === 'first-audio-timeout' ||
+          fixture.name === 'total-timeout'
+        ) {
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                init?.signal?.addEventListener(
+                  'abort',
+                  () => controller.error(new DOMException('aborted', 'AbortError')),
+                  { once: true },
+                );
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response('private cloud response', { status: Number(fixture.name) });
+      };
+
+      const fake = createFakeServer();
+      configurePlugin({
+        ttsBackend: 'cloud-with-fallback',
+        aivisCloudApiKey: fixture.name === 'configuration' ? '' : 'route-cloud-key',
+        aivisCloudBaseUrl: 'https://cloud.example.test',
+        aivisCloudFirstAudioTimeoutMs:
+          fixture.name === 'total-timeout' ? 50 : 5,
+        aivisCloudModelUuid: '11111111-2222-4333-8444-555555555555',
+        aivisCloudTimeoutMs: fixture.name === 'total-timeout' ? 5 : 100,
+      }, fake.server);
+      const result = await requestRoute(fake.handlers[0], {
+        method: 'POST',
+        url: '/api/tts',
+        body: { text: 'private fixture text', emotion: 'neutral' },
+      });
+
+      assert.equal(result.statusCode, 200, fixture.name);
+      assert.equal(result.headers['Content-Type'], 'audio/wav', fixture.name);
+      assert.equal(result.headers['X-Vayria-Tts-Backend'], 'local', fixture.name);
+      assert.equal(result.headers['X-Vayria-Tts-Fallback-From'], 'aivis-cloud', fixture.name);
+      assert.equal(result.headers['X-Vayria-Tts-Fallback-Reason'], fixture.expected, fixture.name);
+      assert.equal(localSynthesisCalls, 1, fixture.name);
+      assert.deepEqual(result.chunks.at(-1), Buffer.from(LOCAL_WAV_FIXTURE), fixture.name);
+      assert.equal(JSON.stringify(result.headers).includes('route-cloud-key'), false);
+      assert.equal(JSON.stringify(result.headers).includes('private fixture text'), false);
+      assert.equal(JSON.stringify(result.headers).includes('private cloud response'), false);
+    }
+  } finally {
+    console.info = originalConsoleInfo;
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(
+    fallbackEvents,
+    cases.flatMap(() => [
+      'tts_start',
+      'tts_fallback_started',
+      'tts_first_audio',
+      'tts_completed',
+      'tts_fallback_completed',
+    ]),
+  );
+});
+
+test('Cloud-with-fallback returns a safe 502 when Local fallback also fails', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (new URL(String(input)).pathname === '/speakers') {
+      return new Response('private local response', { status: 500 });
+    }
+    return new Response('private cloud response', { status: 401 });
+  };
+  try {
+    const fake = createFakeServer();
+    configurePlugin({
+      ttsBackend: 'cloud-with-fallback',
+      aivisCloudApiKey: 'route-cloud-key',
+      aivisCloudBaseUrl: 'https://cloud.example.test',
+      aivisCloudModelUuid: '11111111-2222-4333-8444-555555555555',
+    }, fake.server);
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'private fixture text', emotion: 'neutral' },
+    });
+
+    assert.equal(result.statusCode, 502);
+    assert.equal(result.headers['Content-Type'], 'application/json; charset=utf-8');
+    assert.equal(result.body.includes('route-cloud-key'), false);
+    assert.equal(result.body.includes('private fixture text'), false);
+    assert.equal(result.body.includes('private cloud response'), false);
+    assert.equal(result.body.includes('private local response'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Cloud-with-fallback does not replay Local after the first Cloud chunk', async () => {
+  const originalFetch = globalThis.fetch;
+  let localCalls = 0;
+  globalThis.fetch = async (input) => {
+    if (createLocalTtsResponse(input)) {
+      localCalls += 1;
+      return createLocalTtsResponse(input)!;
+    }
+    let emitted = false;
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (!emitted) {
+            emitted = true;
+            controller.enqueue(new Uint8Array([1, 2]));
+            return;
+          }
+          controller.error(new Error('private stream detail'));
+        },
+      }),
+      { status: 200 },
+    );
+  };
+  try {
+    const fake = createFakeServer();
+    configurePlugin({
+      ttsBackend: 'cloud-with-fallback',
+      aivisCloudApiKey: 'route-cloud-key',
+      aivisCloudBaseUrl: 'https://cloud.example.test',
+      aivisCloudModelUuid: '11111111-2222-4333-8444-555555555555',
+    }, fake.server);
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'private fixture text', emotion: 'neutral' },
+    });
+
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.headers['X-Vayria-Tts-Backend'], 'aivis-cloud');
+    assert.deepEqual(result.chunks, [Buffer.from([1, 2])]);
+    assert.equal(result.destroyed, true);
+    assert.equal(localCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Cloud-with-fallback stops without Local synthesis after a client abort', async () => {
+  const originalFetch = globalThis.fetch;
+  let localCalls = 0;
+  globalThis.fetch = async (input, init) => {
+    if (createLocalTtsResponse(input)) {
+      localCalls += 1;
+      return createLocalTtsResponse(input)!;
+    }
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        },
+      }),
+      { status: 200 },
+    );
+  };
+  try {
+    const fake = createFakeServer();
+    configurePlugin({
+      ttsBackend: 'cloud-with-fallback',
+      aivisCloudApiKey: 'route-cloud-key',
+      aivisCloudBaseUrl: 'https://cloud.example.test',
+      aivisCloudFirstAudioTimeoutMs: 50,
+      aivisCloudModelUuid: '11111111-2222-4333-8444-555555555555',
+    }, fake.server);
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'private fixture text', emotion: 'neutral' },
+      abortAfterMs: 5,
+    });
+
+    assert.equal(result.statusCode, 0);
+    assert.equal(result.destroyed, true);
+    assert.equal(localCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('exhibition local API captures safe events and keeps Playcheck raw priority', async () => {

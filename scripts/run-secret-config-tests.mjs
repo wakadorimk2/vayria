@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
-const testFile = resolve(
-  'node_modules/.tmp/secret-config-test/scripts/secret-config.test.js',
-);
-const result = spawnSync(process.execPath, ['--test', testFile], {
+const testFiles = [
+  resolve('node_modules/.tmp/secret-config-test/scripts/secret-config.test.js'),
+  resolve('node_modules/.tmp/secret-config-test/scripts/aivis-cloud.test.js'),
+];
+const result = spawnSync(process.execPath, ['--test', ...testFiles], {
   stdio: 'inherit',
 });
 

@@ -62,28 +62,30 @@ function Resolve-ReferenceFile {
     throw "The 1Password reference file was not found: $resolvedPath"
   }
 
-  $keyLineCount = 0
-  $referenceValue = $null
+  $references = @{}
   foreach ($line in (Get-Content -LiteralPath $resolvedPath -ErrorAction Stop)) {
     $trimmedLine = $line.Trim()
     if ([string]::IsNullOrWhiteSpace($trimmedLine) -or $trimmedLine.StartsWith('#')) {
       continue
     }
 
-    if ($trimmedLine -notmatch '^OPENAI_API_KEY\s*=\s*(.*?)\s*$') {
-      throw 'The 1Password reference file may contain only OPENAI_API_KEY=op://... and comments.'
+    if ($trimmedLine -notmatch '^(OPENAI_API_KEY|AIVIS_CLOUD_API_KEY)\s*=\s*(.*?)\s*$') {
+      throw 'The 1Password reference file may contain only supported API key op:// references and comments.'
     }
-
-    $keyLineCount++
-    $referenceValue = $Matches[1].Trim()
+    $name = $Matches[1]
+    $referenceValue = $Matches[2].Trim()
+    if ($references.ContainsKey($name)) {
+      throw "The 1Password reference file contains a duplicate $name entry."
+    }
+    if ([string]::IsNullOrWhiteSpace($referenceValue) -or
+        -not $referenceValue.StartsWith('op://', [StringComparison]::OrdinalIgnoreCase)) {
+      throw "$name in the 1Password reference file must be an op:// reference."
+    }
+    $references[$name] = $referenceValue
   }
 
-  if ($keyLineCount -ne 1 -or [string]::IsNullOrWhiteSpace($referenceValue)) {
+  if (-not $references.ContainsKey('OPENAI_API_KEY')) {
     throw 'The 1Password reference file must contain exactly one OPENAI_API_KEY entry.'
-  }
-
-  if (-not $referenceValue.StartsWith('op://', [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'OPENAI_API_KEY in the 1Password reference file must be an op:// reference.'
   }
 
   return $resolvedPath

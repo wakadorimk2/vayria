@@ -3,9 +3,28 @@ import {
   BARGE_IN_DUCK_GAIN,
   BARGE_IN_GAIN_RAMP_MS,
 } from '../voice/audioLab.js';
+import type { AudioPlaybackSource } from './audioPlaybackSource.js';
+import {
+  createMediaSourceStreamTarget,
+  pumpMediaSourceAudio,
+} from './mediaSourceStream.js';
+import {
+  createRmsEnvelope,
+  selectLipSyncRms,
+  StreamingAudioCapture,
+  type RmsEnvelope,
+} from './rmsEnvelope.js';
+import {
+  isPlaybackGestureError,
+  monitorPlaybackStart,
+  PlaybackGestureGate,
+  PersistentStreamingAudio,
+  type PlaybackGestureReason,
+} from './persistentStreamingAudio.js';
 
 const SMOOTHING_FACTOR = 0.5;
 const RMS_CEILING = 0.12;
+const LIVE_ANALYSER_RMS_THRESHOLD = 0.0001;
 const REACTION_GAIN_SCALE = 0.55;
 const DEV_RESOURCE_CLEANUP_GRACE_MS = 100;
 const isDevelopmentBuild =
@@ -13,12 +32,15 @@ const isDevelopmentBuild =
 
 export interface PlayAudioOptions {
   startDelayMs?: number;
+  onComplete?: (completedAt: number) => void;
+  onFirstAudioReady?: (readyAt: number) => void;
+  onPlaybackGestureRequired?: (reason: PlaybackGestureReason) => void;
   onReadyToStart?: (scheduledStartAt: number) => boolean | void;
   onStart?: (startedAt: number) => void;
 }
 
 export type PlayAudio = (
-  audioData: ArrayBuffer,
+  source: AudioPlaybackSource,
   options?: PlayAudioOptions,
 ) => Promise<void>;
 
@@ -29,16 +51,65 @@ function clampVolume(value: number): number {
   return Math.max(0, Math.min(value, 1));
 }
 
+interface WindowWithManagedMediaSource {
+  MediaSource?: typeof MediaSource;
+  ManagedMediaSource?: typeof MediaSource;
+}
+
+function readStreamingMediaSourceConstructor(): typeof MediaSource | null {
+  const mediaWindow = window as unknown as WindowWithManagedMediaSource;
+  return mediaWindow.ManagedMediaSource ?? mediaWindow.MediaSource ?? null;
+}
+
+async function collectAudioStream(
+  stream: ReadableStream<Uint8Array>,
+  onFirstAudioReady?: (readyAt: number) => void,
+  onComplete?: (completedAt: number) => void,
+): Promise<ArrayBuffer> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  let first = true;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!value?.byteLength) continue;
+    if (first) {
+      first = false;
+      onFirstAudioReady?.(performance.now());
+    }
+    chunks.push(value);
+    byteLength += value.byteLength;
+  }
+  onComplete?.(performance.now());
+  const combined = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return combined.buffer;
+}
+
 export function useAudioLipSync(volume = 1) {
   const normalizedVolume = clampVolume(volume);
   const [mouthOpen, setMouthOpen] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isReactionPlaying, setIsReactionPlaying] = useState(false);
   const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
+  const [needsPlaybackGesture, setNeedsPlaybackGesture] = useState(false);
   const contextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const persistentStreamingAudioRef = useRef<PersistentStreamingAudio | null>(null);
+  const mediaSourceUrlRef = useRef<string | null>(null);
+  const mediaSourceCleanupRef = useRef<(() => void) | null>(null);
+  const sourceBufferRef = useRef<SourceBuffer | null>(null);
+  const streamingAudioCaptureRef = useRef<StreamingAudioCapture | null>(null);
+  const streamingRmsEnvelopeRef = useRef<RmsEnvelope | null>(null);
+  const streamReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  const streamCancelRef = useRef<(() => void) | null>(null);
   const reactionAnalyserRef = useRef<AnalyserNode | null>(null);
   const reactionGainRef = useRef<GainNode | null>(null);
   const reactionSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -55,9 +126,15 @@ export function useAudioLipSync(volume = 1) {
   const reactionMouthOpenRef = useRef(0);
   const volumeRef = useRef(normalizedVolume);
   const deferredCleanupTimerRef = useRef<number | null>(null);
+  const playbackGestureWaitRef = useRef<{
+    gate: PlaybackGestureGate;
+    generation: number;
+  } | null>(null);
 
   const ensureAudioContext = useCallback(() => {
     if (!contextRef.current || contextRef.current.state === 'closed') {
+      persistentStreamingAudioRef.current?.dispose();
+      persistentStreamingAudioRef.current = null;
       contextRef.current = new AudioContext();
       gainRef.current = null;
       reactionGainRef.current = null;
@@ -84,26 +161,43 @@ export function useAudioLipSync(volume = 1) {
     return contextRef.current;
   }, []);
 
-  const prepare = useCallback(async () => {
+  const ensurePersistentStreamingAudio = useCallback((context: AudioContext) => {
+    if (!persistentStreamingAudioRef.current) {
+      persistentStreamingAudioRef.current = new PersistentStreamingAudio();
+    }
+    return persistentStreamingAudioRef.current.ensure(context);
+  }, []);
+
+  const prepare = useCallback((): Promise<boolean> => {
     let context: AudioContext;
     try {
       context = ensureAudioContext();
+      ensurePersistentStreamingAudio(context);
     } catch {
-      return false;
+      return Promise.resolve(false);
     }
 
-    if (context.state !== 'running') {
-      try {
-        await context.resume();
-      } catch {
-        return false;
-      }
-    }
-
-    const unlocked = context.state === 'running';
-    if (unlocked) setIsAudioUnlocked(true);
-    return unlocked;
-  }, [ensureAudioContext]);
+    const gestureWait = playbackGestureWaitRef.current;
+    const prepareAttempt = () =>
+      persistentStreamingAudioRef.current!.prepare(context, Boolean(gestureWait));
+    const preparePromise = (
+      gestureWait ? gestureWait.gate.resume(prepareAttempt) : prepareAttempt()
+    )
+      .then((ready) => {
+        if (!ready) return false;
+        setIsAudioUnlocked(true);
+        if (
+          gestureWait &&
+          playbackGestureWaitRef.current === gestureWait &&
+          gestureWait.generation === generationRef.current
+        ) {
+          playbackGestureWaitRef.current = null;
+          setNeedsPlaybackGesture(false);
+        }
+        return true;
+      });
+    return preparePromise;
+  }, [ensureAudioContext, ensurePersistentStreamingAudio]);
 
   const clearPlayback = useCallback(() => {
     if (startTimerRef.current !== null) {
@@ -119,6 +213,40 @@ export function useAudioLipSync(volume = 1) {
       }
       sourceRef.current.disconnect();
       sourceRef.current = null;
+    }
+
+    streamCancelRef.current?.();
+    streamCancelRef.current = null;
+    streamingAudioCaptureRef.current?.clear();
+    streamingAudioCaptureRef.current = null;
+    streamingRmsEnvelopeRef.current = null;
+    const gestureWait = playbackGestureWaitRef.current;
+    playbackGestureWaitRef.current = null;
+    if (gestureWait) {
+      gestureWait.gate.cancel(
+        new DOMException('Playback aborted.', 'AbortError'),
+      );
+    }
+    setNeedsPlaybackGesture(false);
+    if (streamReaderRef.current) {
+      void streamReaderRef.current.cancel().catch(() => undefined);
+      streamReaderRef.current = null;
+    }
+    mediaSourceCleanupRef.current?.();
+    mediaSourceCleanupRef.current = null;
+    if (sourceBufferRef.current?.updating) {
+      try {
+        sourceBufferRef.current.abort();
+      } catch {
+        // The MediaSource is no longer open.
+      }
+    }
+    sourceBufferRef.current = null;
+    persistentStreamingAudioRef.current?.clearSource();
+    persistentStreamingAudioRef.current?.disconnect();
+    if (mediaSourceUrlRef.current) {
+      URL.revokeObjectURL(mediaSourceUrlRef.current);
+      mediaSourceUrlRef.current = null;
     }
 
     if (animationFrameRef.current) {
@@ -192,7 +320,7 @@ export function useAudioLipSync(volume = 1) {
   }, []);
 
   const play = useCallback<PlayAudio>(
-    async (audioData, options) => {
+    async (requestedSource, options) => {
       const generation = generationRef.current + 1;
       generationRef.current = generation;
       reactionGenerationRef.current += 1;
@@ -210,7 +338,235 @@ export function useAudioLipSync(volume = 1) {
         }
         setIsAudioUnlocked(true);
 
-        const decodedAudio = await context.decodeAudioData(audioData.slice(0));
+        let audioSource = requestedSource;
+        const MediaSourceConstructor = readStreamingMediaSourceConstructor();
+        if (
+          audioSource.kind === 'stream' &&
+          (!MediaSourceConstructor ||
+            !MediaSourceConstructor.isTypeSupported(audioSource.mimeType))
+        ) {
+          audioSource = {
+            kind: 'buffer',
+            mimeType: audioSource.mimeType,
+            data: await collectAudioStream(
+              audioSource.stream,
+              options?.onFirstAudioReady,
+              options?.onComplete,
+            ),
+          };
+        }
+
+        if (audioSource.kind === 'stream' && MediaSourceConstructor) {
+          const mediaSource = new MediaSourceConstructor();
+          const { source: elementSource } =
+            ensurePersistentStreamingAudio(context);
+          const mediaUrl = URL.createObjectURL(mediaSource);
+          const audio = persistentStreamingAudioRef.current!.setSource(mediaUrl);
+          mediaSourceUrlRef.current = mediaUrl;
+
+          const analyser = context.createAnalyser();
+          analyser.fftSize = 2048;
+          elementSource.connect(analyser);
+          analyser.connect(gainRef.current!);
+          analyserRef.current = analyser;
+
+          await new Promise<void>((resolve, reject) => {
+            const handleSourceOpen = () => {
+              cleanup();
+              resolve();
+            };
+            const handleSourceError = () => {
+              cleanup();
+              reject(new Error('Streaming media source failed.'));
+            };
+            const cleanup = () => {
+              mediaSource.removeEventListener('sourceopen', handleSourceOpen);
+              mediaSource.removeEventListener('error', handleSourceError);
+              if (mediaSourceCleanupRef.current === cleanup) {
+                mediaSourceCleanupRef.current = null;
+              }
+            };
+            mediaSourceCleanupRef.current = cleanup;
+            mediaSource.addEventListener('sourceopen', handleSourceOpen, { once: true });
+            mediaSource.addEventListener('error', handleSourceError, { once: true });
+          });
+          if (generation !== generationRef.current) return;
+
+          const sourceBuffer = mediaSource.addSourceBuffer(audioSource.mimeType);
+          sourceBufferRef.current = sourceBuffer;
+          const reader = audioSource.stream.getReader();
+          streamReaderRef.current = reader;
+          let resolveFirstAudio: () => void = () => undefined;
+          let rejectPlayback: (error: unknown) => void = () => undefined;
+          const firstAudio = new Promise<void>((resolve) => {
+            resolveFirstAudio = resolve;
+          });
+          const interrupted = new Promise<never>((_resolve, reject) => {
+            rejectPlayback = reject;
+          });
+          streamCancelRef.current = () =>
+            rejectPlayback(new DOMException('Playback aborted.', 'AbortError'));
+
+          const audioCapture = new StreamingAudioCapture();
+          streamingAudioCaptureRef.current = audioCapture;
+
+          const pump = pumpMediaSourceAudio(
+            reader,
+            createMediaSourceStreamTarget(mediaSource, sourceBuffer),
+            {
+              onChunk: (chunk) => audioCapture.addChunk(chunk),
+              onFirstChunk: () => {
+                options?.onFirstAudioReady?.(performance.now());
+                resolveFirstAudio();
+              },
+              onComplete: () => options?.onComplete?.(performance.now()),
+            },
+          );
+          void pump.catch(() => undefined);
+          const prepareRmsEnvelope = pump
+            .then(async () => {
+              const encodedAudio = audioCapture.finish();
+              if (streamingAudioCaptureRef.current === audioCapture) {
+                streamingAudioCaptureRef.current = null;
+              }
+              if (!encodedAudio || generation !== generationRef.current) return;
+              const decodedAudio = await context.decodeAudioData(encodedAudio);
+              if (generation !== generationRef.current) return;
+              streamingRmsEnvelopeRef.current = createRmsEnvelope(decodedAudio);
+            })
+            .catch(() => {
+              audioCapture.clear();
+              if (streamingAudioCaptureRef.current === audioCapture) {
+                streamingAudioCaptureRef.current = null;
+              }
+            });
+          void prepareRmsEnvelope;
+
+          await Promise.race([firstAudio, interrupted, pump]);
+          if (generation !== generationRef.current) return;
+
+          const samples = new Float32Array(analyser.fftSize);
+          const updateMouth = () => {
+            if (
+              generation !== generationRef.current ||
+              analyserRef.current !== analyser
+            ) {
+              return;
+            }
+            analyser.getFloatTimeDomainData(samples);
+            let squaredTotal = 0;
+            for (const sample of samples) squaredTotal += sample * sample;
+            const liveRms = Math.sqrt(squaredTotal / samples.length);
+            const rms = selectLipSyncRms(
+              liveRms,
+              streamingRmsEnvelopeRef.current,
+              audio.currentTime,
+              LIVE_ANALYSER_RMS_THRESHOLD,
+            );
+            smoothedRmsRef.current =
+              smoothedRmsRef.current * SMOOTHING_FACTOR +
+              rms * (1 - SMOOTHING_FACTOR);
+            primaryMouthOpenRef.current = Math.min(
+              smoothedRmsRef.current / RMS_CEILING,
+              1,
+            );
+            setMouthOpen(
+              Math.max(primaryMouthOpenRef.current, reactionMouthOpenRef.current),
+            );
+            animationFrameRef.current = requestAnimationFrame(updateMouth);
+          };
+
+          const requestedDelayMs = options?.startDelayMs ?? 0;
+          const startDelayMs = Number.isFinite(requestedDelayMs)
+            ? Math.max(0, Math.min(requestedDelayMs, 10_000))
+            : 0;
+          const scheduledStartAt = performance.now() + startDelayMs;
+          const readyToStart = options?.onReadyToStart?.(scheduledStartAt);
+          const effectiveStartDelayMs = readyToStart === false ? 0 : startDelayMs;
+          let resolvePlaying: () => void = () => undefined;
+          const playing = new Promise<void>((resolve) => {
+            resolvePlaying = resolve;
+          });
+          const handlePlaying = () => {
+            resolvePlaying();
+            setIsSpeaking(true);
+            animationFrameRef.current = requestAnimationFrame(updateMouth);
+            options?.onStart?.(performance.now());
+          };
+          const ended = new Promise<void>((resolve, reject) => {
+            const handleEnded = () => {
+              cleanup();
+              resolve();
+            };
+            const handleError = () => {
+              cleanup();
+              reject(new Error('Streaming audio playback failed.'));
+            };
+            const cleanup = () => {
+              audio.removeEventListener('playing', handlePlaying);
+              audio.removeEventListener('ended', handleEnded);
+              audio.removeEventListener('error', handleError);
+              if (mediaSourceCleanupRef.current === cleanup) {
+                mediaSourceCleanupRef.current = null;
+              }
+            };
+            mediaSourceCleanupRef.current = cleanup;
+            audio.addEventListener('playing', handlePlaying, { once: true });
+            audio.addEventListener('ended', handleEnded, { once: true });
+            audio.addEventListener('error', handleError, { once: true });
+          });
+          void ended.catch(() => undefined);
+          if (effectiveStartDelayMs > 0) {
+            await Promise.race([
+              new Promise<void>((resolve) => {
+                startTimerRef.current = window.setTimeout(() => {
+                  startTimerRef.current = null;
+                  resolve();
+                }, effectiveStartDelayMs);
+              }),
+              interrupted,
+            ]);
+          }
+          const playAttempt = audio.play();
+          void playAttempt.catch(() => undefined);
+          const startOutcome = await monitorPlaybackStart(
+            playAttempt,
+            playing,
+            undefined,
+            interrupted,
+          );
+          if (startOutcome !== 'started') {
+            if (generation !== generationRef.current) return;
+            const gate = new PlaybackGestureGate();
+            playbackGestureWaitRef.current = { gate, generation };
+            setNeedsPlaybackGesture(true);
+            options?.onPlaybackGestureRequired?.(startOutcome);
+            const eventualStart = Promise.race([
+              playing,
+              playAttempt.catch((error) => {
+                if (isPlaybackGestureError(error)) {
+                  return new Promise<void>(() => undefined);
+                }
+                throw error;
+              }),
+            ]);
+            void eventualStart.catch(() => undefined);
+            await Promise.race([eventualStart, gate.wait(), interrupted]);
+            if (playbackGestureWaitRef.current?.gate === gate) {
+              gate.complete();
+              playbackGestureWaitRef.current = null;
+              setNeedsPlaybackGesture(false);
+            }
+          }
+          await Promise.race([Promise.all([pump, ended]), interrupted]);
+          if (generation === generationRef.current) clearPlayback();
+          return;
+        }
+
+        if (audioSource.kind !== 'buffer') {
+          throw new Error('Streaming audio is not supported in this browser.');
+        }
+        const decodedAudio = await context.decodeAudioData(audioSource.data.slice(0));
         if (generation !== generationRef.current) return;
 
         const source = context.createBufferSource();
@@ -290,10 +646,16 @@ export function useAudioLipSync(volume = 1) {
         });
       } catch (error) {
         if (generation === generationRef.current) clearPlayback();
+        if (generation !== generationRef.current) return;
         throw error;
       }
     },
-    [clearPlayback, clearReactionPlayback, ensureAudioContext],
+    [
+      clearPlayback,
+      clearReactionPlayback,
+      ensureAudioContext,
+      ensurePersistentStreamingAudio,
+    ],
   );
 
   const playReaction = useCallback<PlayReactionAudio>(
@@ -417,6 +779,8 @@ export function useAudioLipSync(volume = 1) {
       gainRef.current = null;
       reactionGainRef.current?.disconnect();
       reactionGainRef.current = null;
+      persistentStreamingAudioRef.current?.dispose();
+      persistentStreamingAudioRef.current = null;
       if (contextRef.current?.state !== 'closed') {
         void contextRef.current?.close();
       }
@@ -440,6 +804,7 @@ export function useAudioLipSync(volume = 1) {
     isReactionPlaying,
     isSpeaking,
     mouthOpen,
+    needsPlaybackGesture,
     play,
     playReaction,
     prepare,
