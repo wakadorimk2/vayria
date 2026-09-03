@@ -26,7 +26,41 @@ export interface LlmProviderEvent {
   callIndex: number;
   retry: number;
   elapsedMs: number;
+  profile?: string;
+  apiEndpoint?: string;
+  cacheMode?: string;
+  cacheKeyVersion?: string;
+  cacheStatus?: string;
+  requestedTier?: string;
+  actualTier?: string;
+  actualModel?: string;
+  inputTokens?: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  staticPrefixChars?: number;
+  dynamicContextChars?: number;
+  schemaBytes?: number;
+  historyItemCount?: number;
+  historyChars?: number;
+  requestBytes?: number;
+  warmup?: number;
+  fallbackReason?: string;
 }
+
+export type LlmProviderEventMetadata = Omit<
+  Partial<LlmProviderEvent>,
+  | 'event'
+  | 'turnId'
+  | 'provider'
+  | 'model'
+  | 'purpose'
+  | 'source'
+  | 'callIndex'
+  | 'retry'
+  | 'elapsedMs'
+>;
 
 export interface LlmProviderLatencySummary {
   source: 'voice' | 'manual' | 'card_change';
@@ -57,7 +91,10 @@ export interface LlmProviderCallTracker {
   readonly callCount: number;
   run<T>(
     options: RunLlmProviderCallOptions,
-    execute: (markFirstChunk: () => void) => Promise<T>,
+    execute: (
+      markFirstChunk: () => void,
+      setMetadata: (metadata: LlmProviderEventMetadata) => void,
+    ) => Promise<T>,
   ): Promise<T>;
 }
 
@@ -91,13 +128,17 @@ export function createLlmProviderCallTracker(
     },
     async run<T>(
       callOptions: RunLlmProviderCallOptions,
-      execute: (markFirstChunk: () => void) => Promise<T>,
+      execute: (
+        markFirstChunk: () => void,
+        setMetadata: (metadata: LlmProviderEventMetadata) => void,
+      ) => Promise<T>,
     ) {
       callCount += 1;
       const callIndex = callCount;
       const startedAt = now();
       let active = true;
       let firstChunkRecorded = false;
+      let metadata: LlmProviderEventMetadata = {};
       let recordQueue: Promise<void> | null = null;
       const record = (event: LlmProviderEventName): Promise<void> => {
         const payload: LlmProviderEvent = {
@@ -110,6 +151,7 @@ export function createLlmProviderCallTracker(
           callIndex,
           retry: callOptions.retry,
           elapsedMs: Math.max(0, Math.round(now() - startedAt)),
+          ...(event === 'llm_provider_done' ? metadata : {}),
         };
         try {
           options.observe?.(payload);
@@ -131,10 +173,13 @@ export function createLlmProviderCallTracker(
         firstChunkRecorded = true;
         void record('llm_provider_first_chunk');
       };
+      const setMetadata = (next: LlmProviderEventMetadata): void => {
+        metadata = { ...metadata, ...next };
+      };
 
       void record('llm_provider_start');
       try {
-        const providerCall = execute(markFirstChunk);
+        const providerCall = execute(markFirstChunk, setMetadata);
         return options.signal
           ? await raceWithAbort(providerCall, options.signal)
           : await providerCall;

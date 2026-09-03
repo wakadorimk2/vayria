@@ -4,6 +4,8 @@ import {
   buildAutonomousDirectorInstruction,
   buildCharacterIdentitySystemPrompt,
   buildCardPreviewSystemPrompt,
+  buildCardPreviewStaticPrompt,
+  buildConversationActionPolicyStaticPrompt,
   buildProgramContextSystemPrompt,
   buildUtterancePlanInstruction,
   buildVoiceInteractionPolicySystemPrompt,
@@ -236,6 +238,22 @@ test('card preview prompt uses behavior state without motion asset details', () 
   assert.match(prompt, /Behavior gesture intention: inspect/);
   assert.equal(prompt.includes('card-chicken'), false);
   assert.equal(prompt.includes('.vrma'), false);
+});
+
+test('cache prefixes exclude turn-specific identity, cards, and runtime values', () => {
+  const policyPrefix = buildConversationActionPolicyStaticPrompt();
+  const previewPrefix = buildCardPreviewStaticPrompt();
+  assert.doesNotMatch(policyPrefix, /character-identity|forced card is|0\.25/u);
+  assert.doesNotMatch(previewPrefix, /Selected card|Callback tendency|0\.25/u);
+});
+
+test('voice prompt includes identity and program context once', () => {
+  const prompt = buildVoiceInteractionPolicySystemPrompt(
+    'concept-chicken',
+    VALID_CONTEXT,
+  );
+  assert.equal(prompt.match(/<character-identity>/gu)?.length, 1);
+  assert.equal(prompt.match(/<program-context>/gu)?.length, 1);
 });
 
 test('program context keeps the card segment viewer-directed', () => {

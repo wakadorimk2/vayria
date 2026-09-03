@@ -6,6 +6,10 @@ import {
   streamOpenAiResponse,
   type OpenAiResponseRequest,
 } from '../server/openAiResponses.js';
+import {
+  modelForProfile,
+  resolveLlmRuntimeOptions,
+} from '../server/llmRuntime.js';
 
 const baseRequest: OpenAiResponseRequest = {
   apiKey: 'test-key',
@@ -159,4 +163,21 @@ test('request abort is forwarded and is not an availability fallback', async () 
     assert.equal(error.retryableAvailabilityFailure, false);
     return true;
   });
+});
+
+test('LLM profiles default to explicit Luna and exhibition-only safety features', () => {
+  assert.deepEqual(resolveLlmRuntimeOptions({}, false), {
+    profile: 'luna-explicit',
+    serviceTier: 'standard',
+    fallbackEnabled: false,
+    cacheWarmupEnabled: false,
+  });
+  assert.deepEqual(resolveLlmRuntimeOptions({}, true), {
+    profile: 'luna-explicit',
+    serviceTier: 'standard',
+    fallbackEnabled: true,
+    cacheWarmupEnabled: true,
+  });
+  assert.equal(modelForProfile('nano-legacy'), 'gpt-5-nano');
+  assert.equal(modelForProfile('luna-explicit'), 'gpt-5.6-luna');
 });

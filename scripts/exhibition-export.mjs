@@ -36,6 +36,27 @@ const CSV_COLUMNS = [
   'retry',
   'unitIndex',
   'characterCount',
+  'profile',
+  'apiEndpoint',
+  'cacheMode',
+  'cacheKeyVersion',
+  'cacheStatus',
+  'requestedTier',
+  'actualTier',
+  'actualModel',
+  'inputTokens',
+  'cachedTokens',
+  'cacheWriteTokens',
+  'outputTokens',
+  'reasoningTokens',
+  'staticPrefixChars',
+  'dynamicContextChars',
+  'schemaBytes',
+  'historyItemCount',
+  'historyChars',
+  'requestBytes',
+  'warmup',
+  'fallbackReason',
 ];
 
 function average(values) {
@@ -114,6 +135,47 @@ function summarizeLlmProviderLatency(events) {
       ];
     }),
   );
+}
+
+function summarizeLlmCacheProfiles(events) {
+  const abortedTurns = new Set(
+    events
+      .filter(
+        (event) =>
+          event.event === 'turn_aborted' && typeof event.turnId === 'string',
+      )
+      .map((event) => event.turnId),
+  );
+  const groups = new Map();
+  for (const event of events) {
+    if (event.event !== 'llm_provider_done') continue;
+    if (!Number.isFinite(event.elapsedMs) || event.elapsedMs < 0) continue;
+    const group = {
+      source: event.source ?? 'unknown',
+      purpose: event.purpose ?? 'unknown',
+      profile: event.profile ?? 'unknown',
+      cacheStatus: event.cacheStatus ?? 'unknown',
+      tier: event.actualTier ?? event.requestedTier ?? 'unknown',
+      retry: Number.isInteger(event.retry) ? event.retry : 0,
+      fallback: typeof event.fallbackReason === 'string',
+      aborted:
+        typeof event.turnId === 'string' && abortedTurns.has(event.turnId),
+    };
+    const key = JSON.stringify(group);
+    const values = groups.get(key) ?? { ...group, values: [] };
+    values.values.push(event.elapsedMs);
+    groups.set(key, values);
+  }
+  return [...groups.values()]
+    .map(({ values, ...group }) => ({
+      ...group,
+      count: values.length,
+      p50Ms: nearestRank(values, 0.5),
+      p95Ms: nearestRank(values, 0.95),
+    }))
+    .sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right)),
+    );
 }
 
 function nearestRank(values, fraction) {
@@ -328,6 +390,7 @@ export function summarizeCapture({ metadata, events, observations }, generatedAt
       lastAt: timestamps.at(-1)?.at ?? null,
       latency: summarizeLatency(events),
       llmProviderLatency: summarizeLlmProviderLatency(events),
+      llmCacheProfiles: summarizeLlmCacheProfiles(events),
       interactivePipelineLatency: summarizeInteractivePipeline(events),
     },
     observations: {
@@ -372,6 +435,27 @@ function eventRow(captureId, event) {
     retry: event.retry,
     unitIndex: event.unitIndex,
     characterCount: event.characterCount,
+    profile: event.profile,
+    apiEndpoint: event.apiEndpoint,
+    cacheMode: event.cacheMode,
+    cacheKeyVersion: event.cacheKeyVersion,
+    cacheStatus: event.cacheStatus,
+    requestedTier: event.requestedTier,
+    actualTier: event.actualTier,
+    actualModel: event.actualModel,
+    inputTokens: event.inputTokens,
+    cachedTokens: event.cachedTokens,
+    cacheWriteTokens: event.cacheWriteTokens,
+    outputTokens: event.outputTokens,
+    reasoningTokens: event.reasoningTokens,
+    staticPrefixChars: event.staticPrefixChars,
+    dynamicContextChars: event.dynamicContextChars,
+    schemaBytes: event.schemaBytes,
+    historyItemCount: event.historyItemCount,
+    historyChars: event.historyChars,
+    requestBytes: event.requestBytes,
+    warmup: event.warmup,
+    fallbackReason: event.fallbackReason,
     emotion: event.emotion,
     phase: event.phase,
     reason: event.reason,

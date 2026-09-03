@@ -203,6 +203,45 @@ test('telemetry recording failures do not change the provider result or event or
   ]);
 });
 
+test('provider completion accepts safe cache metadata only on done', async () => {
+  const harness = createHarness();
+  await harness.tracker.run(
+    { purpose: 'response-generation', retry: 0 },
+    async (markFirstChunk, setMetadata) => {
+      markFirstChunk();
+      setMetadata({
+        profile: 'luna-explicit',
+        cacheStatus: 'hit',
+        inputTokens: 200,
+        cachedTokens: 160,
+        requestBytes: 1200,
+      });
+    },
+  );
+  assert.equal(harness.events[0]?.profile, undefined);
+  assert.equal(harness.events[1]?.profile, undefined);
+  assert.deepEqual(
+    {
+      profile: harness.events[2]?.profile,
+      cacheStatus: harness.events[2]?.cacheStatus,
+      inputTokens: harness.events[2]?.inputTokens,
+      cachedTokens: harness.events[2]?.cachedTokens,
+      requestBytes: harness.events[2]?.requestBytes,
+    },
+    {
+      profile: 'luna-explicit',
+      cacheStatus: 'hit',
+      inputTokens: 200,
+      cachedTokens: 160,
+      requestBytes: 1200,
+    },
+  );
+  assert.doesNotMatch(
+    JSON.stringify(harness.events[2]),
+    /apiKey|history|message|prompt|text/i,
+  );
+});
+
 test('provider observer receives ordered milestones without waiting for storage', async () => {
   const observed: string[] = [];
   let releaseStorage: (() => void) | undefined;

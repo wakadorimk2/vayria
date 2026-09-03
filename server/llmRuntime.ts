@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { Buffer } from 'node:buffer';
 import type { Message } from '@aituber-onair/chat';
 import {
   OpenAiResponsesError,
@@ -54,6 +55,78 @@ export interface StructuredLlmResult {
   actualModel: string;
   fallbackReason: string | null;
   responses: OpenAiResponseResult | null;
+  telemetry: {
+    profile: LlmProfile;
+    apiEndpoint: 'chat-completions' | 'responses';
+    cacheMode: 'disabled' | 'explicit';
+    cacheKeyVersion: string;
+    cacheStatus: 'disabled' | 'hit' | 'write' | 'miss';
+    requestedTier: OpenAiServiceTier;
+    actualTier: string;
+    inputTokens: number;
+    cachedTokens: number;
+    cacheWriteTokens: number;
+    outputTokens: number;
+    reasoningTokens: number;
+    staticPrefixChars: number;
+    dynamicContextChars: number;
+    schemaBytes: number;
+    historyItemCount: number;
+    historyChars: number;
+    requestBytes: number;
+  };
+}
+
+function buildTelemetry(
+  request: StructuredLlmRequest,
+  responses: OpenAiResponseResult | null,
+  apiEndpoint: 'chat-completions' | 'responses',
+): StructuredLlmResult['telemetry'] {
+  const cacheMode =
+    request.runtime.profile === 'luna-explicit' ? 'explicit' : 'disabled';
+  const cachedTokens = responses?.usage.cachedTokens ?? 0;
+  const cacheWriteTokens = responses?.usage.cacheWriteTokens ?? 0;
+  const cacheStatus =
+    cacheMode === 'disabled'
+      ? 'disabled'
+      : cachedTokens > 0
+        ? 'hit'
+        : cacheWriteTokens > 0
+          ? 'write'
+          : 'miss';
+  return {
+    profile: request.runtime.profile,
+    apiEndpoint,
+    cacheMode,
+    cacheKeyVersion: request.cacheKey.split(':').at(-1) ?? 'unknown',
+    cacheStatus,
+    requestedTier: request.runtime.serviceTier,
+    actualTier:
+      responses?.serviceTier ??
+      (request.runtime.serviceTier === 'fast' ? 'unknown' : 'standard'),
+    inputTokens: responses?.usage.inputTokens ?? 0,
+    cachedTokens,
+    cacheWriteTokens,
+    outputTokens: responses?.usage.outputTokens ?? 0,
+    reasoningTokens: responses?.usage.reasoningTokens ?? 0,
+    staticPrefixChars: Array.from(request.staticPrompt).length,
+    dynamicContextChars: Array.from(request.dynamicPrompt).length,
+    schemaBytes: Buffer.byteLength(JSON.stringify(request.output.schema)),
+    historyItemCount: request.history.length,
+    historyChars: request.history.reduce(
+      (total, item) => total + Array.from(item.content).length,
+      0,
+    ),
+    requestBytes: Buffer.byteLength(
+      JSON.stringify({
+        staticPrompt: request.staticPrompt,
+        dynamicPrompt: request.dynamicPrompt,
+        history: request.history,
+        userMessage: request.userMessage,
+        output: request.output,
+      }),
+    ),
+  };
 }
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -142,12 +215,14 @@ export async function processStructuredLlm(
 ): Promise<StructuredLlmResult> {
   const requestedModel = modelForProfile(request.runtime.profile);
   if (request.runtime.profile === 'nano-legacy') {
+    const text = await runLegacyNano(request);
     return {
-      text: await runLegacyNano(request),
+      text,
       requestedModel,
       actualModel: requestedModel,
       fallbackReason: null,
       responses: null,
+      telemetry: buildTelemetry(request, null, 'chat-completions'),
     };
   }
 
@@ -185,6 +260,7 @@ export async function processStructuredLlm(
       actualModel: requestedModel,
       fallbackReason: null,
       responses,
+      telemetry: buildTelemetry(request, responses, 'responses'),
     };
   } catch (error) {
     if (
@@ -197,12 +273,14 @@ export async function processStructuredLlm(
     }
     const reason = fallbackReason(error);
     request.onFallback?.(reason);
+    const text = await runLegacyNano(request);
     return {
-      text: await runLegacyNano(request),
+      text,
       requestedModel,
       actualModel: String(MODEL_GPT_5_NANO),
       fallbackReason: reason,
       responses: null,
+      telemetry: buildTelemetry(request, null, 'responses'),
     };
   }
 }
