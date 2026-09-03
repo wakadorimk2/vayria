@@ -144,7 +144,7 @@ function buildInput(request: OpenAiResponseRequest): unknown[] {
       : []),
     ...request.history.map((message) => ({
       role: message.role,
-      content: [{ type: 'input_text', text: message.content }],
+      content: message.content,
     })),
     {
       role: 'user',

@@ -64,6 +64,10 @@ test('Responses body uses Luna structured output without storage', () => {
   assert.deepEqual(firstContent[0]?.prompt_cache_breakpoint, {
     mode: 'explicit',
   });
+  assert.deepEqual(input[2], {
+    role: 'assistant',
+    content: 'history',
+  });
   assert.equal(JSON.stringify(body).includes('test-key'), false);
 });
 
