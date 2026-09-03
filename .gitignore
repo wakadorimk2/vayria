@@ -20,6 +20,7 @@ tools/motion/runtime-cache/
 tools/motion/raw-output/
 tools/stt/.venv/
 tools/stt/.pytest_cache/
+tools/stt/.pytest-tmp-*/
 tools/stt/**/__pycache__/
 tools/stt/benchmarks/local/
 *.npz
