@@ -1,7 +1,7 @@
 # Vayria Mission Control
 
 - Target: 2026-09-23 Exhibition
-- Reviewed: 2026-09-01
+- Reviewed: 2026-09-03
 - Phase: 2/5 Experience Push
 
 ## Phases
@@ -15,7 +15,7 @@
 ## Now
 
 - 🔥 [Experience Push Tracker #80](https://github.com/wakadorimk2/vayria/issues/80) — 9/7までに新しい展示価値を4つ実装し、同じ証拠基準でSelectionへ渡す
-- ⚡ [Speed #78](https://github.com/wakadorimk2/vayria/issues/78) — Aivis Cloud APIとlocal TTSを比較し、発話開始の待ち時間を縮める
+- ⚡ Speed — [TTS #78](https://github.com/wakadorimk2/vayria/issues/78)でAivis Cloudとlocal TTSを比較し、[LLM #83](https://github.com/wakadorimk2/vayria/issues/83)でprovider計測とinteractive pathの発話開始を短縮する
 - 💬 [Conversation #23](https://github.com/wakadorimk2/vayria/issues/23) — [研究 #64](https://github.com/wakadorimk2/vayria/issues/64)を入力に、viewer activityへ適応する自律発話タイミングを実装する
 - 🃏 [Card #22](https://github.com/wakadorimk2/vayria/issues/22) — card dropから視線、非言語反応、返答までに一つの「おっ」を作る
 - 👀 [Embodiment #79](https://github.com/wakadorimk2/vayria/issues/79) — 発話開始時の視線、表情、モーションを一つの身体反応として尖らせる
@@ -31,6 +31,6 @@
 
 ## Recently Done
 
-- [PR #74](https://github.com/wakadorimk2/vayria/pull/74) カードdrag中の空間attentionを方向cueとして安定化した
-- [PR #73](https://github.com/wakadorimk2/vayria/pull/73) LifeDynamics blink adapterを追加した
-- [PR #72](https://github.com/wakadorimk2/vayria/pull/72) LifeDynamics life adapterを追加した
+- [PR #75](https://github.com/wakadorimk2/vayria/pull/75) LifeDynamicsを通常経路へ採用し、カードdrag時の視線追従を修正した
+- [PR #82](https://github.com/wakadorimk2/vayria/pull/82) Aivis Cloud streamingとTTFA比較経路を追加した
+- [PR #81](https://github.com/wakadorimk2/vayria/pull/81) PROJECT.mdを正本とするMission Controlローカルビューを追加した
