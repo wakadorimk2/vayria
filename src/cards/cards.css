@@ -814,6 +814,14 @@
   animation: wildcard-card-activate 520ms ease-out;
 }
 
+.wildcard-card.wildcard-card--supporting {
+  border-color: color-mix(in srgb, var(--kind-accent) 56%, #fff);
+  box-shadow:
+    0 4px 10px rgb(0 0 0 / 24%),
+    0 0 0 2px color-mix(in srgb, var(--kind-accent) 18%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 60%);
+}
+
 @keyframes wildcard-card-activate {
   0% {
     transform: translateY(0) rotate(var(--card-rotation));
@@ -1426,6 +1434,7 @@
 .app-shell .card-zone--brain .wildcard-card:not(
     .wildcard-card--selected,
     .wildcard-card--active,
+    .wildcard-card--supporting,
     .wildcard-card--drop-target,
     .wildcard-card--pending-insertion
   ) {
@@ -1434,6 +1443,7 @@
 
 .app-shell .card-zone--brain .wildcard-card--selected,
 .app-shell .card-zone--brain .wildcard-card--active,
+.app-shell .card-zone--brain .wildcard-card--supporting,
 .app-shell .card-zone--brain .wildcard-card--drop-target,
 .app-shell .card-zone--brain .wildcard-card--pending-insertion {
   opacity: 1;

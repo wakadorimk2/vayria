@@ -53,6 +53,12 @@ import type {
 import { isConversationActionDecision } from '../performer/types';
 import type { VoiceInputEvent } from '../voice/voiceInput';
 import { readAudioPlaybackSource } from '../audio/audioPlaybackSource.js';
+import {
+  isExpressionLevel,
+  isSpeechAct,
+  type ExpressionLevel,
+  type SpeechAct,
+} from './utterancePlan';
 
 export type ConversationStatus =
   | 'idle'
@@ -71,6 +77,8 @@ export interface AutonomousDecision {
 
 interface ChatResponse {
   activatedCards: unknown;
+  speechAct: unknown;
+  expressionLevel: unknown;
   backchannelCue?: unknown;
   emotion: unknown;
   text: string;
@@ -125,6 +133,12 @@ interface ConversationOptions {
     delta: AutonomyInternalDelta,
     context: AutonomyDeltaContext,
   ) => void;
+  onReplyPresentationStart?: (
+    planId: string,
+    activatedCardIds: string[],
+    speechAct: SpeechAct,
+  ) => void;
+  onReplyPresentationEnd?: (planId: string) => void;
 }
 
 interface ErrorResponse {
@@ -161,7 +175,7 @@ function readActivatedCards(value: unknown, allowEmpty = false): string[] {
   if (
     !Array.isArray(value) ||
     (!allowEmpty && value.length < 1) ||
-    value.length > 3 ||
+    value.length > 2 ||
     !value.every((id): id is string => typeof id === 'string') ||
     new Set(value).size !== value.length
   ) {
@@ -308,6 +322,8 @@ export function useConversation(
   );
   const subtitleClearTimerRef = useRef<number | null>(null);
   const lastSelfUtteranceRef = useRef<string | null>(null);
+  const recentExpressionLevelsRef = useRef<ExpressionLevel[]>([]);
+  const activePresentationPlanIdRef = useRef<string | null>(null);
   const isMutedRef = useRef(isMuted);
   const sourceRef = useRef<ConversationSource | null>(null);
   const statusRef = useRef<ConversationStatus>('idle');
@@ -320,6 +336,10 @@ export function useConversation(
   const onPerformanceResultRef = useRef(options.onPerformanceResult);
   const onInteractionActionRef = useRef(options.onInteractionAction);
   const onAutonomyDeltaRef = useRef(options.onAutonomyDelta);
+  const onReplyPresentationStartRef = useRef(
+    options.onReplyPresentationStart,
+  );
+  const onReplyPresentationEndRef = useRef(options.onReplyPresentationEnd);
   const characterIdentityRef = useRef(
     options.characterIdentity ?? DEFAULT_CHARACTER_IDENTITY,
   );
@@ -334,6 +354,8 @@ export function useConversation(
     onPerformanceResultRef.current = options.onPerformanceResult;
     onInteractionActionRef.current = options.onInteractionAction;
     onAutonomyDeltaRef.current = options.onAutonomyDelta;
+    onReplyPresentationStartRef.current = options.onReplyPresentationStart;
+    onReplyPresentationEndRef.current = options.onReplyPresentationEnd;
     timeline.setListener(options.onInteractionTimelineEvent);
   }, [
     options.onPerformanceCue,
@@ -342,6 +364,8 @@ export function useConversation(
     options.onInteractionAction,
     options.onInteractionTimelineEvent,
     options.onAutonomyDelta,
+    options.onReplyPresentationStart,
+    options.onReplyPresentationEnd,
     timeline,
   ]);
 
@@ -439,6 +463,11 @@ export function useConversation(
       generationRef.current += 1;
       abortFetch();
       if (stopPlayback) playback.stop();
+      const presentationPlanId = activePresentationPlanIdRef.current;
+      if (presentationPlanId) {
+        activePresentationPlanIdRef.current = null;
+        onReplyPresentationEndRef.current?.(presentationPlanId);
+      }
     },
     [abortFetch, playback],
   );
@@ -477,6 +506,7 @@ export function useConversation(
     floorController.reset('conversation_reset');
     participationController.reset();
     lastSelfUtteranceRef.current = null;
+    recentExpressionLevelsRef.current = [];
     clearSubtitle();
     setReply('');
     setError('');
@@ -713,6 +743,7 @@ export function useConversation(
               fragmentation: 0,
               semanticBiases: [],
             },
+            recentExpressionLevels: recentExpressionLevelsRef.current,
             ...(turnSource === 'autonomous'
               ? {
                   topic: autonomousContext?.topic ?? null,
@@ -767,6 +798,21 @@ export function useConversation(
                 autonomyCandidate!,
               )
             : null;
+        const isSpeakingResponse =
+          turnSource === 'manual' ||
+          (turnSource === 'voice' &&
+            interactionDecision?.action === 'take_floor') ||
+          (turnSource === 'autonomous' &&
+            autonomousDecision?.externalAction === 'speak');
+        const speechAct = chatPayload.speechAct;
+        const expressionLevel = chatPayload.expressionLevel;
+        if (isSpeakingResponse) {
+          if (!isSpeechAct(speechAct) || !isExpressionLevel(expressionLevel)) {
+            throw new Error('AI の発話計画形式が正しくありません。');
+          }
+        } else if (speechAct !== null || expressionLevel !== null) {
+          throw new Error('非発話応答の発話計画が正しくありません。');
+        }
         const internalDelta =
           turnSource === 'autonomous'
             ? autonomousDecision?.internalDelta ?? { reasonUpdates: [] }
@@ -814,6 +860,9 @@ export function useConversation(
           chatPayload.activatedCards,
           autonomousDecision !== null || interactionDecision !== null,
         );
+        if (isSpeakingResponse && activatedCards.length < 1) {
+          throw new Error('AI が主役カードを選びませんでした。');
+        }
         if (
           interactionDecision !== null &&
           interactionDecision.action !== 'take_floor' &&
@@ -834,9 +883,9 @@ export function useConversation(
             interactionDecision.action === 'take_floor') &&
           (autonomousDecision === null ||
             autonomousDecision.externalAction === 'speak') &&
-          !activatedCards.includes(cardContext.forcedCardId)
+          activatedCards[0] !== cardContext.forcedCardId
         ) {
-          throw new Error('AI が交換したカードを発動しませんでした。');
+          throw new Error('AI が交換したカードを主役にしませんでした。');
         }
 
         responseEmotion = normalizeEmotion(chatPayload.emotion);
@@ -1045,6 +1094,11 @@ export function useConversation(
         }
 
         const playbackResult = await playback.play(plan, audioSource, {
+          presentationLeadMs:
+            typeof window !== 'undefined' &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              ? 0
+              : 120,
           ...(turnSource === 'voice'
             ? {
                 streamPriming: {
@@ -1054,6 +1108,22 @@ export function useConversation(
               }
             : {}),
           onFirstAudioReady: (readyAt) => {
+            if (
+              generation === generationRef.current &&
+              isSpeechAct(speechAct) &&
+              activePresentationPlanIdRef.current !== executionPlan.planId
+            ) {
+              const previousPlanId = activePresentationPlanIdRef.current;
+              if (previousPlanId) {
+                onReplyPresentationEndRef.current?.(previousPlanId);
+              }
+              activePresentationPlanIdRef.current = executionPlan.planId;
+              onReplyPresentationStartRef.current?.(
+                executionPlan.planId,
+                activatedCards,
+                speechAct,
+              );
+            }
             eventEmitter.emit('tts_first_audio', {
               durationMs: readyAt - ttsStartedAt,
               phase: 'tts',
@@ -1127,6 +1197,10 @@ export function useConversation(
           },
           onSpeechEnd: () => {
             if (generation !== generationRef.current) return;
+            if (activePresentationPlanIdRef.current === executionPlan.planId) {
+              activePresentationPlanIdRef.current = null;
+              onReplyPresentationEndRef.current?.(executionPlan.planId);
+            }
             scheduleSubtitleClear(generation);
           },
         });
@@ -1139,6 +1213,13 @@ export function useConversation(
           emitResult(executionPlan, 'interrupted');
           emitTerminalEvent('turn_aborted', { reason: 'superseded' });
           return { completed: false, decision: null };
+        }
+
+        if (isExpressionLevel(expressionLevel)) {
+          recentExpressionLevelsRef.current = [
+            ...recentExpressionLevelsRef.current,
+            expressionLevel,
+          ].slice(-10);
         }
 
         lastSelfUtteranceRef.current = responseText;
@@ -1222,6 +1303,10 @@ export function useConversation(
         });
         return { completed: false, decision: null };
       } finally {
+        if (activePresentationPlanIdRef.current === executionPlan.planId) {
+          activePresentationPlanIdRef.current = null;
+          onReplyPresentationEndRef.current?.(executionPlan.planId);
+        }
         if (turnSource === 'voice' && floorController.getState().floorOwner === 'vayria') {
           floorController.release('turn_ended');
         }

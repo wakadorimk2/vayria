@@ -39,6 +39,7 @@ export interface PerformancePlaybackCallbacks {
   onPlaybackStartup?: (diagnostic: PlaybackStartupDiagnostic) => void;
   onSpeechStart?: (startedAt: number) => void;
   onSpeechEnd?: (endedAt: number) => void;
+  presentationLeadMs?: number;
   streamPriming?: StreamingPlaybackPrimingOptions;
 }
 
@@ -161,7 +162,10 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
       let motionStartedAt: number | undefined;
       let speechStartedAt: number | undefined;
       await this.playAudio(audioSource, {
-        startDelayMs: motionReady ? plan.timing.motionLeadMs : 0,
+        startDelayMs: Math.max(
+          motionReady ? plan.timing.motionLeadMs : 0,
+          callbacks.presentationLeadMs ?? 0,
+        ),
         onComplete: callbacks.onAudioComplete,
         onFirstAudioReady: callbacks.onFirstAudioReady,
         onPlaybackGestureRequired: callbacks.onPlaybackGestureRequired,
