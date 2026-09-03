@@ -183,13 +183,16 @@ test('quiet-time sampling stays within the configured inclusive range', () => {
   assert.equal(sampleAutonomyQuietTime(TIMING, () => 1), 18_000);
 });
 
-test('baseline remains the default timing mode', () => {
-  assert.equal(readAutonomyTimingMode(undefined), 'baseline');
-  assert.equal(readAutonomyTimingMode('unknown'), 'baseline');
+test('monotonic is the default timing mode while baseline remains selectable', () => {
+  assert.equal(readAutonomyTimingMode(undefined), 'monotonic');
+  assert.equal(readAutonomyTimingMode('unknown'), 'monotonic');
+  assert.equal(readAutonomyTimingMode('baseline'), 'baseline');
   assert.equal(readAutonomyTimingMode('monotonic'), 'monotonic');
   assert.equal(resolveAutonomyTimingMode('baseline', 'monotonic'), 'baseline');
   assert.equal(resolveAutonomyTimingMode('invalid', 'monotonic'), 'monotonic');
-  assert.equal(resolveAutonomyTimingMode('invalid', 'invalid'), 'baseline');
+  assert.equal(resolveAutonomyTimingMode('invalid', 'baseline'), 'baseline');
+  assert.equal(resolveAutonomyTimingMode('invalid', 'invalid'), 'monotonic');
+  assert.equal(resolveAutonomyTimingMode(undefined, undefined), 'monotonic');
 });
 
 test('monotonic readiness is zero through the minimum and quadratic in the window', () => {

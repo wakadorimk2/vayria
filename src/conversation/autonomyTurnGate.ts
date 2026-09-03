@@ -15,6 +15,8 @@ export const AUTONOMY_TIMING_MODES = ['baseline', 'monotonic'] as const;
 
 export type AutonomyTimingMode = (typeof AUTONOMY_TIMING_MODES)[number];
 
+export const DEFAULT_AUTONOMY_TIMING_MODE: AutonomyTimingMode = 'monotonic';
+
 function parseAutonomyTimingMode(value: unknown): AutonomyTimingMode | null {
   return typeof value === 'string' &&
     (AUTONOMY_TIMING_MODES as readonly string[]).includes(value)
@@ -23,7 +25,7 @@ function parseAutonomyTimingMode(value: unknown): AutonomyTimingMode | null {
 }
 
 export function readAutonomyTimingMode(value: unknown): AutonomyTimingMode {
-  return parseAutonomyTimingMode(value) ?? 'baseline';
+  return parseAutonomyTimingMode(value) ?? DEFAULT_AUTONOMY_TIMING_MODE;
 }
 
 export function resolveAutonomyTimingMode(
@@ -33,7 +35,7 @@ export function resolveAutonomyTimingMode(
   return (
     parseAutonomyTimingMode(queryValue) ??
     parseAutonomyTimingMode(environmentValue) ??
-    'baseline'
+    DEFAULT_AUTONOMY_TIMING_MODE
   );
 }
 
