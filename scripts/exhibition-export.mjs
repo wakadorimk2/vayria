@@ -114,6 +114,114 @@ function summarizeLlmProviderLatency(events) {
   );
 }
 
+function nearestRank(values, fraction) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)];
+}
+
+function summarizePipelineMetric(values) {
+  return {
+    count: values.length,
+    p50Ms: nearestRank(values, 0.5),
+    p95Ms: nearestRank(values, 0.95),
+  };
+}
+
+function eventTimestamp(event) {
+  const value = Date.parse(event.at);
+  return Number.isFinite(value) ? value : null;
+}
+
+function firstEventAt(events, eventName) {
+  const timestamps = events
+    .filter((event) => event.event === eventName)
+    .map(eventTimestamp)
+    .filter((value) => value !== null)
+    .sort((left, right) => left - right);
+  return timestamps[0] ?? null;
+}
+
+function segmentDuration(from, to) {
+  return from !== null && to !== null && to >= from ? to - from : null;
+}
+
+function summarizeInteractivePipeline(events) {
+  const interactiveSources = ['voice', 'manual', 'card_change'];
+  const groups = ['normal', 'retry', 'aborted'];
+  const metricNames = [
+    'inputToProviderFirstChunkMs',
+    'providerFirstChunkToSpeechUnitMs',
+    'speechUnitToTtsFirstAudioMs',
+    'ttsFirstAudioToPlaybackMs',
+    'inputToPlaybackMs',
+  ];
+  const turns = new Map();
+  for (const event of events) {
+    if (!interactiveSources.includes(event.source) || typeof event.turnId !== 'string') {
+      continue;
+    }
+    const turn = turns.get(event.turnId) ?? { source: event.source, events: [] };
+    turn.events.push(event);
+    turns.set(event.turnId, turn);
+  }
+
+  const result = Object.fromEntries(
+    interactiveSources.map((source) => [
+      source,
+      Object.fromEntries(
+        groups.map((group) => [
+          group,
+          Object.fromEntries(metricNames.map((name) => [name, []])),
+        ]),
+      ),
+    ]),
+  );
+
+  for (const turn of turns.values()) {
+    const aborted = turn.events.some((event) => event.event === 'turn_aborted');
+    const retried = turn.events.some(
+      (event) =>
+        event.event === 'llm_provider_done' &&
+        Number.isInteger(event.retry) &&
+        event.retry > 0,
+    );
+    const group = aborted ? 'aborted' : retried ? 'retry' : 'normal';
+    const input = firstEventAt(turn.events, 'input_received');
+    const providerFirstChunk = firstEventAt(turn.events, 'llm_provider_first_chunk');
+    const speechUnit = firstEventAt(turn.events, 'speech_unit_ready');
+    const ttsFirstAudio = firstEventAt(turn.events, 'tts_first_audio');
+    const playback = firstEventAt(turn.events, 'playback_started');
+    const values = {
+      inputToProviderFirstChunkMs: segmentDuration(input, providerFirstChunk),
+      providerFirstChunkToSpeechUnitMs: segmentDuration(providerFirstChunk, speechUnit),
+      speechUnitToTtsFirstAudioMs: segmentDuration(speechUnit, ttsFirstAudio),
+      ttsFirstAudioToPlaybackMs: segmentDuration(ttsFirstAudio, playback),
+      inputToPlaybackMs: segmentDuration(input, playback),
+    };
+    for (const [name, value] of Object.entries(values)) {
+      if (value !== null) result[turn.source][group][name].push(value);
+    }
+  }
+
+  return Object.fromEntries(
+    interactiveSources.map((source) => [
+      source,
+      Object.fromEntries(
+        groups.map((group) => [
+          group,
+          Object.fromEntries(
+            metricNames.map((name) => [
+              name,
+              summarizePipelineMetric(result[source][group][name]),
+            ]),
+          ),
+        ]),
+      ),
+    ]),
+  );
+}
+
 function summarizeAxisScores(observations) {
   return Object.fromEntries(
     RUBRIC_AXES.map((axis) => {
@@ -177,6 +285,7 @@ export function summarizeCapture({ metadata, events, observations }, generatedAt
       lastAt: timestamps.at(-1)?.at ?? null,
       latency: summarizeLatency(events),
       llmProviderLatency: summarizeLlmProviderLatency(events),
+      interactivePipelineLatency: summarizeInteractivePipeline(events),
     },
     observations: {
       count: observations.length,

@@ -138,6 +138,61 @@ test('LLM provider latency summary separates interactive sources', () => {
   });
 });
 
+test('interactive pipeline latency separates normal, retry, and aborted turns', () => {
+  const metadata = {
+    schemaVersion: 1,
+    captureId: 'ex-20260822000001-abcdef13',
+    mode: 'exhibition',
+    startedAt: '2026-08-22T00:00:00.000Z',
+    finishedAt: null,
+    status: 'active',
+  };
+  const turnEvents = (turnId, source, offset, extra = []) => [
+    { event: 'input_received', at: `2026-08-22T00:00:0${offset}.000Z`, turnId, source },
+    { event: 'llm_provider_first_chunk', at: `2026-08-22T00:00:0${offset}.800Z`, turnId, source },
+    { event: 'speech_unit_ready', at: `2026-08-22T00:00:0${offset}.900Z`, turnId, source },
+    { event: 'tts_first_audio', at: `2026-08-22T00:00:0${offset + 1}.300Z`, turnId, source },
+    { event: 'playback_started', at: `2026-08-22T00:00:0${offset + 1}.310Z`, turnId, source },
+    ...extra.map((event) => ({ ...event, turnId, source })),
+  ];
+  const summary = summarizeCapture({
+    metadata,
+    observations: [],
+    events: [
+      ...turnEvents('normal-1', 'voice', 1),
+      ...turnEvents('retry-1', 'voice', 3, [
+        { event: 'llm_provider_done', at: '2026-08-22T00:00:04.500Z', retry: 1 },
+      ]),
+      ...turnEvents('aborted-1', 'card_change', 5, [
+        { event: 'turn_aborted', at: '2026-08-22T00:00:06.500Z' },
+      ]),
+    ],
+  });
+
+  const voiceNormal = summary.runtime.interactivePipelineLatency.voice.normal;
+  assert.deepEqual(voiceNormal.inputToProviderFirstChunkMs, {
+    count: 1,
+    p50Ms: 800,
+    p95Ms: 800,
+  });
+  assert.equal(voiceNormal.providerFirstChunkToSpeechUnitMs.p50Ms, 100);
+  assert.equal(voiceNormal.speechUnitToTtsFirstAudioMs.p50Ms, 400);
+  assert.equal(voiceNormal.ttsFirstAudioToPlaybackMs.p50Ms, 10);
+  assert.equal(voiceNormal.inputToPlaybackMs.p50Ms, 1310);
+  assert.equal(
+    summary.runtime.interactivePipelineLatency.voice.retry.inputToPlaybackMs.count,
+    1,
+  );
+  assert.equal(
+    summary.runtime.interactivePipelineLatency.card_change.aborted.inputToPlaybackMs.count,
+    1,
+  );
+  assert.equal(
+    summary.runtime.interactivePipelineLatency.manual.normal.inputToPlaybackMs.count,
+    0,
+  );
+});
+
 test('observer CLI saves notes, numeric scores, and N/A reasons without deleting data', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vayria-exhibition-observe-'));
   const captureId = 'ex-20260822000200-abcdef56';

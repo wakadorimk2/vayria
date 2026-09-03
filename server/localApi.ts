@@ -192,6 +192,7 @@ const CONVERSATION_EVENTS = [
   'input_received',
   'llm_start',
   'llm_done',
+  'speech_unit_ready',
   'tts_start',
   'tts_fallback_started',
   'tts_fallback_completed',

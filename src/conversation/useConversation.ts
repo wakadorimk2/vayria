@@ -668,7 +668,7 @@ export function useConversation(
           : null;
 
       try {
-        if (turnSource !== 'voice') {
+        if (turnSource === 'autonomous') {
           await waitMilliseconds(plan.preReaction?.leadBeforeSpeechMs ?? 0);
         }
         if (generation !== generationRef.current) {
@@ -897,6 +897,8 @@ export function useConversation(
         });
         onReplyAccepted(activatedCards);
 
+        eventEmitter.emit('speech_unit_ready');
+
         if (INTERACTIVE_SOURCES.includes(turnSource)) {
           if (turnSource === 'voice' && interactionDecision) {
             const floorTransition = floorController.applyFinalized(
@@ -946,7 +948,9 @@ export function useConversation(
 
         setConversationState('synthesizing', turnSource);
         currentPhase = 'tts';
-        await waitMilliseconds(plan.speech?.delayMs ?? 0);
+        if (turnSource === 'autonomous') {
+          await waitMilliseconds(plan.speech?.delayMs ?? 0);
+        }
         if (generation !== generationRef.current) {
           emitResult(executionPlan, 'interrupted');
           emitTerminalEvent('turn_aborted', {
