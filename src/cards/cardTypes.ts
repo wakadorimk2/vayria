@@ -1,6 +1,11 @@
 export type CardKind = 'concept' | 'mood' | 'effect';
 
-export type CardState = 'normal' | 'selected' | 'active' | 'disabled';
+export type CardState =
+  | 'normal'
+  | 'selected'
+  | 'active'
+  | 'supporting'
+  | 'disabled';
 
 export type CardMotion =
   | 'none'

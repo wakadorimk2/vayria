@@ -128,13 +128,30 @@ export function useCardGamePrototype() {
     setZones((current) => ({ ...current, activatedCardIds: [] }));
   }, []);
 
-  const acceptReply = useCallback((activatedCardIds: string[]) => {
+  const presentReply = useCallback((activatedCardIds: string[]) => {
     setZones((current) => {
       const brainCardIds = new Set(current.brain.map((card) => card.id));
       return {
         ...current,
+        activatedCardIds: activatedCardIds
+          .filter((id) => brainCardIds.has(id))
+          .slice(0, 2),
+      };
+    });
+  }, []);
+
+  const clearReplyPresentation = useCallback(() => {
+    setZones((current) => ({ ...current, activatedCardIds: [] }));
+  }, []);
+
+  const acceptReply = useCallback((activatedCardIds: string[]) => {
+    setZones((current) => {
+      return {
+        ...current,
         remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
-        activatedCardIds: activatedCardIds.filter((id) => brainCardIds.has(id)),
+        activatedCardIds: current.activatedCardIds.filter((id) =>
+          activatedCardIds.includes(id),
+        ),
         forcedCardId: null,
       };
     });
@@ -144,6 +161,8 @@ export function useCardGamePrototype() {
     maxInterferenceCount: MAX_INTERFERENCE_COUNT,
     acceptReply,
     beginReply,
+    clearReplyPresentation,
+    presentReply,
     resetTurn,
     selectCard,
     selectedBrainCardId,

@@ -15,6 +15,12 @@
     "server/streamingSpeech.ts",
     "src/character/emotion.ts",
     "src/character/identity.ts",
+    "src/cards/cardDropReaction.ts",
+    "src/cards/cardDropPreview.ts",
+    "src/cards/cardMotionAssets.ts",
+    "src/cards/cardPool.ts",
+    "src/cards/cardReactions.ts",
+    "src/cards/cardTypes.ts",
     "src/performer/runtime.ts",
     "src/performer/profile.ts",
     "src/performer/types.ts",
@@ -27,11 +33,14 @@
     "src/conversation/useAutonomousTalk.ts",
     "src/conversation/autonomyState.ts",
     "src/conversation/programContext.ts",
+    "src/conversation/utterancePlan.ts",
     "scripts/card-preview-api.test.ts",
     "scripts/local-api-capture.test.ts",
     "scripts/llm-provider-telemetry.test.ts",
     "scripts/streaming-speech.test.ts",
     "scripts/card-reactions.test.ts",
+    "scripts/card-drop-reaction.test.ts",
+    "scripts/card-drop-preview.test.ts",
     "scripts/performer-runtime.test.ts",
     "scripts/conversation-floor.test.ts",
     "scripts/participation-controller.test.ts",
@@ -39,6 +48,7 @@
     "scripts/autonomous-context.test.ts",
     "scripts/autonomous-talk.test.ts",
     "scripts/autonomy-turn-gate.test.ts",
-    "scripts/autonomy-state.test.ts"
+    "scripts/autonomy-state.test.ts",
+    "scripts/utterance-plan.test.ts"
   ]
 }

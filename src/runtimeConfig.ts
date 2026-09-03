@@ -6,6 +6,7 @@ import {
   type AudioEndpointMs,
   type ExhibitionAudioPreset,
 } from './voice/audioLab.js';
+import { readCardDropReactionMode } from './cards/cardDropReaction.js';
 
 const APP_MODES = ['local', 'exhibition', 'public'] as const;
 const VOICE_INPUT_TRANSPORTS = ['web-speech', 'remote'] as const;
@@ -141,6 +142,10 @@ export const runtimeConfig = Object.freeze({
   earlySpeechLeadEnabled: readEarlySpeechLeadEnabled(browserSearch),
   cloudTtsStreamPlaybackEnabled:
     readCloudTtsStreamPlaybackEnabled(browserSearch),
+  cardDropReactionMode: readCardDropReactionMode(
+    browserSearch,
+    import.meta.env.VITE_CARD_DROP_REACTION_MODE,
+  ),
   autonomyTimingMode: readConfiguredAutonomyTimingMode(browserSearch),
   audioPreset: readAudioPreset(browserSearch),
   audioEndpointMs: readAudioEndpoint(browserSearch),
