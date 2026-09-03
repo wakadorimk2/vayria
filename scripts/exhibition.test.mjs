@@ -21,6 +21,7 @@ import {
   createCsv,
   exportCapture,
   parseExportArgs,
+  summarizeCapture,
 } from './exhibition-export.mjs';
 import {
   parseObserveArgs,
@@ -99,6 +100,42 @@ test('observation commands validate notes, scores, and N/A reasons', () => {
     () => parseObservationCommand(`note ${'x'.repeat(501)}`),
     /500 characters or fewer/,
   );
+});
+
+test('LLM provider latency summary separates interactive sources', () => {
+  const metadata = {
+    schemaVersion: 1,
+    captureId: 'ex-20260822000000-abcdef12',
+    mode: 'exhibition',
+    startedAt: '2026-08-22T00:00:00.000Z',
+    finishedAt: null,
+    status: 'active',
+  };
+  const providerDone = (source, elapsedMs) => ({
+    captureId: metadata.captureId,
+    event: 'llm_provider_done',
+    at: '2026-08-22T00:00:01.000Z',
+    source,
+    elapsedMs,
+  });
+  const summary = summarizeCapture({
+    metadata,
+    observations: [],
+    events: [
+      providerDone('manual', 10),
+      providerDone('manual', 20),
+      providerDone('manual', 100),
+      providerDone('voice', 30),
+      providerDone('card_change', 40),
+      providerDone('autonomous', 9_999),
+    ],
+  });
+
+  assert.deepEqual(summary.runtime.llmProviderLatency, {
+    voice: { count: 1, p50Ms: 30, p95Ms: 30 },
+    manual: { count: 3, p50Ms: 20, p95Ms: 100 },
+    card_change: { count: 1, p50Ms: 40, p95Ms: 40 },
+  });
 });
 
 test('observer CLI saves notes, numeric scores, and N/A reasons without deleting data', async () => {

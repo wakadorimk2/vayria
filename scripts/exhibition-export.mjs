@@ -22,6 +22,11 @@ const CSV_COLUMNS = [
   'durationMs',
   'activeRequests',
   'audioBytes',
+  'provider',
+  'model',
+  'purpose',
+  'callIndex',
+  'retry',
   'emotion',
   'phase',
   'reason',
@@ -76,6 +81,37 @@ function summarizeLatency(events) {
     averageMs: average(values),
     p95Ms: values[p95Index],
   };
+}
+
+function summarizeLlmProviderLatency(events) {
+  const interactiveSources = ['voice', 'manual', 'card_change'];
+  return Object.fromEntries(
+    interactiveSources.map((source) => {
+      const values = events
+        .filter(
+          (event) =>
+            event.event === 'llm_provider_done' && event.source === source,
+        )
+        .map((event) => event.elapsedMs)
+        .filter(
+          (value) =>
+            typeof value === 'number' &&
+            Number.isFinite(value) &&
+            value >= 0,
+        )
+        .sort((left, right) => left - right);
+      const p50Index = Math.max(0, Math.ceil(values.length * 0.5) - 1);
+      const p95Index = Math.max(0, Math.ceil(values.length * 0.95) - 1);
+      return [
+        source,
+        {
+          count: values.length,
+          p50Ms: values[p50Index] ?? null,
+          p95Ms: values[p95Index] ?? null,
+        },
+      ];
+    }),
+  );
 }
 
 function summarizeAxisScores(observations) {
@@ -140,6 +176,7 @@ export function summarizeCapture({ metadata, events, observations }, generatedAt
       firstAt: timestamps[0]?.at ?? null,
       lastAt: timestamps.at(-1)?.at ?? null,
       latency: summarizeLatency(events),
+      llmProviderLatency: summarizeLlmProviderLatency(events),
     },
     observations: {
       count: observations.length,
@@ -176,6 +213,11 @@ function eventRow(captureId, event) {
     durationMs: event.durationMs,
     activeRequests: event.activeRequests,
     audioBytes: event.audioBytes,
+    provider: event.provider,
+    model: event.model,
+    purpose: event.purpose,
+    callIndex: event.callIndex,
+    retry: event.retry,
     emotion: event.emotion,
     phase: event.phase,
     reason: event.reason,

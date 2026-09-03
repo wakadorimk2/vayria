@@ -125,6 +125,11 @@ import type {
   VayriaAppMode,
   VayriaHealthResponse,
 } from '../src/networkState.js';
+import {
+  createLlmProviderCallTracker,
+  type LlmProviderCallTracker,
+  type LlmProviderSource,
+} from './llmProviderTelemetry.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -511,6 +516,10 @@ const PLAYCHECK_RECORD_FIELDS = [
   'activeRequests',
   'audioBytes',
   'provider',
+  'model',
+  'purpose',
+  'callIndex',
+  'retry',
   'providerCallCount',
   'gateEvent',
   'gatePhase',
@@ -631,6 +640,44 @@ async function recordStructuredEvent(
     } catch (error) {
       console.warn('Exhibition event recording failed.', error);
   }
+}
+
+function createRequestLlmProviderTracker(
+  config: LocalApiConfig,
+  fields: {
+    requestId: string;
+    runId?: string;
+    turnId: string;
+    source: LlmProviderSource;
+    signal: AbortSignal;
+  },
+): LlmProviderCallTracker {
+  return createLlmProviderCallTracker({
+    turnId: fields.turnId,
+    provider: 'openai',
+    model: String(MODEL_GPT_5_NANO),
+    source: fields.source,
+    signal: fields.signal,
+    record: ({ event, ...providerFields }) =>
+      recordStructuredEvent(config, event, {
+        origin: 'server',
+        requestId: fields.requestId,
+        runId: fields.runId,
+        ...providerFields,
+      }),
+  });
+}
+
+export function resolveLlmProviderSource(
+  mode: ChatMode,
+  forcedCardId: string | null,
+  programContext: ProgramContext,
+): LlmProviderSource {
+  return mode === 'autonomous' &&
+    forcedCardId !== null &&
+    programContext.phase === 'after_card_change'
+    ? 'card_change'
+    : mode;
 }
 
 function readSafeEventId(value: unknown, field: string): string {
@@ -2400,6 +2447,7 @@ async function generateConversationActionPolicy(
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
   programContext: ProgramContext,
+  telemetry: LlmProviderCallTracker,
 ): Promise<ConversationActionDecision> {
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey,
@@ -2440,6 +2488,7 @@ async function generateConversationActionPolicy(
 
   const requestPolicy = async (
     correction?: string,
+    retry = 0,
   ): Promise<ConversationActionDecision> => {
     let streamedReply = '';
     let completedReply = '';
@@ -2451,13 +2500,20 @@ async function generateConversationActionPolicy(
       ...history,
       { role: 'user', content: message },
     ];
-    await chat.processChat(
-      messages,
-      (partial) => {
-        streamedReply += partial;
-      },
-      async (complete) => {
-        completedReply = complete;
+    await telemetry.run(
+      { purpose: 'conversation-policy', retry },
+      async (markFirstChunk) => {
+        await chat.processChat(
+          messages,
+          (partial) => {
+            if (partial) markFirstChunk();
+            streamedReply += partial;
+          },
+          async (complete) => {
+            markFirstChunk();
+            completedReply = complete;
+          },
+        );
       },
     );
     const responseText = (completedReply || streamedReply).trim();
@@ -2482,6 +2538,7 @@ async function generateConversationActionPolicy(
   try {
     return await requestPolicy(
       'Your previous policy output violated the action and cue contract. Return exactly one valid action and a compatible cue.',
+      1,
     );
   } catch (error) {
     if (!(error instanceof ConversationPolicyContractError)) throw error;
@@ -2548,6 +2605,7 @@ async function generateInteractiveResponse(
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
   programContext: ProgramContext,
+  telemetry: LlmProviderCallTracker,
 ): Promise<CardAssistantResponse> {
   const selfNameResolution = resolveSelfName(message, characterIdentity);
   const fastPathDecision: ConversationActionDecision | null =
@@ -2564,6 +2622,7 @@ async function generateInteractiveResponse(
       performanceContext,
       characterIdentity,
       programContext,
+      telemetry,
     ));
   const decision = normalizeConversationActionDecision(
     message,
@@ -2591,6 +2650,8 @@ async function generateInteractiveResponse(
     performanceContext,
     characterIdentity,
     programContext,
+    null,
+    telemetry,
   );
   return {
     ...reply.response,
@@ -2681,7 +2742,8 @@ async function generateReply(
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
   programContext: ProgramContext,
-  autonomyCandidate: AutonomyCandidate | null = null,
+  autonomyCandidate: AutonomyCandidate | null,
+  telemetry: LlmProviderCallTracker,
 ): Promise<GeneratedChatResponse> {
   const minActivatedCardItems = mode === 'manual' ? 1 : 0;
   const reasonUpdateSchema = {
@@ -2922,6 +2984,7 @@ async function generateReply(
 
   let providerCallCount = 0;
   const requestReply = async (correction?: string): Promise<string> => {
+    const retry = providerCallCount;
     providerCallCount += 1;
     let streamedReply = '';
     let completedReply = '';
@@ -2939,13 +3002,20 @@ async function generateReply(
             : (message ?? ''),
       },
     ];
-    await chat.processChat(
-      messages,
-      (partial) => {
-        streamedReply += partial;
-      },
-      async (complete) => {
-        completedReply = complete;
+    await telemetry.run(
+      { purpose: 'response-generation', retry },
+      async (markFirstChunk) => {
+        await chat.processChat(
+          messages,
+          (partial) => {
+            if (partial) markFirstChunk();
+            streamedReply += partial;
+          },
+          async (complete) => {
+            markFirstChunk();
+            completedReply = complete;
+          },
+        );
       },
     );
     const responseText = (completedReply || streamedReply).trim();
@@ -3023,6 +3093,7 @@ async function generateCardPreviewReply(
   apiKey: string,
   cardId: string,
   performanceContext: PerformanceContextPayload,
+  telemetry: LlmProviderCallTracker,
 ): Promise<AssistantResponse> {
   const card = CARD_BY_ID.get(cardId);
   if (!card) throw new RequestError('cardId must be a known card ID.', 400);
@@ -3064,16 +3135,23 @@ async function generateCardPreviewReply(
 
   let streamedReply = '';
   let completedReply = '';
-  await chat.processChat(
-    [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: 'このカードの反応を実演してください。' },
-    ],
-    (partial) => {
-      streamedReply += partial;
-    },
-    async (complete) => {
-      completedReply = complete;
+  await telemetry.run(
+    { purpose: 'card-preview', retry: 0 },
+    async (markFirstChunk) => {
+      await chat.processChat(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: 'このカードの反応を実演してください。' },
+        ],
+        (partial) => {
+          if (partial) markFirstChunk();
+          streamedReply += partial;
+        },
+        async (complete) => {
+          markFirstChunk();
+          completedReply = complete;
+        },
+      );
     },
   );
 
@@ -3721,23 +3799,40 @@ async function handleRequest(
       }
       const { cardId, performanceContext } = readCardPreviewRequest(payload);
       const startedAt = performance.now();
-      logStructuredEvent('llm_start', {
+      const providerTurnId = headerTurnId ?? requestId;
+      const providerAbortController = new AbortController();
+      const abortProvider = () => providerAbortController.abort();
+      request.once('aborted', abortProvider);
+      const telemetry = createRequestLlmProviderTracker(config, {
+        requestId,
+        runId: playcheckRunId,
+        turnId: providerTurnId,
+        source: 'card-preview',
+        signal: providerAbortController.signal,
+      });
+      await recordStructuredEvent(config, 'llm_start', {
         origin: 'server',
         requestId,
-        turnId: headerTurnId,
+        turnId: providerTurnId,
         source: 'card-preview',
         cardId,
         activeRequests: activeProviderRequests,
       });
-      const previewResponse = await generateCardPreviewReply(
-        config.openAiApiKey,
-        cardId,
-        performanceContext,
-      );
-      logStructuredEvent('llm_done', {
+      let previewResponse: AssistantResponse;
+      try {
+        previewResponse = await generateCardPreviewReply(
+          config.openAiApiKey,
+          cardId,
+          performanceContext,
+          telemetry,
+        );
+      } finally {
+        request.off('aborted', abortProvider);
+      }
+      await recordStructuredEvent(config, 'llm_done', {
         origin: 'server',
         requestId,
-        turnId: headerTurnId,
+        turnId: providerTurnId,
         source: 'card-preview',
         cardId,
         durationMs: Math.round(performance.now() - startedAt),
@@ -3774,6 +3869,23 @@ async function handleRequest(
         autonomyCandidate,
       } = readChatRequest(payload);
       const startedAt = performance.now();
+      const providerTurnId = headerTurnId ?? requestId;
+      const providerSource = resolveLlmProviderSource(
+        mode,
+        forcedCardId,
+        programContext,
+      );
+      const providerAbortController = new AbortController();
+      const abortProvider = () => providerAbortController.abort();
+      request.once('aborted', abortProvider);
+      const telemetry = createRequestLlmProviderTracker(config, {
+        requestId,
+        runId: playcheckRunId,
+        turnId: providerTurnId,
+        source: providerSource,
+        signal: providerAbortController.signal,
+      });
+      try {
       const fastPathDecision =
         mode === 'manual'
           ? classifyViewerMessageFastPath(message!)
@@ -3785,8 +3897,8 @@ async function handleRequest(
           origin: 'server',
           requestId,
           runId: playcheckRunId,
-          turnId: headerTurnId,
-          source: mode,
+          turnId: providerTurnId,
+          source: providerSource,
           activeRequests: activeProviderRequests,
         });
       }
@@ -3803,6 +3915,7 @@ async function handleRequest(
           performanceContext,
           characterIdentity,
           programContext,
+          telemetry,
         );
       } else {
         const generatedResponse = await generateReply(
@@ -3823,8 +3936,8 @@ async function handleRequest(
           characterIdentity,
           programContext,
           autonomyCandidate,
+          telemetry,
         );
-        providerCallCount = generatedResponse.providerCallCount;
         assistantResponse =
           mode === 'voice'
             ? {
@@ -3833,13 +3946,14 @@ async function handleRequest(
               }
             : generatedResponse.response;
       }
+      providerCallCount = telemetry.callCount;
       if (!bypassesLlm) {
         await recordStructuredEvent(config, 'llm_done', {
           origin: 'server',
           requestId,
           runId: playcheckRunId,
-          turnId: headerTurnId,
-          source: mode,
+          turnId: providerTurnId,
+          source: providerSource,
           durationMs: Math.round(performance.now() - startedAt),
           ...(providerCallCount === null ? {} : { providerCallCount }),
           activeRequests: activeProviderRequests,
@@ -3847,6 +3961,9 @@ async function handleRequest(
       }
       sendJson(response, 200, assistantResponse);
       return;
+      } finally {
+        request.off('aborted', abortProvider);
+      }
     }
 
     requestPhase = 'tts';
