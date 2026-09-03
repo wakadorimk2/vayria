@@ -25,6 +25,11 @@ export const CONVERSATION_EVENTS = [
   'speech_unit_ready',
   'internal_delta_rejected',
   'tts_start',
+  'tts_unit_start',
+  'tts_unit_audio_ready',
+  'tts_unit_playback_started',
+  'tts_unit_playback_completed',
+  'tts_queue_gap',
   'tts_first_audio',
   'tts_ready',
   'playback_startup',
@@ -61,6 +66,7 @@ interface ConversationEventDetails {
   purpose?: 'conversation-policy' | 'response-generation' | 'card-preview';
   callIndex?: number;
   retry?: number;
+  unitIndex?: number;
 }
 
 export type ConversationEvent = ConversationEventDetails &
@@ -96,6 +102,7 @@ function readSafeDetails(
   const sampleRateHz = readNonNegativeInteger(details.sampleRateHz);
   const callIndex = readNonNegativeInteger(details.callIndex);
   const retry = readNonNegativeInteger(details.retry);
+  const unitIndex = readNonNegativeInteger(details.unitIndex);
   return {
     ...(details.audioContextState === 'closed' ||
     details.audioContextState === 'running' ||
@@ -136,6 +143,7 @@ function readSafeDetails(
       : {}),
     ...(callIndex === undefined || callIndex === 0 ? {} : { callIndex }),
     ...(retry === undefined ? {} : { retry }),
+    ...(unitIndex === 0 || unitIndex === 1 ? { unitIndex } : {}),
   };
 }
 

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 import {
+  createAivisSpeakerCatalogCache,
   localApiPlugin,
   parseVoiceAssistantResponse,
 } from '../server/localApi.js';
@@ -427,21 +428,52 @@ test('Cloud TTS middleware forwards MP3 chunks and honors response backpressure'
 
 test('explicit Local TTS mode keeps the WAV provider contract', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input) =>
-    createLocalTtsResponse(input) ?? new Response(null, { status: 500 });
+  const originalConsoleInfo = console.info;
+  let speakerCalls = 0;
+  const events: Array<Record<string, unknown>> = [];
+  globalThis.fetch = async (input) => {
+    if (new URL(String(input)).pathname === '/speakers') speakerCalls += 1;
+    return createLocalTtsResponse(input) ?? new Response(null, { status: 500 });
+  };
+  console.info = (...values: unknown[]) => {
+    if (values[0] === '[performer-event]' && typeof values[1] === 'string') {
+      events.push(JSON.parse(values[1]) as Record<string, unknown>);
+    }
+  };
   try {
     const fake = createFakeServer();
     configurePlugin({ ttsBackend: 'local' }, fake.server);
     const result = await requestRoute(fake.handlers[0], {
       method: 'POST',
       url: '/api/tts',
-      body: { text: 'local fixture', emotion: 'neutral' },
+      body: { text: '秘密の本文', emotion: 'neutral', unitIndex: 0 },
     });
+    const second = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: '秘密の本文', emotion: 'neutral', unitIndex: 1 },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     assert.equal(result.statusCode, 200);
+    assert.equal(second.statusCode, 200);
     assert.equal(result.headers['Content-Type'], 'audio/wav');
     assert.equal(result.headers['X-Vayria-Tts-Backend'], 'local');
+    assert.equal(speakerCalls, 1);
+    const stageEvents = events.filter((event) =>
+      String(event.event).startsWith('tts_'),
+    );
+    for (const event of stageEvents) {
+      assert.equal(JSON.stringify(event).includes('秘密の本文'), false);
+    }
+    assert.deepEqual(
+      events
+        .filter((event) => event.event === 'tts_speaker_catalog_ready')
+        .map((event) => [event.unitIndex, event.characterCount]),
+      [[0, 5], [1, 5]],
+    );
   } finally {
+    console.info = originalConsoleInfo;
     globalThis.fetch = originalFetch;
   }
 });
@@ -476,6 +508,67 @@ test('explicit Cloud TTS mode does not call Local after a Cloud failure', async 
 });
 
 const LOCAL_WAV_FIXTURE = new Uint8Array([82, 73, 70, 70]);
+
+test('speaker catalog cache is single-flight, expires, and does not cache failures', async () => {
+  const speakers = [{ name: 'zonoko', styles: [{ id: 1, name: 'ノーマル' }] }];
+  let clock = 0;
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const cache = createAivisSpeakerCatalogCache(async () => {
+    calls += 1;
+    await blocked;
+    return speakers;
+  }, () => clock, 100);
+  const baseUrl = new URL('http://127.0.0.1:10101/');
+  const first = cache.get(baseUrl);
+  const second = cache.get(baseUrl);
+  assert.equal(calls, 1);
+  release?.();
+  assert.deepEqual(await first, speakers);
+  assert.deepEqual(await second, speakers);
+  assert.equal(calls, 1);
+  clock = 101;
+  await cache.get(baseUrl);
+  assert.equal(calls, 2);
+
+  let failureCalls = 0;
+  const failingCache = createAivisSpeakerCatalogCache(async () => {
+    failureCalls += 1;
+    if (failureCalls === 1) throw new Error('catalog unavailable');
+    return speakers;
+  });
+  await assert.rejects(failingCache.get(baseUrl), /catalog unavailable/);
+  assert.deepEqual(await failingCache.get(baseUrl), speakers);
+  assert.equal(failureCalls, 2);
+});
+
+test('Local TTS abort stops the turn while a shared speaker request remains pending', async () => {
+  const originalFetch = globalThis.fetch;
+  let audioQueryCalls = 0;
+  globalThis.fetch = async (input) => {
+    const pathname = new URL(String(input)).pathname;
+    if (pathname === '/speakers') return new Promise<Response>(() => undefined);
+    if (pathname === '/audio_query') audioQueryCalls += 1;
+    return new Response(null, { status: 500 });
+  };
+  try {
+    const fake = createFakeServer();
+    configurePlugin({ ttsBackend: 'local' }, fake.server);
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'abort fixture', emotion: 'neutral', unitIndex: 0 },
+      abortAfterMs: 5,
+    });
+    assert.equal(result.destroyed, true);
+    assert.equal(audioQueryCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 function createLocalTtsResponse(
   input: Parameters<typeof fetch>[0],
@@ -597,6 +690,10 @@ test('Cloud-with-fallback selects Local once for safe pre-audio failures', async
     cases.flatMap(() => [
       'tts_start',
       'tts_fallback_started',
+      'tts_speaker_catalog_ready',
+      'tts_audio_query_done',
+      'tts_synthesis_headers_ready',
+      'tts_synthesis_body_done',
       'tts_first_audio',
       'tts_completed',
       'tts_fallback_completed',

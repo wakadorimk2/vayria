@@ -683,7 +683,8 @@ export function useConversation(
       let streamingFirstResult: PerformancePlaybackResult | null = null;
       let streamingLastResult: PerformancePlaybackResult | null = null;
       let streamedChatPayload: ChatResponse | null = null;
-      let streamedReplyText = '';
+        let streamedReplyText = '';
+        let previousStreamingUnitEndedAt: number | null = null;
       const streamingUnitIndexes = new Set<number>();
       const performerStateContext =
         turnSource === 'autonomous'
@@ -733,6 +734,17 @@ export function useConversation(
             setConversationState('synthesizing', turnSource);
           }
           const unitTtsStartedAt = performance.now();
+          eventEmitter.emit('tts_unit_start', { phase: 'tts', unitIndex: index });
+          let unitAudioReadyEmitted = false;
+          const emitUnitAudioReady = (readyAt: number) => {
+            if (unitAudioReadyEmitted) return;
+            unitAudioReadyEmitted = true;
+            eventEmitter.emit('tts_unit_audio_ready', {
+              durationMs: readyAt - unitTtsStartedAt,
+              phase: 'tts',
+              unitIndex: index,
+            });
+          };
           const audioPromise = fetch(apiUrl('/api/tts'), {
             method: 'POST',
             headers: {
@@ -746,6 +758,7 @@ export function useConversation(
               text: text.trim(),
               emotion: normalizeEmotion(candidate.emotion),
               ttsProfile: plan.ttsProfile,
+              unitIndex: index,
             }),
             signal: chatController.signal,
           }).then(async (ttsResponse) => {
@@ -755,6 +768,9 @@ export function useConversation(
               );
             }
             const audioSource = await readAudioPlaybackSource(ttsResponse);
+            if (audioSource.kind === 'buffer') {
+              emitUnitAudioReady(performance.now());
+            }
             if (audioSource.kind === 'buffer' && !streamingFirstAudioEmitted) {
               streamingFirstAudioEmitted = true;
               eventEmitter.emit('tts_first_audio', {
@@ -786,6 +802,7 @@ export function useConversation(
               };
               const result = await playback.play(unitPlan, audioSource, {
               onFirstAudioReady: (readyAt) => {
+                emitUnitAudioReady(readyAt);
                 if (streamingFirstAudioEmitted) return;
                 streamingFirstAudioEmitted = true;
                 eventEmitter.emit('tts_first_audio', {
@@ -801,6 +818,20 @@ export function useConversation(
                 });
               },
               onSpeechStart: (startedAt) => {
+                if (previousStreamingUnitEndedAt !== null && index > 0) {
+                  eventEmitter.emit('tts_queue_gap', {
+                    durationMs: Math.max(
+                      0,
+                      startedAt - previousStreamingUnitEndedAt,
+                    ),
+                    phase: 'tts',
+                    unitIndex: index,
+                  });
+                }
+                eventEmitter.emit('tts_unit_playback_started', {
+                  phase: 'tts',
+                  unitIndex: index,
+                });
                 if (streamingPlaybackStarted) return;
                 streamingPlaybackStarted = true;
                 speechStartedAt = startedAt;
@@ -814,7 +845,12 @@ export function useConversation(
                   setConversationState('speaking', turnSource);
                 }
               },
-              onSpeechEnd: () => {
+              onSpeechEnd: (endedAt) => {
+                previousStreamingUnitEndedAt = endedAt;
+                eventEmitter.emit('tts_unit_playback_completed', {
+                  phase: 'tts',
+                  unitIndex: index,
+                });
                 if (generation !== generationRef.current) return;
                 scheduleSubtitleClear(generation);
               },

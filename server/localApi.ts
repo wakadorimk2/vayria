@@ -207,6 +207,11 @@ const CONVERSATION_EVENTS = [
   'speech_unit_ready',
   'internal_delta_rejected',
   'tts_start',
+  'tts_unit_start',
+  'tts_unit_audio_ready',
+  'tts_unit_playback_started',
+  'tts_unit_playback_completed',
+  'tts_queue_gap',
   'tts_fallback_started',
   'tts_fallback_completed',
   'tts_first_audio',
@@ -254,6 +259,7 @@ export interface LocalApiConfig {
   httpsEnabled?: boolean;
   exhibitionNetwork?: ExhibitionNetworkRuntime;
   internetConnectivity?: InternetConnectivityProbe;
+  aivisSpeakerCatalog?: AivisSpeakerCatalogCache;
 }
 
 export function createHealthResponse(
@@ -354,6 +360,59 @@ interface AivisSpeaker {
   styles: AivisStyle[];
 }
 
+interface AivisSpeakerCatalogCache {
+  get(baseUrl: URL): Promise<AivisSpeaker[]>;
+}
+
+const AIVIS_SPEAKER_CACHE_TTL_MS = 5 * 60 * 1_000;
+
+export function createAivisSpeakerCatalogCache(
+  load: (baseUrl: URL) => Promise<AivisSpeaker[]> = (baseUrl) =>
+    loadAivisSpeakers(baseUrl),
+  now: () => number = Date.now,
+  ttlMs = AIVIS_SPEAKER_CACHE_TTL_MS,
+): AivisSpeakerCatalogCache {
+  const entries = new Map<
+    string,
+    { expiresAt: number; promise: Promise<AivisSpeaker[]> }
+  >();
+  return {
+    get(baseUrl) {
+      const key = baseUrl.href;
+      const existing = entries.get(key);
+      if (existing && existing.expiresAt > now()) return existing.promise;
+      const promise = load(baseUrl)
+        .then((speakers) => {
+          const entry = entries.get(key);
+          if (entry?.promise === promise) entry.expiresAt = now() + ttlMs;
+          return speakers;
+        })
+        .catch((error) => {
+          if (entries.get(key)?.promise === promise) entries.delete(key);
+          throw error;
+        });
+      entries.set(key, { expiresAt: Number.POSITIVE_INFINITY, promise });
+      return promise;
+    },
+  };
+}
+
+function waitForSharedPromise<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException('aborted', 'AbortError'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new DOMException('aborted', 'AbortError'));
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', abort);
+    });
+  });
+}
+
 interface ClientConversationEvent {
   audioContextState?: 'closed' | 'running' | 'suspended';
   audioSourceKind?: 'buffer' | 'stream';
@@ -378,6 +437,7 @@ interface ClientConversationEvent {
   purpose?: LlmProviderPurpose;
   callIndex?: number;
   retry?: number;
+  unitIndex?: number;
   runId?: string;
   gateEvent?: AutonomyTurnGateTelemetry['gateEvent'];
   gatePhase?: AutonomyTurnGateTelemetry['gatePhase'];
@@ -570,6 +630,8 @@ const PLAYCHECK_RECORD_FIELDS = [
   'callIndex',
   'retry',
   'providerCallCount',
+  'unitIndex',
+  'characterCount',
   'gateEvent',
   'gatePhase',
   'transition',
@@ -812,6 +874,7 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     'purpose',
     'callIndex',
     'retry',
+    'unitIndex',
     'runId',
     'gateEvent',
     'gatePhase',
@@ -1003,6 +1066,30 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
       throw new RequestError('callIndex must be positive.', 400);
     }
     eventPayload.retry = readNonNegativeEventInteger(record.retry, 'retry');
+  }
+
+  const unitEventNames = [
+    'tts_unit_start',
+    'tts_unit_audio_ready',
+    'tts_unit_playback_started',
+    'tts_unit_playback_completed',
+    'tts_queue_gap',
+  ] as const;
+  const isUnitEvent = (unitEventNames as readonly string[]).includes(event);
+  if (!isUnitEvent && record.unitIndex !== undefined) {
+    throw new RequestError(
+      'unitIndex is only valid for unit TTS events.',
+      400,
+    );
+  }
+  if (isUnitEvent) {
+    eventPayload.unitIndex = readNonNegativeEventInteger(
+      record.unitIndex,
+      'unitIndex',
+    );
+    if (eventPayload.unitIndex > 1) {
+      throw new RequestError('unitIndex must be 0 or 1.', 400);
+    }
   }
 
   if (event === 'playback_startup') {
@@ -1794,6 +1881,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
 function readTtsRequest(payload: unknown): {
   text: string;
   emotion: Emotion;
+  unitIndex: number;
   ttsProfile?: {
     rateScale: number;
     intonationScale: number;
@@ -1806,11 +1894,15 @@ function readTtsRequest(payload: unknown): {
   const record = payload as Record<string, unknown>;
   if (
     Object.keys(record).some(
-      (key) => key !== 'text' && key !== 'emotion' && key !== 'ttsProfile',
+      (key) =>
+        key !== 'text' &&
+        key !== 'emotion' &&
+        key !== 'ttsProfile' &&
+        key !== 'unitIndex',
     )
   ) {
     throw new RequestError(
-      'Request body may contain only text, emotion, and ttsProfile.',
+      'Request body may contain only text, emotion, ttsProfile, and unitIndex.',
       400,
     );
   }
@@ -1825,6 +1917,16 @@ function readTtsRequest(payload: unknown): {
       `text must be ${MAX_TEXT_LENGTH} characters or fewer.`,
       400,
     );
+  }
+
+  const unitIndex = record.unitIndex ?? 0;
+  if (
+    typeof unitIndex !== 'number' ||
+    !Number.isSafeInteger(unitIndex) ||
+    unitIndex < 0 ||
+    unitIndex > 1
+  ) {
+    throw new RequestError('unitIndex must be 0 or 1.', 400);
   }
 
   let ttsProfile: {
@@ -1867,6 +1969,7 @@ function readTtsRequest(payload: unknown): {
   return {
     text: normalizedText,
     emotion: normalizeEmotion(record.emotion),
+    unitIndex,
     ttsProfile,
   };
 }
@@ -4071,6 +4174,9 @@ async function synthesizeSpeech(
   settings: AivisTtsSettings,
   text: string,
   signal?: AbortSignal,
+  onStage?: (
+    stage: 'audio_query_done' | 'synthesis_headers_ready' | 'synthesis_body_done',
+  ) => void,
 ): Promise<ArrayBuffer> {
   const speaker = String(styleId);
   const audioQueryResponse = await requestAivis(
@@ -4087,6 +4193,7 @@ async function synthesizeSpeech(
       throw new Error('AudioQuery must be a JSON object.');
     }
     audioQuery = payload as Record<string, unknown>;
+    onStage?.('audio_query_done');
   } catch (error) {
     console.error('AivisSpeech Engine returned an invalid AudioQuery.', {
       styleId,
@@ -4112,7 +4219,10 @@ async function synthesizeSpeech(
     '/synthesis',
     styleId,
   );
-  return synthesisResponse.arrayBuffer();
+  onStage?.('synthesis_headers_ready');
+  const audio = await synthesisResponse.arrayBuffer();
+  onStage?.('synthesis_body_done');
+  return audio;
 }
 
 async function synthesizeLocalSpeech(
@@ -4121,9 +4231,21 @@ async function synthesizeLocalSpeech(
   settings: AivisTtsSettings,
   text: string,
   signal?: AbortSignal,
+  onStage?: (
+    stage:
+      | 'speaker_catalog_ready'
+      | 'audio_query_done'
+      | 'synthesis_headers_ready'
+      | 'synthesis_body_done',
+  ) => void,
 ): Promise<Buffer> {
   const baseUrl = readAivisBaseUrl(config.aivisBaseUrl);
-  const speakers = await loadAivisSpeakers(baseUrl, signal);
+  const speakers = config.aivisSpeakerCatalog
+    ? signal
+      ? await waitForSharedPromise(config.aivisSpeakerCatalog.get(baseUrl), signal)
+      : await config.aivisSpeakerCatalog.get(baseUrl)
+    : await loadAivisSpeakers(baseUrl, signal);
+  onStage?.('speaker_catalog_ready');
   const style = resolveZonokoStyle(speakers, emotion);
   console.info('Performer TTS:', {
     emotion,
@@ -4133,7 +4255,7 @@ async function synthesizeLocalSpeech(
     styleId: style.id,
   });
   return Buffer.from(
-    await synthesizeSpeech(baseUrl, style.id, settings, text, signal),
+    await synthesizeSpeech(baseUrl, style.id, settings, text, signal, onStage),
   );
 }
 
@@ -4150,7 +4272,9 @@ async function reportAivisSelection(config: LocalApiConfig): Promise<void> {
 
   let speakers: AivisSpeaker[];
   try {
-    speakers = await loadAivisSpeakers(baseUrl);
+    speakers = config.aivisSpeakerCatalog
+      ? await config.aivisSpeakerCatalog.get(baseUrl)
+      : await loadAivisSpeakers(baseUrl);
   } catch (error) {
     console.warn(
       error instanceof AivisSpeechError ? error.userMessage : String(error),
@@ -4306,6 +4430,7 @@ async function handleRequest(
         ...(event.purpose === undefined ? {} : { purpose: event.purpose }),
         ...(event.callIndex === undefined ? {} : { callIndex: event.callIndex }),
         ...(event.retry === undefined ? {} : { retry: event.retry }),
+        ...(event.unitIndex === undefined ? {} : { unitIndex: event.unitIndex }),
         ...(event.gateEvent === undefined
           ? {}
           : { gateEvent: event.gateEvent }),
@@ -4645,7 +4770,7 @@ async function handleRequest(
     }
 
     requestPhase = 'tts';
-    const { text, emotion, ttsProfile } = readTtsRequest(payload);
+    const { text, emotion, ttsProfile, unitIndex } = readTtsRequest(payload);
     const ttsBackend = readTtsBackend(config.ttsBackend);
     const settings = readAivisTtsSettings(config);
     const effectiveSettings = ttsProfile
@@ -4662,12 +4787,37 @@ async function handleRequest(
         }
       : settings;
     const startedAt = performance.now();
+    const characterCount = Array.from(text).length;
+    let ttsStageRecordQueue = Promise.resolve();
+    const recordLocalTtsStage = (
+      stage:
+        | 'speaker_catalog_ready'
+        | 'audio_query_done'
+        | 'synthesis_headers_ready'
+        | 'synthesis_body_done',
+    ): void => {
+      const durationMs = Math.round(performance.now() - startedAt);
+      ttsStageRecordQueue = ttsStageRecordQueue.then(() =>
+        recordStructuredEvent(config, `tts_${stage}`, {
+          origin: 'server',
+          requestId,
+          runId: playcheckRunId,
+          turnId: headerTurnId,
+          provider: 'local',
+          unitIndex,
+          characterCount,
+          durationMs,
+        }),
+      );
+    };
     await recordStructuredEvent(config, 'tts_start', {
       origin: 'server',
       requestId,
       runId: playcheckRunId,
       turnId: headerTurnId,
       provider: ttsBackend,
+      unitIndex,
+      characterCount,
       activeRequests: activeProviderRequests,
     });
     if (ttsBackend !== 'local') {
@@ -4720,6 +4870,8 @@ async function handleRequest(
           provider: 'local',
           reason: error.kind,
           durationMs: Math.round(performance.now() - startedAt),
+          unitIndex,
+          characterCount,
         });
         const localAbortController = new AbortController();
         const abortLocal = () => localAbortController.abort();
@@ -4732,6 +4884,7 @@ async function handleRequest(
             effectiveSettings,
             text,
             localAbortController.signal,
+            recordLocalTtsStage,
           );
         } finally {
           request.off('aborted', abortLocal);
@@ -4750,6 +4903,8 @@ async function handleRequest(
           durationMs: Math.round(performance.now() - startedAt),
           audioBytes: audio.byteLength,
           activeRequests: activeProviderRequests,
+          unitIndex,
+          characterCount,
         });
         await recordStructuredEvent(config, 'tts_completed', {
           origin: 'server',
@@ -4761,6 +4916,8 @@ async function handleRequest(
           durationMs: Math.round(performance.now() - startedAt),
           audioBytes: audio.byteLength,
           activeRequests: activeProviderRequests,
+          unitIndex,
+          characterCount,
         });
         await recordStructuredEvent(config, 'tts_fallback_completed', {
           origin: 'server',
@@ -4770,6 +4927,8 @@ async function handleRequest(
           provider: 'local',
           reason: error.kind,
           durationMs: Math.round(performance.now() - startedAt),
+          unitIndex,
+          characterCount,
         });
         response.writeHead(200, {
           'Cache-Control': 'no-store',
@@ -4804,6 +4963,8 @@ async function handleRequest(
             durationMs: Math.round(performance.now() - startedAt),
             audioBytes: firstChunkBytes,
             activeRequests: activeProviderRequests,
+            unitIndex,
+            characterCount,
           });
         },
       );
@@ -4816,6 +4977,8 @@ async function handleRequest(
         durationMs: Math.round(performance.now() - startedAt),
         audioBytes,
         activeRequests: activeProviderRequests,
+        unitIndex,
+        characterCount,
       });
       return;
     }
@@ -4831,6 +4994,7 @@ async function handleRequest(
         effectiveSettings,
         text,
         localAbortController.signal,
+        recordLocalTtsStage,
       );
     } finally {
       request.off('aborted', abortLocal);
@@ -4848,6 +5012,8 @@ async function handleRequest(
       durationMs: Math.round(performance.now() - startedAt),
       audioBytes: audio.byteLength,
       activeRequests: activeProviderRequests,
+      unitIndex,
+      characterCount,
     });
     await recordStructuredEvent(config, 'tts_completed', {
       origin: 'server',
@@ -4858,6 +5024,8 @@ async function handleRequest(
       durationMs: Math.round(performance.now() - startedAt),
       audioBytes: audio.byteLength,
       activeRequests: activeProviderRequests,
+      unitIndex,
+      characterCount,
     });
     response.writeHead(200, {
       'Cache-Control': 'no-store',
@@ -4989,9 +5157,12 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
             config.playcheckRoot ?? 'playcheck-results/local',
           )
         : undefined;
-      const requestConfig = exhibitionCapture
-        ? { ...config, exhibitionCapture }
-        : config;
+      const aivisSpeakerCatalog = createAivisSpeakerCatalogCache();
+      const requestConfig = {
+        ...config,
+        ...(exhibitionCapture ? { exhibitionCapture } : {}),
+        aivisSpeakerCatalog,
+      };
 
       if (exhibitionCapture) {
         let stoppingFromInterrupt = false;
@@ -5041,7 +5212,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
       }
 
       if (readTtsBackend(config.ttsBackend) === 'local') {
-        void reportAivisSelection(config);
+        void reportAivisSelection(requestConfig);
       }
       server.middlewares.use((request, response, next) => {
         const pathname = new URL(

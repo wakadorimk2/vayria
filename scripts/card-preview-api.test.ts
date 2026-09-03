@@ -721,6 +721,26 @@ test('provider timing events accept only safe lifecycle metadata', () => {
   );
 });
 
+test('unit TTS events accept only a bounded unit index', () => {
+  const event = readConversationEvent({
+    at: '2026-09-03T00:00:00.000Z',
+    elapsedMs: 1_000,
+    event: 'tts_unit_playback_started',
+    source: 'voice',
+    turnId: 'turn-unit-1',
+    unitIndex: 1,
+  });
+  assert.equal(event.unitIndex, 1);
+  assert.throws(
+    () => readConversationEvent({ ...event, unitIndex: 2 }),
+    /unitIndex must be 0 or 1/,
+  );
+  assert.throws(
+    () => readConversationEvent({ ...event, event: 'tts_start' }),
+    /only valid for unit TTS events/,
+  );
+});
+
 test('playback gesture telemetry accepts only safe reason classifications', () => {
   const event = readConversationEvent({
     at: '2026-09-02T00:00:00.000Z',

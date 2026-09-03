@@ -34,6 +34,8 @@ const CSV_COLUMNS = [
   'purpose',
   'callIndex',
   'retry',
+  'unitIndex',
+  'characterCount',
 ];
 
 function average(values) {
@@ -142,6 +144,20 @@ function firstClientEventElapsed(events, eventName) {
   return elapsedValues[0] ?? null;
 }
 
+function firstClientEventDuration(events, eventName) {
+  const values = events
+    .filter(
+      (event) =>
+        event.event === eventName &&
+        event.origin === 'client' &&
+        Number.isInteger(event.durationMs) &&
+        event.durationMs >= 0,
+    )
+    .map((event) => event.durationMs)
+    .sort((left, right) => left - right);
+  return values[0] ?? null;
+}
+
 function segmentDuration(from, to) {
   return from !== null && to !== null && to >= from ? to - from : null;
 }
@@ -159,6 +175,7 @@ function summarizeInteractivePipeline(events) {
     'speechUnitToTtsFirstAudioMs',
     'ttsFirstAudioToPlaybackMs',
     'inputToPlaybackMs',
+    'continuationQueueGapMs',
   ];
   const turns = new Map();
   for (const event of events) {
@@ -220,6 +237,10 @@ function summarizeInteractivePipeline(events) {
       speechUnitToTtsFirstAudioMs: segmentDuration(speechUnit, ttsFirstAudio),
       ttsFirstAudioToPlaybackMs: segmentDuration(ttsFirstAudio, playback),
       inputToPlaybackMs: segmentDuration(input, playback),
+      continuationQueueGapMs: firstClientEventDuration(
+        turn.events,
+        'tts_queue_gap',
+      ),
     };
     for (const [name, value] of Object.entries(values)) {
       if (value !== null) result[source][group][name].push(value);
@@ -349,6 +370,8 @@ function eventRow(captureId, event) {
     purpose: event.purpose,
     callIndex: event.callIndex,
     retry: event.retry,
+    unitIndex: event.unitIndex,
+    characterCount: event.characterCount,
     emotion: event.emotion,
     phase: event.phase,
     reason: event.reason,

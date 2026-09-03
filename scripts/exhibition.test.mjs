@@ -161,7 +161,9 @@ test('interactive pipeline latency separates normal, retry, and aborted turns', 
     metadata,
     observations: [],
     events: [
-      ...turnEvents('normal-1', 'voice', 1),
+      ...turnEvents('normal-1', 'voice', 1, [
+        { event: 'tts_queue_gap', at: '2026-08-22T00:00:02.000Z', origin: 'client', durationMs: 25 },
+      ]),
       ...turnEvents('retry-1', 'voice', 3, [
         { event: 'llm_provider_done', at: '2026-08-22T00:00:04.500Z', retry: 1 },
       ]),
@@ -228,6 +230,7 @@ test('interactive pipeline latency separates normal, retry, and aborted turns', 
   assert.equal(voiceNormal.speechUnitToTtsFirstAudioMs.p50Ms, 400);
   assert.equal(voiceNormal.ttsFirstAudioToPlaybackMs.p50Ms, 10);
   assert.equal(voiceNormal.inputToPlaybackMs.p50Ms, 1310);
+  assert.equal(voiceNormal.continuationQueueGapMs.p50Ms, 25);
   assert.equal(
     summary.runtime.interactivePipelineLatency.voice.retry.inputToPlaybackMs.count,
     1,
@@ -433,5 +436,7 @@ test('CSV keeps the legacy columns in place and appends provider telemetry', () 
     'purpose',
     'callIndex',
     'retry',
+    'unitIndex',
+    'characterCount',
   ]);
 });
