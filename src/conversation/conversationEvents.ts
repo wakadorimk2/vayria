@@ -7,6 +7,7 @@ import {
   AUTONOMY_TURN_GATE_EXTERNAL_EVENTS,
   AUTONOMY_TURN_GATE_PHASES,
   AUTONOMY_TURN_GATE_TRANSITIONS,
+  AUTONOMY_TIMING_MODES,
   type AutonomyTurnGateTelemetry,
 } from './autonomyTurnGate.js';
 import {
@@ -149,6 +150,35 @@ function readSafeGateDetails(
     Number.isSafeInteger(details.delayMs) &&
     details.delayMs >= 0
       ? { delayMs: details.delayMs }
+      : {}),
+    ...(details.timingMode && AUTONOMY_TIMING_MODES.includes(details.timingMode)
+      ? { timingMode: details.timingMode }
+      : {}),
+    ...(typeof details.elapsedSilenceMs === 'number' &&
+    Number.isSafeInteger(details.elapsedSilenceMs) &&
+    details.elapsedSilenceMs >= 0
+      ? { elapsedSilenceMs: details.elapsedSilenceMs }
+      : {}),
+    ...(typeof details.readiness === 'number' &&
+    Number.isFinite(details.readiness) &&
+    details.readiness >= 0 &&
+    details.readiness <= 1
+      ? { readiness: details.readiness }
+      : {}),
+    ...(typeof details.threshold === 'number' &&
+    Number.isFinite(details.threshold) &&
+    details.threshold >= 0 &&
+    details.threshold <= 1
+      ? { threshold: details.threshold }
+      : {}),
+    ...(details.opportunityOutcome === 'fired' ||
+    details.opportunityOutcome === 'skipped'
+      ? { opportunityOutcome: details.opportunityOutcome }
+      : {}),
+    ...(typeof details.sessionGeneration === 'number' &&
+    Number.isSafeInteger(details.sessionGeneration) &&
+    details.sessionGeneration >= 0
+      ? { sessionGeneration: details.sessionGeneration }
       : {}),
   };
 }

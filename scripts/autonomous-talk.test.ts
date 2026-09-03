@@ -58,3 +58,13 @@ test('busy, muted, hidden, or unready state still blocks scheduling', () => {
     );
   }
 });
+
+test('disabled loop preserves the router and operator hard gate', () => {
+  assert.equal(
+    shouldScheduleAutonomousTalk({
+      ...READY_STATE,
+      isLoopEnabled: false,
+    }),
+    false,
+  );
+});

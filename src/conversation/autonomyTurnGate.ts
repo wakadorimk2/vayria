@@ -10,6 +10,17 @@ export const AUTONOMY_TURN_GATE_PHASES = [
 export type AutonomyTurnGatePhase =
   (typeof AUTONOMY_TURN_GATE_PHASES)[number];
 
+export const AUTONOMY_TIMING_MODES = ['baseline', 'monotonic'] as const;
+
+export type AutonomyTimingMode = (typeof AUTONOMY_TIMING_MODES)[number];
+
+export function readAutonomyTimingMode(value: unknown): AutonomyTimingMode {
+  return typeof value === 'string' &&
+    (AUTONOMY_TIMING_MODES as readonly string[]).includes(value)
+    ? (value as AutonomyTimingMode)
+    : 'baseline';
+}
+
 export const AUTONOMY_TURN_GATE_EXTERNAL_EVENTS = [
   'viewer_speech',
   'card_change',
@@ -29,6 +40,7 @@ export const AUTONOMY_TURN_GATE_BLOCK_REASONS = [
   'muted',
   'not_ready',
   'hidden',
+  'no_candidate',
 ] as const;
 
 export type AutonomyTurnGateBlockReason =
@@ -46,6 +58,7 @@ export const AUTONOMY_TURN_GATE_EVENTS = [
   'timer_ready',
   'turn_result',
   'internal_delta',
+  'opportunity_skipped',
 ] as const;
 
 export type AutonomyTurnGateEvent =
@@ -57,6 +70,7 @@ export const AUTONOMY_TURN_GATE_TRANSITIONS = [
   'entered_running',
   'entered_refractory',
   'reopened',
+  'restarted',
   'timer_expired',
   'ignored',
 ] as const;
@@ -73,7 +87,15 @@ export interface AutonomyTurnGateTiming {
 export interface AutonomyTurnGateState {
   phase: AutonomyTurnGatePhase;
   nextEligibleAt: number | null;
+  quietStartedAt: number | null;
+  readinessThreshold: number | null;
   reopenAfterTurn: boolean;
+}
+
+export interface AutonomyTimingSnapshot {
+  elapsedSilenceMs: number;
+  readiness: number;
+  threshold: number | null;
 }
 
 export interface AutonomyTurnGateTelemetry {
@@ -93,6 +115,12 @@ export interface AutonomyTurnGateTelemetry {
   externalAction?: 'speak' | 'none';
   nextEligibleAt?: number | null;
   delayMs?: number;
+  timingMode?: AutonomyTimingMode;
+  elapsedSilenceMs?: number;
+  readiness?: number;
+  threshold?: number;
+  opportunityOutcome?: 'fired' | 'skipped';
+  sessionGeneration?: number;
 }
 
 export type AutonomyTurnGateAction =
@@ -105,7 +133,8 @@ export type AutonomyTurnGateAction =
     }
   | { type: 'turn_started'; at?: number }
   | { type: 'turn_completed'; at?: number }
-  | { type: 'turn_aborted'; at?: number };
+  | { type: 'turn_aborted'; at?: number }
+  | { type: 'opportunity_skipped'; at?: number };
 
 function readTimingValue(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
@@ -144,8 +173,16 @@ export function createAutonomyTurnGateState(
   return {
     phase: nextEligibleAt === null ? 'ready' : 'initial_quiet',
     nextEligibleAt,
+    quietStartedAt: null,
+    readinessThreshold: null,
     reopenAfterTurn: false,
   };
+}
+
+function sampleReadinessThreshold(random: () => number): number {
+  const sampledRandom = random();
+  const randomValue = Number.isFinite(sampledRandom) ? sampledRandom : 0;
+  return Math.min(1, Math.max(0, randomValue));
 }
 
 export function sampleAutonomyQuietTime(
@@ -168,11 +205,89 @@ export function sampleAutonomyQuietTime(
   );
 }
 
+function createRefractoryState(
+  at: number,
+  timing: AutonomyTurnGateTiming,
+  random: () => number,
+  mode: AutonomyTimingMode,
+): AutonomyTurnGateState {
+  if (mode === 'baseline') {
+    const quietTimeMs = sampleAutonomyQuietTime(timing, random);
+    return {
+      phase: quietTimeMs === 0 ? 'ready' : 'refractory',
+      nextEligibleAt: quietTimeMs === 0 ? null : at + quietTimeMs,
+      quietStartedAt: null,
+      readinessThreshold: null,
+      reopenAfterTurn: false,
+    };
+  }
+
+  const normalizedTiming = readTiming(timing);
+  const threshold = sampleReadinessThreshold(random);
+  const readinessDelayMs = Math.ceil(
+    normalizedTiming.autonomyQuietTimeMinMs +
+      Math.sqrt(threshold) *
+        (normalizedTiming.autonomyQuietTimeMaxMs -
+          normalizedTiming.autonomyQuietTimeMinMs),
+  );
+  return {
+    phase: readinessDelayMs === 0 ? 'ready' : 'refractory',
+    nextEligibleAt: readinessDelayMs === 0 ? null : at + readinessDelayMs,
+    quietStartedAt: at,
+    readinessThreshold: threshold,
+    reopenAfterTurn: false,
+  };
+}
+
+export function readAutonomyTimingSnapshot(
+  state: AutonomyTurnGateState,
+  timing: AutonomyTurnGateTiming,
+  now = Date.now(),
+  mode: AutonomyTimingMode = 'baseline',
+): AutonomyTimingSnapshot {
+  if (
+    mode !== 'monotonic' ||
+    state.quietStartedAt === null ||
+    state.readinessThreshold === null
+  ) {
+    return {
+      elapsedSilenceMs: 0,
+      readiness: state.phase === 'ready' ? 1 : 0,
+      threshold: null,
+    };
+  }
+
+  const normalizedTiming = readTiming(timing);
+  const elapsedSilenceMs = Math.max(0, now - state.quietStartedAt);
+  const windowMs =
+    normalizedTiming.autonomyQuietTimeMaxMs -
+    normalizedTiming.autonomyQuietTimeMinMs;
+  const normalizedElapsed =
+    windowMs === 0
+      ? elapsedSilenceMs >= normalizedTiming.autonomyQuietTimeMinMs
+        ? 1
+        : 0
+      : Math.min(
+          1,
+          Math.max(
+            0,
+            (elapsedSilenceMs - normalizedTiming.autonomyQuietTimeMinMs) /
+              windowMs,
+          ),
+        );
+  return {
+    elapsedSilenceMs,
+    readiness: normalizedElapsed * normalizedElapsed,
+    threshold: state.readinessThreshold,
+  };
+}
+
 export function transitionAutonomyTurnGate(
   current: AutonomyTurnGateState,
   action: AutonomyTurnGateAction,
   timing: AutonomyTurnGateTiming,
   random = Math.random,
+  mode: AutonomyTimingMode = 'baseline',
 ): AutonomyTurnGateState {
   const at = action.at ?? Date.now();
 
@@ -191,15 +306,22 @@ export function transitionAutonomyTurnGate(
     return {
       phase: 'ready',
       nextEligibleAt: null,
+      quietStartedAt: current.quietStartedAt,
+      readinessThreshold: current.readinessThreshold,
       reopenAfterTurn: false,
     };
   }
 
   if (action.type === 'external_event') {
     if (current.phase === 'refractory') {
+      if (mode === 'monotonic' && action.event === 'viewer_speech') {
+        return createRefractoryState(at, timing, random, mode);
+      }
       return {
         phase: 'ready',
         nextEligibleAt: null,
+        quietStartedAt: null,
+        readinessThreshold: null,
         reopenAfterTurn: false,
       };
     }
@@ -216,6 +338,8 @@ export function transitionAutonomyTurnGate(
     return {
       phase: 'running',
       nextEligibleAt: null,
+      quietStartedAt: null,
+      readinessThreshold: null,
       reopenAfterTurn: false,
     };
   }
@@ -225,8 +349,15 @@ export function transitionAutonomyTurnGate(
     return {
       phase: 'ready',
       nextEligibleAt: null,
+      quietStartedAt: null,
+      readinessThreshold: null,
       reopenAfterTurn: false,
     };
+  }
+
+  if (action.type === 'opportunity_skipped') {
+    if (current.phase !== 'ready') return current;
+    return createRefractoryState(at, timing, random, mode);
   }
 
   if (current.phase !== 'running') return current;
@@ -234,16 +365,12 @@ export function transitionAutonomyTurnGate(
     return {
       phase: 'ready',
       nextEligibleAt: null,
+      quietStartedAt: null,
+      readinessThreshold: null,
       reopenAfterTurn: false,
     };
   }
-
-  const quietTimeMs = sampleAutonomyQuietTime(timing, random);
-  return {
-    phase: quietTimeMs === 0 ? 'ready' : 'refractory',
-    nextEligibleAt: quietTimeMs === 0 ? null : at + quietTimeMs,
-    reopenAfterTurn: false,
-  };
+  return createRefractoryState(at, timing, random, mode);
 }
 
 export function isAutonomyTurnGateReady(

@@ -64,6 +64,7 @@ import {
   AUTONOMY_TURN_GATE_EXTERNAL_EVENTS,
   AUTONOMY_TURN_GATE_PHASES,
   AUTONOMY_TURN_GATE_TRANSITIONS,
+  AUTONOMY_TIMING_MODES,
   type AutonomyTurnGateTelemetry,
 } from '../src/conversation/autonomyTurnGate.js';
 import {
@@ -360,6 +361,12 @@ interface ClientConversationEvent {
   externalAction?: AutonomyTurnGateTelemetry['externalAction'];
   nextEligibleAt?: number | null;
   delayMs?: number;
+  timingMode?: AutonomyTurnGateTelemetry['timingMode'];
+  elapsedSilenceMs?: number;
+  readiness?: number;
+  threshold?: number;
+  opportunityOutcome?: AutonomyTurnGateTelemetry['opportunityOutcome'];
+  sessionGeneration?: number;
 }
 
 class RequestError extends Error {
@@ -528,6 +535,12 @@ const PLAYCHECK_RECORD_FIELDS = [
   'externalAction',
   'nextEligibleAt',
   'delayMs',
+  'timingMode',
+  'elapsedSilenceMs',
+  'readiness',
+  'threshold',
+  'opportunityOutcome',
+  'sessionGeneration',
 ] as const;
 const SAFE_PLAYCHECK_REASONS = new Set([
   'busy',
@@ -685,6 +698,12 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     'externalAction',
     'nextEligibleAt',
     'delayMs',
+    'timingMode',
+    'elapsedSilenceMs',
+    'readiness',
+    'threshold',
+    'opportunityOutcome',
+    'sessionGeneration',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError('Event body contains an unsupported field.', 400);
@@ -734,6 +753,12 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     'externalAction',
     'nextEligibleAt',
     'delayMs',
+    'timingMode',
+    'elapsedSilenceMs',
+    'readiness',
+    'threshold',
+    'opportunityOutcome',
+    'sessionGeneration',
   ];
   const hasGateFields = gateFields.some((field) => record[field] !== undefined);
   if (event !== 'autonomy_gate' && hasGateFields) {
@@ -885,6 +910,49 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
       throw new RequestError(`${field} is invalid.`, 400);
     }
     eventPayload[field] = value;
+  }
+  if (record.timingMode !== undefined) {
+    if (
+      typeof record.timingMode !== 'string' ||
+      !(AUTONOMY_TIMING_MODES as readonly string[]).includes(record.timingMode)
+    ) {
+      throw new RequestError('timingMode is invalid.', 400);
+    }
+    eventPayload.timingMode = record.timingMode as AutonomyTurnGateTelemetry['timingMode'];
+  }
+  for (const field of ['readiness', 'threshold'] as const) {
+    if (record[field] === undefined) continue;
+    const value = record[field];
+    if (
+      typeof value !== 'number' ||
+      !Number.isFinite(value) ||
+      value < 0 ||
+      value > 1
+    ) {
+      throw new RequestError(`${field} is invalid.`, 400);
+    }
+    eventPayload[field] = value;
+  }
+  for (const field of ['elapsedSilenceMs', 'sessionGeneration'] as const) {
+    if (record[field] === undefined) continue;
+    const value = record[field];
+    if (
+      typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < 0
+    ) {
+      throw new RequestError(`${field} is invalid.`, 400);
+    }
+    eventPayload[field] = value;
+  }
+  if (record.opportunityOutcome !== undefined) {
+    if (
+      record.opportunityOutcome !== 'fired' &&
+      record.opportunityOutcome !== 'skipped'
+    ) {
+      throw new RequestError('opportunityOutcome is invalid.', 400);
+    }
+    eventPayload.opportunityOutcome = record.opportunityOutcome;
   }
 
   if (record.runId !== undefined) {
@@ -3706,6 +3774,24 @@ async function handleRequest(
           ? {}
           : { nextEligibleAt: event.nextEligibleAt }),
         ...(event.delayMs === undefined ? {} : { delayMs: event.delayMs }),
+        ...(event.timingMode === undefined
+          ? {}
+          : { timingMode: event.timingMode }),
+        ...(event.elapsedSilenceMs === undefined
+          ? {}
+          : { elapsedSilenceMs: event.elapsedSilenceMs }),
+        ...(event.readiness === undefined
+          ? {}
+          : { readiness: event.readiness }),
+        ...(event.threshold === undefined
+          ? {}
+          : { threshold: event.threshold }),
+        ...(event.opportunityOutcome === undefined
+          ? {}
+          : { opportunityOutcome: event.opportunityOutcome }),
+        ...(event.sessionGeneration === undefined
+          ? {}
+          : { sessionGeneration: event.sessionGeneration }),
       });
       sendNoContent(response);
       return;

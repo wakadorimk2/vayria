@@ -2429,6 +2429,7 @@ export default function App() {
     onGateEvent: emitAutonomyGateEvent,
     sessionGeneration,
     timing: autonomyTurnGateTiming,
+    timingMode: runtimeConfig.autonomyTimingMode,
   });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {

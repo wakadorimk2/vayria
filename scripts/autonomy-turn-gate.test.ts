@@ -4,6 +4,8 @@ import {
   createAutonomyTurnGateState,
   getAutonomyTurnGateWaitMs,
   isAutonomyTurnGateReady,
+  readAutonomyTimingMode,
+  readAutonomyTimingSnapshot,
   sampleAutonomyQuietTime,
   transitionAutonomyTurnGate,
   type AutonomyTurnGateTiming,
@@ -178,4 +180,175 @@ test('quiet-time sampling stays within the configured inclusive range', () => {
   assert.equal(sampleAutonomyQuietTime(TIMING, () => 0), 8_000);
   assert.equal(sampleAutonomyQuietTime(TIMING, () => 0.999), 17_990);
   assert.equal(sampleAutonomyQuietTime(TIMING, () => 1), 18_000);
+});
+
+test('baseline remains the default timing mode', () => {
+  assert.equal(readAutonomyTimingMode(undefined), 'baseline');
+  assert.equal(readAutonomyTimingMode('unknown'), 'baseline');
+  assert.equal(readAutonomyTimingMode('monotonic'), 'monotonic');
+});
+
+test('monotonic readiness is zero through the minimum and quadratic in the window', () => {
+  const running = transitionAutonomyTurnGate(
+    readyState(),
+    { type: 'turn_started', at: 5_000 },
+    TIMING,
+  );
+  const refractory = transitionAutonomyTurnGate(
+    running,
+    { type: 'turn_completed', at: 6_000 },
+    TIMING,
+    () => 0.25,
+    'monotonic',
+  );
+
+  assert.equal(refractory.phase, 'refractory');
+  assert.equal(refractory.nextEligibleAt, 19_000);
+  assert.deepEqual(
+    readAutonomyTimingSnapshot(refractory, TIMING, 14_000, 'monotonic'),
+    { elapsedSilenceMs: 8_000, readiness: 0, threshold: 0.25 },
+  );
+  assert.deepEqual(
+    readAutonomyTimingSnapshot(refractory, TIMING, 19_000, 'monotonic'),
+    { elapsedSilenceMs: 13_000, readiness: 0.25, threshold: 0.25 },
+  );
+  assert.deepEqual(
+    readAutonomyTimingSnapshot(refractory, TIMING, 24_000, 'monotonic'),
+    { elapsedSilenceMs: 18_000, readiness: 1, threshold: 0.25 },
+  );
+});
+
+test('monotonic threshold is sampled once when refractory starts', () => {
+  let calls = 0;
+  const running = transitionAutonomyTurnGate(
+    readyState(),
+    { type: 'turn_started', at: 5_000 },
+    TIMING,
+  );
+  const refractory = transitionAutonomyTurnGate(
+    running,
+    { type: 'turn_completed', at: 6_000 },
+    TIMING,
+    () => {
+      calls += 1;
+      return 1;
+    },
+    'monotonic',
+  );
+
+  assert.equal(calls, 1);
+  assert.equal(refractory.readinessThreshold, 1);
+  assert.equal(refractory.nextEligibleAt, 24_000);
+  assert.equal(
+    transitionAutonomyTurnGate(
+      refractory,
+      { type: 'timer_expired', at: 23_999 },
+      TIMING,
+      () => {
+        calls += 1;
+        return 0;
+      },
+      'monotonic',
+    ),
+    refractory,
+  );
+  assert.equal(calls, 1);
+
+  const ready = transitionAutonomyTurnGate(
+    refractory,
+    { type: 'timer_expired', at: 24_000 },
+    TIMING,
+    () => {
+      calls += 1;
+      return 0;
+    },
+    'monotonic',
+  );
+  assert.equal(calls, 1);
+  assert.equal(ready.phase, 'ready');
+});
+
+test('viewer speech restarts monotonic silence with a new fixed threshold', () => {
+  const running = transitionAutonomyTurnGate(
+    readyState(),
+    { type: 'turn_started', at: 5_000 },
+    TIMING,
+  );
+  const refractory = transitionAutonomyTurnGate(
+    running,
+    { type: 'turn_completed', at: 6_000 },
+    TIMING,
+    () => 0.25,
+    'monotonic',
+  );
+  const restarted = transitionAutonomyTurnGate(
+    refractory,
+    { type: 'external_event', event: 'viewer_speech', at: 10_000 },
+    TIMING,
+    () => 0.81,
+    'monotonic',
+  );
+
+  assert.equal(restarted.phase, 'refractory');
+  assert.equal(restarted.quietStartedAt, 10_000);
+  assert.equal(restarted.readinessThreshold, 0.81);
+  assert.equal(restarted.nextEligibleAt, 27_000);
+});
+
+test('a monotonic opportunity without a candidate starts the next opportunity window', () => {
+  const running = transitionAutonomyTurnGate(
+    readyState(),
+    { type: 'turn_started', at: 5_000 },
+    TIMING,
+  );
+  const refractory = transitionAutonomyTurnGate(
+    running,
+    { type: 'turn_completed', at: 6_000 },
+    TIMING,
+    () => 0,
+    'monotonic',
+  );
+  const ready = transitionAutonomyTurnGate(
+    refractory,
+    { type: 'timer_expired', at: 14_000 },
+    TIMING,
+    () => 1,
+    'monotonic',
+  );
+  const skipped = transitionAutonomyTurnGate(
+    ready,
+    { type: 'opportunity_skipped', at: 14_000 },
+    TIMING,
+    () => 1,
+    'monotonic',
+  );
+
+  assert.equal(skipped.phase, 'refractory');
+  assert.equal(skipped.quietStartedAt, 14_000);
+  assert.equal(skipped.readinessThreshold, 1);
+  assert.equal(skipped.nextEligibleAt, 32_000);
+});
+
+test('session reset clears monotonic readiness and restores initial quiet', () => {
+  const reset = transitionAutonomyTurnGate(
+    {
+      phase: 'refractory',
+      nextEligibleAt: 24_000,
+      quietStartedAt: 6_000,
+      readinessThreshold: 1,
+      reopenAfterTurn: false,
+    },
+    { type: 'reset', at: 30_000 },
+    TIMING,
+    () => 0,
+    'monotonic',
+  );
+
+  assert.deepEqual(reset, {
+    phase: 'initial_quiet',
+    nextEligibleAt: 34_000,
+    quietStartedAt: null,
+    readinessThreshold: null,
+    reopenAfterTurn: false,
+  });
 });
