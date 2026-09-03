@@ -911,13 +911,16 @@ test('playback coordinator forwards stream priming and startup diagnostics', asy
   assert.equal(receivedSourceKind, 'stream');
 });
 
-test('audio response keeps MP3 as a stream and buffers WAV', async () => {
+test('audio response buffers MP3 and WAV by default', async () => {
   const mp3 = await readAudioPlaybackSource(
     new Response(new Uint8Array([1, 2, 3]), {
       headers: { 'Content-Type': 'audio/mpeg' },
     }),
   );
-  assert.equal(mp3.kind, 'stream');
+  assert.equal(mp3.kind, 'buffer');
+  if (mp3.kind === 'buffer') {
+    assert.deepEqual([...new Uint8Array(mp3.data)], [1, 2, 3]);
+  }
 
   const wav = await readAudioPlaybackSource(
     new Response(new Uint8Array([4, 5]), {
@@ -926,6 +929,50 @@ test('audio response keeps MP3 as a stream and buffers WAV', async () => {
   );
   assert.equal(wav.kind, 'buffer');
   if (wav.kind === 'buffer') assert.deepEqual([...new Uint8Array(wav.data)], [4, 5]);
+});
+
+test('audio response streams MP3 only when comparison playback is enabled', async () => {
+  const mp3 = await readAudioPlaybackSource(
+    new Response(new Uint8Array([1, 2, 3]), {
+      headers: { 'Content-Type': 'audio/mpeg' },
+    }),
+    { streamMpegPlayback: true },
+  );
+
+  assert.equal(mp3.kind, 'stream');
+});
+
+test('buffered MP3 preserves chunk order', async () => {
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2]));
+        controller.enqueue(new Uint8Array([3]));
+        controller.close();
+      },
+    }),
+    { headers: { 'Content-Type': 'audio/mpeg' } },
+  );
+
+  const mp3 = await readAudioPlaybackSource(response);
+  assert.equal(mp3.kind, 'buffer');
+  if (mp3.kind === 'buffer') {
+    assert.deepEqual([...new Uint8Array(mp3.data)], [1, 2, 3]);
+  }
+});
+
+test('buffered MP3 rejects an interrupted response body', async () => {
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2]));
+        controller.error(new DOMException('Playback aborted.', 'AbortError'));
+      },
+    }),
+    { headers: { 'Content-Type': 'audio/mpeg' } },
+  );
+
+  await assert.rejects(readAudioPlaybackSource(response));
 });
 
 test('media source pump preserves chunk order and reports stream boundaries', async () => {

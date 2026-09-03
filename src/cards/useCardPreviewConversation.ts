@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
-import { apiUrl } from '../runtimeConfig';
+import { apiUrl, runtimeConfig } from '../runtimeConfig';
 import { readAudioPlaybackSource } from '../audio/audioPlaybackSource.js';
 import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
@@ -207,7 +207,9 @@ export function useCardPreviewConversation(
           );
         }
 
-        const audioSource = await readAudioPlaybackSource(ttsResponse);
+        const audioSource = await readAudioPlaybackSource(ttsResponse, {
+          streamMpegPlayback: runtimeConfig.cloudTtsStreamPlaybackEnabled,
+        });
         if (generation !== generationRef.current) return;
         const playbackResult = await playback.play(plan, audioSource, {
           onPlaybackStartup: (diagnostic) => {

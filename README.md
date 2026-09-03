@@ -126,6 +126,9 @@ API keyを使う場合は、`npm run exhibition:start:op`を使用します。
 自然に分離できる4〜12文字の第一声も、既定で先行生成します。
 比較時は、`VITE_EARLY_SPEECH_LEAD_ENABLED=0`、またはURLの`?earlySpeechLead=0`で無効にします。
 
+Aivis CloudのMP3は、音質を優先して全データを受信してから再生します。
+旧MediaSource経路と比較する場合は、`VITE_CLOUD_TTS_STREAM_PLAYBACK_ENABLED=1`、またはURLの`?cloudTtsStreamPlayback=1`を指定します。
+
 マイク、ChatGPT音声、Vayria音声を個別に再生し、Vayriaの音声メーターで経路を確認します。
 音声メーターはマイクとChatGPT音声で動き、Vayria自身の音声では動かない状態が期待値です。
 

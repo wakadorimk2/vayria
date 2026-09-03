@@ -9,6 +9,7 @@ interface ImportMetaEnv {
   readonly VITE_VOICE_INPUT_TRANSPORT?: string;
   readonly VITE_STREAMING_SPEECH_ENABLED?: string;
   readonly VITE_EARLY_SPEECH_LEAD_ENABLED?: string;
+  readonly VITE_CLOUD_TTS_STREAM_PLAYBACK_ENABLED?: string;
 }
 
 interface ImportMeta {

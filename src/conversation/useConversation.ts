@@ -767,7 +767,10 @@ export function useConversation(
                 await readError(ttsResponse, '返答音声を生成できませんでした。'),
               );
             }
-            const audioSource = await readAudioPlaybackSource(ttsResponse);
+            const audioSource = await readAudioPlaybackSource(ttsResponse, {
+              streamMpegPlayback:
+                runtimeConfig.cloudTtsStreamPlaybackEnabled,
+            });
             if (audioSource.kind === 'buffer') {
               emitUnitAudioReady(performance.now());
             }
@@ -1283,7 +1286,9 @@ export function useConversation(
           );
         }
 
-        const audioSource = await readAudioPlaybackSource(ttsResponse);
+        const audioSource = await readAudioPlaybackSource(ttsResponse, {
+          streamMpegPlayback: runtimeConfig.cloudTtsStreamPlaybackEnabled,
+        });
         if (audioSource.kind === 'buffer') {
           eventEmitter.emit('tts_first_audio', {
             durationMs: performance.now() - ttsStartedAt,

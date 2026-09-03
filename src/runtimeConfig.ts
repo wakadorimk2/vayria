@@ -96,6 +96,15 @@ function readEarlySpeechLeadEnabled(search: string): boolean {
   return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
 }
 
+function readCloudTtsStreamPlaybackEnabled(search: string): boolean {
+  const queryValue = new URLSearchParams(search).get('cloudTtsStreamPlayback');
+  const value =
+    queryValue ?? import.meta.env.VITE_CLOUD_TTS_STREAM_PLAYBACK_ENABLED;
+  if (typeof value !== 'string' || value.trim() === '') return false;
+
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
 function readConfiguredAutonomyTimingMode(search: string) {
   const queryValue = new URLSearchParams(search).get('autonomyTiming');
   return resolveAutonomyTimingMode(
@@ -130,6 +139,8 @@ export const runtimeConfig = Object.freeze({
   routerEnabled: readRouterEnabled(browserSearch),
   streamingSpeechEnabled: readStreamingSpeechEnabled(browserSearch),
   earlySpeechLeadEnabled: readEarlySpeechLeadEnabled(browserSearch),
+  cloudTtsStreamPlaybackEnabled:
+    readCloudTtsStreamPlaybackEnabled(browserSearch),
   autonomyTimingMode: readConfiguredAutonomyTimingMode(browserSearch),
   audioPreset: readAudioPreset(browserSearch),
   audioEndpointMs: readAudioEndpoint(browserSearch),
