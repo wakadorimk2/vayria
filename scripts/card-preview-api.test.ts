@@ -23,6 +23,7 @@ import {
   readCardPreviewRequest,
   readConversationEvent,
   readAutonomyCandidate,
+  resolveProvisionalActivatedCards,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
 import {
@@ -68,6 +69,46 @@ const AUTONOMY_CANDIDATE = {
     },
   ],
 } as const;
+
+test('provisional card metadata keeps speaking turns valid', () => {
+  const cards = ['rain', 'sleepy'];
+  assert.deepEqual(
+    resolveProvisionalActivatedCards(
+      'voice',
+      { voiceAction: 'take_floor' },
+      cards,
+      null,
+    ),
+    ['rain'],
+  );
+  assert.deepEqual(
+    resolveProvisionalActivatedCards(
+      'autonomous',
+      { externalAction: 'speak' },
+      cards,
+      'sleepy',
+    ),
+    ['sleepy'],
+  );
+  assert.deepEqual(
+    resolveProvisionalActivatedCards(
+      'voice',
+      { voiceAction: 'listen' },
+      cards,
+      'sleepy',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    resolveProvisionalActivatedCards(
+      'autonomous',
+      { externalAction: 'none' },
+      cards,
+      'sleepy',
+    ),
+    [],
+  );
+});
 
 const AUTONOMY_CANDIDATE_WIRE = {
   episodeId: AUTONOMY_CANDIDATE.episodeId,

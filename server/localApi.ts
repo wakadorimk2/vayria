@@ -152,6 +152,7 @@ import {
   processStructuredLlm,
   type LlmRuntimeOptions,
 } from './llmRuntime.js';
+import { OpenAiResponsesError } from './openAiResponses.js';
 
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_TEXT_LENGTH = 1_000;
@@ -2863,6 +2864,21 @@ export function buildVoiceInteractionPolicySystemPrompt(
   ].join('\n');
 }
 
+export function resolveProvisionalActivatedCards(
+  mode: ChatMode,
+  header: Record<string, unknown>,
+  brainCardIds: readonly string[],
+  forcedCardId: string | null,
+): string[] {
+  const isSpeaking =
+    mode === 'manual' ||
+    (mode === 'voice' && header.voiceAction === 'take_floor') ||
+    (mode === 'autonomous' && header.externalAction === 'speak');
+  if (!isSpeaking) return [];
+  const primaryCardId = forcedCardId ?? brainCardIds[0] ?? null;
+  return primaryCardId ? [primaryCardId] : [];
+}
+
 export function buildVoiceInteractionPolicyStaticPrompt(): string {
   return [
     'Choose voiceAction as a first-class conversational action and return it together with the spoken response.',
@@ -3681,12 +3697,13 @@ async function generateReply(
 
   const provisionalActivatedCards = (
     header: Record<string, unknown>,
-  ): string[] => {
-    if (!forcedCardId) return [];
-    if (mode === 'voice' && header.voiceAction !== 'take_floor') return [];
-    if (mode === 'autonomous' && header.externalAction !== 'speak') return [];
-    return [forcedCardId];
-  };
+  ): string[] =>
+    resolveProvisionalActivatedCards(
+      mode,
+      header,
+      brainCardIds,
+      forcedCardId,
+    );
 
   const validateStreamingDelivery = (
     header: Record<string, unknown>,
@@ -5368,6 +5385,12 @@ async function handleRequest(
         'application/x-ndjson',
       )
     ) {
+      if (error instanceof OpenAiResponsesError) {
+        console.error('Local chat Responses request failed.', {
+          kind: error.kind,
+          status: error.status,
+        });
+      }
       writeNdjson(response, {
         type: 'error',
         error:
