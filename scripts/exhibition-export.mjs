@@ -158,10 +158,8 @@ function summarizeInteractivePipeline(events) {
   ];
   const turns = new Map();
   for (const event of events) {
-    if (!interactiveSources.includes(event.source) || typeof event.turnId !== 'string') {
-      continue;
-    }
-    const turn = turns.get(event.turnId) ?? { source: event.source, events: [] };
+    if (typeof event.turnId !== 'string') continue;
+    const turn = turns.get(event.turnId) ?? { events: [] };
     turn.events.push(event);
     turns.set(event.turnId, turn);
   }
@@ -179,6 +177,14 @@ function summarizeInteractivePipeline(events) {
   );
 
   for (const turn of turns.values()) {
+    const source =
+      turn.events.find(
+        (event) =>
+          event.event.startsWith('llm_provider_') &&
+          interactiveSources.includes(event.source),
+      )?.source ??
+      turn.events.find((event) => interactiveSources.includes(event.source))?.source;
+    if (!source) continue;
     const aborted = turn.events.some((event) => event.event === 'turn_aborted');
     const retried = turn.events.some(
       (event) =>
@@ -200,7 +206,7 @@ function summarizeInteractivePipeline(events) {
       inputToPlaybackMs: segmentDuration(input, playback),
     };
     for (const [name, value] of Object.entries(values)) {
-      if (value !== null) result[turn.source][group][name].push(value);
+      if (value !== null) result[source][group][name].push(value);
     }
   }
 

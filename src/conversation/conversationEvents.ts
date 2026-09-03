@@ -19,6 +19,7 @@ export const CONVERSATION_EVENTS = [
   'llm_start',
   'llm_done',
   'speech_unit_ready',
+  'internal_delta_rejected',
   'tts_start',
   'tts_first_audio',
   'tts_ready',

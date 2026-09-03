@@ -130,6 +130,10 @@ import {
   type LlmProviderCallTracker,
   type LlmProviderSource,
 } from './llmProviderTelemetry.js';
+import {
+  IncrementalSpeechEnvelopeParser,
+  parseStreamingSpeechEnvelope,
+} from './streamingSpeech.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -193,6 +197,7 @@ const CONVERSATION_EVENTS = [
   'llm_start',
   'llm_done',
   'speech_unit_ready',
+  'internal_delta_rejected',
   'tts_start',
   'tts_fallback_started',
   'tts_fallback_completed',
@@ -316,6 +321,7 @@ interface ChatRequestPayload {
   lastSelfUtterance: string | null;
   performanceContext: PerformanceContextPayload;
   autonomyCandidate: AutonomyCandidate | null;
+  streamSpeech: boolean;
 }
 
 interface CardPreviewRequestPayload {
@@ -457,6 +463,19 @@ function sendNoContent(response: ServerResponse): void {
     'Cache-Control': 'no-store',
   });
   response.end();
+}
+
+function startNdjson(response: ServerResponse): void {
+  response.writeHead(200, {
+    'Cache-Control': 'no-store',
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+  });
+}
+
+function writeNdjson(response: ServerResponse, payload: object): void {
+  if (response.destroyed || response.writableEnded) return;
+  response.write(`${JSON.stringify(payload)}\n`);
 }
 
 function readTurnIdHeader(request: IncomingMessage): string | null {
@@ -1190,6 +1209,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'lastSelfUtterance',
     'performanceContext',
     'autonomyCandidate',
+    'streamSpeech',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError(
@@ -1202,6 +1222,10 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
   if (mode !== 'manual' && mode !== 'voice' && mode !== 'autonomous') {
     throw new RequestError('mode must be manual, voice, or autonomous.', 400);
   }
+  if (record.streamSpeech !== undefined && typeof record.streamSpeech !== 'boolean') {
+    throw new RequestError('streamSpeech must be a boolean.', 400);
+  }
+  const streamSpeechRequested = record.streamSpeech === true;
 
   const characterIdentityValue = record.characterIdentity;
   const characterIdentity =
@@ -1537,6 +1561,10 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     lastSelfUtterance,
     performanceContext,
     autonomyCandidate,
+    streamSpeech:
+      streamSpeechRequested &&
+      (mode !== 'autonomous' ||
+        (forcedCardId !== null && programContext.phase === 'after_card_change')),
   };
 }
 
@@ -2612,6 +2640,15 @@ interface GeneratedChatResponse {
   providerCallCount: number;
 }
 
+interface StreamingReplyCallbacks {
+  onSpeechUnit: (
+    index: number,
+    unit: string,
+    response: CardAssistantResponse,
+  ) => void;
+  onStateRejected: () => void;
+}
+
 async function generateInteractiveResponse(
   apiKey: string,
   mode: 'manual' | 'voice',
@@ -2623,6 +2660,7 @@ async function generateInteractiveResponse(
   characterIdentity: CharacterIdentity,
   programContext: ProgramContext,
   telemetry: LlmProviderCallTracker,
+  streaming: StreamingReplyCallbacks | null = null,
 ): Promise<CardAssistantResponse> {
   const selfNameResolution = resolveSelfName(message, characterIdentity);
   const fastPathDecision: ConversationActionDecision | null =
@@ -2669,6 +2707,16 @@ async function generateInteractiveResponse(
     programContext,
     null,
     telemetry,
+    streaming
+      ? {
+          onSpeechUnit: (index, unit, response) =>
+            streaming.onSpeechUnit(index, unit, {
+              ...response,
+              interactionAction: 'take_floor',
+            }),
+          onStateRejected: streaming.onStateRejected,
+        }
+      : null,
   );
   return {
     ...reply.response,
@@ -2761,7 +2809,9 @@ async function generateReply(
   programContext: ProgramContext,
   autonomyCandidate: AutonomyCandidate | null,
   telemetry: LlmProviderCallTracker,
+  streaming: StreamingReplyCallbacks | null = null,
 ): Promise<GeneratedChatResponse> {
+  const streamingEnabled = streaming !== null;
   const minActivatedCardItems = mode === 'manual' ? 1 : 0;
   const reasonUpdateSchema = {
     type: 'object',
@@ -2806,7 +2856,84 @@ async function generateReply(
     ],
     additionalProperties: false,
   };
-  const responseProperties = {
+  const emotionProperty = {
+    type: 'string',
+    enum: EMOTIONS,
+  };
+  const activatedCardsProperty = {
+    type: 'array',
+    items: {
+      type: 'string',
+      enum: brainCardIds,
+    },
+    minItems: minActivatedCardItems,
+    maxItems: MAX_ACTIVATED_CARDS,
+  };
+  const deliveryHeaderProperties =
+    mode === 'voice'
+      ? {
+          voiceAction: {
+            type: 'string',
+            enum: VOICE_INTERACTION_ACTIONS,
+          },
+          backchannelCue: {
+            type: 'string',
+            enum: VOICE_BACKCHANNEL_CUES,
+          },
+        }
+      : mode === 'autonomous'
+        ? {
+            externalAction: {
+              type: 'string',
+              enum: AUTONOMY_EXTERNAL_ACTIONS,
+            },
+            usedReasonIds: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: autonomyCandidate?.reasons.map((reason) => reason.id) ?? [],
+              },
+              maxItems: MAX_CANDIDATE_REASONS,
+            },
+          }
+        : {};
+  const responseProperties = streamingEnabled
+    ? {
+        deliveryHeader: {
+          type: 'object',
+          properties: {
+            ...deliveryHeaderProperties,
+            emotion: emotionProperty,
+            activatedCards: activatedCardsProperty,
+          },
+          required: [
+            ...(mode === 'voice' ? ['voiceAction', 'backchannelCue'] : []),
+            ...(mode === 'autonomous' ? ['externalAction', 'usedReasonIds'] : []),
+            'emotion',
+            'activatedCards',
+          ],
+          additionalProperties: false,
+        },
+        speechUnits: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: mode === 'manual' ? 1 : 0,
+          maxItems: 2,
+        },
+        internalDelta: {
+          type: 'object',
+          properties: {
+            reasonUpdates: {
+              type: 'array',
+              items: reasonUpdateSchema,
+              maxItems: MAX_REASON_UPDATES_PER_DELTA,
+            },
+          },
+          required: ['reasonUpdates'],
+          additionalProperties: false,
+        },
+      }
+    : {
     text: { type: 'string' },
     emotion: {
       type: 'string',
@@ -2849,27 +2976,18 @@ async function generateReply(
           },
         }
       : {}),
-    ...(mode === 'voice'
-      ? {
-          voiceAction: {
-            type: 'string',
-            enum: VOICE_INTERACTION_ACTIONS,
-          },
-          backchannelCue: {
-            type: 'string',
-            enum: VOICE_BACKCHANNEL_CUES,
-          },
-        }
-      : {}),
+    ...deliveryHeaderProperties,
   };
-  const responseRequired = [
-    'text',
-    'emotion',
-    'activatedCards',
-    'internalDelta',
-    ...(mode === 'autonomous' ? ['externalAction', 'usedReasonIds'] : []),
-    ...(mode === 'voice' ? ['voiceAction', 'backchannelCue'] : []),
-  ];
+  const responseRequired = streamingEnabled
+    ? ['deliveryHeader', 'speechUnits', 'internalDelta']
+    : [
+        'text',
+        'emotion',
+        'activatedCards',
+        'internalDelta',
+        ...(mode === 'autonomous' ? ['externalAction', 'usedReasonIds'] : []),
+        ...(mode === 'voice' ? ['voiceAction', 'backchannelCue'] : []),
+      ];
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey,
     model: MODEL_GPT_5_NANO,
@@ -2995,16 +3113,58 @@ async function generateReply(
     forcedInstruction,
     performerPolicyInstruction,
     internalDeltaInstruction,
+    streamingEnabled
+      ? 'Return deliveryHeader first, then speechUnits, then internalDelta. Split spoken text into one or two complete short speechUnits. Use an empty speechUnits array for a non-speaking voice action or autonomous externalAction none. Each unit must be independently speakable and must not contain Markdown.'
+      : '',
     'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
     activationInstruction,
   ].join('\n');
 
   let providerCallCount = 0;
+  const committedUnits: string[] = [];
+  let committedResponse: CardAssistantResponse | null = null;
+
+  const validateStreamingDelivery = (
+    header: Record<string, unknown>,
+    units: readonly string[],
+    internalDelta: unknown = { reasonUpdates: [] },
+  ): CardAssistantResponse =>
+    parseAssistantResponse(
+      JSON.stringify({
+        ...header,
+        text: units.join(''),
+        internalDelta,
+      }),
+      mode,
+      brainCardIds,
+      forcedCardId,
+      message,
+      characterIdentity,
+      autonomyCandidate,
+    );
+
+  const commitSpeechUnit = (
+    header: Record<string, unknown>,
+    rawUnit: string,
+  ): void => {
+    if (!streaming || !rawUnit.trim()) return;
+    const unit = rawUnit.trim();
+    const candidateUnits = [...committedUnits, unit];
+    const candidate = validateStreamingDelivery(header, candidateUnits);
+    committedUnits.push(unit);
+    committedResponse = candidate;
+    streaming.onSpeechUnit(committedUnits.length - 1, unit, candidate);
+  };
+
   const requestReply = async (correction?: string): Promise<string> => {
     const retry = providerCallCount;
     providerCallCount += 1;
     let streamedReply = '';
     let completedReply = '';
+    const envelopeParser = streamingEnabled
+      ? new IncrementalSpeechEnvelopeParser()
+      : null;
+    let attemptHeader: Record<string, unknown> | null = null;
     const messages: Message[] = [
       {
         role: 'system',
@@ -3027,6 +3187,24 @@ async function generateReply(
           (partial) => {
             if (partial) markFirstChunk();
             streamedReply += partial;
+            if (!partial || !envelopeParser || committedUnits.length >= 2) return;
+            const parsed = envelopeParser.push(partial);
+            if (
+              parsed.deliveryHeader &&
+              typeof parsed.deliveryHeader === 'object' &&
+              !Array.isArray(parsed.deliveryHeader)
+            ) {
+              attemptHeader = parsed.deliveryHeader as Record<string, unknown>;
+            }
+            if (!attemptHeader) return;
+            for (const unit of parsed.speechUnits) {
+              if (committedUnits.length >= 2) break;
+              try {
+                commitSpeechUnit(attemptHeader, unit);
+              } catch {
+                // The full contract decides whether the attempt can retry.
+              }
+            }
           },
           async (complete) => {
             markFirstChunk();
@@ -3042,34 +3220,80 @@ async function generateReply(
     return responseText;
   };
 
-  try {
-    const response = parseAssistantResponse(
-      await requestReply(),
-      mode,
-      brainCardIds,
-      forcedCardId,
-      message,
-      characterIdentity,
-      autonomyCandidate,
+  const parseAttempt = (value: string): CardAssistantResponse => {
+    if (!streamingEnabled) {
+      return parseAssistantResponse(
+        value,
+        mode,
+        brainCardIds,
+        forcedCardId,
+        message,
+        characterIdentity,
+        autonomyCandidate,
+      );
+    }
+    let envelope;
+    try {
+      envelope = parseStreamingSpeechEnvelope(value);
+    } catch (error) {
+      throw new CardContractError(
+        error instanceof Error ? error.message : 'Invalid streaming response.',
+      );
+    }
+    const normalizedUnits = envelope.speechUnits.map((unit) => unit.trim());
+    const delivery = validateStreamingDelivery(
+      envelope.deliveryHeader,
+      normalizedUnits,
     );
+    if (
+      committedUnits.some((unit, index) => normalizedUnits[index] !== unit)
+    ) {
+      throw new CardContractError('Committed speech units changed before completion.');
+    }
+    for (const unit of normalizedUnits.slice(committedUnits.length)) {
+      commitSpeechUnit(envelope.deliveryHeader, unit);
+    }
+    try {
+      return validateStreamingDelivery(
+        envelope.deliveryHeader,
+        normalizedUnits,
+        envelope.internalDelta,
+      );
+    } catch (error) {
+      if (!committedResponse) throw error;
+      streaming?.onStateRejected();
+      return {
+        ...delivery,
+        internalDelta: { reasonUpdates: [] },
+      };
+    }
+  };
+
+  try {
+    const response = parseAttempt(await requestReply());
     return { response, providerCallCount };
   } catch (error) {
+    const acceptedResponse = committedResponse as CardAssistantResponse | null;
+    if (acceptedResponse) {
+      streaming?.onStateRejected();
+      return {
+        response: {
+          ...acceptedResponse,
+          internalDelta: { reasonUpdates: [] },
+        },
+        providerCallCount,
+      };
+    }
     if (!(error instanceof CardContractError)) throw error;
     console.warn('Chat card contract failed. Retrying once.', error.message);
   }
 
-  const response = parseAssistantResponse(
+  const response = parseAttempt(
     await requestReply(
       mode === 'voice'
-        ? 'Your previous attempt violated the voice action or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text and empty activatedCards for listen, react_nonverbally, or backchannel. For content-bearing input, take_floor text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Use non-empty text for take_floor and include the forced current card when one exists.'
+        ? 'Your previous attempt violated the voice action or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty speechUnits and empty activatedCards for listen, react_nonverbally, or backchannel. For content-bearing input, take_floor speechUnits must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Use non-empty speechUnits for take_floor and include the forced current card when one exists.'
         : 'Your previous attempt violated the card contract. Follow the current brain-card subset and forced-card requirements exactly.',
     ),
-    mode,
-    brainCardIds,
-    forcedCardId,
-    message,
-    characterIdentity,
-    autonomyCandidate,
   );
   return { response, providerCallCount };
 }
@@ -3887,6 +4111,7 @@ async function handleRequest(
         lastSelfUtterance,
         performanceContext,
         autonomyCandidate,
+        streamSpeech,
       } = readChatRequest(payload);
       const startedAt = performance.now();
       const providerTurnId = headerTurnId ?? requestId;
@@ -3908,6 +4133,27 @@ async function handleRequest(
         source: providerSource,
         signal: providerAbortController.signal,
       });
+      let stateRejected = false;
+      if (streamSpeech) startNdjson(response);
+      const streamingCallbacks: StreamingReplyCallbacks | null = streamSpeech
+        ? {
+            onSpeechUnit: (index, unit, candidate) => {
+              const streamedCandidate =
+                mode === 'voice'
+                  ? { ...candidate, interactionAction: candidate.voiceAction }
+                  : candidate;
+              writeNdjson(response, {
+                type: 'speech_unit',
+                index,
+                text: unit,
+                response: streamedCandidate,
+              });
+            },
+            onStateRejected: () => {
+              stateRejected = true;
+            },
+          }
+        : null;
       try {
       const fastPathDecision =
         mode === 'manual'
@@ -3939,6 +4185,7 @@ async function handleRequest(
           characterIdentity,
           programContext,
           telemetry,
+          streamingCallbacks,
         );
       } else {
         const generatedResponse = await generateReply(
@@ -3960,6 +4207,7 @@ async function handleRequest(
           programContext,
           autonomyCandidate,
           telemetry,
+          streamingCallbacks,
         );
         assistantResponse =
           mode === 'voice'
@@ -3982,7 +4230,27 @@ async function handleRequest(
           activeRequests: activeProviderRequests,
         });
       }
-      sendJson(response, 200, assistantResponse);
+      if (streamSpeech) {
+        if (stateRejected) {
+          await recordStructuredEvent(config, 'internal_delta_rejected', {
+            origin: 'server',
+            requestId,
+            runId: playcheckRunId,
+            turnId: providerTurnId,
+            source: providerSource,
+            reason: 'invalid_request',
+          });
+        }
+        writeNdjson(response, {
+          type: 'state',
+          internalDelta: assistantResponse.internalDelta ?? { reasonUpdates: [] },
+          rejected: stateRejected,
+        });
+        writeNdjson(response, { type: 'done', response: assistantResponse });
+        response.end();
+      } else {
+        sendJson(response, 200, assistantResponse);
+      }
       return;
       } finally {
         unbindProviderAbort();
@@ -4215,6 +4483,23 @@ async function handleRequest(
   } catch (error) {
     if (request.aborted) {
       if (!response.destroyed) response.destroy();
+      return;
+    }
+    if (
+      response.headersSent &&
+      typeof response.getHeader === 'function' &&
+      String(response.getHeader('Content-Type') ?? '').startsWith(
+        'application/x-ndjson',
+      )
+    ) {
+      writeNdjson(response, {
+        type: 'error',
+        error:
+          error instanceof RequestError
+            ? error.message
+            : 'The chat provider request failed.',
+      });
+      response.end();
       return;
     }
     if (error instanceof RequestError) {

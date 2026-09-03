@@ -166,6 +166,36 @@ test('interactive pipeline latency separates normal, retry, and aborted turns', 
       ...turnEvents('aborted-1', 'card_change', 5, [
         { event: 'turn_aborted', at: '2026-08-22T00:00:06.500Z' },
       ]),
+      {
+        event: 'input_received',
+        at: '2026-08-22T00:00:07.000Z',
+        turnId: 'card-change-mixed',
+        source: 'autonomous',
+      },
+      {
+        event: 'llm_provider_first_chunk',
+        at: '2026-08-22T00:00:07.700Z',
+        turnId: 'card-change-mixed',
+        source: 'card_change',
+      },
+      {
+        event: 'speech_unit_ready',
+        at: '2026-08-22T00:00:07.800Z',
+        turnId: 'card-change-mixed',
+        source: 'autonomous',
+      },
+      {
+        event: 'tts_first_audio',
+        at: '2026-08-22T00:00:08.100Z',
+        turnId: 'card-change-mixed',
+        source: 'autonomous',
+      },
+      {
+        event: 'playback_started',
+        at: '2026-08-22T00:00:08.110Z',
+        turnId: 'card-change-mixed',
+        source: 'autonomous',
+      },
     ],
   });
 
@@ -186,6 +216,10 @@ test('interactive pipeline latency separates normal, retry, and aborted turns', 
   assert.equal(
     summary.runtime.interactivePipelineLatency.card_change.aborted.inputToPlaybackMs.count,
     1,
+  );
+  assert.equal(
+    summary.runtime.interactivePipelineLatency.card_change.normal.inputToPlaybackMs.p50Ms,
+    1110,
   );
   assert.equal(
     summary.runtime.interactivePipelineLatency.manual.normal.inputToPlaybackMs.count,

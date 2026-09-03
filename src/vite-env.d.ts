@@ -6,6 +6,7 @@ interface ImportMetaEnv {
   readonly VITE_AUDIO_PRESET?: string;
   readonly VITE_AUDIO_ENDPOINT_MS?: string;
   readonly VITE_VOICE_INPUT_TRANSPORT?: string;
+  readonly VITE_STREAMING_SPEECH_ENABLED?: string;
 }
 
 interface ImportMeta {

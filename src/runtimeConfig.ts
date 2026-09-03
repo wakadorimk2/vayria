@@ -79,6 +79,12 @@ function readRouterEnabled(search: string): boolean {
   return new URLSearchParams(search).get('router') === '1';
 }
 
+function readStreamingSpeechEnabled(search: string): boolean {
+  const queryValue = new URLSearchParams(search).get('streamingSpeech');
+  const value = queryValue ?? import.meta.env.VITE_STREAMING_SPEECH_ENABLED;
+  return typeof value === 'string' && ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+}
+
 function readAudioPreset(search: string): ExhibitionAudioPreset {
   const queryValue = new URLSearchParams(search).get('audioPreset');
   return resolveExhibitionAudioPreset(
@@ -103,6 +109,7 @@ export const runtimeConfig = Object.freeze({
   audioLabEnabled: readAudioLabEnabled(browserSearch),
   sttCaptureEnabled: readSttCaptureEnabled(browserSearch),
   routerEnabled: readRouterEnabled(browserSearch),
+  streamingSpeechEnabled: readStreamingSpeechEnabled(browserSearch),
   audioPreset: readAudioPreset(browserSearch),
   audioEndpointMs: readAudioEndpoint(browserSearch),
   mode,
