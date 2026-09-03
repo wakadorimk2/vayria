@@ -6,6 +6,9 @@ const testFiles = [
   resolve('node_modules/.tmp/performer-test/scripts/local-api-capture.test.js'),
   resolve('node_modules/.tmp/performer-test/scripts/card-reactions.test.js'),
   resolve(
+    'node_modules/.tmp/performer-test/scripts/card-drop-reaction.test.js',
+  ),
+  resolve(
     'node_modules/.tmp/performer-test/scripts/performer-runtime.test.js',
   ),
   resolve(

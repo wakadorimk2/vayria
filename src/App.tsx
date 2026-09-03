@@ -22,6 +22,7 @@ import {
   type CardDragPositionUpdate,
 } from './cards/CardGamePrototype';
 import { useCardGamePrototype } from './cards/useCardGamePrototype';
+import { CardDropReactionController } from './cards/cardDropReaction';
 import { SpatialTargetRegistry } from './attention/spatialTargetRegistry';
 import {
   addCharacterAlias,
@@ -479,10 +480,14 @@ export default function App() {
     contribution: DirectionContribution;
     programContext: ProgramContext;
   } | null>(null);
+  const cardDropReactionControllerRef = useRef(
+    new CardDropReactionController(),
+  );
   useEffect(() => {
     characterIdentityRef.current = characterIdentity;
   }, [characterIdentity]);
   const cardReactionPlanIdsRef = useRef(new Set<string>());
+  const cardDropReactionPlanIdsRef = useRef(new Set<string>());
   const pendingActivatedCardIdsRef = useRef(new Map<string, string[]>());
   const stageRef = useRef<VrmStageHandle>(null);
   const [stageMotionPort, setStageMotionPort] =
@@ -1058,6 +1063,9 @@ export default function App() {
   const handlePerformanceResult = useCallback(
     (result: PerformanceResult) => {
       if (activePlanRef.current?.planId !== result.planId) return;
+      const isCardDropReactionPlan = cardDropReactionPlanIdsRef.current.delete(
+        result.planId,
+      );
       const isCardReactionPlan = cardReactionPlanIdsRef.current.delete(
         result.planId,
       );
@@ -1070,6 +1078,13 @@ export default function App() {
       }
       playbackCoordinator.stop();
       completePlan(result);
+      if (isCardDropReactionPlan) {
+        cardDropReactionControllerRef.current.settleReaction(
+          result.planId,
+          result.outcome,
+        );
+      }
+      cardDropReactionControllerRef.current.settleReply(result.planId);
       if (isCardReactionPlan) {
         if (result.outcome === 'completed' && pendingActivatedCardIds) {
           acceptReply(pendingActivatedCardIds);
@@ -1659,6 +1674,8 @@ export default function App() {
     resetConversation();
     resetRuntime();
     resetTurn();
+    cardDropReactionControllerRef.current.reset();
+    cardDropReactionPlanIdsRef.current.clear();
     cardReactionPlanIdsRef.current.clear();
     pendingActivatedCardIdsRef.current.clear();
     activePlanRef.current = null;
@@ -2102,6 +2119,11 @@ export default function App() {
             text: message,
           };
           const plan = createPlanForTrigger(trigger);
+          const voiceCardContext = readCardContext();
+          cardDropReactionControllerRef.current.handoffToReply(
+            voiceCardContext.forcedCardId,
+            plan.planId,
+          );
           if (
             !plan.actionDecision ||
             plan.actionDecision.action === 'take_floor'
@@ -2112,7 +2134,7 @@ export default function App() {
           handleConversationInputReceived(event.segmentId, Date.now());
           void sendVoice(
             message,
-            readCardContext(),
+            voiceCardContext,
             handleReplyAccepted,
             plan,
             { segmentId: event.segmentId, at: event.at, asrConfidence: null },
@@ -2233,6 +2255,10 @@ export default function App() {
         : null;
 
       if (preactivatedPlan) {
+        cardDropReactionControllerRef.current.handoffToReply(
+          cardContextOverride?.forcedCardId ?? null,
+          preactivatedPlan.planId,
+        );
         cardReactionPlanIdsRef.current.add(preactivatedPlan.planId);
         handlePerformancePlan(preactivatedPlan);
       }
@@ -2371,6 +2397,34 @@ export default function App() {
         ],
       });
       notifyMeaningfulAutonomyEvent('card_change');
+      const reducedMotion = window.matchMedia(
+        '(prefers-reduced-motion: reduce)',
+      ).matches;
+      const cardDropReaction = cardDropReactionControllerRef.current.begin(
+        result,
+        runtimeConfig.cardDropReactionMode,
+        reducedMotion,
+      );
+      if (cardDropReaction) {
+        spatialTargetRegistry.refreshDefault('game');
+        if (!reducedMotion) {
+          cardAttentionEnergyControllerRef.current.trigger(
+            readAnimationNow(),
+            logicalAttentionRef.current.gazeStrength ??
+              logicalAttentionRef.current.strength,
+          );
+          scheduleCardDefaultAttention();
+        }
+        const reactionPlan = createPlanForTrigger(
+          cardDropReaction.trigger,
+          cardDropReaction.contribution,
+        );
+        cardDropReactionControllerRef.current.bindReactionPlan(
+          reactionPlan.planId,
+        );
+        cardDropReactionPlanIdsRef.current.add(reactionPlan.planId);
+        executeNonSpeechPlan(reactionPlan);
+      }
       if (!isAutonomousLoopEnabled || isMuted || isBusy) return;
       pendingCardStimulusRef.current = {
         cardContext: {
@@ -2386,13 +2440,17 @@ export default function App() {
     },
     [
       activateCardSwap,
+      createPlanForTrigger,
+      executeNonSpeechPlan,
       isAutonomousLoopEnabled,
       isBusy,
       isMuted,
       notifyMeaningfulAutonomyEvent,
       programContext,
       recordAutonomyEvidence,
+      scheduleCardDefaultAttention,
       setProgramPhase,
+      spatialTargetRegistry,
     ],
   );
 
@@ -2489,6 +2547,11 @@ export default function App() {
       recordViewerIntent(current, trimmedInput, identityForRequest),
     );
     const plan = createPlanForTrigger(trigger);
+    const manualCardContext = readCardContext();
+    cardDropReactionControllerRef.current.handoffToReply(
+      manualCardContext.forcedCardId,
+      plan.planId,
+    );
     if (!plan.actionDecision || plan.actionDecision.action === 'take_floor') {
       beginReply();
     }
@@ -2496,7 +2559,7 @@ export default function App() {
     setInput('');
     void sendManual(
       trimmedInput,
-      readCardContext(),
+      manualCardContext,
       handleReplyAccepted,
       plan,
       identityForRequest,
