@@ -120,8 +120,8 @@ API key本体はworktreeや`.env.local`へ保存しません。
 `npm run exhibition`は`npm run exhibition:start`の短縮名です。
 API keyを使う場合は、`npm run exhibition:start:op`を使用します。
 
-検証済み発話単位からTTSを開始する実験経路は、既定で無効です。
-`VITE_STREAMING_SPEECH_ENABLED=1`、またはURLの`?streamingSpeech=1`で有効にします。
+検証済み発話単位からTTSを開始する経路は、既定で有効です。
+無効にする場合は、`VITE_STREAMING_SPEECH_ENABLED=0`、またはURLの`?streamingSpeech=0`を指定します。
 この経路はvoice、manual、card changeだけに適用し、通常のautonomous発話には適用しません。
 
 マイク、ChatGPT音声、Vayria音声を個別に再生し、Vayriaの音声メーターで経路を確認します。

@@ -82,7 +82,9 @@ function readRouterEnabled(search: string): boolean {
 function readStreamingSpeechEnabled(search: string): boolean {
   const queryValue = new URLSearchParams(search).get('streamingSpeech');
   const value = queryValue ?? import.meta.env.VITE_STREAMING_SPEECH_ENABLED;
-  return typeof value === 'string' && ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+  if (typeof value !== 'string' || value.trim() === '') return true;
+
+  return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
 }
 
 function readAudioPreset(search: string): ExhibitionAudioPreset {
