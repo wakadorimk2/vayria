@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PlayAudio } from '../src/audio/useAudioLipSync.js';
 import { readAudioPlaybackSource } from '../src/audio/audioPlaybackSource.js';
-import { pumpMediaSourceAudio } from '../src/audio/mediaSourceStream.js';
+import {
+  pumpMediaSourceAudio,
+  StreamingPlaybackPrimingGate,
+} from '../src/audio/mediaSourceStream.js';
 import {
   createRmsEnvelope,
   sampleRmsEnvelope,
@@ -873,6 +876,41 @@ test('playback coordinator forwards a safe gesture requirement reason', async ()
   assert.equal(receivedReason, 'start_timeout');
 });
 
+test('playback coordinator forwards stream priming and startup diagnostics', async () => {
+  let receivedTargetMs: number | undefined;
+  let receivedSourceKind: string | undefined;
+  const coordinator = new PerformancePlaybackCoordinator({
+    getMotionPort: () => null,
+    playAudio: async (_audioSource, options) => {
+      receivedTargetMs = options?.streamPriming?.targetMs;
+      options?.onPlaybackStartup?.({
+        audioContextState: 'running',
+        bufferedDurationMs: 160,
+        firstChunkBytes: 4_096,
+        firstChunkIntervalMs: 30,
+        primingOutcome: 'target',
+        primingTargetMs: 150,
+        primingWaitMs: 30,
+        sampleRateHz: 48_000,
+        sourceKind: 'stream',
+      });
+      options?.onStart?.(1_000);
+    },
+    stopAudio: () => undefined,
+    now: () => 1_000,
+  });
+
+  await coordinator.play(createPlan({ motion: undefined }), bufferSource(), {
+    streamPriming: { targetMs: 150, maximumWaitMs: 300 },
+    onPlaybackStartup: (diagnostic) => {
+      receivedSourceKind = diagnostic.sourceKind;
+    },
+  });
+
+  assert.equal(receivedTargetMs, 150);
+  assert.equal(receivedSourceKind, 'stream');
+});
+
 test('audio response keeps MP3 as a stream and buffers WAV', async () => {
   const mp3 = await readAudioPlaybackSource(
     new Response(new Uint8Array([1, 2, 3]), {
@@ -894,6 +932,7 @@ test('media source pump preserves chunk order and reports stream boundaries', as
   const chunks: number[][] = [];
   const capturedChunks: Uint8Array[] = [];
   const targetChunks: Uint8Array[] = [];
+  const bufferedDurations: number[] = [];
   const events: string[] = [];
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -909,10 +948,13 @@ test('media source pump preserves chunk order and reports stream boundaries', as
       chunks.push([...chunk]);
     },
     end: () => events.push('end'),
+    getBufferedDurationMs: () => targetChunks.length * 100,
     isUpdating: () => false,
     waitForUpdate: async () => undefined,
   }, {
     onChunk: (chunk) => capturedChunks.push(chunk),
+    onChunkAppended: (_chunk, bufferedDurationMs) =>
+      bufferedDurations.push(bufferedDurationMs),
     onFirstChunk: () => events.push('first'),
     onComplete: () => events.push('complete'),
   });
@@ -920,13 +962,66 @@ test('media source pump preserves chunk order and reports stream boundaries', as
   assert.deepEqual(chunks, [[1, 2], [3]]);
   assert.deepEqual(capturedChunks.map((chunk) => [...chunk]), [[1, 2], [3]]);
   assert.notEqual(capturedChunks[0], targetChunks[0]);
+  assert.deepEqual(bufferedDurations, [100, 200]);
   assert.deepEqual(events, ['first', 'end', 'complete']);
+});
+
+test('stream priming waits for target and bounds completion, timeout, and cancellation', async () => {
+  const targetClock = new FakeClock();
+  const targetGate = new StreamingPlaybackPrimingGate(150, 300, targetClock);
+  let targetSettled = false;
+  void targetGate.wait().then(() => {
+    targetSettled = true;
+  });
+  targetGate.observe(100, targetClock.now());
+  targetClock.advance(149);
+  await Promise.resolve();
+  assert.equal(targetSettled, false);
+  targetGate.observe(150, targetClock.now());
+  assert.deepEqual(await targetGate.wait(), {
+    bufferedDurationMs: 150,
+    reason: 'target',
+    waitedMs: 149,
+  });
+
+  const completionClock = new FakeClock();
+  const completionGate = new StreamingPlaybackPrimingGate(150, 300, completionClock);
+  completionGate.observe(80, completionClock.now());
+  completionClock.advance(40);
+  completionGate.complete(completionClock.now());
+  assert.deepEqual(await completionGate.wait(), {
+    bufferedDurationMs: 80,
+    reason: 'complete',
+    waitedMs: 40,
+  });
+
+  const timeoutClock = new FakeClock();
+  const timeoutGate = new StreamingPlaybackPrimingGate(150, 300, timeoutClock);
+  timeoutGate.observe(60, timeoutClock.now());
+  timeoutClock.advance(300);
+  assert.deepEqual(await timeoutGate.wait(), {
+    bufferedDurationMs: 60,
+    reason: 'timeout',
+    waitedMs: 300,
+  });
+
+  const cancelledClock = new FakeClock();
+  const cancelledGate = new StreamingPlaybackPrimingGate(150, 300, cancelledClock);
+  cancelledGate.observe(20, cancelledClock.now());
+  cancelledClock.advance(10);
+  cancelledGate.cancel(cancelledClock.now());
+  assert.deepEqual(await cancelledGate.wait(), {
+    bufferedDurationMs: 20,
+    reason: 'cancelled',
+    waitedMs: 10,
+  });
 });
 
 test('media source pump rejects an empty or interrupted stream safely', async () => {
   const target = {
     addChunk: () => undefined,
     end: () => undefined,
+    getBufferedDurationMs: () => 0,
     isUpdating: () => false,
     waitForUpdate: async () => undefined,
   };

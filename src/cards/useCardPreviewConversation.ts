@@ -210,6 +210,13 @@ export function useCardPreviewConversation(
         const audioSource = await readAudioPlaybackSource(ttsResponse);
         if (generation !== generationRef.current) return;
         const playbackResult = await playback.play(plan, audioSource, {
+          onPlaybackStartup: (diagnostic) => {
+            if (!import.meta.env.DEV) return;
+            console.info('[playback-startup]', {
+              route: 'card-preview',
+              ...diagnostic,
+            });
+          },
           onSpeechStart: (startedAt) => {
             speechStartedAt = startedAt;
             if (generation === generationRef.current) setStatus('speaking');
