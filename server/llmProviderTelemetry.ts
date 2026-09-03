@@ -97,7 +97,7 @@ export function createLlmProviderCallTracker(
       const startedAt = now();
       let active = true;
       let firstChunkRecorded = false;
-      let recordQueue = Promise.resolve();
+      let recordQueue: Promise<void> | null = null;
       const record = (event: LlmProviderEventName): Promise<void> => {
         const payload: LlmProviderEvent = {
           event,
@@ -110,7 +110,14 @@ export function createLlmProviderCallTracker(
           retry: callOptions.retry,
           elapsedMs: Math.max(0, Math.round(now() - startedAt)),
         };
-        recordQueue = recordQueue.then(() => options.record(payload));
+        const write = async (): Promise<void> => {
+          try {
+            await options.record(payload);
+          } catch (error) {
+            console.warn('LLM provider telemetry recording failed.', error);
+          }
+        };
+        recordQueue = recordQueue ? recordQueue.then(write) : write();
         return recordQueue;
       };
       const markFirstChunk = (): void => {
@@ -119,7 +126,7 @@ export function createLlmProviderCallTracker(
         void record('llm_provider_first_chunk');
       };
 
-      await record('llm_provider_start');
+      void record('llm_provider_start');
       try {
         const providerCall = execute(markFirstChunk);
         return options.signal
@@ -127,7 +134,6 @@ export function createLlmProviderCallTracker(
           : await providerCall;
       } finally {
         active = false;
-        await recordQueue;
         await record('llm_provider_done');
       }
     },

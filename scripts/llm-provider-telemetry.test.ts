@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import test from 'node:test';
 import {
   createLlmProviderCallTracker,
@@ -6,7 +8,10 @@ import {
   type LlmProviderEvent,
   type LlmProviderSource,
 } from '../server/llmProviderTelemetry.js';
-import { resolveLlmProviderSource } from '../server/localApi.js';
+import {
+  bindLlmProviderAbort,
+  resolveLlmProviderSource,
+} from '../server/localApi.js';
 import { DEFAULT_PROGRAM_CONTEXT } from '../src/conversation/programContext.js';
 
 function createHarness(source: LlmProviderSource = 'manual') {
@@ -165,6 +170,81 @@ test('provider telemetry contains only the approved safe fields', async () => {
     assert.deepEqual(Object.keys(event).sort(), approvedFields);
     assert.doesNotMatch(JSON.stringify(event), /apiKey|history|message|prompt|text/i);
   }
+});
+
+test('telemetry recording failures do not change the provider result or event order', async () => {
+  const attempts: string[] = [];
+  const tracker = createLlmProviderCallTracker({
+    turnId: 'turn-record-failure',
+    provider: 'openai',
+    model: 'gpt-5-nano',
+    source: 'manual',
+    record: async (event) => {
+      attempts.push(event.event);
+      if (event.event !== 'llm_provider_done') {
+        throw new Error(`record failed: ${event.event}`);
+      }
+    },
+  });
+
+  const result = await tracker.run(
+    { purpose: 'response-generation', retry: 0 },
+    async (markFirstChunk) => {
+      markFirstChunk();
+      return 'provider result';
+    },
+  );
+
+  assert.equal(result, 'provider result');
+  assert.deepEqual(attempts, [
+    'llm_provider_start',
+    'llm_provider_first_chunk',
+    'llm_provider_done',
+  ]);
+});
+
+test('telemetry completion failure does not mask a provider failure', async () => {
+  const tracker = createLlmProviderCallTracker({
+    turnId: 'turn-provider-failure',
+    provider: 'openai',
+    model: 'gpt-5-nano',
+    source: 'voice',
+    record: async (event) => {
+      if (event.event === 'llm_provider_done') {
+        throw new Error('done recording failed');
+      }
+    },
+  });
+
+  await assert.rejects(
+    tracker.run(
+      { purpose: 'response-generation', retry: 0 },
+      async () => {
+        throw new Error('provider failed');
+      },
+    ),
+    /provider failed/,
+  );
+});
+
+test('provider abort binding observes response close and removes both listeners', () => {
+  const request = new EventEmitter() as unknown as IncomingMessage;
+  const response = new EventEmitter() as unknown as ServerResponse;
+  Object.defineProperty(response, 'writableEnded', {
+    configurable: true,
+    value: false,
+  });
+  const controller = new AbortController();
+  const unbind = bindLlmProviderAbort(request, response, controller);
+
+  assert.equal(request.listenerCount('aborted'), 1);
+  assert.equal(response.listenerCount('close'), 1);
+  response.emit('close');
+  assert.equal(controller.signal.aborted, true);
+
+  unbind();
+  assert.equal(request.listenerCount('aborted'), 0);
+  assert.equal(response.listenerCount('close'), 0);
 });
 
 test('interactive summaries calculate p50 and p95 and exclude autonomous calls', () => {

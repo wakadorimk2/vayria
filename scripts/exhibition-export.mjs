@@ -22,11 +22,6 @@ const CSV_COLUMNS = [
   'durationMs',
   'activeRequests',
   'audioBytes',
-  'provider',
-  'model',
-  'purpose',
-  'callIndex',
-  'retry',
   'emotion',
   'phase',
   'reason',
@@ -34,6 +29,11 @@ const CSV_COLUMNS = [
   'axis',
   'score',
   'note',
+  'provider',
+  'model',
+  'purpose',
+  'callIndex',
+  'retry',
 ];
 
 function average(values) {

@@ -284,3 +284,46 @@ test('CSV generation escapes commas and preserves the same row set', () => {
   assert.match(csv, /"a,b"/);
   assert.equal(csv.trim().split(/\r?\n/).length, 2);
 });
+
+test('CSV keeps the legacy columns in place and appends provider telemetry', () => {
+  const csv = createCsv({
+    metadata: {
+      captureId: 'ex-20260822000500-abcdef12',
+      mode: 'exhibition',
+    },
+    events: [],
+    observations: [],
+  });
+  const [header] = csv.trim().split(/\r?\n/);
+  const legacyColumns = [
+    'recordType',
+    'captureId',
+    'at',
+    'event',
+    'observationType',
+    'origin',
+    'requestId',
+    'source',
+    'turnId',
+    'elapsedMs',
+    'durationMs',
+    'activeRequests',
+    'audioBytes',
+    'emotion',
+    'phase',
+    'reason',
+    'interactionAction',
+    'axis',
+    'score',
+    'note',
+  ];
+
+  assert.deepEqual(header.split(',').slice(0, legacyColumns.length), legacyColumns);
+  assert.deepEqual(header.split(',').slice(legacyColumns.length), [
+    'provider',
+    'model',
+    'purpose',
+    'callIndex',
+    'retry',
+  ]);
+});

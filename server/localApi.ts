@@ -668,6 +668,22 @@ function createRequestLlmProviderTracker(
   });
 }
 
+export function bindLlmProviderAbort(
+  request: IncomingMessage,
+  response: ServerResponse,
+  controller: AbortController,
+): () => void {
+  const abortProvider = () => {
+    if (!response.writableEnded) controller.abort();
+  };
+  request.once('aborted', abortProvider);
+  response.once('close', abortProvider);
+  return () => {
+    request.off('aborted', abortProvider);
+    response.off('close', abortProvider);
+  };
+}
+
 export function resolveLlmProviderSource(
   mode: ChatMode,
   forcedCardId: string | null,
@@ -3801,8 +3817,11 @@ async function handleRequest(
       const startedAt = performance.now();
       const providerTurnId = headerTurnId ?? requestId;
       const providerAbortController = new AbortController();
-      const abortProvider = () => providerAbortController.abort();
-      request.once('aborted', abortProvider);
+      const unbindProviderAbort = bindLlmProviderAbort(
+        request,
+        response,
+        providerAbortController,
+      );
       const telemetry = createRequestLlmProviderTracker(config, {
         requestId,
         runId: playcheckRunId,
@@ -3810,7 +3829,7 @@ async function handleRequest(
         source: 'card-preview',
         signal: providerAbortController.signal,
       });
-      await recordStructuredEvent(config, 'llm_start', {
+      logStructuredEvent('llm_start', {
         origin: 'server',
         requestId,
         turnId: providerTurnId,
@@ -3827,9 +3846,9 @@ async function handleRequest(
           telemetry,
         );
       } finally {
-        request.off('aborted', abortProvider);
+        unbindProviderAbort();
       }
-      await recordStructuredEvent(config, 'llm_done', {
+      logStructuredEvent('llm_done', {
         origin: 'server',
         requestId,
         turnId: providerTurnId,
@@ -3876,8 +3895,11 @@ async function handleRequest(
         programContext,
       );
       const providerAbortController = new AbortController();
-      const abortProvider = () => providerAbortController.abort();
-      request.once('aborted', abortProvider);
+      const unbindProviderAbort = bindLlmProviderAbort(
+        request,
+        response,
+        providerAbortController,
+      );
       const telemetry = createRequestLlmProviderTracker(config, {
         requestId,
         runId: playcheckRunId,
@@ -3893,7 +3915,7 @@ async function handleRequest(
       const bypassesLlm =
         fastPathDecision !== null && fastPathDecision.action !== 'take_floor';
       if (!bypassesLlm) {
-        await recordStructuredEvent(config, 'llm_start', {
+        logStructuredEvent('llm_start', {
           origin: 'server',
           requestId,
           runId: playcheckRunId,
@@ -3948,7 +3970,7 @@ async function handleRequest(
       }
       providerCallCount = telemetry.callCount;
       if (!bypassesLlm) {
-        await recordStructuredEvent(config, 'llm_done', {
+        logStructuredEvent('llm_done', {
           origin: 'server',
           requestId,
           runId: playcheckRunId,
@@ -3962,7 +3984,7 @@ async function handleRequest(
       sendJson(response, 200, assistantResponse);
       return;
       } finally {
-        request.off('aborted', abortProvider);
+        unbindProviderAbort();
       }
     }
 
