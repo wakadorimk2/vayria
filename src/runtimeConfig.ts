@@ -1,5 +1,5 @@
 import { readPlaycheckRunId } from './playcheck';
-import { readAutonomyTimingMode } from './conversation/autonomyTurnGate.js';
+import { resolveAutonomyTimingMode } from './conversation/autonomyTurnGate.js';
 import {
   resolveAudioEndpointMs,
   resolveExhibitionAudioPreset,
@@ -82,8 +82,9 @@ function readRouterEnabled(search: string): boolean {
 
 function readConfiguredAutonomyTimingMode(search: string) {
   const queryValue = new URLSearchParams(search).get('autonomyTiming');
-  return readAutonomyTimingMode(
-    queryValue ?? import.meta.env.VITE_AUTONOMY_TIMING_MODE,
+  return resolveAutonomyTimingMode(
+    queryValue,
+    import.meta.env.VITE_AUTONOMY_TIMING_MODE,
   );
 }
 

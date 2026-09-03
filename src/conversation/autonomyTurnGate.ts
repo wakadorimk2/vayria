@@ -5,6 +5,7 @@ export const AUTONOMY_TURN_GATE_PHASES = [
   'ready',
   'running',
   'refractory',
+  'waiting_candidate',
 ] as const;
 
 export type AutonomyTurnGatePhase =
@@ -14,11 +15,26 @@ export const AUTONOMY_TIMING_MODES = ['baseline', 'monotonic'] as const;
 
 export type AutonomyTimingMode = (typeof AUTONOMY_TIMING_MODES)[number];
 
-export function readAutonomyTimingMode(value: unknown): AutonomyTimingMode {
+function parseAutonomyTimingMode(value: unknown): AutonomyTimingMode | null {
   return typeof value === 'string' &&
     (AUTONOMY_TIMING_MODES as readonly string[]).includes(value)
     ? (value as AutonomyTimingMode)
-    : 'baseline';
+    : null;
+}
+
+export function readAutonomyTimingMode(value: unknown): AutonomyTimingMode {
+  return parseAutonomyTimingMode(value) ?? 'baseline';
+}
+
+export function resolveAutonomyTimingMode(
+  queryValue: unknown,
+  environmentValue: unknown,
+): AutonomyTimingMode {
+  return (
+    parseAutonomyTimingMode(queryValue) ??
+    parseAutonomyTimingMode(environmentValue) ??
+    'baseline'
+  );
 }
 
 export const AUTONOMY_TURN_GATE_EXTERNAL_EVENTS = [
@@ -134,7 +150,8 @@ export type AutonomyTurnGateAction =
   | { type: 'turn_started'; at?: number }
   | { type: 'turn_completed'; at?: number }
   | { type: 'turn_aborted'; at?: number }
-  | { type: 'opportunity_skipped'; at?: number };
+  | { type: 'opportunity_skipped'; at?: number }
+  | { type: 'candidate_available'; at?: number };
 
 function readTimingValue(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
@@ -313,10 +330,17 @@ export function transitionAutonomyTurnGate(
   }
 
   if (action.type === 'external_event') {
+    if (
+      mode === 'monotonic' &&
+      action.event === 'viewer_speech' &&
+      (current.phase === 'ready' || current.phase === 'refractory')
+    ) {
+      return createRefractoryState(at, timing, random, mode);
+    }
+    if (current.phase === 'waiting_candidate') {
+      return createRefractoryState(at, timing, random, mode);
+    }
     if (current.phase === 'refractory') {
-      if (mode === 'monotonic' && action.event === 'viewer_speech') {
-        return createRefractoryState(at, timing, random, mode);
-      }
       return {
         phase: 'ready',
         nextEligibleAt: null,
@@ -357,6 +381,20 @@ export function transitionAutonomyTurnGate(
 
   if (action.type === 'opportunity_skipped') {
     if (current.phase !== 'ready') return current;
+    if (mode === 'monotonic') {
+      return {
+        phase: 'waiting_candidate',
+        nextEligibleAt: null,
+        quietStartedAt: null,
+        readinessThreshold: null,
+        reopenAfterTurn: false,
+      };
+    }
+    return createRefractoryState(at, timing, random, mode);
+  }
+
+  if (action.type === 'candidate_available') {
+    if (current.phase !== 'waiting_candidate') return current;
     return createRefractoryState(at, timing, random, mode);
   }
 

@@ -27,18 +27,26 @@ export interface AutonomousSchedulerState {
   isTurnGateReady: boolean;
 }
 
-export function shouldScheduleAutonomousTalk(
+export function areAutonomousHardGatesOpen(
   state: AutonomousSchedulerState,
 ): boolean {
   return (
-    state.hasCandidate &&
-    state.isTurnGateReady &&
     !state.isMuted &&
     state.isLoopEnabled &&
     !state.isVoiceActivityActive &&
     state.isReady &&
     state.isVisible &&
     !state.isBusy
+  );
+}
+
+export function shouldScheduleAutonomousTalk(
+  state: AutonomousSchedulerState,
+): boolean {
+  return (
+    state.hasCandidate &&
+    state.isTurnGateReady &&
+    areAutonomousHardGatesOpen(state)
   );
 }
 
@@ -51,6 +59,25 @@ export interface AutonomyCandidateTelemetry {
   episodeId: string;
   reasonIds: readonly string[];
   decisionEvidenceIds: readonly string[];
+}
+
+export interface AutonomousTurnAttempt {
+  readonly generation: number;
+}
+
+export function isCurrentAutonomousTurnAttempt(
+  activeAttempt: AutonomousTurnAttempt | null,
+  expectedAttempt: AutonomousTurnAttempt,
+  currentGeneration: number,
+): boolean {
+  return (
+    activeAttempt === expectedAttempt &&
+    expectedAttempt.generation === currentGeneration
+  );
+}
+
+interface ActiveAutonomousTurn extends AutonomousTurnAttempt {
+  readonly telemetry: AutonomyCandidateTelemetry | null;
 }
 
 interface UseAutonomousTalkOptions {
@@ -73,13 +100,9 @@ interface UseAutonomousTalkOptions {
   timingMode?: AutonomyTimingMode;
 }
 
-function readBlockReason(
+function readHardGateBlockReason(
   state: AutonomousSchedulerState,
-  gate: AutonomyTurnGateState,
 ): AutonomyTurnGateBlockReason | null {
-  if (gate.phase === 'initial_quiet') return 'initial_quiet';
-  if (gate.phase === 'refractory') return 'refractory';
-  if (gate.phase === 'running') return 'running';
   if (state.isBusy) return 'busy';
   if (state.isVoiceActivityActive) return 'voice_activity';
   if (!state.isLoopEnabled) return 'loop_disabled';
@@ -87,6 +110,17 @@ function readBlockReason(
   if (!state.isReady) return 'not_ready';
   if (!state.isVisible) return 'hidden';
   return null;
+}
+
+function readBlockReason(
+  state: AutonomousSchedulerState,
+  gate: AutonomyTurnGateState,
+): AutonomyTurnGateBlockReason | null {
+  if (gate.phase === 'initial_quiet') return 'initial_quiet';
+  if (gate.phase === 'refractory') return 'refractory';
+  if (gate.phase === 'running') return 'running';
+  if (gate.phase === 'waiting_candidate') return 'no_candidate';
+  return readHardGateBlockReason(state);
 }
 
 function readTransition(
@@ -141,9 +175,7 @@ export function useAutonomousTalk({
   const onCandidateRef = useRef(onCandidate);
   const onGateEventRef = useRef(onGateEvent);
   const candidateTelemetryRef = useRef(candidateTelemetry);
-  const activeCandidateTelemetryRef = useRef<AutonomyCandidateTelemetry | null>(
-    null,
-  );
+  const activeTurnRef = useRef<ActiveAutonomousTurn | null>(null);
   const dispatchedCandidateRef = useRef<string | null>(null);
   const lastCandidateKeyRef = useRef<string | null>(null);
   const lastDecisionKeyRef = useRef<string | null>(null);
@@ -254,7 +286,7 @@ export function useAutonomousTalk({
     gateStateRef.current = next;
     setGateState(next);
     dispatchedCandidateRef.current = null;
-    activeCandidateTelemetryRef.current = null;
+    activeTurnRef.current = null;
     lastCandidateKeyRef.current = null;
     lastDecisionKeyRef.current = null;
     lastSkippedOpportunityRef.current = null;
@@ -291,7 +323,7 @@ export function useAutonomousTalk({
   }, [applyGateAction, emitGateEvent, externalEventSignal]);
 
   useEffect(() => {
-    const waitMs = getAutonomyTurnGateWaitMs(gateState);
+    const waitMs = getAutonomyTurnGateWaitMs(gateState, nowRef.current());
     if (waitMs === null) return;
 
     const timer = window.setTimeout(() => {
@@ -313,6 +345,17 @@ export function useAutonomousTalk({
   }, [applyGateAction, emitGateEvent, gateState]);
 
   useEffect(() => {
+    const schedulerState: AutonomousSchedulerState = {
+      hasCandidate,
+      isBusy,
+      isVoiceActivityActive,
+      isLoopEnabled,
+      isMuted,
+      isReady,
+      isVisible,
+      isTurnGateReady: isAutonomyTurnGateReady(gateState),
+    };
+
     if (!candidateKey) {
       lastCandidateKeyRef.current = null;
       lastDecisionKeyRef.current = null;
@@ -320,7 +363,8 @@ export function useAutonomousTalk({
         timingModeRef.current === 'monotonic' &&
         gateState.phase === 'ready' &&
         gateState.quietStartedAt !== null &&
-        gateState.readinessThreshold !== null
+        gateState.readinessThreshold !== null &&
+        areAutonomousHardGatesOpen(schedulerState)
       ) {
         const opportunityKey = `${gateState.quietStartedAt}:${gateState.readinessThreshold}`;
         if (lastSkippedOpportunityRef.current !== opportunityKey) {
@@ -352,16 +396,28 @@ export function useAutonomousTalk({
       });
     }
 
-    const schedulerState: AutonomousSchedulerState = {
-      hasCandidate,
-      isBusy,
-      isVoiceActivityActive,
-      isLoopEnabled,
-      isMuted,
-      isReady,
-      isVisible,
-      isTurnGateReady: isAutonomyTurnGateReady(gateState),
-    };
+    if (gateState.phase === 'waiting_candidate') {
+      const hardGateBlockReason = readHardGateBlockReason(schedulerState);
+      if (hardGateBlockReason !== null) {
+        const decisionKey = `${candidateKey}:waiting_candidate:${hardGateBlockReason}`;
+        if (lastDecisionKeyRef.current !== decisionKey) {
+          lastDecisionKeyRef.current = decisionKey;
+          emitGateEvent({
+            gateEvent: 'gate_blocked',
+            gatePhase: gateState.phase,
+            transition: 'blocked',
+            blockedBy: hardGateBlockReason,
+          });
+        }
+        return;
+      }
+      applyGateAction({
+        type: 'candidate_available',
+        at: nowRef.current(),
+      });
+      return;
+    }
+
     const blockReason = readBlockReason(schedulerState, gateState);
     if (!shouldScheduleAutonomousTalk(schedulerState)) {
       const decisionKey = `${candidateKey}:${gateState.phase}:${
@@ -397,11 +453,15 @@ export function useAutonomousTalk({
     }
 
     dispatchedCandidateRef.current = candidateKey;
-    activeCandidateTelemetryRef.current = candidateTelemetryRef.current;
+    const activeTurn: ActiveAutonomousTurn = {
+      generation: sessionGenerationRef.current,
+      telemetry: candidateTelemetryRef.current,
+    };
+    activeTurnRef.current = activeTurn;
     const startedAt = nowRef.current();
     const started = applyGateAction({ type: 'turn_started', at: startedAt });
     if (!started.changed) {
-      activeCandidateTelemetryRef.current = null;
+      activeTurnRef.current = null;
       return;
     }
     emitGateEvent({
@@ -413,13 +473,25 @@ export function useAutonomousTalk({
     void onCandidateRef
       .current()
       .then((outcome) => {
+        if (
+          !isCurrentAutonomousTurnAttempt(
+            activeTurnRef.current,
+            activeTurn,
+            sessionGenerationRef.current,
+          )
+        ) {
+          return;
+        }
         const completed = outcome === 'speak' || outcome === 'none';
         const previous = gateStateRef.current;
         const result = applyGateAction({
           type: completed ? 'turn_completed' : 'turn_aborted',
           at: nowRef.current(),
         });
-        if (!result.changed) return;
+        if (!result.changed) {
+          activeTurnRef.current = null;
+          return;
+        }
         const delayMs =
           result.next.nextEligibleAt === null
             ? undefined
@@ -435,23 +507,35 @@ export function useAutonomousTalk({
             : undefined,
           nextEligibleAt: result.next.nextEligibleAt,
           delayMs,
-        }, activeCandidateTelemetryRef.current);
-        activeCandidateTelemetryRef.current = null;
+        }, activeTurn.telemetry);
+        activeTurnRef.current = null;
       })
       .catch(() => {
+        if (
+          !isCurrentAutonomousTurnAttempt(
+            activeTurnRef.current,
+            activeTurn,
+            sessionGenerationRef.current,
+          )
+        ) {
+          return;
+        }
         const previous = gateStateRef.current;
         const result = applyGateAction({
           type: 'turn_aborted',
           at: nowRef.current(),
         });
-        if (!result.changed) return;
+        if (!result.changed) {
+          activeTurnRef.current = null;
+          return;
+        }
         emitGateEvent({
           gateEvent: 'turn_aborted',
           gatePhase: result.next.phase,
           transition: readTransition(previous, result.next),
           nextEligibleAt: result.next.nextEligibleAt,
-        }, activeCandidateTelemetryRef.current);
-        activeCandidateTelemetryRef.current = null;
+        }, activeTurn.telemetry);
+        activeTurnRef.current = null;
       });
   }, [
     applyGateAction,
