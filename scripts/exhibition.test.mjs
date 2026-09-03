@@ -128,6 +128,7 @@ test('LLM provider latency summary separates interactive sources', () => {
       providerDone('voice', 30),
       providerDone('card_change', 40),
       providerDone('autonomous', 9_999),
+      { ...providerDone('voice', 1), warmup: 1 },
     ],
   });
 

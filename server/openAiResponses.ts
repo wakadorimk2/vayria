@@ -172,7 +172,7 @@ export function buildOpenAiResponsesBody(
       },
     },
     input: buildInput(request),
-    ...(request.serviceTier === 'fast' ? { service_tier: 'fast' } : {}),
+    service_tier: request.serviceTier === 'fast' ? 'fast' : 'default',
     ...(request.cache
       ? {
           prompt_cache_key: request.cache.key,

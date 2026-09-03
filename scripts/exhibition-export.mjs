@@ -113,7 +113,9 @@ function summarizeLlmProviderLatency(events) {
       const values = events
         .filter(
           (event) =>
-            event.event === 'llm_provider_done' && event.source === source,
+            event.event === 'llm_provider_done' &&
+            event.source === source &&
+            event.warmup !== 1,
         )
         .map((event) => event.elapsedMs)
         .filter(
@@ -158,6 +160,7 @@ function summarizeLlmCacheProfiles(events) {
       tier: event.actualTier ?? event.requestedTier ?? 'unknown',
       retry: Number.isInteger(event.retry) ? event.retry : 0,
       fallback: typeof event.fallbackReason === 'string',
+      warmup: event.warmup === 1,
       aborted:
         typeof event.turnId === 'string' && abortedTurns.has(event.turnId),
     };

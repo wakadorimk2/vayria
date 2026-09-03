@@ -67,13 +67,13 @@ test('Responses body uses Luna structured output without storage', () => {
   assert.equal(JSON.stringify(body).includes('test-key'), false);
 });
 
-test('standard tier and cache-disabled requests omit optional cache fields', () => {
+test('standard tier is explicit and cache-disabled requests omit cache fields', () => {
   const body = buildOpenAiResponsesBody({
     ...baseRequest,
     serviceTier: 'standard',
     cache: undefined,
   });
-  assert.equal('service_tier' in body, false);
+  assert.equal(body.service_tier, 'default');
   assert.equal('prompt_cache_key' in body, false);
   assert.equal('prompt_cache_options' in body, false);
   const input = body.input as Array<Record<string, unknown>>;

@@ -362,6 +362,7 @@ test('interactive summaries calculate p50 and p95 and exclude autonomous calls',
     done('voice', 30),
     done('card_change', 40),
     done('autonomous', 9_999),
+    { ...done('voice', 1), warmup: 1 },
   ]);
 
   assert.deepEqual(summary, [

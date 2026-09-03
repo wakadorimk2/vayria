@@ -278,6 +278,7 @@ interface LlmRequestContext {
   runtime: LlmRuntimeOptions;
   signal: AbortSignal;
   onFallback: (reason: string) => void;
+  warmup: boolean;
 }
 
 const DEFAULT_LLM_RUNTIME: LlmRuntimeOptions = {
@@ -679,6 +680,7 @@ const PLAYCHECK_RECORD_FIELDS = [
   'requestBytes',
   'warmup',
   'fallbackReason',
+  'parserMilestone',
   'unitIndex',
   'characterCount',
   'gateEvent',
@@ -3026,7 +3028,7 @@ async function generateConversationActionPolicy(
         setMetadata({
           ...result.telemetry,
           actualModel: result.actualModel,
-          warmup: 0,
+          warmup: llm.warmup ? 1 : 0,
           ...(result.fallbackReason
             ? { fallbackReason: result.fallbackReason }
             : {}),
@@ -3136,6 +3138,14 @@ interface StreamingReplyCallbacks {
   ) => void;
   onStateRejected: () => void;
   onDeliveryMetadataRejected: () => void;
+  onParserMilestone?: (
+    milestone:
+      | 'delivery_header_complete'
+      | 'speech_lead_complete'
+      | 'provisional_validation_rejected'
+      | 'full_json_complete'
+      | 'speech_unit_written',
+  ) => void;
 }
 
 async function generateInteractiveResponse(
@@ -3207,6 +3217,7 @@ async function generateInteractiveResponse(
             }),
           onStateRejected: streaming.onStateRejected,
           onDeliveryMetadataRejected: streaming.onDeliveryMetadataRejected,
+          onParserMilestone: streaming.onParserMilestone,
         }
       : null,
     earlySpeechLead,
@@ -3721,6 +3732,8 @@ async function generateReply(
       ? new IncrementalSpeechEnvelopeParser()
       : null;
     let attemptHeader: Record<string, unknown> | null = null;
+    let headerMilestoneRecorded = false;
+    let leadMilestoneRecorded = false;
     await telemetry.run(
       { purpose: 'response-generation', retry },
       async (markFirstChunk, setMetadata) => {
@@ -3755,6 +3768,8 @@ async function generateReply(
             streamedReply = '';
             completedReply = '';
             attemptHeader = null;
+            headerMilestoneRecorded = false;
+            leadMilestoneRecorded = false;
             envelopeParser = streamingEnabled
               ? new IncrementalSpeechEnvelopeParser()
               : null;
@@ -3771,8 +3786,16 @@ async function generateReply(
               !Array.isArray(parsed.deliveryHeader)
             ) {
               attemptHeader = parsed.deliveryHeader as Record<string, unknown>;
+              if (!headerMilestoneRecorded) {
+                headerMilestoneRecorded = true;
+                streaming?.onParserMilestone?.('delivery_header_complete');
+              }
             }
             if (!attemptHeader) return;
+            if (parsed.speechLead !== undefined && !leadMilestoneRecorded) {
+              leadMilestoneRecorded = true;
+              streaming?.onParserMilestone?.('speech_lead_complete');
+            }
             if (
               parsed.speechLead !== undefined &&
               isValidSpeechLead(parsed.speechLead) &&
@@ -3781,6 +3804,9 @@ async function generateReply(
               try {
                 commitSpeechUnit(attemptHeader, parsed.speechLead);
               } catch {
+                streaming?.onParserMilestone?.(
+                  'provisional_validation_rejected',
+                );
                 // The full contract decides whether the attempt can retry.
               }
             }
@@ -3789,6 +3815,9 @@ async function generateReply(
               try {
                 commitSpeechUnit(attemptHeader, unit);
               } catch {
+                streaming?.onParserMilestone?.(
+                  'provisional_validation_rejected',
+                );
                 // The full contract decides whether the attempt can retry.
               }
             }
@@ -3801,7 +3830,7 @@ async function generateReply(
         setMetadata({
           ...result.telemetry,
           actualModel: result.actualModel,
-          warmup: 0,
+          warmup: llm.warmup ? 1 : 0,
           ...(result.fallbackReason
             ? { fallbackReason: result.fallbackReason }
             : {}),
@@ -3835,6 +3864,7 @@ async function generateReply(
     let envelope;
     try {
       envelope = parseStreamingSpeechEnvelope(value);
+      streaming?.onParserMilestone?.('full_json_complete');
     } catch (error) {
       throw new CardContractError(
         error instanceof Error ? error.message : 'Invalid streaming response.',
@@ -4044,7 +4074,7 @@ async function generateCardPreviewReply(
       setMetadata({
         ...result.telemetry,
         actualModel: result.actualModel,
-        warmup: 0,
+        warmup: llm.warmup ? 1 : 0,
         ...(result.fallbackReason
           ? { fallbackReason: result.fallbackReason }
           : {}),
@@ -4773,6 +4803,7 @@ async function handleRequest(
         apiKey: config.openAiApiKey,
         runtime: config.llmRuntime ?? DEFAULT_LLM_RUNTIME,
         signal: providerAbortController.signal,
+        warmup: false,
         onFallback: (reason) => {
           void recordStructuredEvent(config, 'llm_fallback', {
             origin: 'server',
@@ -4889,6 +4920,7 @@ async function handleRequest(
         apiKey: config.openAiApiKey,
         runtime: config.llmRuntime ?? DEFAULT_LLM_RUNTIME,
         signal: providerAbortController.signal,
+        warmup: false,
         onFallback: (reason) => {
           void recordStructuredEvent(config, 'llm_fallback', {
             origin: 'server',
@@ -4915,12 +4947,23 @@ async function handleRequest(
                 text: unit,
                 response: streamedCandidate,
               });
+              streamingCallbacks?.onParserMilestone?.('speech_unit_written');
             },
             onStateRejected: () => {
               stateRejected = true;
             },
             onDeliveryMetadataRejected: () => {
               deliveryMetadataRejected = true;
+            },
+            onParserMilestone: (parserMilestone) => {
+              void recordStructuredEvent(config, 'llm_parser_milestone', {
+                origin: 'server',
+                requestId,
+                runId: playcheckRunId,
+                turnId: providerTurnId,
+                source: providerSource,
+                parserMilestone,
+              });
             },
           }
         : null;
@@ -5426,6 +5469,61 @@ async function handleRequest(
   }
 }
 
+async function warmInteractiveLlmCache(config: LocalApiConfig): Promise<boolean> {
+  const runtime = config.llmRuntime ?? DEFAULT_LLM_RUNTIME;
+  if (
+    !config.openAiApiKey ||
+    !runtime.cacheWarmupEnabled ||
+    runtime.profile !== 'luna-explicit'
+  ) {
+    return false;
+  }
+  const controller = new AbortController();
+  const requestId = randomUUID();
+  const turnId = `warmup:voice:${requestId}`;
+  const telemetry = createRequestLlmProviderTracker(config, {
+    requestId,
+    turnId,
+    source: 'voice',
+    signal: controller.signal,
+  });
+  const llm: LlmRequestContext = {
+    apiKey: config.openAiApiKey,
+    runtime: { ...runtime, fallbackEnabled: false },
+    signal: controller.signal,
+    warmup: true,
+    onFallback: () => undefined,
+  };
+  await generateReply(
+    llm,
+    'voice',
+    '今日の配信で最初に気になったことは？',
+    [],
+    cardPool.slice(0, BRAIN_CARD_COUNT).map((card) => card.id),
+    null,
+    null,
+    0,
+    null,
+    0,
+    'available',
+    null,
+    null,
+    { callbackTendency: 0.5, fragmentation: 0, semanticBiases: [] },
+    DEFAULT_CHARACTER_IDENTITY,
+    DEFAULT_PROGRAM_CONTEXT,
+    null,
+    telemetry,
+    {
+      onSpeechUnit: () => undefined,
+      onStateRejected: () => undefined,
+      onDeliveryMetadataRejected: () => undefined,
+    },
+    true,
+    [],
+  );
+  return true;
+}
+
 export function localApiPlugin(config: LocalApiConfig): Plugin {
   return {
     name: 'performer-local-api',
@@ -5492,6 +5590,16 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
       if (readTtsBackend(config.ttsBackend) === 'local') {
         void reportAivisSelection(requestConfig);
       }
+      void (exhibitionCapture?.ready ?? Promise.resolve())
+        .then(() => warmInteractiveLlmCache(requestConfig))
+        .then((warmed) => {
+          if (warmed) {
+            console.info('[llm-cache] voice cache warmup completed.');
+          }
+        })
+        .catch((error: unknown) => {
+          console.warn('LLM cache warmup failed.', error);
+        });
       server.middlewares.use((request, response, next) => {
         const pathname = new URL(
           request.url ?? '/',

@@ -206,7 +206,9 @@ export function summarizeInteractiveLlmProviderLatency(
     const samples = events
       .filter(
         (event) =>
-          event.event === 'llm_provider_done' && event.source === source,
+          event.event === 'llm_provider_done' &&
+          event.source === source &&
+          event.warmup !== 1,
       )
       .map((event) => event.elapsedMs);
     return {
