@@ -9,6 +9,9 @@ const testFiles = [
     'node_modules/.tmp/performer-test/scripts/card-drop-reaction.test.js',
   ),
   resolve(
+    'node_modules/.tmp/performer-test/scripts/card-drop-preview.test.js',
+  ),
+  resolve(
     'node_modules/.tmp/performer-test/scripts/performer-runtime.test.js',
   ),
   resolve(
@@ -31,6 +34,9 @@ const testFiles = [
   ),
   resolve(
     'node_modules/.tmp/performer-test/scripts/autonomy-state.test.js',
+  ),
+  resolve(
+    'node_modules/.tmp/performer-test/scripts/utterance-plan.test.js',
   ),
 ];
 const result = spawnSync(process.execPath, ['--test', ...testFiles], {

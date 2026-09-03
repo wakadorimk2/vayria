@@ -57,6 +57,8 @@ test('voice assistant response keeps action, text, and card contracts together',
       text: '',
       emotion: 'neutral',
       activatedCards: [],
+      speechAct: null,
+      expressionLevel: null,
     }),
     brainCardIds,
     'card-a',
@@ -73,6 +75,8 @@ test('voice assistant response keeps action, text, and card contracts together',
       text: '',
       emotion: 'neutral',
       activatedCards: [],
+      speechAct: null,
+      expressionLevel: null,
     }),
     brainCardIds,
     'card-a',
@@ -88,6 +92,8 @@ test('voice assistant response keeps action, text, and card contracts together',
       text: 'それは面白いですわ',
       emotion: 'joy',
       activatedCards: ['card-a'],
+      speechAct: 'react',
+      expressionLevel: 'low',
     }),
     brainCardIds,
     'card-a',
@@ -96,6 +102,46 @@ test('voice assistant response keeps action, text, and card contracts together',
   assert.equal(takeFloor.voiceAction, 'take_floor');
   assert.equal(takeFloor.text, 'それは面白いですわ');
   assert.deepEqual(takeFloor.activatedCards, ['card-a']);
+
+  assert.throws(
+    () =>
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'take_floor',
+          backchannelCue: 'none',
+          text: 'まず補助Cardから話しますわ',
+          emotion: 'neutral',
+          activatedCards: ['card-b', 'card-a'],
+          speechAct: 'react',
+          expressionLevel: 'low',
+        }),
+        ['card-a', 'card-b'],
+        'card-a',
+        'Cardを入れました',
+      ),
+    /forced card first/,
+  );
+
+  assert.throws(
+    () =>
+      parseVoiceAssistantResponse(
+        JSON.stringify({
+          voiceAction: 'take_floor',
+          backchannelCue: 'none',
+          text: '強く反応しますわ',
+          emotion: 'surprised',
+          activatedCards: ['card-a'],
+          speechAct: 'react',
+          expressionLevel: 'high',
+        }),
+        brainCardIds,
+        'card-a',
+        'Cardを入れました',
+        undefined,
+        'medium',
+      ),
+    /expression budget/,
+  );
 
   assert.throws(
     () =>

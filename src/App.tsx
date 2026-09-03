@@ -439,7 +439,15 @@ export default function App() {
   );
   const spatialTargetDisposeTimerRef = useRef<number | null>(null);
   const cardGame = useCardGamePrototype();
-  const { acceptReply, beginReply, resetTurn, zones } = cardGame;
+  const {
+    acceptReply,
+    beginReply,
+    clearReplyPresentation,
+    presentReply,
+    resetTurn,
+    zones,
+  } = cardGame;
+  const cardPresentationPlanIdRef = useRef<string | null>(null);
   const performer = usePerformerRuntime();
   const {
     errorCode: cameraAttentionErrorCode,
@@ -930,6 +938,23 @@ export default function App() {
     [play, stageMotionPort, stop],
   );
 
+  const handleReplyPresentationStart = useCallback(
+    (planId: string, activatedCardIds: string[]) => {
+      cardPresentationPlanIdRef.current = planId;
+      presentReply(activatedCardIds);
+    },
+    [presentReply],
+  );
+
+  const handleReplyPresentationEnd = useCallback(
+    (planId: string) => {
+      if (cardPresentationPlanIdRef.current !== planId) return;
+      cardPresentationPlanIdRef.current = null;
+      clearReplyPresentation();
+    },
+    [clearReplyPresentation],
+  );
+
   const handleInteractionAction = useCallback(
     (decision: ConversationActionDecision) => {
       if (
@@ -1200,6 +1225,8 @@ export default function App() {
     onInteractionAction: handleInteractionAction,
     onInteractionTimelineEvent: handleInteractionTimelineEvent,
     onAutonomyDelta: handleAutonomyDelta,
+    onReplyPresentationStart: handleReplyPresentationStart,
+    onReplyPresentationEnd: handleReplyPresentationEnd,
   });
 
   const routerResetSessionRef = useRef<(() => void) | null>(null);

@@ -21,6 +21,11 @@ import type {
   CardSwapResult,
   CardZone,
 } from './useCardGamePrototype';
+import {
+  resolveCardDropPreview,
+  type CardDropPreview,
+  type CardDropPreviewLayout,
+} from './cardDropPreview';
 
 export interface CardInteractionTarget {
   readonly cardId: string;
@@ -71,25 +76,17 @@ interface DragSession {
   lastSpatialSampleAt: number;
   lastSpatialSampleCenter: SpatialViewportPoint;
   brainDropLayout: BrainDropLayout | null;
+  dropPreview: CardDropPreview | null;
   targetBrainCardId: string | null;
   top: number;
   width: number;
 }
 
-interface BrainDropLayout {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-  containerLeft: number;
-  gap: number;
-  cards: Array<{ id: string; width: number }>;
-}
+type BrainDropLayout = CardDropPreviewLayout;
 
 const DRAG_THRESHOLD_PX = 7;
 const DRAG_SPATIAL_SAMPLE_INTERVAL_MS = 80;
 const DRAG_SPATIAL_DEAD_ZONE_PX = 16;
-const DROP_TARGET_MARGIN_PX = 16;
 const SHOW_DEVELOPER_CONTROLS =
   import.meta.env.DEV && runtimeConfig.mode === 'local';
 
@@ -100,22 +97,25 @@ function readBrainDropLayout(): BrainDropLayout | null {
   if (!brainCardsContainer) return null;
 
   const containerRect = brainCardsContainer.getBoundingClientRect();
-  const containerStyles = window.getComputedStyle(brainCardsContainer);
-  const containerLeft =
-    containerRect.left +
-    (Number.parseFloat(containerStyles.borderLeftWidth) || 0) +
-    (Number.parseFloat(containerStyles.paddingLeft) || 0);
-  const gap = Number.parseFloat(containerStyles.columnGap) || 0;
   const brainCardWrappers = Array.from(
     brainCardsContainer.children,
   ).filter((child): child is HTMLElement => child instanceof HTMLElement);
-  const cards: Array<{ id: string; width: number }> = [];
+  const cards: CardDropPreviewLayout['cards'][number][] = [];
   for (const brainCardWrapper of brainCardWrappers) {
     const cardElement = brainCardWrapper.querySelector<HTMLElement>(
       '[data-card-id]',
     );
     const id = cardElement?.dataset.cardId;
-    if (id) cards.push({ id, width: brainCardWrapper.offsetWidth });
+    if (id) {
+      const rect = brainCardWrapper.getBoundingClientRect();
+      cards.push({
+        id,
+        centerX: rect.left + rect.width / 2,
+        centerY: rect.top + rect.height / 2,
+        width: rect.width,
+        height: rect.height,
+      });
+    }
   }
 
   return {
@@ -123,40 +123,8 @@ function readBrainDropLayout(): BrainDropLayout | null {
     right: containerRect.right,
     top: containerRect.top,
     bottom: containerRect.bottom,
-    containerLeft,
-    gap,
     cards,
   };
-}
-
-function readBrainCardIdAtPoint(
-  layout: BrainDropLayout | null,
-  clientX: number,
-  clientY: number,
-): string | null {
-  if (!layout) return null;
-  const isInsideExpandedRow =
-    clientX >= layout.left - DROP_TARGET_MARGIN_PX &&
-    clientX <= layout.right + DROP_TARGET_MARGIN_PX &&
-    clientY >= layout.top - DROP_TARGET_MARGIN_PX &&
-    clientY <= layout.bottom + DROP_TARGET_MARGIN_PX;
-  if (!isInsideExpandedRow) return null;
-
-  let cardLeft = layout.containerLeft;
-  let nearestCardId: string | null = null;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const card of layout.cards) {
-    const cardCenterX = cardLeft + card.width / 2;
-    const distance = Math.abs(clientX - cardCenterX);
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearestCardId = card.id;
-    }
-
-    cardLeft += card.width + layout.gap;
-  }
-
-  return nearestCardId;
 }
 
 function createDragSpatialSample(
@@ -218,20 +186,6 @@ function readPointerTime(): number {
     : Date.now();
 }
 
-function getBrainDropWaveX(distanceFromTarget: number): string {
-  if (distanceFromTarget === 0) return '0px';
-
-  if (distanceFromTarget < 0) {
-    return Math.abs(distanceFromTarget) === 1
-      ? 'var(--brain-drop-wave-left-near)'
-      : 'var(--brain-drop-wave-left-far)';
-  }
-
-  return Math.abs(distanceFromTarget) === 1
-    ? 'var(--brain-drop-wave-right-near)'
-    : 'var(--brain-drop-wave-right-far)';
-}
-
 export function CardGamePrototype({
   game,
   isResetLocked = false,
@@ -267,12 +221,6 @@ export function CardGamePrototype({
     dragActive ||
     selectedBrainCardId !== null ||
     selectedHandCardId !== null;
-  const brainDropTargetIndex =
-    dragState?.isDragging === true && dragState.targetBrainCardId
-      ? zones.brain.findIndex(
-          (card) => card.id === dragState.targetBrainCardId,
-        )
-      : -1;
 
   useEffect(() => {
     onSelectionActiveChange?.(selectionActive);
@@ -412,6 +360,7 @@ export function CardGamePrototype({
           y: rect.top + rect.height / 2,
         },
         brainDropLayout: readBrainDropLayout(),
+        dropPreview: null,
         targetBrainCardId: null,
         top: rect.top,
         width: rect.width,
@@ -455,13 +404,15 @@ export function CardGamePrototype({
 
       suppressNextClickRef.current = true;
 
-      const targetBrainCardId = readBrainCardIdAtPoint(
+      const finalPreview = resolveCardDropPreview(
         session.brainDropLayout,
-        clientX,
-        clientY,
+        {
+          x: clientX - session.offsetX + session.width / 2,
+          y: clientY - session.offsetY + session.height / 2,
+        },
       );
-      if (targetBrainCardId) {
-        if (commitSwap(targetBrainCardId, session.cardId)) {
+      if (finalPreview) {
+        if (commitSwap(finalPreview.targetCardId, session.cardId)) {
           suppressNextAppearanceAttentionRef.current = true;
         }
       }
@@ -482,16 +433,19 @@ export function CardGamePrototype({
 
       event.preventDefault();
       const startedDragging = !session.isDragging;
+      const nextLeft = event.clientX - session.offsetX;
+      const nextTop = event.clientY - session.offsetY;
+      const dropPreview = resolveCardDropPreview(session.brainDropLayout, {
+        x: nextLeft + session.width / 2,
+        y: nextTop + session.height / 2,
+      });
       let nextSession: DragSession = {
         ...session,
+        dropPreview,
         isDragging: true,
-        left: event.clientX - session.offsetX,
-        targetBrainCardId: readBrainCardIdAtPoint(
-          session.brainDropLayout,
-          event.clientX,
-          event.clientY,
-        ),
-        top: event.clientY - session.offsetY,
+        left: nextLeft,
+        targetBrainCardId: dropPreview?.targetCardId ?? null,
+        top: nextTop,
       };
 
       dragSessionRef.current = nextSession;
@@ -577,9 +531,11 @@ export function CardGamePrototype({
   const renderCards = (zone: CardZone) => {
     const selectedId =
       zone === 'brain' ? selectedBrainCardId : selectedHandCardId;
-    return zones[zone].map((card, cardIndex) => {
+    return zones[zone].map((card) => {
       const isActive =
-        zone === 'brain' && zones.activatedCardIds.includes(card.id);
+        zone === 'brain' && zones.activatedCardIds[0] === card.id;
+      const isSupporting =
+        zone === 'brain' && zones.activatedCardIds[1] === card.id;
       const isPendingInsertion =
         zone === 'brain' && zones.forcedCardId === card.id;
       const isDropTarget =
@@ -606,13 +562,13 @@ export function CardGamePrototype({
         motion = 'pending-insertion';
       }
 
-      const hasDropWave =
-        zone === 'brain' && brainDropTargetIndex >= 0;
-      const dropWaveX = hasDropWave
-        ? getBrainDropWaveX(cardIndex - brainDropTargetIndex)
-        : undefined;
-      const brainCardFloatStyle = dropWaveX
-        ? ({ '--brain-drop-wave-x': dropWaveX } as CSSProperties)
+      const dropPreview = isDropTarget ? dragState.dropPreview : null;
+      const brainCardFloatStyle = dropPreview
+        ? ({
+            '--brain-drop-progress': dropPreview.progress,
+            '--brain-drop-retreat-x': `${dropPreview.retreatX}px`,
+            '--brain-drop-retreat-y': `${dropPreview.retreatY}px`,
+          } as CSSProperties)
         : undefined;
 
       const renderedCard = (
@@ -627,13 +583,15 @@ export function CardGamePrototype({
           }
           onSelect={(event) => handleCardActivation(zone, card.id, event)}
           state={
-            visualInteractionLocked
-              ? 'disabled'
-              : selectedId === card.id
-                ? 'selected'
-                : isActive
-                  ? 'active'
-                  : 'normal'
+            isActive
+              ? 'active'
+              : isSupporting
+                ? 'supporting'
+                : visualInteractionLocked
+                  ? 'disabled'
+                  : selectedId === card.id
+                    ? 'selected'
+                    : 'normal'
           }
           interactionDisabled={interactionLocked}
         />
@@ -641,7 +599,7 @@ export function CardGamePrototype({
 
       return zone === 'brain' ? (
         <div
-          className={`brain-card-float${hasDropWave ? ' brain-card-float--drop-wave' : ''}`}
+          className={`brain-card-float${isDropTarget ? ' brain-card-float--drop-target' : ''}`}
           key={card.id}
           style={brainCardFloatStyle}
         >

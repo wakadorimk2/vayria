@@ -69,7 +69,8 @@ export function WildcardCard({
   const isInteractive = Boolean(onSelect);
   const isDisabled = state === 'disabled';
   const isInputDisabled = isDisabled || interactionDisabled;
-  const stateLabel = state === 'active' ? '、発動' : '';
+  const stateLabel =
+    state === 'active' ? '、主役' : state === 'supporting' ? '、補助' : '';
   const motionClass = motion === 'none' ? '' : `wildcard-card--${motion}`;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {

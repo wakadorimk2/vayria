@@ -67,6 +67,16 @@ import {
   type AutonomyTurnGateTelemetry,
 } from '../src/conversation/autonomyTurnGate.js';
 import {
+  EXPRESSION_LEVELS,
+  SPEECH_ACTS,
+  isExpressionLevel,
+  isSpeechAct,
+  isWithinExpressionBudget,
+  resolveExpressionBudget,
+  type ExpressionLevel,
+  type SpeechAct,
+} from '../src/conversation/utterancePlan.js';
+import {
   ATTENTION_TARGETS,
   PERFORMER_PHASES,
   type PerformerStateContext,
@@ -146,7 +156,7 @@ const AIVIS_CONNECTION_ERROR =
   'AivisSpeech Engine に接続できません。AivisSpeech を起動しているか確認してください。';
 const NORMAL_VOICE_STYLE_NAME = VOICE_STYLE_BY_EMOTION.neutral;
 const BRAIN_CARD_COUNT = 5;
-const MAX_ACTIVATED_CARDS = 3;
+const MAX_ACTIVATED_CARDS = 2;
 const MAX_TOPIC_LENGTH = 120;
 const MAX_TOPIC_TURNS = 100;
 const MAX_VIEWER_TURNS_SINCE = 100;
@@ -310,6 +320,7 @@ interface ChatRequestPayload {
   lastSelfUtterance: string | null;
   performanceContext: PerformanceContextPayload;
   autonomyCandidate: AutonomyCandidate | null;
+  recentExpressionLevels: ExpressionLevel[];
 }
 
 interface CardPreviewRequestPayload {
@@ -319,6 +330,8 @@ interface CardPreviewRequestPayload {
 
 interface CardAssistantResponse extends AssistantResponse {
   activatedCards: string[];
+  speechAct: SpeechAct | null;
+  expressionLevel: ExpressionLevel | null;
   externalAction?: AutonomyExternalAction;
   usedReasonIds?: string[];
   internalDelta?: AutonomyInternalDelta;
@@ -1126,6 +1139,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'lastSelfUtterance',
     'performanceContext',
     'autonomyCandidate',
+    'recentExpressionLevels',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError(
@@ -1254,6 +1268,19 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
       400,
     );
   }
+
+  const recentExpressionLevelsValue = record.recentExpressionLevels;
+  if (
+    !Array.isArray(recentExpressionLevelsValue) ||
+    recentExpressionLevelsValue.length > 10 ||
+    !recentExpressionLevelsValue.every(isExpressionLevel)
+  ) {
+    throw new RequestError(
+      'recentExpressionLevels must contain at most 10 expression levels.',
+      400,
+    );
+  }
+  const recentExpressionLevels = [...recentExpressionLevelsValue];
 
   const topicValue = record.topic;
   if (
@@ -1473,6 +1500,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     lastSelfUtterance,
     performanceContext,
     autonomyCandidate,
+    recentExpressionLevels,
   };
 }
 
@@ -1976,6 +2004,7 @@ function parseAssistantResponse(
   message: string | null,
   characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
   autonomyCandidate: AutonomyCandidate | null = null,
+  expressionBudget: ExpressionLevel = 'high',
 ): CardAssistantResponse {
   let payload: unknown;
   try {
@@ -2109,11 +2138,37 @@ function parseAssistantResponse(
     throw new CardContractError('The chat provider returned empty response text.');
   }
 
+  const isSpeaking =
+    mode === 'manual' ||
+    (mode === 'voice' && voiceAction === 'take_floor') ||
+    (mode === 'autonomous' && externalAction === 'speak');
+  const speechAct = record.speechAct;
+  const expressionLevel = record.expressionLevel;
+  if (isSpeaking) {
+    if (!isSpeechAct(speechAct)) {
+      throw new CardContractError(
+        'Speaking responses must contain a valid speechAct.',
+      );
+    }
+    if (!isExpressionLevel(expressionLevel)) {
+      throw new CardContractError(
+        'Speaking responses must contain a valid expressionLevel.',
+      );
+    }
+    if (!isWithinExpressionBudget(expressionLevel, expressionBudget)) {
+      throw new CardContractError(
+        'expressionLevel must not exceed the runtime expression budget.',
+      );
+    }
+  } else if (speechAct !== null || expressionLevel !== null) {
+    throw new CardContractError(
+      'Non-speaking responses must use null speechAct and expressionLevel.',
+    );
+  }
+
   const activatedCards = record.activatedCards;
   const requiresActivatedCard =
-    mode === 'manual' ||
-    (mode === 'autonomous' && externalAction === 'speak' && forcedCardId !== null) ||
-    (mode === 'voice' && voiceAction === 'take_floor' && forcedCardId !== null);
+    isSpeaking;
   if (
     !Array.isArray(activatedCards) ||
     (requiresActivatedCard && activatedCards.length < 1) ||
@@ -2146,9 +2201,9 @@ function parseAssistantResponse(
     forcedCardId !== null &&
     (mode !== 'voice' || voiceAction === 'take_floor') &&
     !(mode === 'autonomous' && externalAction === 'none');
-  if (mustIncludeForcedCard && !activatedCards.includes(forcedCardId)) {
+  if (mustIncludeForcedCard && activatedCards[0] !== forcedCardId) {
     throw new CardContractError(
-      'activatedCards must include the forced card.',
+      'activatedCards must place the forced card first.',
     );
   }
 
@@ -2156,6 +2211,10 @@ function parseAssistantResponse(
     text,
     emotion: normalizeEmotion(record.emotion),
     activatedCards,
+    speechAct: isSpeaking ? (speechAct as SpeechAct) : null,
+    expressionLevel: isSpeaking
+      ? (expressionLevel as ExpressionLevel)
+      : null,
     ...(hasInternalDelta ? { internalDelta } : {}),
   };
   if (mode === 'autonomous') {
@@ -2179,6 +2238,7 @@ export function parseVoiceAssistantResponse(
   forcedCardId: string | null,
   message: string,
   characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
+  expressionBudget: ExpressionLevel = 'high',
 ): CardAssistantResponse {
   return parseAssistantResponse(
     value,
@@ -2187,6 +2247,8 @@ export function parseVoiceAssistantResponse(
     forcedCardId,
     message,
     characterIdentity,
+    null,
+    expressionBudget,
   );
 }
 
@@ -2196,6 +2258,7 @@ export function parseAutonomousAssistantResponse(
   brainCardIds: readonly string[],
   forcedCardId: string | null,
   characterIdentity: CharacterIdentity = DEFAULT_CHARACTER_IDENTITY,
+  expressionBudget: ExpressionLevel = 'high',
 ): CardAssistantResponse {
   return parseAssistantResponse(
     value,
@@ -2205,6 +2268,7 @@ export function parseAutonomousAssistantResponse(
     null,
     characterIdentity,
     candidate,
+    expressionBudget,
   );
 }
 
@@ -2500,6 +2564,8 @@ export function createInteractionReactionResponse(
     text: '',
     emotion: 'neutral',
     activatedCards: [],
+    speechAct: null,
+    expressionLevel: null,
     interactionAction: decision.action,
     backchannelCue: decision.backchannelCue,
   };
@@ -2533,6 +2599,19 @@ export const VOICE_REPLY_INSTRUCTION = [
   'Do not add a question unless the turn needs one.',
 ].join(' ');
 
+export function buildUtterancePlanInstruction(
+  expressionBudget: ExpressionLevel,
+): string {
+  return [
+    'Logically plan the response in two stages within this single response: first choose speechAct and the ordered primary/supporting cards, then write the utterance as that act.',
+    `The runtime expression budget is ${expressionBudget}. expressionLevel must not exceed it.`,
+    'Keep reactivity and interpersonal address high. Use expressionLevel only for theatricality.',
+    'Prefer low expression. Avoid poetic scene-setting, abstract emotional endings, decorative sensory chains, and vague aftertaste.',
+    'Use at most one card-derived association. Only high expression with a card that needs it may use one short lingering image.',
+    'Do not try to make every line clever. A plain concrete streamer reaction is normal.',
+  ].join('\n');
+}
+
 interface GeneratedChatResponse {
   response: CardAssistantResponse;
   providerCallCount: number;
@@ -2548,6 +2627,7 @@ async function generateInteractiveResponse(
   performanceContext: PerformanceContextPayload,
   characterIdentity: CharacterIdentity,
   programContext: ProgramContext,
+  recentExpressionLevels: readonly ExpressionLevel[],
 ): Promise<CardAssistantResponse> {
   const selfNameResolution = resolveSelfName(message, characterIdentity);
   const fastPathDecision: ConversationActionDecision | null =
@@ -2591,6 +2671,8 @@ async function generateInteractiveResponse(
     performanceContext,
     characterIdentity,
     programContext,
+    null,
+    recentExpressionLevels,
   );
   return {
     ...reply.response,
@@ -2682,7 +2764,16 @@ async function generateReply(
   characterIdentity: CharacterIdentity,
   programContext: ProgramContext,
   autonomyCandidate: AutonomyCandidate | null = null,
+  recentExpressionLevels: readonly ExpressionLevel[] = [],
 ): Promise<GeneratedChatResponse> {
+  const forcedCardEnergy = forcedCardId
+    ? CARD_REACTION_PROFILES[forcedCardId]?.behavior.energy ?? null
+    : null;
+  const expressionBudget = resolveExpressionBudget({
+    mode,
+    forcedCardEnergy,
+    recentExpressionLevels,
+  });
   const minActivatedCardItems = mode === 'manual' ? 1 : 0;
   const reasonUpdateSchema = {
     type: 'object',
@@ -2742,6 +2833,14 @@ async function generateReply(
       minItems: minActivatedCardItems,
       maxItems: MAX_ACTIVATED_CARDS,
     },
+    speechAct: {
+      type: ['string', 'null'],
+      enum: [...SPEECH_ACTS, null],
+    },
+    expressionLevel: {
+      type: ['string', 'null'],
+      enum: [...EXPRESSION_LEVELS, null],
+    },
     internalDelta: {
       type: 'object',
       properties: {
@@ -2787,6 +2886,8 @@ async function generateReply(
     'text',
     'emotion',
     'activatedCards',
+    'speechAct',
+    'expressionLevel',
     'internalDelta',
     ...(mode === 'autonomous' ? ['externalAction', 'usedReasonIds'] : []),
     ...(mode === 'voice' ? ['voiceAction', 'backchannelCue'] : []),
@@ -2831,8 +2932,9 @@ async function generateReply(
           ? 'For voiceAction take_floor, use its speaking-form influence in the spoken text, not only in hidden reasoning.'
           : 'Use its speaking-form influence in the spoken text, not only in hidden reasoning.',
         mode === 'voice'
-          ? `For voiceAction take_floor, activatedCards must include ${forcedCardId}. For listen, react_nonverbally, or backchannel, activatedCards must be empty.`
-          : `activatedCards must include ${forcedCardId} when externalAction is speak.`,
+          ? `For voiceAction take_floor, activatedCards[0] must be ${forcedCardId}. For listen, react_nonverbally, or backchannel, activatedCards must be empty.`
+          : `For a speaking response, activatedCards[0] must be ${forcedCardId}.`,
+        'Start the spoken text with a short immediate reaction shaped by that card. Do not merely explain or name the card.',
       ].join(' ')
     : 'No card is forced for this reply.';
   const responseInstruction =
@@ -2857,20 +2959,22 @@ async function generateReply(
       : '';
   const cardInfluenceInstruction =
     mode === 'voice'
-      ? 'For take_floor, use the forced card first when one exists. Make its content or speaking-form influence legible through a concrete, observable cue in the spoken text. For a forced concept card, include at least one concrete word or image from its content influence. For a forced style card, show its speaking-form cue. It is acceptable to use the card label itself. Do not satisfy the forced card only through hidden reasoning, a generic emotion, or an unrelated topic. Do not let the most natural topic erase the forced card. For listen, react_nonverbally, and backchannel, keep activatedCards empty and do not mention cards. Add at most two supporting cards only when their influence is visible in the spoken text. Do not force all five cards into the reply. Do not explain or list the card names.'
+      ? 'For take_floor, choose one primary card and at most one supporting card. activatedCards[0] is the primary card. Use the forced card first when one exists. Make the primary card legible through one concrete, observable cue in the spoken text. A concept card contributes one concrete word or situation. A mood card changes the reaction stance or delivery. An effect card changes the situation or creates a concise retort. Do not satisfy the primary card only through hidden reasoning, a generic emotion, or an unrelated topic. For listen, react_nonverbally, and backchannel, keep activatedCards empty and do not mention cards.'
       : mode === 'manual'
-      ? 'Use the forced card first when one exists. Make its content or speaking-form influence legible through a concrete, observable cue in the spoken text. For a forced concept card, include at least one concrete word or image from its content influence. For a forced style card, show its speaking-form cue. It is acceptable to use the card label itself. Do not satisfy the forced card only through hidden reasoning, a generic emotion, or an unrelated topic. Do not let the most natural topic erase the forced card. Add at most two supporting cards only when their influence is visible in the spoken text. Do not force all five cards into the reply. Do not explain or list the card names.'
+      ? 'Choose one primary card and at most one supporting card. activatedCards[0] is the primary card. Use the forced card first when one exists. Make the primary card legible through one concrete, observable cue in the spoken text. A concept card contributes one concrete word or situation. A mood card changes the reaction stance or delivery. An effect card changes the situation or creates a concise retort. Do not satisfy the primary card only through hidden reasoning, a generic emotion, or an unrelated topic. Do not explain or list card names.'
       : forcedCardId
-        ? 'For this autonomous reply, the forced card is the one strong card influence. Make its content or speaking-form influence concrete and observable. Do not let other brain cards override it.'
-        : 'For this autonomous reply, treat the five brain cards as background state. Do not inject a card label or its strongest image as a mandatory speaking style. Let cards influence topic, mood, or expression weakly when natural. Do not reuse the same card-derived cue every turn.';
+        ? 'For this autonomous reply, the forced card is activatedCards[0] and the one strong card influence. Make its content or speaking-form influence concrete and observable. Do not let another card override it.'
+        : 'For this autonomous reply, choose one primary card and optionally one supporting card from the five-card working set. activatedCards[0] is primary. Keep the influence concrete and light. Do not reuse the same card-derived cue every turn.';
   const activationInstruction =
     mode === 'voice'
-      ? 'For listen, react_nonverbally, and backchannel, return an empty activatedCards array. For take_floor, return only card IDs from the current five cards and include the forced card when one exists. Include supporting cards only when their influence is visible in the reply.'
+      ? 'For listen, react_nonverbally, and backchannel, return empty activatedCards and null speechAct and expressionLevel. For take_floor, return one primary card and at most one supporting card. Put the forced card first when one exists.'
       : mode === 'manual'
-      ? 'Return only card IDs from the current five cards in activatedCards. Include the forced card. Include a supporting card only when its content or speaking-form influence is visible in the reply.'
+      ? 'Return one primary card and at most one supporting card from the current five cards. Put the forced card first when one exists.'
       : forcedCardId
-        ? 'Return the forced card and at most two supporting card IDs from the current five cards in activatedCards.'
-        : 'Return zero or one card ID from the current five cards in activatedCards. An empty array is a normal autonomous speaking response.';
+        ? 'For speak, return the forced card first and at most one supporting card. For none, return empty activatedCards and null speechAct and expressionLevel.'
+        : 'For speak, return one primary card and at most one supporting card. For none, return empty activatedCards and null speechAct and expressionLevel.';
+  const utterancePlanInstruction =
+    buildUtterancePlanInstruction(expressionBudget);
   const performerPolicyInstruction = [
     'The performer runtime has already selected the following behavior parameters.',
     `callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
@@ -2916,6 +3020,7 @@ async function generateReply(
     forcedInstruction,
     performerPolicyInstruction,
     internalDeltaInstruction,
+    utterancePlanInstruction,
     'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
     activationInstruction,
   ].join('\n');
@@ -2964,6 +3069,7 @@ async function generateReply(
       message,
       characterIdentity,
       autonomyCandidate,
+      expressionBudget,
     );
     return { response, providerCallCount };
   } catch (error) {
@@ -2974,8 +3080,8 @@ async function generateReply(
   const response = parseAssistantResponse(
     await requestReply(
       mode === 'voice'
-        ? 'Your previous attempt violated the voice action or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text and empty activatedCards for listen, react_nonverbally, or backchannel. For content-bearing input, take_floor text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Use non-empty text for take_floor and include the forced current card when one exists.'
-        : 'Your previous attempt violated the card contract. Follow the current brain-card subset and forced-card requirements exactly.',
+        ? 'Your previous attempt violated the voice action, utterance-plan, or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text, empty activatedCards, null speechAct, and null expressionLevel for listen, react_nonverbally, or backchannel. For take_floor, return a valid speechAct and an expressionLevel within the budget. The text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Put the forced current card first when one exists.'
+        : 'Your previous attempt violated the utterance-plan or card contract. Follow the current brain-card subset, expression budget, and forced-card-first requirements exactly.',
     ),
     mode,
     brainCardIds,
@@ -2983,6 +3089,7 @@ async function generateReply(
     message,
     characterIdentity,
     autonomyCandidate,
+    expressionBudget,
   );
   return { response, providerCallCount };
 }
@@ -3772,6 +3879,7 @@ async function handleRequest(
         lastSelfUtterance,
         performanceContext,
         autonomyCandidate,
+        recentExpressionLevels,
       } = readChatRequest(payload);
       const startedAt = performance.now();
       const fastPathDecision =
@@ -3803,6 +3911,7 @@ async function handleRequest(
           performanceContext,
           characterIdentity,
           programContext,
+          recentExpressionLevels,
         );
       } else {
         const generatedResponse = await generateReply(
@@ -3823,6 +3932,7 @@ async function handleRequest(
           characterIdentity,
           programContext,
           autonomyCandidate,
+          recentExpressionLevels,
         );
         providerCallCount = generatedResponse.providerCallCount;
         assistantResponse =

@@ -632,6 +632,30 @@ test('motion preparation timeout falls back to immediate audio', async () => {
   });
 });
 
+test('card presentation lead delays speech even without prepared motion', async () => {
+  let requestedDelayMs: number | undefined;
+  const playAudio: PlayAudio = async (_audioData, options) => {
+    requestedDelayMs = options?.startDelayMs;
+    options?.onFirstAudioReady?.(1_000);
+    options?.onStart?.(1_120);
+  };
+  const coordinator = new PerformancePlaybackCoordinator({
+    getMotionPort: () => null,
+    playAudio,
+    stopAudio: () => undefined,
+    now: () => 1_120,
+  });
+
+  const plan = createPlan({ motion: undefined });
+  coordinator.prepare(plan);
+  const result = await coordinator.play(plan, bufferSource(), {
+    presentationLeadMs: 120,
+  });
+
+  assert.equal(requestedDelayMs, 120);
+  assert.equal(result?.speechStartedAt, 1_120);
+});
+
 test('card reaction uses the longer expression hold as the single tail', async () => {
   const events: string[] = [];
   const clock = new FakeClock();
