@@ -20,10 +20,14 @@ function createSwap(
   };
 }
 
-test('card drop reaction defaults to baseline and supports an independent candidate toggle', () => {
-  assert.equal(readCardDropReactionMode('', undefined), 'baseline');
+test('card drop reaction defaults to candidate and supports an independent baseline toggle', () => {
+  assert.equal(readCardDropReactionMode('', undefined), 'candidate');
   assert.equal(
-    readCardDropReactionMode('', 'candidate'),
+    readCardDropReactionMode('', 'baseline'),
+    'baseline',
+  );
+  assert.equal(
+    readCardDropReactionMode('?cardDropReaction=candidate', 'baseline'),
     'candidate',
   );
   assert.equal(
@@ -32,7 +36,7 @@ test('card drop reaction defaults to baseline and supports an independent candid
   );
   assert.equal(
     readCardDropReactionMode('?cardDropReaction=invalid', 'invalid'),
-    'baseline',
+    'candidate',
   );
 });
 

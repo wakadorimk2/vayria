@@ -62,7 +62,7 @@ export function readCardDropReactionMode(
   const queryValue = new URLSearchParams(search).get('cardDropReaction');
   if (isCardDropReactionMode(queryValue)) return queryValue;
   if (isCardDropReactionMode(environmentValue)) return environmentValue;
-  return 'baseline';
+  return 'candidate';
 }
 
 export function createCardDropReactionContribution(
