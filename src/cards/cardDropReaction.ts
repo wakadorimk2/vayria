@@ -148,6 +148,23 @@ export class CardDropReactionController {
     return true;
   }
 
+  prepareReplyHandoff(forcedCardId: string | null): boolean {
+    if (
+      this.state.phase === 'idle' ||
+      this.state.activeCardId === null ||
+      this.state.activeCardId !== forcedCardId
+    ) {
+      return false;
+    }
+    this.state = {
+      ...this.state,
+      phase: 'awaiting-reply',
+      reactionPlanId: null,
+      replyPlanId: null,
+    };
+    return true;
+  }
+
   handoffToReply(forcedCardId: string | null, planId: string): boolean {
     if (
       this.state.phase !== 'awaiting-reply' ||

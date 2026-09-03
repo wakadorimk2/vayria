@@ -1062,10 +1062,17 @@ export default function App() {
 
   const handlePerformanceResult = useCallback(
     (result: PerformanceResult) => {
-      if (activePlanRef.current?.planId !== result.planId) return;
       const isCardDropReactionPlan = cardDropReactionPlanIdsRef.current.delete(
         result.planId,
       );
+      if (isCardDropReactionPlan) {
+        cardDropReactionControllerRef.current.settleReaction(
+          result.planId,
+          result.outcome,
+        );
+      }
+      cardDropReactionControllerRef.current.settleReply(result.planId);
+      if (activePlanRef.current?.planId !== result.planId) return;
       const isCardReactionPlan = cardReactionPlanIdsRef.current.delete(
         result.planId,
       );
@@ -1078,13 +1085,6 @@ export default function App() {
       }
       playbackCoordinator.stop();
       completePlan(result);
-      if (isCardDropReactionPlan) {
-        cardDropReactionControllerRef.current.settleReaction(
-          result.planId,
-          result.outcome,
-        );
-      }
-      cardDropReactionControllerRef.current.settleReply(result.planId);
       if (isCardReactionPlan) {
         if (result.outcome === 'completed' && pendingActivatedCardIds) {
           acceptReply(pendingActivatedCardIds);
@@ -2079,8 +2079,6 @@ export default function App() {
               readAutonomyEvidenceContext(nextAutonomyState, evidenceId) ??
               undefined;
           }
-          cancelNonSpeechPlan();
-          cancelActiveCardReactionPlan();
           const identityForRequest = rememberExplicitAlias(message);
           const confirmedBargeIn =
             bargeInTransition?.effects.includes('interrupt') ?? false;
@@ -2111,6 +2109,12 @@ export default function App() {
           ) {
             return;
           }
+          const voiceCardContext = readCardContext();
+          cardDropReactionControllerRef.current.prepareReplyHandoff(
+            voiceCardContext.forcedCardId,
+          );
+          cancelNonSpeechPlan();
+          cancelActiveCardReactionPlan();
           setAutonomousContext((current) =>
             recordViewerIntent(current, message, identityForRequest),
           );
@@ -2119,7 +2123,6 @@ export default function App() {
             text: message,
           };
           const plan = createPlanForTrigger(trigger);
-          const voiceCardContext = readCardContext();
           cardDropReactionControllerRef.current.handoffToReply(
             voiceCardContext.forcedCardId,
             plan.planId,
@@ -2400,11 +2403,19 @@ export default function App() {
       const reducedMotion = window.matchMedia(
         '(prefers-reduced-motion: reduce)',
       ).matches;
-      const cardDropReaction = cardDropReactionControllerRef.current.begin(
-        result,
-        runtimeConfig.cardDropReactionMode,
-        reducedMotion,
-      );
+      const canStartCardDropReaction =
+        activePlanRef.current === null && !isBusy;
+      const cardDropReaction = canStartCardDropReaction
+        ? cardDropReactionControllerRef.current.begin(
+            result,
+            runtimeConfig.cardDropReactionMode,
+            reducedMotion,
+          )
+        : null;
+      if (!canStartCardDropReaction) {
+        cardDropReactionControllerRef.current.supersede();
+        cardDropReactionPlanIdsRef.current.clear();
+      }
       if (cardDropReaction) {
         spatialTargetRegistry.refreshDefault('game');
         if (!reducedMotion) {
@@ -2425,7 +2436,7 @@ export default function App() {
         cardDropReactionPlanIdsRef.current.add(reactionPlan.planId);
         executeNonSpeechPlan(reactionPlan);
       }
-      if (!isAutonomousLoopEnabled || isMuted || isBusy) return;
+      if (!isAutonomousLoopEnabled || isMuted) return;
       pendingCardStimulusRef.current = {
         cardContext: {
           brainCardIds: result.brainCardIds,
@@ -2507,6 +2518,10 @@ export default function App() {
     }
     stopReaction();
     stageRef.current?.stopReactionMotion();
+    const manualCardContext = readCardContext();
+    cardDropReactionControllerRef.current.prepareReplyHandoff(
+      manualCardContext.forcedCardId,
+    );
     if (source === 'autonomous') cancelAutonomous();
     cancelNonSpeechPlan();
     cancelActiveCardReactionPlan();
@@ -2547,7 +2562,6 @@ export default function App() {
       recordViewerIntent(current, trimmedInput, identityForRequest),
     );
     const plan = createPlanForTrigger(trigger);
-    const manualCardContext = readCardContext();
     cardDropReactionControllerRef.current.handoffToReply(
       manualCardContext.forcedCardId,
       plan.planId,
