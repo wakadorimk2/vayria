@@ -7,6 +7,8 @@ import type { AudioPlaybackSource } from './audioPlaybackSource.js';
 import {
   createMediaSourceStreamTarget,
   pumpMediaSourceAudio,
+  StreamingPlaybackPrimingGate,
+  type StreamingPlaybackPrimingReason,
 } from './mediaSourceStream.js';
 import {
   createRmsEnvelope,
@@ -35,8 +37,27 @@ export interface PlayAudioOptions {
   onComplete?: (completedAt: number) => void;
   onFirstAudioReady?: (readyAt: number) => void;
   onPlaybackGestureRequired?: (reason: PlaybackGestureReason) => void;
+  onPlaybackStartup?: (diagnostic: PlaybackStartupDiagnostic) => void;
   onReadyToStart?: (scheduledStartAt: number) => boolean | void;
   onStart?: (startedAt: number) => void;
+  streamPriming?: StreamingPlaybackPrimingOptions;
+}
+
+export interface StreamingPlaybackPrimingOptions {
+  maximumWaitMs: number;
+  targetMs: number;
+}
+
+export interface PlaybackStartupDiagnostic {
+  audioContextState: AudioContextState;
+  bufferedDurationMs: number;
+  firstChunkBytes?: number;
+  firstChunkIntervalMs?: number;
+  primingOutcome: StreamingPlaybackPrimingReason | 'disabled';
+  primingTargetMs: number;
+  primingWaitMs: number;
+  sampleRateHz: number;
+  sourceKind: AudioPlaybackSource['kind'];
 }
 
 export type PlayAudio = (
@@ -110,6 +131,7 @@ export function useAudioLipSync(volume = 1) {
   const streamingRmsEnvelopeRef = useRef<RmsEnvelope | null>(null);
   const streamReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const streamCancelRef = useRef<(() => void) | null>(null);
+  const streamPrimingGateRef = useRef<StreamingPlaybackPrimingGate | null>(null);
   const reactionAnalyserRef = useRef<AnalyserNode | null>(null);
   const reactionGainRef = useRef<GainNode | null>(null);
   const reactionSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -121,6 +143,7 @@ export function useAudioLipSync(volume = 1) {
   const generationRef = useRef(0);
   const reactionGenerationRef = useRef(0);
   const primaryPlaybackActiveRef = useRef(false);
+  const primaryPlaybackStartedAtRef = useRef<number | null>(null);
   const duckedRef = useRef(false);
   const primaryMouthOpenRef = useRef(0);
   const reactionMouthOpenRef = useRef(0);
@@ -217,6 +240,8 @@ export function useAudioLipSync(volume = 1) {
 
     streamCancelRef.current?.();
     streamCancelRef.current = null;
+    streamPrimingGateRef.current?.cancel();
+    streamPrimingGateRef.current = null;
     streamingAudioCaptureRef.current?.clear();
     streamingAudioCaptureRef.current = null;
     streamingRmsEnvelopeRef.current = null;
@@ -261,6 +286,7 @@ export function useAudioLipSync(volume = 1) {
     setMouthOpen(reactionMouthOpenRef.current);
     setIsSpeaking(false);
     primaryPlaybackActiveRef.current = false;
+    primaryPlaybackStartedAtRef.current = null;
   }, []);
 
   const clearReactionPlayback = useCallback(() => {
@@ -317,6 +343,11 @@ export function useAudioLipSync(volume = 1) {
         targetTime,
       );
     }
+  }, []);
+
+  const getPrimaryPlaybackAgeMs = useCallback((): number | null => {
+    const startedAt = primaryPlaybackStartedAtRef.current;
+    return startedAt === null ? null : Math.max(0, performance.now() - startedAt);
   }, []);
 
   const play = useCallback<PlayAudio>(
@@ -396,6 +427,24 @@ export function useAudioLipSync(volume = 1) {
           sourceBufferRef.current = sourceBuffer;
           const reader = audioSource.stream.getReader();
           streamReaderRef.current = reader;
+          const requestedPriming = options?.streamPriming;
+          const primingTargetMs = requestedPriming
+            ? normalizePlaybackDuration(requestedPriming.targetMs, 10_000)
+            : 0;
+          const primingMaximumWaitMs = requestedPriming
+            ? normalizePlaybackDuration(requestedPriming.maximumWaitMs, 10_000)
+            : 0;
+          const primingGate = requestedPriming
+            ? new StreamingPlaybackPrimingGate(
+                primingTargetMs,
+                primingMaximumWaitMs,
+              )
+            : null;
+          streamPrimingGateRef.current = primingGate;
+          let firstChunkAt: number | null = null;
+          let secondChunkAt: number | null = null;
+          let firstChunkBytes: number | undefined;
+          let bufferedDurationMs = 0;
           let resolveFirstAudio: () => void = () => undefined;
           let rejectPlayback: (error: unknown) => void = () => undefined;
           const firstAudio = new Promise<void>((resolve) => {
@@ -414,12 +463,29 @@ export function useAudioLipSync(volume = 1) {
             reader,
             createMediaSourceStreamTarget(mediaSource, sourceBuffer),
             {
-              onChunk: (chunk) => audioCapture.addChunk(chunk),
+              onChunk: (chunk) => {
+                const receivedAt = performance.now();
+                if (firstChunkAt === null) {
+                  firstChunkAt = receivedAt;
+                  firstChunkBytes = chunk.byteLength;
+                } else if (secondChunkAt === null) {
+                  secondChunkAt = receivedAt;
+                }
+                audioCapture.addChunk(chunk);
+              },
+              onChunkAppended: (_chunk, durationMs) => {
+                bufferedDurationMs = Math.max(bufferedDurationMs, durationMs);
+                primingGate?.observe(bufferedDurationMs);
+              },
               onFirstChunk: () => {
                 options?.onFirstAudioReady?.(performance.now());
                 resolveFirstAudio();
               },
-              onComplete: () => options?.onComplete?.(performance.now()),
+              onComplete: () => {
+                const completedAt = performance.now();
+                primingGate?.complete(completedAt);
+                options?.onComplete?.(completedAt);
+              },
             },
           );
           void pump.catch(() => undefined);
@@ -444,6 +510,26 @@ export function useAudioLipSync(volume = 1) {
 
           await Promise.race([firstAudio, interrupted, pump]);
           if (generation !== generationRef.current) return;
+          const primingResult = primingGate
+            ? await Promise.race([primingGate.wait(), interrupted])
+            : {
+                bufferedDurationMs: Math.round(bufferedDurationMs),
+                reason: 'disabled' as const,
+                waitedMs: 0,
+              };
+          if (streamPrimingGateRef.current === primingGate) {
+            streamPrimingGateRef.current = null;
+          }
+          if (
+            generation !== generationRef.current ||
+            primingResult.reason === 'cancelled'
+          ) {
+            return;
+          }
+          if (context.state !== 'running') await context.resume();
+          if (context.state !== 'running') {
+            throw new Error('AudioContext is not running');
+          }
 
           const samples = new Float32Array(analyser.fftSize);
           const updateMouth = () => {
@@ -489,9 +575,10 @@ export function useAudioLipSync(volume = 1) {
           });
           const handlePlaying = () => {
             resolvePlaying();
+            primaryPlaybackStartedAtRef.current = performance.now();
             setIsSpeaking(true);
             animationFrameRef.current = requestAnimationFrame(updateMouth);
-            options?.onStart?.(performance.now());
+            options?.onStart?.(primaryPlaybackStartedAtRef.current);
           };
           const ended = new Promise<void>((resolve, reject) => {
             const handleEnded = () => {
@@ -527,6 +614,28 @@ export function useAudioLipSync(volume = 1) {
               interrupted,
             ]);
           }
+          if (context.state !== 'running') await context.resume();
+          if (context.state !== 'running') {
+            throw new Error('AudioContext is not running');
+          }
+          options?.onPlaybackStartup?.({
+            audioContextState: context.state,
+            bufferedDurationMs: Math.round(primingResult.bufferedDurationMs),
+            ...(firstChunkBytes === undefined ? {} : { firstChunkBytes }),
+            ...(firstChunkAt === null || secondChunkAt === null
+              ? {}
+              : {
+                  firstChunkIntervalMs: Math.max(
+                    0,
+                    Math.round(secondChunkAt - firstChunkAt),
+                  ),
+                }),
+            primingOutcome: primingResult.reason,
+            primingTargetMs,
+            primingWaitMs: primingResult.waitedMs,
+            sampleRateHz: Math.round(context.sampleRate),
+            sourceKind: 'stream',
+          });
           const playAttempt = audio.play();
           void playAttempt.catch(() => undefined);
           const startOutcome = await monitorPlaybackStart(
@@ -611,6 +720,10 @@ export function useAudioLipSync(volume = 1) {
           animationFrameRef.current = requestAnimationFrame(updateMouth);
         };
 
+        if (context.state !== 'running') await context.resume();
+        if (context.state !== 'running') {
+          throw new Error('AudioContext is not running');
+        }
         return new Promise<void>((resolve) => {
           source.onended = () => {
             if (generation === generationRef.current) clearPlayback();
@@ -624,9 +737,10 @@ export function useAudioLipSync(volume = 1) {
             ) {
               return;
             }
+            primaryPlaybackStartedAtRef.current = performance.now();
             setIsSpeaking(true);
             animationFrameRef.current = requestAnimationFrame(updateMouth);
-            options?.onStart?.(performance.now());
+            options?.onStart?.(primaryPlaybackStartedAtRef.current);
           };
 
           const readyToStart = options?.onReadyToStart?.(scheduledStartAt);
@@ -634,6 +748,15 @@ export function useAudioLipSync(volume = 1) {
             readyToStart === false ? 0 : startDelayMs;
           const scheduledAudioTime =
             context.currentTime + effectiveStartDelayMs / 1_000;
+          options?.onPlaybackStartup?.({
+            audioContextState: context.state,
+            bufferedDurationMs: Math.max(0, Math.round(decodedAudio.duration * 1_000)),
+            primingOutcome: 'disabled',
+            primingTargetMs: 0,
+            primingWaitMs: 0,
+            sampleRateHz: Math.round(context.sampleRate),
+            sourceKind: 'buffer',
+          });
           source.start(scheduledAudioTime);
           if (effectiveStartDelayMs > 0) {
             startTimerRef.current = window.setTimeout(() => {
@@ -803,6 +926,7 @@ export function useAudioLipSync(volume = 1) {
     isAudioUnlocked,
     isReactionPlaying,
     isSpeaking,
+    getPrimaryPlaybackAgeMs,
     mouthOpen,
     needsPlaybackGesture,
     play,
@@ -812,4 +936,9 @@ export function useAudioLipSync(volume = 1) {
     stopReaction,
     stop,
   };
+}
+
+function normalizePlaybackDuration(value: number, maximum: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(Math.round(value), maximum));
 }

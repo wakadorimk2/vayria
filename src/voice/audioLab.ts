@@ -61,6 +61,7 @@ export const ADAPTIVE_NOISE_FLOOR_MULTIPLIER = 2.5;
 export const MILD_NOISE_FLOOR_MULTIPLIER = 2.0;
 export const BARGE_IN_DUCK_GAIN = 0.25;
 export const BARGE_IN_GAIN_RAMP_MS = 20;
+export const BARGE_IN_STARTUP_DUCK_GUARD_MS = 250;
 export const BARGE_IN_TIMEOUT_MS = 2_500;
 
 export const AUDIO_PROCESSING_CONSTRAINTS = [
@@ -73,7 +74,7 @@ export type AudioProcessingConstraint =
   (typeof AUDIO_PROCESSING_CONSTRAINTS)[number];
 
 export type BargeInState = 'idle' | 'candidate' | 'confirmed' | 'restored';
-export type BargeInAction = 'duck' | 'interrupt' | 'restore';
+export type BargeInAction = 'duck' | 'interrupt' | 'restore' | 'suppress_duck';
 
 export const KNOWN_HALLUCINATION_PHRASES = [
   'ご視聴ありがとうございました',
@@ -202,6 +203,7 @@ export type VoiceInputDiagnostic =
       action: BargeInAction;
       state: BargeInState;
       ttsPlaying: boolean;
+      playbackAgeMs?: number;
       reason?: string;
     }
   | {
@@ -530,6 +532,7 @@ export interface VoiceLabBargeInRecord {
   action: BargeInAction;
   state: BargeInState;
   ttsPlaying: boolean;
+  playbackAgeMs?: number;
   reason?: string;
 }
 
@@ -739,12 +742,17 @@ export function isVoiceInputDiagnostic(
     return (
       (record.action === 'duck' ||
         record.action === 'interrupt' ||
-        record.action === 'restore') &&
+        record.action === 'restore' ||
+        record.action === 'suppress_duck') &&
       (record.state === 'idle' ||
         record.state === 'candidate' ||
         record.state === 'confirmed' ||
         record.state === 'restored') &&
       typeof record.ttsPlaying === 'boolean' &&
+      (record.playbackAgeMs === undefined ||
+        (typeof record.playbackAgeMs === 'number' &&
+          Number.isFinite(record.playbackAgeMs) &&
+          record.playbackAgeMs >= 0)) &&
       Number.isFinite(record.at)
     );
   }

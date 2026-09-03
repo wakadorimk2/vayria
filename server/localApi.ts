@@ -64,6 +64,7 @@ import {
   AUTONOMY_TURN_GATE_EXTERNAL_EVENTS,
   AUTONOMY_TURN_GATE_PHASES,
   AUTONOMY_TURN_GATE_TRANSITIONS,
+  AUTONOMY_TIMING_MODES,
   type AutonomyTurnGateTelemetry,
 } from '../src/conversation/autonomyTurnGate.js';
 import {
@@ -203,6 +204,7 @@ const CONVERSATION_EVENTS = [
   'tts_fallback_completed',
   'tts_first_audio',
   'tts_ready',
+  'playback_startup',
   'playback_started',
   'playback_gesture_required',
   'tts_completed',
@@ -345,15 +347,25 @@ interface AivisSpeaker {
 }
 
 interface ClientConversationEvent {
+  audioContextState?: 'closed' | 'running' | 'suspended';
+  audioSourceKind?: 'buffer' | 'stream';
   at: string;
+  bufferedDurationMs?: number;
   elapsedMs: number;
   event: ConversationEventName;
   source: ConversationEventSource;
   turnId: string;
   durationMs?: number;
   emotion?: Emotion;
+  firstChunkBytes?: number;
+  firstChunkIntervalMs?: number;
   phase?: 'llm' | 'tts';
+  playbackRoute?: 'conversation';
+  primingOutcome?: 'cancelled' | 'complete' | 'disabled' | 'target' | 'timeout';
+  primingTargetMs?: number;
+  primingWaitMs?: number;
   reason?: string;
+  sampleRateHz?: number;
   interactionAction?: ConversationAction;
   runId?: string;
   gateEvent?: AutonomyTurnGateTelemetry['gateEvent'];
@@ -372,6 +384,12 @@ interface ClientConversationEvent {
   externalAction?: AutonomyTurnGateTelemetry['externalAction'];
   nextEligibleAt?: number | null;
   delayMs?: number;
+  timingMode?: AutonomyTurnGateTelemetry['timingMode'];
+  elapsedSilenceMs?: number;
+  readiness?: number;
+  threshold?: number;
+  opportunityOutcome?: AutonomyTurnGateTelemetry['opportunityOutcome'];
+  sessionGeneration?: number;
 }
 
 class RequestError extends Error {
@@ -557,6 +575,12 @@ const PLAYCHECK_RECORD_FIELDS = [
   'externalAction',
   'nextEligibleAt',
   'delayMs',
+  'timingMode',
+  'elapsedSilenceMs',
+  'readiness',
+  'threshold',
+  'opportunityOutcome',
+  'sessionGeneration',
 ] as const;
 const SAFE_PLAYCHECK_REASONS = new Set([
   'busy',
@@ -723,6 +747,17 @@ function readSafeEventId(value: unknown, field: string): string {
   return value;
 }
 
+function readNonNegativeEventInteger(value: unknown, field: string): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < 0
+  ) {
+    throw new RequestError(`${field} must be a non-negative integer.`, 400);
+  }
+  return value;
+}
+
 function readSafeEventIdList(value: unknown, field: string): string[] {
   if (!Array.isArray(value) || value.length > MAX_EVENT_ID_LIST_LENGTH) {
     throw new RequestError(`${field} must be a bounded string list.`, 400);
@@ -742,14 +777,24 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
   const record = payload as Record<string, unknown>;
   const allowedKeys = new Set([
     'at',
+    'audioContextState',
+    'audioSourceKind',
+    'bufferedDurationMs',
     'elapsedMs',
     'event',
     'source',
     'turnId',
     'durationMs',
     'emotion',
+    'firstChunkBytes',
+    'firstChunkIntervalMs',
     'phase',
+    'playbackRoute',
+    'primingOutcome',
+    'primingTargetMs',
+    'primingWaitMs',
     'reason',
+    'sampleRateHz',
     'interactionAction',
     'runId',
     'gateEvent',
@@ -768,6 +813,12 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     'externalAction',
     'nextEligibleAt',
     'delayMs',
+    'timingMode',
+    'elapsedSilenceMs',
+    'readiness',
+    'threshold',
+    'opportunityOutcome',
+    'sessionGeneration',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError('Event body contains an unsupported field.', 400);
@@ -794,6 +845,30 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
   ) {
     throw new RequestError('event is invalid.', 400);
   }
+  const playbackStartupFields = [
+    'audioContextState',
+    'audioSourceKind',
+    'bufferedDurationMs',
+    'firstChunkBytes',
+    'firstChunkIntervalMs',
+    'playbackRoute',
+    'primingOutcome',
+    'primingTargetMs',
+    'primingWaitMs',
+    'sampleRateHz',
+  ] as const;
+  const hasPlaybackStartupFields = playbackStartupFields.some(
+    (field) => record[field] !== undefined,
+  );
+  if (event !== 'playback_startup' && hasPlaybackStartupFields) {
+    throw new RequestError(
+      'Playback startup fields are only valid for playback_startup events.',
+      400,
+    );
+  }
+  if (event === 'playback_startup' && source !== 'voice') {
+    throw new RequestError('playback_startup events must use the voice source.', 400);
+  }
   if (
     event === 'playback_gesture_required' &&
     (typeof record.reason !== 'string' ||
@@ -817,6 +892,12 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     'externalAction',
     'nextEligibleAt',
     'delayMs',
+    'timingMode',
+    'elapsedSilenceMs',
+    'readiness',
+    'threshold',
+    'opportunityOutcome',
+    'sessionGeneration',
   ];
   const hasGateFields = gateFields.some((field) => record[field] !== undefined);
   if (event !== 'autonomy_gate' && hasGateFields) {
@@ -874,6 +955,48 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     source,
     turnId,
   };
+
+  if (event === 'playback_startup') {
+    if (record.playbackRoute !== 'conversation') {
+      throw new RequestError('playbackRoute is invalid.', 400);
+    }
+    if (record.audioSourceKind !== 'buffer' && record.audioSourceKind !== 'stream') {
+      throw new RequestError('audioSourceKind is invalid.', 400);
+    }
+    if (
+      record.audioContextState !== 'closed' &&
+      record.audioContextState !== 'running' &&
+      record.audioContextState !== 'suspended'
+    ) {
+      throw new RequestError('audioContextState is invalid.', 400);
+    }
+    if (
+      record.primingOutcome !== 'cancelled' &&
+      record.primingOutcome !== 'complete' &&
+      record.primingOutcome !== 'disabled' &&
+      record.primingOutcome !== 'target' &&
+      record.primingOutcome !== 'timeout'
+    ) {
+      throw new RequestError('primingOutcome is invalid.', 400);
+    }
+    for (const field of [
+      'bufferedDurationMs',
+      'primingTargetMs',
+      'primingWaitMs',
+      'sampleRateHz',
+    ] as const) {
+      eventPayload[field] = readNonNegativeEventInteger(record[field], field);
+    }
+    for (const field of ['firstChunkBytes', 'firstChunkIntervalMs'] as const) {
+      if (record[field] !== undefined) {
+        eventPayload[field] = readNonNegativeEventInteger(record[field], field);
+      }
+    }
+    eventPayload.playbackRoute = record.playbackRoute;
+    eventPayload.audioSourceKind = record.audioSourceKind;
+    eventPayload.audioContextState = record.audioContextState;
+    eventPayload.primingOutcome = record.primingOutcome;
+  }
 
   if (record.gateEvent !== undefined) {
     eventPayload.gateEvent = record.gateEvent as AutonomyTurnGateTelemetry['gateEvent'];
@@ -968,6 +1091,49 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
       throw new RequestError(`${field} is invalid.`, 400);
     }
     eventPayload[field] = value;
+  }
+  if (record.timingMode !== undefined) {
+    if (
+      typeof record.timingMode !== 'string' ||
+      !(AUTONOMY_TIMING_MODES as readonly string[]).includes(record.timingMode)
+    ) {
+      throw new RequestError('timingMode is invalid.', 400);
+    }
+    eventPayload.timingMode = record.timingMode as AutonomyTurnGateTelemetry['timingMode'];
+  }
+  for (const field of ['readiness', 'threshold'] as const) {
+    if (record[field] === undefined) continue;
+    const value = record[field];
+    if (
+      typeof value !== 'number' ||
+      !Number.isFinite(value) ||
+      value < 0 ||
+      value > 1
+    ) {
+      throw new RequestError(`${field} is invalid.`, 400);
+    }
+    eventPayload[field] = value;
+  }
+  for (const field of ['elapsedSilenceMs', 'sessionGeneration'] as const) {
+    if (record[field] === undefined) continue;
+    const value = record[field];
+    if (
+      typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < 0
+    ) {
+      throw new RequestError(`${field} is invalid.`, 400);
+    }
+    eventPayload[field] = value;
+  }
+  if (record.opportunityOutcome !== undefined) {
+    if (
+      record.opportunityOutcome !== 'fired' &&
+      record.opportunityOutcome !== 'skipped'
+    ) {
+      throw new RequestError('opportunityOutcome is invalid.', 400);
+    }
+    eventPayload.opportunityOutcome = record.opportunityOutcome;
   }
 
   if (record.runId !== undefined) {
@@ -4025,6 +4191,24 @@ async function handleRequest(
           ? {}
           : { nextEligibleAt: event.nextEligibleAt }),
         ...(event.delayMs === undefined ? {} : { delayMs: event.delayMs }),
+        ...(event.timingMode === undefined
+          ? {}
+          : { timingMode: event.timingMode }),
+        ...(event.elapsedSilenceMs === undefined
+          ? {}
+          : { elapsedSilenceMs: event.elapsedSilenceMs }),
+        ...(event.readiness === undefined
+          ? {}
+          : { readiness: event.readiness }),
+        ...(event.threshold === undefined
+          ? {}
+          : { threshold: event.threshold }),
+        ...(event.opportunityOutcome === undefined
+          ? {}
+          : { opportunityOutcome: event.opportunityOutcome }),
+        ...(event.sessionGeneration === undefined
+          ? {}
+          : { sessionGeneration: event.sessionGeneration }),
       });
       sendNoContent(response);
       return;

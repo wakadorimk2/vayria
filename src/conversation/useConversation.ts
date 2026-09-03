@@ -149,6 +149,8 @@ const ACTIVE_STATUSES: ConversationStatus[] = [
 ];
 
 const INTERACTIVE_SOURCES: ConversationSource[] = ['manual', 'voice'];
+const VOICE_STREAM_PRIMING_TARGET_MS = 150;
+const VOICE_STREAM_PRIMING_MAXIMUM_WAIT_MS = 300;
 
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
@@ -1281,6 +1283,14 @@ export function useConversation(
         }
 
         const playbackResult = await playback.play(plan, audioSource, {
+          ...(turnSource === 'voice'
+            ? {
+                streamPriming: {
+                  targetMs: VOICE_STREAM_PRIMING_TARGET_MS,
+                  maximumWaitMs: VOICE_STREAM_PRIMING_MAXIMUM_WAIT_MS,
+                },
+              }
+            : {}),
           onFirstAudioReady: (readyAt) => {
             eventEmitter.emit('tts_first_audio', {
               durationMs: readyAt - ttsStartedAt,
@@ -1315,6 +1325,31 @@ export function useConversation(
             eventEmitter.emit('playback_gesture_required', {
               phase: 'tts',
               reason,
+            });
+          },
+          onPlaybackStartup: (diagnostic) => {
+            if (turnSource !== 'voice') return;
+            eventEmitter.emit('playback_startup', {
+              audioContextState:
+                diagnostic.audioContextState === 'running' ||
+                diagnostic.audioContextState === 'suspended' ||
+                diagnostic.audioContextState === 'closed'
+                  ? diagnostic.audioContextState
+                  : undefined,
+              audioSourceKind: diagnostic.sourceKind,
+              bufferedDurationMs: diagnostic.bufferedDurationMs,
+              ...(diagnostic.firstChunkBytes === undefined
+                ? {}
+                : { firstChunkBytes: diagnostic.firstChunkBytes }),
+              ...(diagnostic.firstChunkIntervalMs === undefined
+                ? {}
+                : { firstChunkIntervalMs: diagnostic.firstChunkIntervalMs }),
+              phase: 'tts',
+              playbackRoute: 'conversation',
+              primingOutcome: diagnostic.primingOutcome,
+              primingTargetMs: diagnostic.primingTargetMs,
+              primingWaitMs: diagnostic.primingWaitMs,
+              sampleRateHz: diagnostic.sampleRateHz,
             });
           },
           onSpeechStart: (startedAt) => {
