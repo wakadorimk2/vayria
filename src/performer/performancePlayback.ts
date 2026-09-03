@@ -1,6 +1,8 @@
 import type {
+  PlaybackStartupDiagnostic,
   PlayAudio,
   PlayAudioOptions,
+  StreamingPlaybackPrimingOptions,
 } from '../audio/useAudioLipSync.js';
 import type { AudioPlaybackSource } from '../audio/audioPlaybackSource.js';
 import type { PerformancePlan } from './types.js';
@@ -34,8 +36,10 @@ export interface PerformancePlaybackCallbacks {
   onMotionReady?: (readyAt: number) => void;
   onMotionStart?: (startedAt: number) => void;
   onPlaybackGestureRequired?: PlayAudioOptions['onPlaybackGestureRequired'];
+  onPlaybackStartup?: (diagnostic: PlaybackStartupDiagnostic) => void;
   onSpeechStart?: (startedAt: number) => void;
   onSpeechEnd?: (endedAt: number) => void;
+  streamPriming?: StreamingPlaybackPrimingOptions;
 }
 
 export interface PerformancePlaybackResult {
@@ -161,6 +165,7 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
         onComplete: callbacks.onAudioComplete,
         onFirstAudioReady: callbacks.onFirstAudioReady,
         onPlaybackGestureRequired: callbacks.onPlaybackGestureRequired,
+        onPlaybackStartup: callbacks.onPlaybackStartup,
         onReadyToStart: () => {
           if (!motionReady || !this.isCurrent(plan.planId, generation, controller)) {
             return false;
@@ -177,6 +182,7 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
           motionPort?.markSpeechStart(plan.planId, startedAt);
           callbacks.onSpeechStart?.(startedAt);
         },
+        streamPriming: callbacks.streamPriming,
       });
       if (!this.isCurrent(plan.planId, generation, controller)) return null;
 

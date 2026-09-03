@@ -22,6 +22,7 @@ export const CONVERSATION_EVENTS = [
   'tts_start',
   'tts_first_audio',
   'tts_ready',
+  'playback_startup',
   'playback_started',
   'playback_gesture_required',
   'tts_completed',
@@ -37,11 +38,21 @@ export const CONVERSATION_EVENTS = [
 export type ConversationEventName = (typeof CONVERSATION_EVENTS)[number];
 
 interface ConversationEventDetails {
+  audioContextState?: 'closed' | 'running' | 'suspended';
+  audioSourceKind?: 'buffer' | 'stream';
+  bufferedDurationMs?: number;
   durationMs?: number;
   emotion?: Emotion;
+  firstChunkBytes?: number;
+  firstChunkIntervalMs?: number;
   interactionAction?: ConversationAction;
   phase?: 'llm' | 'tts';
+  playbackRoute?: 'conversation';
+  primingOutcome?: 'cancelled' | 'complete' | 'disabled' | 'target' | 'timeout';
+  primingTargetMs?: number;
+  primingWaitMs?: number;
   reason?: string;
+  sampleRateHz?: number;
 }
 
 export type ConversationEvent = ConversationEventDetails &
@@ -64,18 +75,50 @@ function createTurnId(): string {
 function readSafeDetails(
   details: ConversationEventDetails,
 ): ConversationEventDetails {
+  const readNonNegativeInteger = (value: number | undefined) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? Math.max(0, Math.round(value))
+      : undefined;
+  const bufferedDurationMs = readNonNegativeInteger(details.bufferedDurationMs);
+  const durationMs = readNonNegativeInteger(details.durationMs);
+  const firstChunkBytes = readNonNegativeInteger(details.firstChunkBytes);
+  const firstChunkIntervalMs = readNonNegativeInteger(details.firstChunkIntervalMs);
+  const primingTargetMs = readNonNegativeInteger(details.primingTargetMs);
+  const primingWaitMs = readNonNegativeInteger(details.primingWaitMs);
+  const sampleRateHz = readNonNegativeInteger(details.sampleRateHz);
   return {
-    ...(typeof details.durationMs === 'number' &&
-    Number.isFinite(details.durationMs)
-      ? { durationMs: Math.max(0, Math.round(details.durationMs)) }
+    ...(details.audioContextState === 'closed' ||
+    details.audioContextState === 'running' ||
+    details.audioContextState === 'suspended'
+      ? { audioContextState: details.audioContextState }
       : {}),
+    ...(details.audioSourceKind === 'buffer' || details.audioSourceKind === 'stream'
+      ? { audioSourceKind: details.audioSourceKind }
+      : {}),
+    ...(bufferedDurationMs === undefined ? {} : { bufferedDurationMs }),
+    ...(durationMs === undefined ? {} : { durationMs }),
     ...(details.emotion ? { emotion: details.emotion } : {}),
+    ...(firstChunkBytes === undefined ? {} : { firstChunkBytes }),
+    ...(firstChunkIntervalMs === undefined ? {} : { firstChunkIntervalMs }),
     ...(details.interactionAction &&
     isConversationAction(details.interactionAction)
       ? { interactionAction: details.interactionAction }
       : {}),
     ...(details.phase ? { phase: details.phase } : {}),
+    ...(details.playbackRoute === 'conversation'
+      ? { playbackRoute: details.playbackRoute }
+      : {}),
+    ...(details.primingOutcome === 'cancelled' ||
+    details.primingOutcome === 'complete' ||
+    details.primingOutcome === 'disabled' ||
+    details.primingOutcome === 'target' ||
+    details.primingOutcome === 'timeout'
+      ? { primingOutcome: details.primingOutcome }
+      : {}),
+    ...(primingTargetMs === undefined ? {} : { primingTargetMs }),
+    ...(primingWaitMs === undefined ? {} : { primingWaitMs }),
     ...(details.reason ? { reason: details.reason.slice(0, 120) } : {}),
+    ...(sampleRateHz === undefined ? {} : { sampleRateHz }),
   };
 }
 

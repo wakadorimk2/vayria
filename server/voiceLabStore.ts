@@ -118,6 +118,7 @@ const RECORD_KEYS: ReadonlyMap<VoiceLabRecord['kind'], ReadonlySet<string>> =
         'action',
         'state',
         'ttsPlaying',
+        'playbackAgeMs',
         'reason',
       ]),
     ],

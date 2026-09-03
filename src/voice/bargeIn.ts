@@ -1,5 +1,8 @@
 import type { BargeInState } from './audioLab.js';
-import { findKnownHallucinationPhrase } from './audioLab.js';
+import {
+  BARGE_IN_STARTUP_DUCK_GUARD_MS,
+  findKnownHallucinationPhrase,
+} from './audioLab.js';
 import {
   isContentBearingVoiceMessage,
   isDefiniteParticipationMessage,
@@ -14,7 +17,12 @@ import {
 import { MAX_VOICE_TEXT_LENGTH } from './voiceInput.js';
 
 export type BargeInEvent =
-  | { type: 'speech_started'; ttsPlaying: boolean }
+  | {
+      type: 'speech_started';
+      ttsPlaying: boolean;
+      suppressDuck?: boolean;
+      playbackAgeMs?: number;
+    }
   | { type: 'transcript_finalized'; accepted: boolean }
   | { type: 'recognition_failed' }
   | { type: 'recognition_stopped' }
@@ -22,7 +30,7 @@ export type BargeInEvent =
   | { type: 'tts_stopped' }
   | { type: 'reset' };
 
-export type BargeInEffect = 'duck' | 'interrupt' | 'restore';
+export type BargeInEffect = 'duck' | 'interrupt' | 'restore' | 'suppress_duck';
 
 export interface BargeInTransition {
   state: BargeInState;
@@ -90,6 +98,21 @@ export function shouldInterruptBusyTurn(
   return acceptedTranscript && (isBusy || hasActivePlan);
 }
 
+export function shouldSuppressStartupDuck(
+  ttsPlaying: boolean,
+  isVoiceTurn: boolean,
+  playbackAgeMs: number | null,
+): boolean {
+  return (
+    ttsPlaying &&
+    isVoiceTurn &&
+    playbackAgeMs !== null &&
+    Number.isFinite(playbackAgeMs) &&
+    playbackAgeMs >= 0 &&
+    playbackAgeMs <= BARGE_IN_STARTUP_DUCK_GUARD_MS
+  );
+}
+
 export function isRejectedBargeInCandidate(
   candidateSegmentId: string | null,
   segmentId: string,
@@ -116,8 +139,10 @@ export function reduceBargeIn(
       }
       return {
         state: 'candidate',
-        effects: ['duck'],
-        reason: 'barge-in-candidate',
+        effects: event.suppressDuck ? ['suppress_duck'] : ['duck'],
+        reason: event.suppressDuck
+          ? 'playback-startup-guard'
+          : 'barge-in-candidate',
       };
     case 'transcript_finalized':
       if (state !== 'candidate') return { state, effects: [] };
