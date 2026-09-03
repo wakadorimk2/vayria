@@ -3,7 +3,6 @@ import test from 'node:test';
 import {
   measureCardOverlapRatio,
   resolveCommittedCardDropTarget,
-  resolveCardDropLabelPlacement,
   resolveCardDropPreview,
   type CardDropPreviewInput,
 } from '../src/cards/cardDropPreview.js';
@@ -28,11 +27,7 @@ function dragInput(
   return {
     height: 100,
     left,
-    pointerX: left + 40,
-    pointerY: top + 50,
     top,
-    viewportHeight: 800,
-    viewportWidth: 600,
     width: 80,
     ...overrides,
   };
@@ -66,7 +61,6 @@ test('drop preview stays a candidate below 0.35 overlap and locks at the thresho
   assert.equal(candidate?.targetCardId, 'middle');
   assert.equal(candidate?.phase, 'candidate');
   assert.equal(candidate?.retreatY, 0);
-  assert.equal(candidate?.labelPlacement, null);
   assert.equal(locked?.targetCardId, 'middle');
   assert.equal(locked?.phase, 'locked');
   assert.equal(locked?.overlapRatio, 0.35);
@@ -115,51 +109,11 @@ test('locked target retreats up by 24 percent within the 24 to 40 pixel cap', ()
   const maximum = resolveCardDropPreview(tallLayout, {
     ...dragInput(110, 0),
     height: 300,
-    pointerY: 150,
   });
   assert.equal(minimum?.retreatY, -24);
   assert.equal(minimum?.scale, 0.94);
   assert.equal(Math.abs(minimum?.rotationDeg ?? 0), 2);
   assert.equal(maximum?.retreatY, -40);
-});
-
-test('label moves away from the pointer and stays inside the viewport', () => {
-  const target = {
-    ...layout.cards[1],
-    centerY: 250,
-  };
-  const labelLayout = {
-    ...layout,
-    top: 200,
-    bottom: 300,
-    cards: [target],
-  };
-  const centered = dragInput(110, 200, {
-    pointerX: 150,
-    pointerY: 176,
-  });
-  const placement = resolveCardDropLabelPlacement(
-    labelLayout,
-    target,
-    centered,
-  );
-  assert.ok(placement.left > target.centerX);
-  assert.equal(placement.top, 164);
-
-  const edgeTarget = {
-    id: 'edge',
-    centerX: 590,
-    centerY: 50,
-    width: 80,
-    height: 100,
-  };
-  const edgePlacement = resolveCardDropLabelPlacement(
-    { ...layout, right: 600, cards: [edgeTarget] },
-    edgeTarget,
-    dragInput(550, 0, { pointerX: 590 }),
-  );
-  assert.ok(edgePlacement.left >= 8);
-  assert.ok(edgePlacement.left + 148 <= 592);
 });
 
 test('preview remains inactive without any card overlap', () => {

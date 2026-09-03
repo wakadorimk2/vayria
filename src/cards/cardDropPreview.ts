@@ -19,15 +19,6 @@ export interface CardDropPreviewInput {
   top: number;
   width: number;
   height: number;
-  pointerX: number;
-  pointerY: number;
-  viewportWidth: number;
-  viewportHeight: number;
-}
-
-export interface CardDropLabelPlacement {
-  left: number;
-  top: number;
 }
 
 export interface CardDropPreview {
@@ -37,7 +28,6 @@ export interface CardDropPreview {
   retreatY: number;
   scale: number;
   rotationDeg: number;
-  labelPlacement: CardDropLabelPlacement | null;
 }
 
 export function resolveCommittedCardDropTarget(
@@ -60,11 +50,6 @@ const RETARGET_ADVANTAGE_RATIO = 0.15;
 const RETREAT_HEIGHT_RATIO = 0.24;
 const MIN_RETREAT_PX = 24;
 const MAX_RETREAT_PX = 40;
-const LABEL_WIDTH_PX = 148;
-const LABEL_HEIGHT_PX = 28;
-const LABEL_GAP_PX = 8;
-const VIEWPORT_MARGIN_PX = 8;
-const POINTER_EXCLUSION_RADIUS_PX = 48;
 
 interface ScoredCard {
   card: CardDropPreviewCard;
@@ -116,87 +101,6 @@ export function measureCardOverlapRatio(
       Math.max(targetRect.top, draggedRect.top),
   );
   return (overlapWidth * overlapHeight) / Math.max(card.width * card.height, 1);
-}
-
-function intersectsPointerExclusion(
-  left: number,
-  top: number,
-  pointerX: number,
-  pointerY: number,
-): boolean {
-  const closestX = clamp(pointerX, left, left + LABEL_WIDTH_PX);
-  const closestY = clamp(pointerY, top, top + LABEL_HEIGHT_PX);
-  return (
-    Math.hypot(pointerX - closestX, pointerY - closestY) <
-    POINTER_EXCLUSION_RADIUS_PX
-  );
-}
-
-export function resolveCardDropLabelPlacement(
-  layout: CardDropPreviewLayout,
-  target: CardDropPreviewCard,
-  input: CardDropPreviewInput,
-): CardDropLabelPlacement {
-  const maximumLeft = Math.max(
-    VIEWPORT_MARGIN_PX,
-    input.viewportWidth - LABEL_WIDTH_PX - VIEWPORT_MARGIN_PX,
-  );
-  const maximumTop = Math.max(
-    VIEWPORT_MARGIN_PX,
-    input.viewportHeight - LABEL_HEIGHT_PX - VIEWPORT_MARGIN_PX,
-  );
-  const centeredLeft = clamp(
-    target.centerX - LABEL_WIDTH_PX / 2,
-    VIEWPORT_MARGIN_PX,
-    maximumLeft,
-  );
-  const top = clamp(
-    layout.top - LABEL_HEIGHT_PX - LABEL_GAP_PX,
-    VIEWPORT_MARGIN_PX,
-    maximumTop,
-  );
-  if (
-    !intersectsPointerExclusion(
-      centeredLeft,
-      top,
-      input.pointerX,
-      input.pointerY,
-    )
-  ) {
-    return { left: centeredLeft, top };
-  }
-
-  const horizontalOffset =
-    target.width / 2 + LABEL_WIDTH_PX / 2 + LABEL_GAP_PX;
-  const preferredDirection = input.pointerX <= target.centerX ? 1 : -1;
-  const preferredLeft = clamp(
-    target.centerX +
-      preferredDirection * horizontalOffset -
-      LABEL_WIDTH_PX / 2,
-    VIEWPORT_MARGIN_PX,
-    maximumLeft,
-  );
-  if (
-    !intersectsPointerExclusion(
-      preferredLeft,
-      top,
-      input.pointerX,
-      input.pointerY,
-    )
-  ) {
-    return { left: preferredLeft, top };
-  }
-
-  return {
-    left: clamp(
-      target.centerX -
-        preferredDirection * horizontalOffset -
-        LABEL_WIDTH_PX / 2,
-      VIEWPORT_MARGIN_PX,
-      maximumLeft,
-    ),
-    top,
-  };
 }
 
 function scoreCards(
@@ -261,9 +165,5 @@ export function resolveCardDropPreview(
     retreatY,
     scale: phase === 'locked' ? 0.94 : 1,
     rotationDeg,
-    labelPlacement:
-      phase === 'locked'
-        ? resolveCardDropLabelPlacement(layout, selected.card, input)
-        : null,
   };
 }

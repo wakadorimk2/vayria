@@ -191,19 +191,13 @@ function resolveDragDropPreview(
   session: DragSession,
   left: number,
   top: number,
-  pointerX: number,
-  pointerY: number,
 ): CardDropPreview | null {
   return resolveCardDropPreview(
     session.brainDropLayout,
     {
       height: session.height,
       left,
-      pointerX,
-      pointerY,
       top,
-      viewportHeight: window.innerHeight,
-      viewportWidth: window.innerWidth,
       width: session.width,
     },
     session.dropPreview?.phase === 'locked'
@@ -437,8 +431,6 @@ export function CardGamePrototype({
         session,
         finalLeft,
         finalTop,
-        clientX,
-        clientY,
       );
       const committedTargetCardId = resolveCommittedCardDropTarget(
         displayedPreview,
@@ -472,8 +464,6 @@ export function CardGamePrototype({
         session,
         nextLeft,
         nextTop,
-        event.clientX,
-        event.clientY,
       );
       let nextSession: DragSession = {
         ...session,
@@ -650,14 +640,6 @@ export function CardGamePrototype({
   const dragCard = dragState
     ? zones.hand.find((card) => card.id === dragState.cardId)
     : null;
-  const lockedDropPreview =
-    dragState?.dropPreview?.phase === 'locked'
-      ? dragState.dropPreview
-      : null;
-  const lockedDropCard = lockedDropPreview
-    ? zones.brain.find((card) => card.id === lockedDropPreview.targetCardId) ??
-      null
-    : null;
 
   return (
     <div className="card-prototype" aria-label="Brain and hand cards">
@@ -738,19 +720,6 @@ export function CardGamePrototype({
             motion="dragging"
             state="selected"
           />
-        </div>
-      )}
-      {lockedDropPreview?.labelPlacement && lockedDropCard && (
-        <div
-          aria-live="polite"
-          className="card-drop-target-label"
-          role="status"
-          style={{
-            left: lockedDropPreview.labelPlacement.left,
-            top: lockedDropPreview.labelPlacement.top,
-          }}
-        >
-          <strong>{lockedDropCard.label}</strong>
         </div>
       )}
     </div>

@@ -390,33 +390,6 @@ input {
   transform: translateY(var(--card-lift)) rotate(var(--card-rotation));
 }
 
-.card-drop-target-label {
-  position: fixed;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 148px;
-  min-height: 28px;
-  padding: 0.22rem 0.5rem;
-  border: 1px solid rgb(255 241 198 / 72%);
-  border-radius: 999px;
-  background: rgb(31 24 42 / 92%);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 34%);
-  color: #fff1c6;
-  font-size: 0.68rem;
-  line-height: 1.15;
-  letter-spacing: 0.04em;
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-.card-drop-target-label strong {
-  overflow: hidden;
-  font-weight: 800;
-  text-overflow: ellipsis;
-}
-
 .brain-card-float:nth-child(2n) {
   --brain-float-distance: -4px;
   animation-delay: -1.7s;
