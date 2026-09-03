@@ -97,7 +97,7 @@ test('locked target requires a 0.15 advantage before retargeting', () => {
   assert.equal(retargeted?.phase, 'locked');
 });
 
-test('locked target retreats down by 24 percent within the 24 to 40 pixel cap', () => {
+test('locked target retreats up by 24 percent within the 24 to 40 pixel cap', () => {
   const minimum = resolveCardDropPreview(layout, dragInput(110, 0));
   const tallLayout = {
     ...layout,
@@ -117,21 +117,34 @@ test('locked target retreats down by 24 percent within the 24 to 40 pixel cap', 
     height: 300,
     pointerY: 150,
   });
-  assert.equal(minimum?.retreatY, 24);
+  assert.equal(minimum?.retreatY, -24);
   assert.equal(minimum?.scale, 0.94);
   assert.equal(Math.abs(minimum?.rotationDeg ?? 0), 2);
-  assert.equal(maximum?.retreatY, 40);
+  assert.equal(maximum?.retreatY, -40);
 });
 
 test('label moves away from the pointer and stays inside the viewport', () => {
-  const target = layout.cards[1];
-  const centered = dragInput(110, 0, {
+  const target = {
+    ...layout.cards[1],
+    centerY: 250,
+  };
+  const labelLayout = {
+    ...layout,
+    top: 200,
+    bottom: 300,
+    cards: [target],
+  };
+  const centered = dragInput(110, 200, {
     pointerX: 150,
-    pointerY: 120,
+    pointerY: 176,
   });
-  const placement = resolveCardDropLabelPlacement(layout, target, centered);
+  const placement = resolveCardDropLabelPlacement(
+    labelLayout,
+    target,
+    centered,
+  );
   assert.ok(placement.left > target.centerX);
-  assert.equal(placement.top, 108);
+  assert.equal(placement.top, 164);
 
   const edgeTarget = {
     id: 'edge',

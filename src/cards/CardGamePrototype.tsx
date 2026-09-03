@@ -750,7 +750,6 @@ export function CardGamePrototype({
             top: lockedDropPreview.labelPlacement.top,
           }}
         >
-          <span>押し出す:</span>
           <strong>{lockedDropCard.label}</strong>
         </div>
       )}

@@ -398,7 +398,6 @@ input {
   justify-content: center;
   width: 148px;
   min-height: 28px;
-  gap: 0.3rem;
   padding: 0.22rem 0.5rem;
   border: 1px solid rgb(255 241 198 / 72%);
   border-radius: 999px;
@@ -410,11 +409,6 @@ input {
   letter-spacing: 0.04em;
   pointer-events: none;
   white-space: nowrap;
-}
-
-.card-drop-target-label span {
-  color: rgb(255 241 198 / 78%);
-  font-weight: 620;
 }
 
 .card-drop-target-label strong {

@@ -151,7 +151,7 @@ export function resolveCardDropLabelPlacement(
     maximumLeft,
   );
   const top = clamp(
-    layout.bottom + LABEL_GAP_PX,
+    layout.top - LABEL_HEIGHT_PX - LABEL_GAP_PX,
     VIEWPORT_MARGIN_PX,
     maximumTop,
   );
@@ -241,7 +241,7 @@ export function resolveCardDropPreview(
 
   const retreatY =
     phase === 'locked'
-      ? clamp(
+      ? -clamp(
           selected.card.height * RETREAT_HEIGHT_RATIO,
           MIN_RETREAT_PX,
           MAX_RETREAT_PX,
