@@ -39,9 +39,30 @@ test('candidate starts 24 pixels before the visible card reaches the lane', () =
   const candidate = resolveCardDropPreview(layout, previewInput(150, 224));
   assert.equal(candidate?.phase, 'candidate');
   assert.equal(candidate?.targetCardId, 'middle');
-  assert.equal(candidate?.retreatY, -4);
+  assert.equal(candidate?.retreatY, 0);
   assert.equal(candidate?.scale, 1);
   assert.equal(candidate?.rotationDeg, 0);
+});
+
+test('candidate retreat follows approach and insertion depth continuously', () => {
+  const twelvePixelsAway = resolveCardDropPreview(
+    layout,
+    previewInput(150, 212),
+  );
+  const touching = resolveCardDropPreview(layout, previewInput(150, 200));
+  const sixPixelsInserted = resolveCardDropPreview(
+    layout,
+    previewInput(150, 194),
+  );
+  const almostLocked = resolveCardDropPreview(
+    layout,
+    previewInput(150, 188.1),
+  );
+  assert.equal(twelvePixelsAway?.retreatY, -2);
+  assert.equal(touching?.retreatY, -4);
+  assert.equal(sixPixelsInserted?.retreatY, -16);
+  assert.ok((almostLocked?.retreatY ?? 0) < -27.7);
+  assert.ok((almostLocked?.retreatY ?? -100) > -28);
 });
 
 test('visible card locks after 12 pixels of lane overlap', () => {
@@ -57,7 +78,7 @@ test('locked preview retains through 8 pixels and returns to candidate below it'
   const released = resolveCardDropPreview(layout, previewInput(150, 193), retained);
   assert.equal(retained?.phase, 'locked');
   assert.equal(released?.phase, 'candidate');
-  assert.equal(released?.retreatY, -4);
+  assert.equal(released?.retreatY, -18);
 });
 
 test('target selection uses pointer X while phase uses the visible card top', () => {

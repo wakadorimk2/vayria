@@ -62,7 +62,8 @@ const CANDIDATE_APPROACH_PX = 24;
 const LOCK_OVERLAP_PX = 12;
 const UNLOCK_OVERLAP_PX = 8;
 const RETARGET_HYSTERESIS_RATIO = 0.15;
-const CANDIDATE_RETREAT_PX = 4;
+const CANDIDATE_CONTACT_RETREAT_PX = 4;
+const CANDIDATE_MAX_RETREAT_PX = 28;
 const RETREAT_HEIGHT_RATIO = 0.6;
 const MIN_RETREAT_PX = 60;
 const MAX_RETREAT_PX = 100;
@@ -100,6 +101,23 @@ function canRetarget(
   const threshold =
     midpoint + direction * centerDistance * RETARGET_HYSTERESIS_RATIO;
   return direction > 0 ? pointerX >= threshold : pointerX <= threshold;
+}
+
+function resolveCandidateRetreat(gap: number, overlap: number): number {
+  if (overlap <= 0) {
+    const approachProgress = clamp(
+      1 - gap / CANDIDATE_APPROACH_PX,
+      0,
+      1,
+    );
+    return CANDIDATE_CONTACT_RETREAT_PX * approachProgress;
+  }
+  const insertionProgress = clamp(overlap / LOCK_OVERLAP_PX, 0, 1);
+  return (
+    CANDIDATE_CONTACT_RETREAT_PX +
+    (CANDIDATE_MAX_RETREAT_PX - CANDIDATE_CONTACT_RETREAT_PX) *
+      insertionProgress
+  );
 }
 
 export function resolveCardDragPlacement(
@@ -152,6 +170,7 @@ export function resolveCardDropPreview(
     !canRetarget(previousTarget, nearest, input.pointerX)
       ? previousTarget
       : nearest;
+  const candidateRetreat = resolveCandidateRetreat(gap, overlap);
   const retreatY =
     phase === 'locked'
       ? -clamp(
@@ -159,7 +178,9 @@ export function resolveCardDropPreview(
           MIN_RETREAT_PX,
           MAX_RETREAT_PX,
         )
-      : -CANDIDATE_RETREAT_PX;
+      : candidateRetreat === 0
+        ? 0
+        : -candidateRetreat;
   const rotationDeg =
     phase === 'locked'
       ? selected.centerX < (layout.left + layout.right) / 2

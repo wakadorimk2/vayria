@@ -386,6 +386,9 @@ input {
 
 .brain-card-float--drop-candidate {
   filter: brightness(1.04);
+  transition:
+    filter 100ms ease,
+    transform 40ms linear;
 }
 
 .brain-card-float--drop-candidate .wildcard-card--drop-target {
