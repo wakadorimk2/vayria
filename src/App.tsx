@@ -109,6 +109,7 @@ import {
   isConfirmedBargeInTranscript,
   isRejectedBargeInCandidate,
   reduceBargeIn,
+  shouldSuppressStartupDuck,
   shouldInterruptBusyTurn,
   type BargeInEvent,
 } from './voice/bargeIn';
@@ -516,6 +517,7 @@ export default function App() {
   );
   const sessionGenerationRef = useRef(0);
   const {
+    getPrimaryPlaybackAgeMs,
     isAudioUnlocked,
     isReactionPlaying,
     isSpeaking,
@@ -1345,6 +1347,20 @@ export default function App() {
         }, BARGE_IN_TIMEOUT_MS);
       }
 
+      if (transition.effects.includes('suppress_duck')) {
+        const playbackAgeMs =
+          event.type === 'speech_started' ? event.playbackAgeMs : undefined;
+        voiceLab.handleDiagnostic({
+          type: 'barge_in',
+          at: Date.now(),
+          action: 'suppress_duck',
+          state: transition.state,
+          ttsPlaying,
+          ...(playbackAgeMs === undefined ? {} : { playbackAgeMs }),
+          reason: transition.reason,
+        });
+      }
+
       if (transition.effects.includes('interrupt')) {
         voiceLab.handleDiagnostic({
           type: 'barge_in',
@@ -2013,9 +2029,18 @@ export default function App() {
             activeBargeInSegmentRef.current = null;
           }
           setVoiceValidationError('');
+          const primaryPlaybackAgeMs = getPrimaryPlaybackAgeMs();
           dispatchBargeIn({
             type: 'speech_started',
             ttsPlaying,
+            suppressDuck: shouldSuppressStartupDuck(
+              isBargeInCandidate,
+              source === 'voice',
+              primaryPlaybackAgeMs,
+            ),
+            ...(primaryPlaybackAgeMs === null
+              ? {}
+              : { playbackAgeMs: primaryPlaybackAgeMs }),
           });
           // A speech start is still only an acoustic candidate. Do not show a
           // participation cue until the finalized turn selects a reaction.
@@ -2200,6 +2225,7 @@ export default function App() {
       createPlanForTrigger,
       dispatchBargeIn,
       evaluateVoiceParticipation,
+      getPrimaryPlaybackAgeMs,
       handleReplyAccepted,
       interruptCurrentTurn,
       isBusy,
@@ -2213,6 +2239,7 @@ export default function App() {
       readAutonomyEvidenceContext,
       rememberExplicitAlias,
       sendVoice,
+      source,
       handleConversationInputReceived,
       ttsPlaying,
       stopReaction,
@@ -2525,6 +2552,7 @@ export default function App() {
     onGateEvent: emitAutonomyGateEvent,
     sessionGeneration,
     timing: autonomyTurnGateTiming,
+    timingMode: runtimeConfig.autonomyTimingMode,
   });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {

@@ -744,6 +744,54 @@ test('playback gesture telemetry accepts only safe reason classifications', () =
   );
 });
 
+test('playback startup telemetry accepts only bounded allowlisted diagnostics', () => {
+  const event = readConversationEvent({
+    at: '2026-09-03T00:00:00.000Z',
+    elapsedMs: 1_000,
+    event: 'playback_startup',
+    source: 'voice',
+    turnId: 'turn-playback-startup-1',
+    phase: 'tts',
+    playbackRoute: 'conversation',
+    audioSourceKind: 'stream',
+    firstChunkBytes: 4_096,
+    firstChunkIntervalMs: 42,
+    bufferedDurationMs: 168,
+    primingOutcome: 'target',
+    primingTargetMs: 150,
+    primingWaitMs: 42,
+    audioContextState: 'running',
+    sampleRateHz: 48_000,
+  });
+  assert.equal(event.primingTargetMs, 150);
+  assert.equal(event.audioContextState, 'running');
+
+  assert.throws(
+    () =>
+      readConversationEvent({
+        ...event,
+        content: 'must not be logged',
+      }),
+    /unsupported field/,
+  );
+  assert.throws(
+    () =>
+      readConversationEvent({
+        ...event,
+        sampleRateHz: -1,
+      }),
+    /sampleRateHz must be a non-negative integer/,
+  );
+  assert.throws(
+    () =>
+      readConversationEvent({
+        ...event,
+        event: 'playback_started',
+      }),
+    /only valid for playback_startup/,
+  );
+});
+
 test('autonomy gate events keep only bounded diagnostic fields', () => {
   const event = readConversationEvent({
     at: '2026-08-23T00:00:00.000Z',

@@ -50,6 +50,7 @@ import {
   isConfirmedBargeInTranscript,
   isRejectedBargeInCandidate,
   reduceBargeIn,
+  shouldSuppressStartupDuck,
   shouldInterruptBusyTurn,
 } from '../src/voice/bargeIn.js';
 import { createInteractionTimeline } from '../src/conversation/interactionTimeline.js';
@@ -1283,6 +1284,37 @@ test('barge-in reducer separates candidate ducking from confirmed interruption',
       state: 'candidate',
       effects: ['duck'],
       reason: 'barge-in-candidate',
+    },
+  );
+});
+
+test('barge-in startup guard suppresses only ducking and keeps confirmed interruption', () => {
+  assert.equal(shouldSuppressStartupDuck(true, true, 0), true);
+  assert.equal(shouldSuppressStartupDuck(true, true, 250), true);
+  assert.equal(shouldSuppressStartupDuck(true, true, 251), false);
+  assert.equal(shouldSuppressStartupDuck(true, false, 120), false);
+  assert.equal(shouldSuppressStartupDuck(false, true, 120), false);
+  assert.equal(shouldSuppressStartupDuck(true, true, null), false);
+  const guardedCandidate = reduceBargeIn('idle', {
+    type: 'speech_started',
+    ttsPlaying: true,
+    suppressDuck: true,
+    playbackAgeMs: 120,
+  });
+  assert.deepEqual(guardedCandidate, {
+    state: 'candidate',
+    effects: ['suppress_duck'],
+    reason: 'playback-startup-guard',
+  });
+  assert.deepEqual(
+    reduceBargeIn(guardedCandidate.state, {
+      type: 'transcript_finalized',
+      accepted: true,
+    }),
+    {
+      state: 'confirmed',
+      effects: ['interrupt', 'restore'],
+      reason: 'confirmed-barge-in',
     },
   );
 });

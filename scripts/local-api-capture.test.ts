@@ -835,6 +835,12 @@ test('exhibition local API captures safe events and keeps Playcheck raw priority
         externalAction: 'speak',
         nextEligibleAt: 18_000,
         delayMs: 8_000,
+        timingMode: 'monotonic',
+        elapsedSilenceMs: 13_000,
+        readiness: 0.25,
+        threshold: 0.25,
+        opportunityOutcome: 'fired',
+        sessionGeneration: 2,
       }),
       204,
     );
@@ -847,6 +853,12 @@ test('exhibition local API captures safe events and keeps Playcheck raw priority
     assert.deepEqual(events[1].createdReasonIds, ['reason-2']);
     assert.deepEqual(events[1].resolvedReasonIds, ['reason-1']);
     assert.deepEqual(events[1].candidateEvidenceIds, ['evidence-1']);
+    assert.equal(events[1].timingMode, 'monotonic');
+    assert.equal(events[1].elapsedSilenceMs, 13_000);
+    assert.equal(events[1].readiness, 0.25);
+    assert.equal(events[1].threshold, 0.25);
+    assert.equal(events[1].opportunityOutcome, 'fired');
+    assert.equal(events[1].sessionGeneration, 2);
     assert.equal('message' in events[0], false);
     assert.equal('history' in events[0], false);
     assert.equal('apiKey' in events[0], false);

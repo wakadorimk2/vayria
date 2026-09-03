@@ -291,6 +291,9 @@ export class VoiceLabRecorder {
           action: diagnostic.action,
           state: diagnostic.state,
           ttsPlaying: diagnostic.ttsPlaying,
+          ...(diagnostic.playbackAgeMs === undefined
+            ? {}
+            : { playbackAgeMs: Math.max(0, Math.round(diagnostic.playbackAgeMs)) }),
           ...(diagnostic.reason ? { reason: diagnostic.reason } : {}),
         };
         this.appendRecord(record);
