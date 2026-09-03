@@ -202,13 +202,22 @@ function resolveDragDropPreview(
   pointerX: number,
   pointerY: number,
 ): CardDropPreview | null {
+  const placement = resolveCardDragPlacement({
+    height: session.height,
+    offsetX: session.offsetX,
+    offsetY: session.offsetY,
+    pointerX,
+    pointerY,
+    width: session.width,
+  });
   return resolveCardDropPreview(
     session.brainDropLayout,
     {
+      dragBottom: placement.top + session.height,
+      dragTop: placement.top,
       pointerX,
-      pointerY,
     },
-    session.dropPreview?.targetCardId ?? null,
+    session.dropPreview,
   );
 }
 
@@ -627,7 +636,7 @@ export function CardGamePrototype({
 
       return zone === 'brain' ? (
         <div
-          className={`brain-card-float${dropPreview ? ' brain-card-float--drop-locked' : ''}`}
+          className={`brain-card-float${dropPreview ? ` brain-card-float--drop-${dropPreview.phase}` : ''}`}
           key={card.id}
           style={brainCardFloatStyle}
         >

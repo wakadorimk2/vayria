@@ -16,17 +16,21 @@ export interface CardDropPreviewLayout {
 
 export interface CardDropPreviewInput {
   pointerX: number;
-  pointerY: number;
+  dragTop: number;
+  dragBottom: number;
 }
 
 export interface CardDropPreview {
   targetCardId: string;
+  phase: 'candidate' | 'locked';
   retreatY: number;
   scale: number;
   rotationDeg: number;
 }
 
-export interface CardDragPlacementInput extends CardDropPreviewInput {
+export interface CardDragPlacementInput {
+  pointerX: number;
+  pointerY: number;
   offsetX: number;
   offsetY: number;
   width: number;
@@ -45,8 +49,8 @@ export function resolveCommittedCardDropTarget(
   finalPreview: CardDropPreview | null,
 ): string | null {
   if (
-    !displayedPreview ||
-    !finalPreview ||
+    displayedPreview?.phase !== 'locked' ||
+    finalPreview?.phase !== 'locked' ||
     finalPreview.targetCardId !== displayedPreview.targetCardId
   ) {
     return null;
@@ -54,8 +58,11 @@ export function resolveCommittedCardDropTarget(
   return displayedPreview.targetCardId;
 }
 
-const VERTICAL_EXIT_MARGIN_PX = 24;
+const CANDIDATE_APPROACH_PX = 24;
+const LOCK_OVERLAP_PX = 12;
+const UNLOCK_OVERLAP_PX = 8;
 const RETARGET_HYSTERESIS_RATIO = 0.15;
+const CANDIDATE_RETREAT_PX = 4;
 const RETREAT_HEIGHT_RATIO = 0.6;
 const MIN_RETREAT_PX = 60;
 const MAX_RETREAT_PX = 100;
@@ -111,39 +118,60 @@ export function resolveCardDragPlacement(
 export function resolveCardDropPreview(
   layout: CardDropPreviewLayout | null,
   input: CardDropPreviewInput,
-  lockedTargetCardId: string | null = null,
+  previousPreview: CardDropPreview | null = null,
 ): CardDropPreview | null {
   if (!layout || !layout.cards.length) return null;
 
-  const locked = lockedTargetCardId
-    ? layout.cards.find((card) => card.id === lockedTargetCardId) ?? null
+  const previousTarget = previousPreview
+    ? layout.cards.find((card) => card.id === previousPreview.targetCardId) ?? null
     : null;
-  const verticalMargin = locked ? VERTICAL_EXIT_MARGIN_PX : 0;
-  if (
-    input.pointerY < layout.top - verticalMargin ||
-    input.pointerY > layout.bottom + verticalMargin
-  ) {
-    return null;
-  }
+  const overlap = Math.max(
+    0,
+    Math.min(layout.bottom, input.dragBottom) -
+      Math.max(layout.top, input.dragTop),
+  );
+  const gap =
+    input.dragBottom < layout.top
+      ? layout.top - input.dragBottom
+      : input.dragTop > layout.bottom
+        ? input.dragTop - layout.bottom
+        : 0;
+  const phase: CardDropPreview['phase'] =
+    previousPreview?.phase === 'locked' && overlap >= UNLOCK_OVERLAP_PX
+      ? 'locked'
+      : overlap >= LOCK_OVERLAP_PX
+        ? 'locked'
+        : 'candidate';
+  if (phase === 'candidate' && gap > CANDIDATE_APPROACH_PX) return null;
 
   const nearest = findNearestCard(layout.cards, input.pointerX);
   if (!nearest) return null;
   const selected =
-    locked && nearest.id !== locked.id && !canRetarget(locked, nearest, input.pointerX)
-      ? locked
+    previousTarget &&
+    nearest.id !== previousTarget.id &&
+    !canRetarget(previousTarget, nearest, input.pointerX)
+      ? previousTarget
       : nearest;
-  const retreatY = -clamp(
-    selected.height * RETREAT_HEIGHT_RATIO,
-    MIN_RETREAT_PX,
-    MAX_RETREAT_PX,
-  );
+  const retreatY =
+    phase === 'locked'
+      ? -clamp(
+          selected.height * RETREAT_HEIGHT_RATIO,
+          MIN_RETREAT_PX,
+          MAX_RETREAT_PX,
+        )
+      : -CANDIDATE_RETREAT_PX;
   const rotationDeg =
-    selected.centerX < (layout.left + layout.right) / 2 ? -2 : 2;
+    phase === 'locked'
+      ? selected.centerX < (layout.left + layout.right) / 2
+        ? -2
+        : 2
+      : 0;
 
   return {
     targetCardId: selected.id,
+    phase,
     retreatY,
-    scale: 0.94,
+    scale: phase === 'locked' ? 0.94 : 1,
     rotationDeg,
   };
 }

@@ -19,67 +19,89 @@ const layout = {
   ],
 } as const;
 
-function pointer(pointerX: number, pointerY = 150) {
-  return { pointerX, pointerY };
+function previewInput(pointerX: number, dragTop: number, height = 100) {
+  return {
+    dragBottom: dragTop + height,
+    dragTop,
+    pointerX,
+  };
 }
 
 test('pointer X selects the nearest card including gaps and outer edges', () => {
-  assert.equal(resolveCardDropPreview(layout, pointer(50))?.targetCardId, 'left');
-  assert.equal(resolveCardDropPreview(layout, pointer(105))?.targetCardId, 'middle');
-  assert.equal(resolveCardDropPreview(layout, pointer(-200))?.targetCardId, 'left');
-  assert.equal(resolveCardDropPreview(layout, pointer(500))?.targetCardId, 'right');
+  assert.equal(resolveCardDropPreview(layout, previewInput(50, 224))?.targetCardId, 'left');
+  assert.equal(resolveCardDropPreview(layout, previewInput(105, 224))?.targetCardId, 'middle');
+  assert.equal(resolveCardDropPreview(layout, previewInput(-200, 224))?.targetCardId, 'left');
+  assert.equal(resolveCardDropPreview(layout, previewInput(500, 224))?.targetCardId, 'right');
 });
 
-test('target selection depends on pointer position rather than drag grab offset', () => {
-  const leftGrab = resolveCardDragPlacement({
-    ...pointer(150),
+test('candidate starts 24 pixels before the visible card reaches the lane', () => {
+  assert.equal(resolveCardDropPreview(layout, previewInput(150, 225)), null);
+  const candidate = resolveCardDropPreview(layout, previewInput(150, 224));
+  assert.equal(candidate?.phase, 'candidate');
+  assert.equal(candidate?.targetCardId, 'middle');
+  assert.equal(candidate?.retreatY, -4);
+  assert.equal(candidate?.scale, 1);
+  assert.equal(candidate?.rotationDeg, 0);
+});
+
+test('visible card locks after 12 pixels of lane overlap', () => {
+  const candidate = resolveCardDropPreview(layout, previewInput(150, 189));
+  const locked = resolveCardDropPreview(layout, previewInput(150, 188));
+  assert.equal(candidate?.phase, 'candidate');
+  assert.equal(locked?.phase, 'locked');
+});
+
+test('locked preview retains through 8 pixels and returns to candidate below it', () => {
+  const locked = resolveCardDropPreview(layout, previewInput(150, 188));
+  const retained = resolveCardDropPreview(layout, previewInput(150, 192), locked);
+  const released = resolveCardDropPreview(layout, previewInput(150, 193), retained);
+  assert.equal(retained?.phase, 'locked');
+  assert.equal(released?.phase, 'candidate');
+  assert.equal(released?.retreatY, -4);
+});
+
+test('target selection uses pointer X while phase uses the visible card top', () => {
+  const shallowGrab = resolveCardDragPlacement({
     height: 100,
     offsetX: 8,
-    offsetY: 50,
+    offsetY: 20,
+    pointerX: 150,
+    pointerY: 240,
     width: 80,
   });
-  const rightGrab = resolveCardDragPlacement({
-    ...pointer(150),
+  const deepGrab = resolveCardDragPlacement({
     height: 100,
     offsetX: 72,
-    offsetY: 50,
+    offsetY: 70,
+    pointerX: 150,
+    pointerY: 290,
     width: 80,
   });
-  assert.notEqual(leftGrab.left, rightGrab.left);
-  assert.equal(resolveCardDropPreview(layout, pointer(150))?.targetCardId, 'middle');
-});
-
-test('unlocked target activates only inside the actual lane bounds', () => {
-  assert.equal(resolveCardDropPreview(layout, pointer(150, 99)), null);
-  assert.equal(resolveCardDropPreview(layout, pointer(150, 100))?.targetCardId, 'middle');
-  assert.equal(resolveCardDropPreview(layout, pointer(150, 200))?.targetCardId, 'middle');
-  assert.equal(resolveCardDropPreview(layout, pointer(150, 201)), null);
-});
-
-test('locked target retains through the 24 pixel vertical exit margin', () => {
-  assert.equal(resolveCardDropPreview(layout, pointer(150, 76), 'middle')?.targetCardId, 'middle');
-  assert.equal(resolveCardDropPreview(layout, pointer(150, 224), 'middle')?.targetCardId, 'middle');
-  assert.equal(resolveCardDropPreview(layout, pointer(150, 75), 'middle'), null);
-  assert.equal(resolveCardDropPreview(layout, pointer(150, 225), 'middle'), null);
+  assert.equal(shallowGrab.top, 188);
+  assert.equal(deepGrab.top, 188);
+  assert.notEqual(shallowGrab.left, deepGrab.left);
+  assert.equal(resolveCardDropPreview(layout, previewInput(150, shallowGrab.top))?.phase, 'locked');
+  assert.equal(resolveCardDropPreview(layout, previewInput(150, deepGrab.top))?.phase, 'locked');
 });
 
 test('locked target requires 15 percent travel beyond the midpoint to retarget', () => {
-  assert.equal(resolveCardDropPreview(layout, pointer(214), 'middle')?.targetCardId, 'middle');
-  assert.equal(resolveCardDropPreview(layout, pointer(215), 'middle')?.targetCardId, 'right');
-  assert.equal(resolveCardDropPreview(layout, pointer(86), 'middle')?.targetCardId, 'middle');
-  assert.equal(resolveCardDropPreview(layout, pointer(85), 'middle')?.targetCardId, 'left');
+  const middle = resolveCardDropPreview(layout, previewInput(150, 188));
+  assert.equal(resolveCardDropPreview(layout, previewInput(214, 188), middle)?.targetCardId, 'middle');
+  assert.equal(resolveCardDropPreview(layout, previewInput(215, 188), middle)?.targetCardId, 'right');
+  assert.equal(resolveCardDropPreview(layout, previewInput(86, 188), middle)?.targetCardId, 'middle');
+  assert.equal(resolveCardDropPreview(layout, previewInput(85, 188), middle)?.targetCardId, 'left');
 });
 
-test('target retreats up by 60 percent within the 60 to 100 pixel cap', () => {
-  const minimum = resolveCardDropPreview(layout, pointer(150));
+test('locked target retreats up by 60 percent within the 60 to 100 pixel cap', () => {
+  const minimum = resolveCardDropPreview(layout, previewInput(150, 188));
   const tallLayout = {
     ...layout,
     bottom: 400,
     cards: [
-      { id: 'tall', centerX: 150, centerY: 200, width: 80, height: 300 },
+      { id: 'tall', centerX: 150, centerY: 250, width: 80, height: 300 },
     ],
   } as const;
-  const maximum = resolveCardDropPreview(tallLayout, pointer(150, 200));
+  const maximum = resolveCardDropPreview(tallLayout, previewInput(150, 388, 300));
   assert.equal(minimum?.retreatY, -60);
   assert.equal(minimum?.scale, 0.94);
   assert.equal(Math.abs(minimum?.rotationDeg ?? 0), 2);
@@ -88,10 +110,11 @@ test('target retreats up by 60 percent within the 60 to 100 pixel cap', () => {
 
 test('drag placement and spatial center share the fixed 32 pixel lift', () => {
   const placement = resolveCardDragPlacement({
-    ...pointer(150, 300),
     height: 100,
     offsetX: 20,
     offsetY: 40,
+    pointerX: 150,
+    pointerY: 300,
     width: 80,
   });
   assert.equal(CARD_DRAG_VISUAL_LIFT_PX, 32);
@@ -103,10 +126,12 @@ test('drag placement and spatial center share the fixed 32 pixel lift', () => {
   });
 });
 
-test('drop commit requires the same target shown by the preview', () => {
-  const middle = resolveCardDropPreview(layout, pointer(150));
-  const right = resolveCardDropPreview(layout, pointer(250));
+test('drop commit requires matching locked previews', () => {
+  const candidate = resolveCardDropPreview(layout, previewInput(150, 224));
+  const middle = resolveCardDropPreview(layout, previewInput(150, 188));
+  const right = resolveCardDropPreview(layout, previewInput(250, 188));
+  assert.equal(resolveCommittedCardDropTarget(candidate, candidate), null);
+  assert.equal(resolveCommittedCardDropTarget(middle, candidate), null);
   assert.equal(resolveCommittedCardDropTarget(middle, right), null);
-  assert.equal(resolveCommittedCardDropTarget(middle, null), null);
   assert.equal(resolveCommittedCardDropTarget(middle, middle), 'middle');
 });

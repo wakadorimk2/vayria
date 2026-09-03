@@ -377,12 +377,26 @@ input {
   animation: brain-card-float 6s ease-in-out infinite alternate;
 }
 
+.brain-card-float--drop-candidate,
 .brain-card-float--drop-locked {
   z-index: 6;
   filter: brightness(1.08);
   will-change: transform;
 }
 
+.brain-card-float--drop-candidate {
+  filter: brightness(1.04);
+}
+
+.brain-card-float--drop-candidate .wildcard-card--drop-target {
+  border-color: color-mix(in srgb, var(--kind-accent) 42%, #fff);
+  box-shadow:
+    0 4px 10px rgb(0 0 0 / 20%),
+    0 0 0 2px color-mix(in srgb, var(--kind-accent) 16%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 60%);
+}
+
+.brain-card-float--drop-candidate .wildcard-card--drop-target,
 .brain-card-float--drop-locked .wildcard-card--drop-target {
   animation: none;
   transform: translateY(var(--card-lift)) rotate(var(--card-rotation));
