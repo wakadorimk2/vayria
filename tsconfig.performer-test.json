@@ -12,6 +12,8 @@
   "include": [
     "server/localApi.ts",
     "server/llmProviderTelemetry.ts",
+    "server/openAiResponses.ts",
+    "server/llmRuntime.ts",
     "server/streamingSpeech.ts",
     "src/character/emotion.ts",
     "src/character/identity.ts",
@@ -37,6 +39,7 @@
     "scripts/card-preview-api.test.ts",
     "scripts/local-api-capture.test.ts",
     "scripts/llm-provider-telemetry.test.ts",
+    "scripts/openai-responses.test.ts",
     "scripts/streaming-speech.test.ts",
     "scripts/card-reactions.test.ts",
     "scripts/card-drop-reaction.test.ts",

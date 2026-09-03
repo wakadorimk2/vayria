@@ -8,6 +8,9 @@ const testFiles = [
     'node_modules/.tmp/performer-test/scripts/llm-provider-telemetry.test.js',
   ),
   resolve(
+    'node_modules/.tmp/performer-test/scripts/openai-responses.test.js',
+  ),
+  resolve(
     'node_modules/.tmp/performer-test/scripts/streaming-speech.test.js',
   ),
   resolve('node_modules/.tmp/performer-test/scripts/card-reactions.test.js'),

@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
-import { createRequire } from 'node:module';
 import { performance } from 'node:perf_hooks';
 import { once } from 'node:events';
 import type { Plugin } from 'vite';
@@ -10,7 +9,6 @@ import {
   synthesizeAivisCloudSpeech,
   type AivisCloudSynthesisResult,
 } from './tts/aivisCloud.js';
-import type { Message } from '@aituber-onair/chat';
 import { isPlaycheckRunId } from '../src/playcheck.js';
 import {
   AIVIS_VOICE_PARAMETERS,
@@ -149,11 +147,11 @@ import {
   isValidSpeechLead,
   parseStreamingSpeechEnvelope,
 } from './streamingSpeech.js';
-
-const require = createRequire(import.meta.url);
-const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
-  '@aituber-onair/chat',
-) as typeof import('@aituber-onair/chat');
+import {
+  modelForProfile,
+  processStructuredLlm,
+  type LlmRuntimeOptions,
+} from './llmRuntime.js';
 
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_TEXT_LENGTH = 1_000;
@@ -213,6 +211,7 @@ const CONVERSATION_EVENTS = [
   'llm_provider_start',
   'llm_provider_first_chunk',
   'llm_provider_done',
+  'llm_fallback',
   'llm_done',
   'speech_unit_ready',
   'internal_delta_rejected',
@@ -270,7 +269,22 @@ export interface LocalApiConfig {
   exhibitionNetwork?: ExhibitionNetworkRuntime;
   internetConnectivity?: InternetConnectivityProbe;
   aivisSpeakerCatalog?: AivisSpeakerCatalogCache;
+  llmRuntime?: LlmRuntimeOptions;
 }
+
+interface LlmRequestContext {
+  apiKey: string;
+  runtime: LlmRuntimeOptions;
+  signal: AbortSignal;
+  onFallback: (reason: string) => void;
+}
+
+const DEFAULT_LLM_RUNTIME: LlmRuntimeOptions = {
+  profile: 'luna-explicit',
+  serviceTier: 'standard',
+  fallbackEnabled: false,
+  cacheWarmupEnabled: false,
+};
 
 export function createHealthResponse(
   config: LocalApiConfig,
@@ -676,6 +690,7 @@ const SAFE_PLAYCHECK_REASONS = new Set([
   'provider_error',
   'authentication',
   'configuration',
+  'connection',
   'invalid_request',
   'model',
   'quota',
@@ -786,7 +801,9 @@ function createRequestLlmProviderTracker(
   return createLlmProviderCallTracker({
     turnId: fields.turnId,
     provider: 'openai',
-    model: String(MODEL_GPT_5_NANO),
+    model: modelForProfile(
+      config.llmRuntime?.profile ?? DEFAULT_LLM_RUNTIME.profile,
+    ),
     source: fields.source,
     signal: fields.signal,
     observe: fields.observe,
@@ -2875,7 +2892,7 @@ export function buildConversationActionPolicySystemPrompt(
 }
 
 async function generateConversationActionPolicy(
-  apiKey: string,
+  llm: LlmRequestContext,
   message: string,
   history: readonly ChatHistoryItem[],
   forcedCardId: string | null,
@@ -2884,34 +2901,21 @@ async function generateConversationActionPolicy(
   programContext: ProgramContext,
   telemetry: LlmProviderCallTracker,
 ): Promise<ConversationActionDecision> {
-  const chat = ChatServiceFactory.createChatService('openai', {
-    apiKey,
-    model: MODEL_GPT_5_NANO,
-    responseLength: 'veryShort',
-    gpt5Preset: 'casual',
-    responseFormat: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'vayria_conversation_action_policy',
-        strict: true,
-        schema: {
-          type: 'object',
-          properties: {
-            action: {
-              type: 'string',
-              enum: INTERACTIVE_POLICY_ACTIONS,
-            },
-            backchannelCue: {
-              type: 'string',
-              enum: CONVERSATION_BACKCHANNEL_CUES,
-            },
-          },
-          required: ['action', 'backchannelCue'],
-          additionalProperties: false,
-        },
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      action: {
+        type: 'string',
+        enum: INTERACTIVE_POLICY_ACTIONS,
+      },
+      backchannelCue: {
+        type: 'string',
+        enum: CONVERSATION_BACKCHANNEL_CUES,
       },
     },
-  });
+    required: ['action', 'backchannelCue'],
+    additionalProperties: false,
+  };
 
   const systemPrompt = buildConversationActionPolicySystemPrompt(
     forcedCardId,
@@ -2927,28 +2931,36 @@ async function generateConversationActionPolicy(
   ): Promise<ConversationActionDecision> => {
     let streamedReply = '';
     let completedReply = '';
-    const messages: Message[] = [
-      {
-        role: 'system',
-        content: correction ? `${systemPrompt}\n${correction}` : systemPrompt,
-      },
-      ...history,
-      { role: 'user', content: message },
-    ];
     await telemetry.run(
       { purpose: 'conversation-policy', retry },
       async (markFirstChunk) => {
-        await chat.processChat(
-          messages,
-          (partial) => {
-            if (partial) markFirstChunk();
+        const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
+        const result = await processStructuredLlm({
+          apiKey: llm.apiKey,
+          runtime: llm.runtime,
+          legacyPrompt: prompt,
+          staticPrompt: prompt,
+          dynamicPrompt: '',
+          history,
+          userMessage: message,
+          output: {
+            name: 'vayria_conversation_action_policy',
+            schema: responseSchema,
+          },
+          maxOutputTokens: 128,
+          cacheKey: 'vayria:policy:interactive:v1',
+          signal: llm.signal,
+          onFallback: llm.onFallback,
+          onTextDelta: (partial) => {
+            markFirstChunk();
             streamedReply += partial;
           },
-          async (complete) => {
+          onComplete: (complete) => {
             markFirstChunk();
             completedReply = complete;
           },
-        );
+        });
+        if (!completedReply) completedReply = result.text;
       },
     );
     const responseText = (completedReply || streamedReply).trim();
@@ -3056,7 +3068,7 @@ interface StreamingReplyCallbacks {
 }
 
 async function generateInteractiveResponse(
-  apiKey: string,
+  llm: LlmRequestContext,
   mode: 'manual' | 'voice',
   message: string,
   history: readonly ChatHistoryItem[],
@@ -3078,7 +3090,7 @@ async function generateInteractiveResponse(
   const policyDecision =
     fastPathDecision ??
     (await generateConversationActionPolicy(
-      apiKey,
+      llm,
       message,
       history,
       forcedCardId,
@@ -3097,7 +3109,7 @@ async function generateInteractiveResponse(
   }
 
   const reply = await generateReply(
-    apiKey,
+    llm,
     mode,
     message,
     history,
@@ -3202,7 +3214,7 @@ export function buildAutonomousDirectorInstruction(
 }
 
 async function generateReply(
-  apiKey: string,
+  llm: LlmRequestContext,
   mode: ChatMode,
   message: string | null,
   history: readonly ChatHistoryItem[],
@@ -3451,25 +3463,12 @@ async function generateReply(
         ...(mode === 'autonomous' ? ['externalAction', 'usedReasonIds'] : []),
         ...(mode === 'voice' ? ['voiceAction', 'backchannelCue'] : []),
       ];
-  const chat = ChatServiceFactory.createChatService('openai', {
-    apiKey,
-    model: MODEL_GPT_5_NANO,
-    responseLength: 'veryShort',
-    gpt5Preset: 'casual',
-    responseFormat: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'wildcard_assistant_response',
-        strict: true,
-        schema: {
-          type: 'object',
-          properties: responseProperties,
-          required: responseRequired,
-          additionalProperties: false,
-        },
-      },
-    },
-  });
+  const responseSchema = {
+    type: 'object',
+    properties: responseProperties,
+    required: responseRequired,
+    additionalProperties: false,
+  };
   const brainCards = brainCardIds.map((id) => CARD_BY_ID.get(id)!);
   const cardInstructions = brainCards
     .map(
@@ -3646,30 +3645,48 @@ async function generateReply(
     providerCallCount += 1;
     let streamedReply = '';
     let completedReply = '';
-    const envelopeParser = streamingEnabled
+    let envelopeParser = streamingEnabled
       ? new IncrementalSpeechEnvelopeParser()
       : null;
     let attemptHeader: Record<string, unknown> | null = null;
-    const messages: Message[] = [
-      {
-        role: 'system',
-        content: correction ? `${systemPrompt}\n${correction}` : systemPrompt,
-      },
-      ...history,
-      {
-        role: 'user',
-        content:
-          mode === 'autonomous'
-            ? '配信中の次の自然な独り言を生成してください。'
-            : (message ?? ''),
-      },
-    ];
     await telemetry.run(
       { purpose: 'response-generation', retry },
       async (markFirstChunk) => {
-        await chat.processChat(
-          messages,
-          (partial) => {
+        const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
+        const result = await processStructuredLlm({
+          apiKey: llm.apiKey,
+          runtime: llm.runtime,
+          legacyPrompt: prompt,
+          staticPrompt: prompt,
+          dynamicPrompt: '',
+          history,
+          userMessage:
+            mode === 'autonomous'
+              ? '配信中の次の自然な独り言を生成してください。'
+              : (message ?? ''),
+          output: {
+            name: 'wildcard_assistant_response',
+            schema: responseSchema,
+          },
+          maxOutputTokens: 512,
+          cacheKey:
+            mode === 'voice'
+              ? 'vayria:reply:voice:lead1:v1'
+              : mode === 'manual'
+                ? 'vayria:reply:manual:lead1:v1'
+                : 'vayria:reply:autonomous:lead0:v1',
+          signal: llm.signal,
+          canFallback: () => committedUnits.length === 0,
+          onFallback: (reason) => {
+            streamedReply = '';
+            completedReply = '';
+            attemptHeader = null;
+            envelopeParser = streamingEnabled
+              ? new IncrementalSpeechEnvelopeParser()
+              : null;
+            llm.onFallback(reason);
+          },
+          onTextDelta: (partial) => {
             if (partial) markFirstChunk();
             streamedReply += partial;
             if (!partial || !envelopeParser || committedUnits.length >= 2) return;
@@ -3702,11 +3719,12 @@ async function generateReply(
               }
             }
           },
-          async (complete) => {
+          onComplete: (complete) => {
             markFirstChunk();
             completedReply = complete;
           },
-        );
+        });
+        if (!completedReply) completedReply = result.text;
       },
     );
     const responseText = (completedReply || streamedReply).trim();
@@ -3876,7 +3894,7 @@ export function parseCardPreviewResponse(value: string): AssistantResponse {
 }
 
 async function generateCardPreviewReply(
-  apiKey: string,
+  llm: LlmRequestContext,
   cardId: string,
   performanceContext: PerformanceContextPayload,
   telemetry: LlmProviderCallTracker,
@@ -3888,31 +3906,18 @@ async function generateCardPreviewReply(
     throw new RequestError('cardId must have a behavior profile.', 400);
   }
 
-  const chat = ChatServiceFactory.createChatService('openai', {
-    apiKey,
-    model: MODEL_GPT_5_NANO,
-    responseLength: 'veryShort',
-    gpt5Preset: 'casual',
-    responseFormat: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'card_preview_response',
-        strict: true,
-        schema: {
-          type: 'object',
-          properties: {
-            text: { type: 'string' },
-            emotion: {
-              type: 'string',
-              enum: EMOTIONS,
-            },
-          },
-          required: ['text', 'emotion'],
-          additionalProperties: false,
-        },
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      text: { type: 'string' },
+      emotion: {
+        type: 'string',
+        enum: EMOTIONS,
       },
     },
-  });
+    required: ['text', 'emotion'],
+    additionalProperties: false,
+  };
 
   const systemPrompt = buildCardPreviewSystemPrompt(
     cardId,
@@ -3924,20 +3929,32 @@ async function generateCardPreviewReply(
   await telemetry.run(
     { purpose: 'card-preview', retry: 0 },
     async (markFirstChunk) => {
-      await chat.processChat(
-        [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: 'このカードの反応を実演してください。' },
-        ],
-        (partial) => {
+      const result = await processStructuredLlm({
+        apiKey: llm.apiKey,
+        runtime: llm.runtime,
+        legacyPrompt: systemPrompt,
+        staticPrompt: systemPrompt,
+        dynamicPrompt: '',
+        history: [],
+        userMessage: 'このカードの反応を実演してください。',
+        output: {
+          name: 'card_preview_response',
+          schema: responseSchema,
+        },
+        maxOutputTokens: 256,
+        cacheKey: 'vayria:card-preview:v1',
+        signal: llm.signal,
+        onFallback: llm.onFallback,
+        onTextDelta: (partial) => {
           if (partial) markFirstChunk();
           streamedReply += partial;
         },
-        async (complete) => {
+        onComplete: (complete) => {
           markFirstChunk();
           completedReply = complete;
         },
-      );
+      });
+      if (!completedReply) completedReply = result.text;
     },
   );
 
@@ -4642,6 +4659,21 @@ async function handleRequest(
         source: 'card-preview',
         signal: providerAbortController.signal,
       });
+      const llm: LlmRequestContext = {
+        apiKey: config.openAiApiKey,
+        runtime: config.llmRuntime ?? DEFAULT_LLM_RUNTIME,
+        signal: providerAbortController.signal,
+        onFallback: (reason) => {
+          void recordStructuredEvent(config, 'llm_fallback', {
+            origin: 'server',
+            requestId,
+            runId: playcheckRunId,
+            turnId: providerTurnId,
+            source: 'card-preview',
+            reason,
+          });
+        },
+      };
       logStructuredEvent('llm_start', {
         origin: 'server',
         requestId,
@@ -4653,7 +4685,7 @@ async function handleRequest(
       let previewResponse: AssistantResponse;
       try {
         previewResponse = await generateCardPreviewReply(
-          config.openAiApiKey,
+          llm,
           cardId,
           performanceContext,
           telemetry,
@@ -4743,6 +4775,21 @@ async function handleRequest(
             }
           : {}),
       });
+      const llm: LlmRequestContext = {
+        apiKey: config.openAiApiKey,
+        runtime: config.llmRuntime ?? DEFAULT_LLM_RUNTIME,
+        signal: providerAbortController.signal,
+        onFallback: (reason) => {
+          void recordStructuredEvent(config, 'llm_fallback', {
+            origin: 'server',
+            requestId,
+            runId: playcheckRunId,
+            turnId: providerTurnId,
+            source: providerSource,
+            reason,
+          });
+        },
+      };
       let stateRejected = false;
       let deliveryMetadataRejected = false;
       const streamingCallbacks: StreamingReplyCallbacks | null = streamSpeech
@@ -4788,7 +4835,7 @@ async function handleRequest(
       let providerCallCount: number | null = null;
       if (mode === 'manual') {
         assistantResponse = await generateInteractiveResponse(
-          config.openAiApiKey,
+          llm,
           mode,
           message!,
           history,
@@ -4804,7 +4851,7 @@ async function handleRequest(
         );
       } else {
         const generatedResponse = await generateReply(
-          config.openAiApiKey,
+          llm,
           mode,
           message,
           history,

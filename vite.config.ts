@@ -12,6 +12,7 @@ import {
   exhibitionNetworkPlugin,
 } from './server/exhibitionNetwork';
 import { createInternetConnectivityProbe } from './server/internetConnectivity';
+import { resolveLlmRuntimeOptions } from './server/llmRuntime';
 
 const DEFAULT_DEV_HOST = '127.0.0.1';
 const DEFAULT_DEV_PORT = 5187;
@@ -118,6 +119,16 @@ export default defineConfig(({ mode }) => {
       httpsEnabled: Boolean(httpsOptions),
       exhibitionNetwork,
       internetConnectivity,
+      llmRuntime: resolveLlmRuntimeOptions(
+        {
+          profile: serverEnvironment.VAYRIA_LLM_PROFILE,
+          serviceTier: serverEnvironment.VAYRIA_LLM_SERVICE_TIER,
+          fallbackEnabled: serverEnvironment.VAYRIA_LLM_FALLBACK_ENABLED,
+          cacheWarmupEnabled:
+            serverEnvironment.VAYRIA_LLM_CACHE_WARMUP_ENABLED,
+        },
+        appMode === 'exhibition',
+      ),
     }),
     voiceStreamProxyPlugin(
       serverEnvironment.VAYRIA_STT_WS_URL?.trim() ||
