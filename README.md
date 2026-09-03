@@ -123,6 +123,8 @@ API keyを使う場合は、`npm run exhibition:start:op`を使用します。
 検証済み発話単位からTTSを開始する経路は、既定で有効です。
 無効にする場合は、`VITE_STREAMING_SPEECH_ENABLED=0`、またはURLの`?streamingSpeech=0`を指定します。
 この経路はvoice、manual、card changeだけに適用し、通常のautonomous発話には適用しません。
+自然に分離できる4〜12文字の第一声も、既定で先行生成します。
+比較時は、`VITE_EARLY_SPEECH_LEAD_ENABLED=0`、またはURLの`?earlySpeechLead=0`で無効にします。
 
 マイク、ChatGPT音声、Vayria音声を個別に再生し、Vayriaの音声メーターで経路を確認します。
 音声メーターはマイクとChatGPT音声で動き、Vayria自身の音声では動かない状態が期待値です。

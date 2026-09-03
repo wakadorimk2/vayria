@@ -875,6 +875,7 @@ export function useConversation(
             streamSpeech:
               runtimeConfig.streamingSpeechEnabled &&
               (INTERACTIVE_SOURCES.includes(turnSource) || isCardChangeTurn),
+            earlySpeechLead: runtimeConfig.earlySpeechLeadEnabled,
           }),
           signal: chatController.signal,
         });

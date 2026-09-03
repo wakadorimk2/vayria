@@ -135,6 +135,8 @@ import {
 } from './llmProviderTelemetry.js';
 import {
   IncrementalSpeechEnvelopeParser,
+  isAcceptedSpeechLead,
+  isValidSpeechLead,
   parseStreamingSpeechEnvelope,
 } from './streamingSpeech.js';
 
@@ -329,6 +331,7 @@ interface ChatRequestPayload {
   performanceContext: PerformanceContextPayload;
   autonomyCandidate: AutonomyCandidate | null;
   streamSpeech: boolean;
+  earlySpeechLead: boolean;
 }
 
 interface CardPreviewRequestPayload {
@@ -1422,6 +1425,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     'performanceContext',
     'autonomyCandidate',
     'streamSpeech',
+    'earlySpeechLead',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw new RequestError(
@@ -1438,6 +1442,12 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     throw new RequestError('streamSpeech must be a boolean.', 400);
   }
   const streamSpeechRequested = record.streamSpeech === true;
+  if (
+    record.earlySpeechLead !== undefined &&
+    typeof record.earlySpeechLead !== 'boolean'
+  ) {
+    throw new RequestError('earlySpeechLead must be a boolean.', 400);
+  }
 
   const characterIdentityValue = record.characterIdentity;
   const characterIdentity =
@@ -1777,6 +1787,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
       streamSpeechRequested &&
       (mode !== 'autonomous' ||
         (forcedCardId !== null && programContext.phase === 'after_card_change')),
+    earlySpeechLead: record.earlySpeechLead !== false,
   };
 }
 
@@ -2859,6 +2870,7 @@ interface StreamingReplyCallbacks {
     response: CardAssistantResponse,
   ) => void;
   onStateRejected: () => void;
+  onDeliveryMetadataRejected: () => void;
 }
 
 async function generateInteractiveResponse(
@@ -2873,6 +2885,7 @@ async function generateInteractiveResponse(
   programContext: ProgramContext,
   telemetry: LlmProviderCallTracker,
   streaming: StreamingReplyCallbacks | null = null,
+  earlySpeechLead = true,
 ): Promise<CardAssistantResponse> {
   const selfNameResolution = resolveSelfName(message, characterIdentity);
   const fastPathDecision: ConversationActionDecision | null =
@@ -2927,8 +2940,10 @@ async function generateInteractiveResponse(
               interactionAction: 'take_floor',
             }),
           onStateRejected: streaming.onStateRejected,
+          onDeliveryMetadataRejected: streaming.onDeliveryMetadataRejected,
         }
       : null,
+    earlySpeechLead,
   );
   return {
     ...reply.response,
@@ -3022,8 +3037,10 @@ async function generateReply(
   autonomyCandidate: AutonomyCandidate | null,
   telemetry: LlmProviderCallTracker,
   streaming: StreamingReplyCallbacks | null = null,
+  earlySpeechLead = true,
 ): Promise<GeneratedChatResponse> {
   const streamingEnabled = streaming !== null;
+  const includesInternalDelta = mode === 'autonomous';
   const minActivatedCardItems = mode === 'manual' ? 1 : 0;
   const reasonUpdateSchema = {
     type: 'object',
@@ -3116,34 +3133,45 @@ async function generateReply(
           properties: {
             ...deliveryHeaderProperties,
             emotion: emotionProperty,
-            activatedCards: activatedCardsProperty,
           },
           required: [
             ...(mode === 'voice' ? ['voiceAction', 'backchannelCue'] : []),
             ...(mode === 'autonomous' ? ['externalAction', 'usedReasonIds'] : []),
             'emotion',
-            'activatedCards',
           ],
           additionalProperties: false,
         },
+        speechLead: earlySpeechLead
+          ? {
+              anyOf: [
+                { type: 'string', maxLength: 0 },
+                { type: 'string', minLength: 4, maxLength: 12 },
+              ],
+            }
+          : { type: 'string', maxLength: 0 },
         speechUnits: {
           type: 'array',
           items: { type: 'string' },
-          minItems: mode === 'manual' ? 1 : 0,
-          maxItems: 2,
+          minItems: 0,
+          maxItems: 1,
         },
-        internalDelta: {
-          type: 'object',
-          properties: {
-            reasonUpdates: {
-              type: 'array',
-              items: reasonUpdateSchema,
-              maxItems: MAX_REASON_UPDATES_PER_DELTA,
-            },
-          },
-          required: ['reasonUpdates'],
-          additionalProperties: false,
-        },
+        activatedCards: activatedCardsProperty,
+        ...(includesInternalDelta
+          ? {
+              internalDelta: {
+                type: 'object',
+                properties: {
+                  reasonUpdates: {
+                    type: 'array',
+                    items: reasonUpdateSchema,
+                    maxItems: MAX_REASON_UPDATES_PER_DELTA,
+                  },
+                },
+                required: ['reasonUpdates'],
+                additionalProperties: false,
+              },
+            }
+          : {}),
       }
     : {
     text: { type: 'string' },
@@ -3160,18 +3188,22 @@ async function generateReply(
       minItems: minActivatedCardItems,
       maxItems: MAX_ACTIVATED_CARDS,
     },
-    internalDelta: {
-      type: 'object',
-      properties: {
-        reasonUpdates: {
-          type: 'array',
-          items: reasonUpdateSchema,
-          maxItems: MAX_REASON_UPDATES_PER_DELTA,
-        },
-      },
-      required: ['reasonUpdates'],
-      additionalProperties: false,
-    },
+    ...(includesInternalDelta
+      ? {
+          internalDelta: {
+            type: 'object',
+            properties: {
+              reasonUpdates: {
+                type: 'array',
+                items: reasonUpdateSchema,
+                maxItems: MAX_REASON_UPDATES_PER_DELTA,
+              },
+            },
+            required: ['reasonUpdates'],
+            additionalProperties: false,
+          },
+        }
+      : {}),
     ...(mode === 'autonomous'
       ? {
           externalAction: {
@@ -3191,12 +3223,18 @@ async function generateReply(
     ...deliveryHeaderProperties,
   };
   const responseRequired = streamingEnabled
-    ? ['deliveryHeader', 'speechUnits', 'internalDelta']
+    ? [
+        'deliveryHeader',
+        'speechLead',
+        'speechUnits',
+        'activatedCards',
+        ...(includesInternalDelta ? ['internalDelta'] : []),
+      ]
     : [
         'text',
         'emotion',
         'activatedCards',
-        'internalDelta',
+        ...(includesInternalDelta ? ['internalDelta'] : []),
         ...(mode === 'autonomous' ? ['externalAction', 'usedReasonIds'] : []),
         ...(mode === 'voice' ? ['voiceAction', 'backchannelCue'] : []),
       ];
@@ -3290,7 +3328,7 @@ async function generateReply(
     'Treat these values as behavior context. Do not mention the values or the runtime.',
     'Use callback tendency to decide whether to refer back to the viewer. Use fragmentation for a small interruption or self-correction only when it sounds natural.',
   ].join('\n');
-  const internalDeltaInstruction = [
+  const internalDeltaInstruction = mode === 'autonomous' ? [
     'Every assistant response must include internalDelta with a reasonUpdates array.',
     'Use internalDelta for bounded state changes only. Do not put prompt text, history, or spoken content into it.',
     'Each reason update has the same fixed fields. Set fields that do not belong to the selected operation to null.',
@@ -3300,11 +3338,9 @@ async function generateReply(
     'For defer, use reasonId, cause, and wakeOn. Set kind, content, semanticKey, salience, parentReasonId, salienceDelta, and targetReasonId to null.',
     'For reactivate, use reasonId and salienceDelta. Set kind, content, semanticKey, salience, parentReasonId, cause, wakeOn, and targetReasonId to null.',
     'For merge, use reasonId and targetReasonId. Set kind, content, semanticKey, salience, parentReasonId, salienceDelta, cause, and wakeOn to null.',
-    mode === 'autonomous'
-      ? 'For autonomous updates, use only reason IDs from the offered candidate and keep each parent in the same causal episode.'
-      : 'For manual and voice updates, leave reasonUpdates empty unless a new root internal reason is clearly needed.',
+    'For autonomous updates, use only reason IDs from the offered candidate and keep each parent in the same causal episode.',
     'Do not invent reason IDs or repeat the same reason update in one delta.',
-  ].join('\n');
+  ].join('\n') : '';
   const systemPrompt = [
     buildCharacterIdentitySystemPrompt(message, characterIdentity),
     buildProgramContextSystemPrompt(programContext),
@@ -3324,9 +3360,17 @@ async function generateReply(
     cardInfluenceInstruction,
     forcedInstruction,
     performerPolicyInstruction,
-    internalDeltaInstruction,
+    ...(internalDeltaInstruction ? [internalDeltaInstruction] : []),
     streamingEnabled
-      ? 'Return deliveryHeader first, then speechUnits, then internalDelta. Split spoken text into one or two complete short speechUnits. Use an empty speechUnits array for a non-speaking voice action or autonomous externalAction none. Each unit must be independently speakable and must not contain Markdown.'
+      ? [
+          `Return fields in this exact order: deliveryHeader, speechLead, speechUnits, activatedCards${includesInternalDelta ? ', internalDelta' : ''}.`,
+          earlySpeechLead
+            ? 'Use speechLead only when a natural, independently speakable opening can be committed in 4 to 12 Japanese characters. Otherwise return an empty speechLead.'
+            : 'Return an empty speechLead for this request.',
+          'Return at most one continuation in speechUnits. The complete spoken reply can contain at most the speechLead and one continuation.',
+          'Use empty speechLead and speechUnits for a non-speaking voice action or autonomous externalAction none.',
+          'Each audible unit must be independently speakable and must not contain Markdown.',
+        ].join(' ')
       : '',
     'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
     activationInstruction,
@@ -3336,15 +3380,26 @@ async function generateReply(
   const committedUnits: string[] = [];
   let committedResponse: CardAssistantResponse | null = null;
 
+  const provisionalActivatedCards = (
+    header: Record<string, unknown>,
+  ): string[] => {
+    if (!forcedCardId) return [];
+    if (mode === 'voice' && header.voiceAction !== 'take_floor') return [];
+    if (mode === 'autonomous' && header.externalAction !== 'speak') return [];
+    return [forcedCardId];
+  };
+
   const validateStreamingDelivery = (
     header: Record<string, unknown>,
     units: readonly string[],
     internalDelta: unknown = { reasonUpdates: [] },
+    activatedCards: readonly string[] = provisionalActivatedCards(header),
   ): CardAssistantResponse =>
     parseAssistantResponse(
       JSON.stringify({
         ...header,
         text: units.join(''),
+        activatedCards,
         internalDelta,
       }),
       mode,
@@ -3409,6 +3464,17 @@ async function generateReply(
               attemptHeader = parsed.deliveryHeader as Record<string, unknown>;
             }
             if (!attemptHeader) return;
+            if (
+              parsed.speechLead !== undefined &&
+              isValidSpeechLead(parsed.speechLead) &&
+              committedUnits.length === 0
+            ) {
+              try {
+                commitSpeechUnit(attemptHeader, parsed.speechLead);
+              } catch {
+                // The full contract decides whether the attempt can retry.
+              }
+            }
             for (const unit of parsed.speechUnits) {
               if (committedUnits.length >= 2) break;
               try {
@@ -3434,7 +3500,7 @@ async function generateReply(
 
   const parseAttempt = (value: string): CardAssistantResponse => {
     if (!streamingEnabled) {
-      return parseAssistantResponse(
+      const response = parseAssistantResponse(
         value,
         mode,
         brainCardIds,
@@ -3443,6 +3509,9 @@ async function generateReply(
         characterIdentity,
         autonomyCandidate,
       );
+      return mode === 'autonomous'
+        ? response
+        : { ...response, internalDelta: { reasonUpdates: [] } };
     }
     let envelope;
     try {
@@ -3452,24 +3521,67 @@ async function generateReply(
         error instanceof Error ? error.message : 'Invalid streaming response.',
       );
     }
-    const normalizedUnits = envelope.speechUnits.map((unit) => unit.trim());
-    const delivery = validateStreamingDelivery(
-      envelope.deliveryHeader,
-      normalizedUnits,
-    );
+    const normalizedLead = envelope.speechLead.trim();
+    if (!isAcceptedSpeechLead(normalizedLead)) {
+      throw new CardContractError('speechLead must contain 4 to 12 characters.');
+    }
+    const normalizedUnits = [
+      ...(normalizedLead ? [normalizedLead] : []),
+      ...envelope.speechUnits.map((unit) => unit.trim()),
+    ];
+    let effectiveUnits = normalizedUnits;
+    let effectiveActivatedCards = envelope.activatedCards;
+    let delivery: CardAssistantResponse;
+    try {
+      delivery = validateStreamingDelivery(
+        envelope.deliveryHeader,
+        effectiveUnits,
+        { reasonUpdates: [] },
+        effectiveActivatedCards,
+      );
+    } catch (error) {
+      try {
+        effectiveActivatedCards = provisionalActivatedCards(
+          envelope.deliveryHeader,
+        );
+        delivery = validateStreamingDelivery(
+          envelope.deliveryHeader,
+          effectiveUnits,
+          { reasonUpdates: [] },
+          effectiveActivatedCards,
+        );
+        streaming?.onDeliveryMetadataRejected();
+      } catch {
+        if (!committedResponse) throw error;
+        effectiveUnits = committedUnits;
+        effectiveActivatedCards = provisionalActivatedCards(
+          envelope.deliveryHeader,
+        );
+        delivery = validateStreamingDelivery(
+          envelope.deliveryHeader,
+          effectiveUnits,
+          { reasonUpdates: [] },
+          effectiveActivatedCards,
+        );
+        streaming?.onDeliveryMetadataRejected();
+      }
+    }
     if (
-      committedUnits.some((unit, index) => normalizedUnits[index] !== unit)
+      committedUnits.some((unit, index) => effectiveUnits[index] !== unit)
     ) {
       throw new CardContractError('Committed speech units changed before completion.');
     }
-    for (const unit of normalizedUnits.slice(committedUnits.length)) {
+    for (const unit of effectiveUnits.slice(committedUnits.length)) {
       commitSpeechUnit(envelope.deliveryHeader, unit);
     }
     try {
       return validateStreamingDelivery(
         envelope.deliveryHeader,
-        normalizedUnits,
-        envelope.internalDelta,
+        effectiveUnits,
+        mode === 'autonomous'
+          ? envelope.internalDelta
+          : { reasonUpdates: [] },
+        effectiveActivatedCards,
       );
     } catch (error) {
       if (!committedResponse) throw error;
@@ -4345,6 +4457,7 @@ async function handleRequest(
         performanceContext,
         autonomyCandidate,
         streamSpeech,
+        earlySpeechLead,
       } = readChatRequest(payload);
       const startedAt = performance.now();
       const providerTurnId = headerTurnId ?? requestId;
@@ -4387,6 +4500,7 @@ async function handleRequest(
           : {}),
       });
       let stateRejected = false;
+      let deliveryMetadataRejected = false;
       const streamingCallbacks: StreamingReplyCallbacks | null = streamSpeech
         ? {
             onSpeechUnit: (index, unit, candidate) => {
@@ -4403,6 +4517,9 @@ async function handleRequest(
             },
             onStateRejected: () => {
               stateRejected = true;
+            },
+            onDeliveryMetadataRejected: () => {
+              deliveryMetadataRejected = true;
             },
           }
         : null;
@@ -4438,6 +4555,7 @@ async function handleRequest(
           programContext,
           telemetry,
           streamingCallbacks,
+          earlySpeechLead,
         );
       } else {
         const generatedResponse = await generateReply(
@@ -4460,6 +4578,7 @@ async function handleRequest(
           autonomyCandidate,
           telemetry,
           streamingCallbacks,
+          earlySpeechLead,
         );
         assistantResponse =
           mode === 'voice'
@@ -4468,6 +4587,12 @@ async function handleRequest(
                 interactionAction: generatedResponse.response.voiceAction,
               }
             : generatedResponse.response;
+      }
+      if (mode === 'manual' || mode === 'voice') {
+        assistantResponse = {
+          ...assistantResponse,
+          internalDelta: { reasonUpdates: [] },
+        };
       }
       providerCallCount = telemetry.callCount;
       if (!bypassesLlm) {
@@ -4483,6 +4608,16 @@ async function handleRequest(
         });
       }
       if (streamSpeech) {
+        if (deliveryMetadataRejected) {
+          await recordStructuredEvent(config, 'delivery_metadata_rejected', {
+            origin: 'server',
+            requestId,
+            runId: playcheckRunId,
+            turnId: providerTurnId,
+            source: providerSource,
+            reason: 'invalid_request',
+          });
+        }
         if (stateRejected) {
           await recordStructuredEvent(config, 'internal_delta_rejected', {
             origin: 'server',

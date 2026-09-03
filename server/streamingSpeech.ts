@@ -1,5 +1,6 @@
 export interface StreamingSpeechChunk {
   deliveryHeader?: unknown;
+  speechLead?: string;
   speechUnits: string[];
 }
 
@@ -88,6 +89,8 @@ export class IncrementalSpeechEnvelopeParser {
   private buffer = '';
   private deliveryHeaderRead = false;
   private deliveryHeaderEnd = 0;
+  private speechLeadRead = false;
+  private speechLeadEnd = 0;
   private speechArrayOffset: number | null = null;
   private speechCursor: number | null = null;
 
@@ -103,9 +106,22 @@ export class IncrementalSpeechEnvelopeParser {
       }
     }
 
-    if (this.speechArrayOffset === null && this.deliveryHeaderRead) {
+    if (!this.speechLeadRead && this.deliveryHeaderRead) {
+      const lead = readPropertyValue(
+        this.buffer,
+        'speechLead',
+        this.deliveryHeaderEnd,
+      );
+      if (lead && typeof lead.value === 'string') {
+        this.speechLeadRead = true;
+        this.speechLeadEnd = lead.end;
+        result.speechLead = lead.value;
+      }
+    }
+
+    if (this.speechArrayOffset === null && this.speechLeadRead) {
       const key = JSON.stringify('speechUnits');
-      const keyOffset = this.buffer.indexOf(key, this.deliveryHeaderEnd);
+      const keyOffset = this.buffer.indexOf(key, this.speechLeadEnd);
       if (keyOffset >= 0) {
         let cursor = skipWhitespace(this.buffer, keyOffset + key.length);
         if (this.buffer[cursor] === ':') cursor = skipWhitespace(this.buffer, cursor + 1);
@@ -141,8 +157,19 @@ export class IncrementalSpeechEnvelopeParser {
 
 export interface StreamingSpeechEnvelope {
   deliveryHeader: Record<string, unknown>;
+  speechLead: string;
   speechUnits: string[];
+  activatedCards: string[];
   internalDelta: unknown;
+}
+
+export function isValidSpeechLead(value: string): boolean {
+  const length = Array.from(value.trim()).length;
+  return length >= 4 && length <= 12;
+}
+
+export function isAcceptedSpeechLead(value: string): boolean {
+  return value.trim() === '' || isValidSpeechLead(value);
 }
 
 export function parseStreamingSpeechEnvelope(value: string): StreamingSpeechEnvelope {
@@ -155,14 +182,19 @@ export function parseStreamingSpeechEnvelope(value: string): StreamingSpeechEnve
     !record.deliveryHeader ||
     typeof record.deliveryHeader !== 'object' ||
     Array.isArray(record.deliveryHeader) ||
+    typeof record.speechLead !== 'string' ||
     !Array.isArray(record.speechUnits) ||
-    !record.speechUnits.every((unit): unit is string => typeof unit === 'string')
+    !record.speechUnits.every((unit): unit is string => typeof unit === 'string') ||
+    !Array.isArray(record.activatedCards) ||
+    !record.activatedCards.every((card): card is string => typeof card === 'string')
   ) {
     throw new Error('Streaming speech response has an invalid delivery contract.');
   }
   return {
     deliveryHeader: record.deliveryHeader as Record<string, unknown>,
+    speechLead: record.speechLead,
     speechUnits: record.speechUnits,
+    activatedCards: record.activatedCards,
     internalDelta: record.internalDelta,
   };
 }
