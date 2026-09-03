@@ -57,6 +57,20 @@ test('complete streaming envelope keeps delivery and state separate', () => {
 test('NDJSON reader handles byte boundaries and preserves event order', async () => {
   const records = [
     {
+      type: 'provider_timing',
+      milestone: 'start',
+      purpose: 'response-generation',
+      callIndex: 1,
+      retry: 0,
+    },
+    {
+      type: 'provider_timing',
+      milestone: 'first_chunk',
+      purpose: 'response-generation',
+      callIndex: 1,
+      retry: 0,
+    },
+    {
       type: 'speech_unit',
       index: 0,
       text: 'えっ、',
@@ -77,5 +91,11 @@ test('NDJSON reader handles byte boundaries and preserves event order', async ()
   await readStreamingChatEvents(new Response(stream), (event) => {
     received.push(event.type);
   });
-  assert.deepEqual(received, ['speech_unit', 'state', 'done']);
+  assert.deepEqual(received, [
+    'provider_timing',
+    'provider_timing',
+    'speech_unit',
+    'state',
+    'done',
+  ]);
 });

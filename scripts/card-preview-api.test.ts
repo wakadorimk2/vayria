@@ -689,6 +689,38 @@ test('conversation events validate the shared interactionAction field', () => {
   );
 });
 
+test('provider timing events accept only safe lifecycle metadata', () => {
+  const event = readConversationEvent({
+    at: '2026-09-03T00:00:00.000Z',
+    elapsedMs: 750,
+    event: 'llm_provider_first_chunk',
+    source: 'voice',
+    turnId: 'turn-provider-timing-1',
+    purpose: 'response-generation',
+    callIndex: 1,
+    retry: 0,
+  });
+  assert.equal(event.purpose, 'response-generation');
+  assert.equal(event.callIndex, 1);
+  assert.equal(event.retry, 0);
+  assert.throws(
+    () =>
+      readConversationEvent({
+        ...event,
+        event: 'llm_done',
+      }),
+    /only valid for provider timing events/,
+  );
+  assert.throws(
+    () =>
+      readConversationEvent({
+        ...event,
+        prompt: 'must not be logged',
+      }),
+    /unsupported field/,
+  );
+});
+
 test('playback gesture telemetry accepts only safe reason classifications', () => {
   const event = readConversationEvent({
     at: '2026-09-02T00:00:00.000Z',

@@ -43,6 +43,7 @@ interface LlmProviderCallTrackerOptions {
   model: string;
   source: LlmProviderSource;
   record: RecordLlmProviderEvent;
+  observe?: (event: LlmProviderEvent) => void;
   now?: () => number;
   signal?: AbortSignal;
 }
@@ -110,6 +111,11 @@ export function createLlmProviderCallTracker(
           retry: callOptions.retry,
           elapsedMs: Math.max(0, Math.round(now() - startedAt)),
         };
+        try {
+          options.observe?.(payload);
+        } catch (error) {
+          console.warn('LLM provider telemetry observer failed.', error);
+        }
         const write = async (): Promise<void> => {
           try {
             await options.record(payload);

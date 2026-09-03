@@ -129,6 +129,8 @@ import type {
 import {
   createLlmProviderCallTracker,
   type LlmProviderCallTracker,
+  type LlmProviderEvent,
+  type LlmProviderPurpose,
   type LlmProviderSource,
 } from './llmProviderTelemetry.js';
 import {
@@ -196,6 +198,9 @@ const INTERACTIVE_POLICY_ACTIONS = [
 const CONVERSATION_EVENTS = [
   'input_received',
   'llm_start',
+  'llm_provider_start',
+  'llm_provider_first_chunk',
+  'llm_provider_done',
   'llm_done',
   'speech_unit_ready',
   'internal_delta_rejected',
@@ -367,6 +372,9 @@ interface ClientConversationEvent {
   reason?: string;
   sampleRateHz?: number;
   interactionAction?: ConversationAction;
+  purpose?: LlmProviderPurpose;
+  callIndex?: number;
+  retry?: number;
   runId?: string;
   gateEvent?: AutonomyTurnGateTelemetry['gateEvent'];
   gatePhase?: AutonomyTurnGateTelemetry['gatePhase'];
@@ -694,6 +702,7 @@ function createRequestLlmProviderTracker(
     turnId: string;
     source: LlmProviderSource;
     signal: AbortSignal;
+    observe?: (event: LlmProviderEvent) => void;
   },
 ): LlmProviderCallTracker {
   return createLlmProviderCallTracker({
@@ -702,6 +711,7 @@ function createRequestLlmProviderTracker(
     model: String(MODEL_GPT_5_NANO),
     source: fields.source,
     signal: fields.signal,
+    observe: fields.observe,
     record: ({ event, ...providerFields }) =>
       recordStructuredEvent(config, event, {
         origin: 'server',
@@ -796,6 +806,9 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     'reason',
     'sampleRateHz',
     'interactionAction',
+    'purpose',
+    'callIndex',
+    'retry',
     'runId',
     'gateEvent',
     'gatePhase',
@@ -955,6 +968,39 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
     source,
     turnId,
   };
+
+  const providerTimingFields = ['purpose', 'callIndex', 'retry'] as const;
+  const isProviderTimingEvent =
+    event === 'llm_provider_start' ||
+    event === 'llm_provider_first_chunk' ||
+    event === 'llm_provider_done';
+  if (
+    !isProviderTimingEvent &&
+    providerTimingFields.some((field) => record[field] !== undefined)
+  ) {
+    throw new RequestError(
+      'Provider timing fields are only valid for provider timing events.',
+      400,
+    );
+  }
+  if (isProviderTimingEvent) {
+    if (
+      record.purpose !== 'conversation-policy' &&
+      record.purpose !== 'response-generation' &&
+      record.purpose !== 'card-preview'
+    ) {
+      throw new RequestError('purpose is invalid.', 400);
+    }
+    eventPayload.purpose = record.purpose;
+    eventPayload.callIndex = readNonNegativeEventInteger(
+      record.callIndex,
+      'callIndex',
+    );
+    if (eventPayload.callIndex === 0) {
+      throw new RequestError('callIndex must be positive.', 400);
+    }
+    eventPayload.retry = readNonNegativeEventInteger(record.retry, 'retry');
+  }
 
   if (event === 'playback_startup') {
     if (record.playbackRoute !== 'conversation') {
@@ -4145,6 +4191,9 @@ async function handleRequest(
         ...(event.interactionAction === undefined
           ? {}
           : { interactionAction: event.interactionAction }),
+        ...(event.purpose === undefined ? {} : { purpose: event.purpose }),
+        ...(event.callIndex === undefined ? {} : { callIndex: event.callIndex }),
+        ...(event.retry === undefined ? {} : { retry: event.retry }),
         ...(event.gateEvent === undefined
           ? {}
           : { gateEvent: event.gateEvent }),
@@ -4310,15 +4359,34 @@ async function handleRequest(
         response,
         providerAbortController,
       );
+      if (streamSpeech) startNdjson(response);
       const telemetry = createRequestLlmProviderTracker(config, {
         requestId,
         runId: playcheckRunId,
         turnId: providerTurnId,
         source: providerSource,
         signal: providerAbortController.signal,
+        ...(streamSpeech
+          ? {
+              observe: (event: LlmProviderEvent) => {
+                const milestone =
+                  event.event === 'llm_provider_start'
+                    ? 'start'
+                    : event.event === 'llm_provider_first_chunk'
+                      ? 'first_chunk'
+                      : 'done';
+                writeNdjson(response, {
+                  type: 'provider_timing',
+                  milestone,
+                  purpose: event.purpose,
+                  callIndex: event.callIndex,
+                  retry: event.retry,
+                });
+              },
+            }
+          : {}),
       });
       let stateRejected = false;
-      if (streamSpeech) startNdjson(response);
       const streamingCallbacks: StreamingReplyCallbacks | null = streamSpeech
         ? {
             onSpeechUnit: (index, unit, candidate) => {

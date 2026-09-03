@@ -203,6 +203,60 @@ test('telemetry recording failures do not change the provider result or event or
   ]);
 });
 
+test('provider observer receives ordered milestones without waiting for storage', async () => {
+  const observed: string[] = [];
+  let releaseStorage: (() => void) | undefined;
+  const storageBlocked = new Promise<void>((resolve) => {
+    releaseStorage = resolve;
+  });
+  const tracker = createLlmProviderCallTracker({
+    turnId: 'turn-observer',
+    provider: 'openai',
+    model: 'gpt-5-nano',
+    source: 'voice',
+    observe: (event) => observed.push(event.event),
+    record: () => storageBlocked,
+  });
+
+  const resultPromise = tracker.run(
+    { purpose: 'response-generation', retry: 0 },
+    async (markFirstChunk) => {
+      markFirstChunk();
+      return 'ok';
+    },
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(observed, [
+    'llm_provider_start',
+    'llm_provider_first_chunk',
+    'llm_provider_done',
+  ]);
+  releaseStorage?.();
+  assert.equal(await resultPromise, 'ok');
+});
+
+test('provider observer failure does not change the provider result', async () => {
+  const tracker = createLlmProviderCallTracker({
+    turnId: 'turn-observer-failure',
+    provider: 'openai',
+    model: 'gpt-5-nano',
+    source: 'manual',
+    observe: () => {
+      throw new Error('observer failed');
+    },
+    record: () => undefined,
+  });
+
+  const result = await tracker.run(
+    { purpose: 'response-generation', retry: 0 },
+    async (markFirstChunk) => {
+      markFirstChunk();
+      return 'ok';
+    },
+  );
+  assert.equal(result, 'ok');
+});
+
 test('telemetry completion failure does not mask a provider failure', async () => {
   const tracker = createLlmProviderCallTracker({
     turnId: 'turn-provider-failure',

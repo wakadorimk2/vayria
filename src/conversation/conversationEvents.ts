@@ -18,6 +18,9 @@ import {
 export const CONVERSATION_EVENTS = [
   'input_received',
   'llm_start',
+  'llm_provider_start',
+  'llm_provider_first_chunk',
+  'llm_provider_done',
   'llm_done',
   'speech_unit_ready',
   'internal_delta_rejected',
@@ -55,6 +58,9 @@ interface ConversationEventDetails {
   primingWaitMs?: number;
   reason?: string;
   sampleRateHz?: number;
+  purpose?: 'conversation-policy' | 'response-generation' | 'card-preview';
+  callIndex?: number;
+  retry?: number;
 }
 
 export type ConversationEvent = ConversationEventDetails &
@@ -88,6 +94,8 @@ function readSafeDetails(
   const primingTargetMs = readNonNegativeInteger(details.primingTargetMs);
   const primingWaitMs = readNonNegativeInteger(details.primingWaitMs);
   const sampleRateHz = readNonNegativeInteger(details.sampleRateHz);
+  const callIndex = readNonNegativeInteger(details.callIndex);
+  const retry = readNonNegativeInteger(details.retry);
   return {
     ...(details.audioContextState === 'closed' ||
     details.audioContextState === 'running' ||
@@ -121,6 +129,13 @@ function readSafeDetails(
     ...(primingWaitMs === undefined ? {} : { primingWaitMs }),
     ...(details.reason ? { reason: details.reason.slice(0, 120) } : {}),
     ...(sampleRateHz === undefined ? {} : { sampleRateHz }),
+    ...(details.purpose === 'conversation-policy' ||
+    details.purpose === 'response-generation' ||
+    details.purpose === 'card-preview'
+      ? { purpose: details.purpose }
+      : {}),
+    ...(callIndex === undefined || callIndex === 0 ? {} : { callIndex }),
+    ...(retry === undefined ? {} : { retry }),
   };
 }
 

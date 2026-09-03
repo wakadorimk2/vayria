@@ -889,7 +889,19 @@ export function useConversation(
           streamingModeUsed = true;
           await readStreamingChatEvents<ChatResponse>(chatResponse, (event) => {
             if (event.type === 'error') throw new Error(event.error);
-            if (event.type === 'speech_unit') {
+            if (event.type === 'provider_timing') {
+              const eventName =
+                event.milestone === 'start'
+                  ? 'llm_provider_start'
+                  : event.milestone === 'first_chunk'
+                    ? 'llm_provider_first_chunk'
+                    : 'llm_provider_done';
+              eventEmitter.emit(eventName, {
+                purpose: event.purpose,
+                callIndex: event.callIndex,
+                retry: event.retry,
+              });
+            } else if (event.type === 'speech_unit') {
               enqueueStreamingSpeechUnit(
                 event.index,
                 event.text,

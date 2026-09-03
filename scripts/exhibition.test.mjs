@@ -148,11 +148,13 @@ test('interactive pipeline latency separates normal, retry, and aborted turns', 
     status: 'active',
   };
   const turnEvents = (turnId, source, offset, extra = []) => [
-    { event: 'input_received', at: `2026-08-22T00:00:0${offset}.000Z`, turnId, source },
-    { event: 'llm_provider_first_chunk', at: `2026-08-22T00:00:0${offset}.800Z`, turnId, source },
-    { event: 'speech_unit_ready', at: `2026-08-22T00:00:0${offset}.900Z`, turnId, source },
-    { event: 'tts_first_audio', at: `2026-08-22T00:00:0${offset + 1}.300Z`, turnId, source },
-    { event: 'playback_started', at: `2026-08-22T00:00:0${offset + 1}.310Z`, turnId, source },
+    { event: 'input_received', at: `2026-08-22T00:00:0${offset}.900Z`, elapsedMs: 0, origin: 'client', turnId, source },
+    { event: 'llm_start', at: `2026-08-22T00:00:0${offset}.100Z`, elapsedMs: 50, origin: 'client', turnId, source },
+    { event: 'llm_provider_first_chunk', at: `2026-08-22T00:00:0${offset}.200Z`, elapsedMs: 800, origin: 'client', purpose: 'response-generation', callIndex: 1, retry: 0, turnId, source },
+    { event: 'speech_unit_ready', at: `2026-08-22T00:00:0${offset}.300Z`, elapsedMs: 900, origin: 'client', turnId, source },
+    { event: 'tts_start', at: `2026-08-22T00:00:0${offset}.400Z`, elapsedMs: 905, origin: 'client', turnId, source },
+    { event: 'tts_first_audio', at: `2026-08-22T00:00:0${offset}.500Z`, elapsedMs: 1300, origin: 'client', turnId, source },
+    { event: 'playback_started', at: `2026-08-22T00:00:0${offset}.600Z`, elapsedMs: 1310, origin: 'client', turnId, source },
     ...extra.map((event) => ({ ...event, turnId, source })),
   ];
   const summary = summarizeCapture({
@@ -169,30 +171,43 @@ test('interactive pipeline latency separates normal, retry, and aborted turns', 
       {
         event: 'input_received',
         at: '2026-08-22T00:00:07.000Z',
+        elapsedMs: 0,
+        origin: 'client',
         turnId: 'card-change-mixed',
         source: 'autonomous',
       },
       {
         event: 'llm_provider_first_chunk',
         at: '2026-08-22T00:00:07.700Z',
+        elapsedMs: 700,
+        origin: 'server',
         turnId: 'card-change-mixed',
         source: 'card_change',
       },
+      { event: 'llm_start', at: '2026-08-22T00:00:09.900Z', elapsedMs: 50, origin: 'client', turnId: 'card-change-mixed', source: 'autonomous' },
+      { event: 'llm_provider_first_chunk', at: '2026-08-22T00:00:09.800Z', elapsedMs: 700, origin: 'client', purpose: 'response-generation', callIndex: 1, retry: 0, turnId: 'card-change-mixed', source: 'autonomous' },
       {
         event: 'speech_unit_ready',
         at: '2026-08-22T00:00:07.800Z',
+        elapsedMs: 800,
+        origin: 'client',
         turnId: 'card-change-mixed',
         source: 'autonomous',
       },
+      { event: 'tts_start', at: '2026-08-22T00:00:09.700Z', elapsedMs: 805, origin: 'client', turnId: 'card-change-mixed', source: 'autonomous' },
       {
         event: 'tts_first_audio',
         at: '2026-08-22T00:00:08.100Z',
+        elapsedMs: 1100,
+        origin: 'client',
         turnId: 'card-change-mixed',
         source: 'autonomous',
       },
       {
         event: 'playback_started',
         at: '2026-08-22T00:00:08.110Z',
+        elapsedMs: 1110,
+        origin: 'client',
         turnId: 'card-change-mixed',
         source: 'autonomous',
       },
@@ -200,12 +215,16 @@ test('interactive pipeline latency separates normal, retry, and aborted turns', 
   });
 
   const voiceNormal = summary.runtime.interactivePipelineLatency.voice.normal;
+  assert.equal(voiceNormal.inputToProviderRequestMs.p50Ms, 50);
+  assert.equal(voiceNormal.providerRequestToFirstChunkMs.p50Ms, 750);
   assert.deepEqual(voiceNormal.inputToProviderFirstChunkMs, {
     count: 1,
     p50Ms: 800,
     p95Ms: 800,
   });
   assert.equal(voiceNormal.providerFirstChunkToSpeechUnitMs.p50Ms, 100);
+  assert.equal(voiceNormal.speechUnitToTtsRequestMs.p50Ms, 5);
+  assert.equal(voiceNormal.ttsRequestToFirstAudioMs.p50Ms, 395);
   assert.equal(voiceNormal.speechUnitToTtsFirstAudioMs.p50Ms, 400);
   assert.equal(voiceNormal.ttsFirstAudioToPlaybackMs.p50Ms, 10);
   assert.equal(voiceNormal.inputToPlaybackMs.p50Ms, 1310);

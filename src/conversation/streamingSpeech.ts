@@ -11,6 +11,14 @@ export interface StreamingStateEvent {
   rejected: boolean;
 }
 
+export interface StreamingProviderTimingEvent {
+  type: 'provider_timing';
+  milestone: 'start' | 'first_chunk' | 'done';
+  purpose: 'conversation-policy' | 'response-generation' | 'card-preview';
+  callIndex: number;
+  retry: number;
+}
+
 export interface StreamingDoneEvent<TResponse = unknown> {
   type: 'done';
   response: TResponse;
@@ -23,6 +31,7 @@ export interface StreamingErrorEvent {
 
 export type StreamingChatEvent<TResponse = unknown> =
   | StreamingSpeechUnitEvent<TResponse>
+  | StreamingProviderTimingEvent
   | StreamingStateEvent
   | StreamingDoneEvent<TResponse>
   | StreamingErrorEvent;
@@ -33,6 +42,21 @@ function parseStreamingChatEvent<TResponse>(line: string): StreamingChatEvent<TR
     throw new Error('Streaming chat event must be an object.');
   }
   const record = value as Record<string, unknown>;
+  if (
+    record.type === 'provider_timing' &&
+    (record.milestone === 'start' ||
+      record.milestone === 'first_chunk' ||
+      record.milestone === 'done') &&
+    (record.purpose === 'conversation-policy' ||
+      record.purpose === 'response-generation' ||
+      record.purpose === 'card-preview') &&
+    Number.isSafeInteger(record.callIndex) &&
+    (record.callIndex as number) > 0 &&
+    Number.isSafeInteger(record.retry) &&
+    (record.retry as number) >= 0
+  ) {
+    return value as StreamingProviderTimingEvent;
+  }
   if (
     record.type === 'speech_unit' &&
     Number.isSafeInteger(record.index) &&

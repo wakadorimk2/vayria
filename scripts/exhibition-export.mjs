@@ -128,18 +128,18 @@ function summarizePipelineMetric(values) {
   };
 }
 
-function eventTimestamp(event) {
-  const value = Date.parse(event.at);
-  return Number.isFinite(value) ? value : null;
-}
-
-function firstEventAt(events, eventName) {
-  const timestamps = events
-    .filter((event) => event.event === eventName)
-    .map(eventTimestamp)
-    .filter((value) => value !== null)
+function firstClientEventElapsed(events, eventName) {
+  const elapsedValues = events
+    .filter(
+      (event) =>
+        event.event === eventName &&
+        event.origin === 'client' &&
+        Number.isInteger(event.elapsedMs) &&
+        event.elapsedMs >= 0,
+    )
+    .map((event) => event.elapsedMs)
     .sort((left, right) => left - right);
-  return timestamps[0] ?? null;
+  return elapsedValues[0] ?? null;
 }
 
 function segmentDuration(from, to) {
@@ -150,8 +150,12 @@ function summarizeInteractivePipeline(events) {
   const interactiveSources = ['voice', 'manual', 'card_change'];
   const groups = ['normal', 'retry', 'aborted'];
   const metricNames = [
+    'inputToProviderRequestMs',
+    'providerRequestToFirstChunkMs',
     'inputToProviderFirstChunkMs',
     'providerFirstChunkToSpeechUnitMs',
+    'speechUnitToTtsRequestMs',
+    'ttsRequestToFirstAudioMs',
     'speechUnitToTtsFirstAudioMs',
     'ttsFirstAudioToPlaybackMs',
     'inputToPlaybackMs',
@@ -193,14 +197,26 @@ function summarizeInteractivePipeline(events) {
         event.retry > 0,
     );
     const group = aborted ? 'aborted' : retried ? 'retry' : 'normal';
-    const input = firstEventAt(turn.events, 'input_received');
-    const providerFirstChunk = firstEventAt(turn.events, 'llm_provider_first_chunk');
-    const speechUnit = firstEventAt(turn.events, 'speech_unit_ready');
-    const ttsFirstAudio = firstEventAt(turn.events, 'tts_first_audio');
-    const playback = firstEventAt(turn.events, 'playback_started');
+    const input = firstClientEventElapsed(turn.events, 'input_received');
+    const providerRequest = firstClientEventElapsed(turn.events, 'llm_start');
+    const providerFirstChunk = firstClientEventElapsed(
+      turn.events,
+      'llm_provider_first_chunk',
+    );
+    const speechUnit = firstClientEventElapsed(turn.events, 'speech_unit_ready');
+    const ttsRequest = firstClientEventElapsed(turn.events, 'tts_start');
+    const ttsFirstAudio = firstClientEventElapsed(turn.events, 'tts_first_audio');
+    const playback = firstClientEventElapsed(turn.events, 'playback_started');
     const values = {
+      inputToProviderRequestMs: segmentDuration(input, providerRequest),
+      providerRequestToFirstChunkMs: segmentDuration(
+        providerRequest,
+        providerFirstChunk,
+      ),
       inputToProviderFirstChunkMs: segmentDuration(input, providerFirstChunk),
       providerFirstChunkToSpeechUnitMs: segmentDuration(providerFirstChunk, speechUnit),
+      speechUnitToTtsRequestMs: segmentDuration(speechUnit, ttsRequest),
+      ttsRequestToFirstAudioMs: segmentDuration(ttsRequest, ttsFirstAudio),
       speechUnitToTtsFirstAudioMs: segmentDuration(speechUnit, ttsFirstAudio),
       ttsFirstAudioToPlaybackMs: segmentDuration(ttsFirstAudio, playback),
       inputToPlaybackMs: segmentDuration(input, playback),
