@@ -22,6 +22,7 @@ import type {
   CardZone,
 } from './useCardGamePrototype';
 import {
+  resolveCardDragPlacement,
   resolveCommittedCardDropTarget,
   resolveCardDropPreview,
   type CardDropPreview,
@@ -72,8 +73,6 @@ interface DragSession {
   pointerId: number;
   startX: number;
   startY: number;
-  initialCardCenter: SpatialViewportPoint;
-  initialPointer: SpatialViewportPoint;
   lastSpatialSampleAt: number;
   lastSpatialSampleCenter: SpatialViewportPoint;
   brainDropLayout: BrainDropLayout | null;
@@ -97,7 +96,6 @@ function readBrainDropLayout(): BrainDropLayout | null {
   );
   if (!brainCardsContainer) return null;
 
-  const containerRect = brainCardsContainer.getBoundingClientRect();
   const brainCardWrappers = Array.from(
     brainCardsContainer.children,
   ).filter((child): child is HTMLElement => child instanceof HTMLElement);
@@ -119,11 +117,17 @@ function readBrainDropLayout(): BrainDropLayout | null {
     }
   }
 
+  if (!cards.length) return null;
+  const left = Math.min(...cards.map((card) => card.centerX - card.width / 2));
+  const right = Math.max(...cards.map((card) => card.centerX + card.width / 2));
+  const top = Math.min(...cards.map((card) => card.centerY - card.height / 2));
+  const bottom = Math.max(...cards.map((card) => card.centerY + card.height / 2));
+
   return {
-    left: containerRect.left,
-    right: containerRect.right,
-    top: containerRect.top,
-    bottom: containerRect.bottom,
+    left,
+    right,
+    top,
+    bottom,
     cards,
   };
 }
@@ -139,11 +143,17 @@ function createDragSpatialSample(
   nextSampleCenter: SpatialViewportPoint;
   update: CardDragPositionUpdate;
 } | null {
+  const placement = resolveCardDragPlacement({
+    height: session.height,
+    offsetX: session.offsetX,
+    offsetY: session.offsetY,
+    pointerX: clientX,
+    pointerY: clientY,
+    width: session.width,
+  });
   const estimatedCenter: SpatialViewportPoint = {
-    x: session.initialCardCenter.x +
-      (clientX - session.initialPointer.x),
-    y: session.initialCardCenter.y +
-      (clientY - session.initialPointer.y),
+    x: placement.centerX,
+    y: placement.centerY,
   };
   const elapsedMs = Math.max(0, capturedAt - session.lastSpatialSampleAt);
   const distance = Math.hypot(
@@ -189,20 +199,16 @@ function readPointerTime(): number {
 
 function resolveDragDropPreview(
   session: DragSession,
-  left: number,
-  top: number,
+  pointerX: number,
+  pointerY: number,
 ): CardDropPreview | null {
   return resolveCardDropPreview(
     session.brainDropLayout,
     {
-      height: session.height,
-      left,
-      top,
-      width: session.width,
+      pointerX,
+      pointerY,
     },
-    session.dropPreview?.phase === 'locked'
-      ? session.dropPreview.targetCardId
-      : null,
+    session.dropPreview?.targetCardId ?? null,
   );
 }
 
@@ -366,14 +372,6 @@ export function CardGamePrototype({
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
-        initialCardCenter: {
-          x: rect.left + rect.width / 2,
-          y: rect.top + rect.height / 2,
-        },
-        initialPointer: {
-          x: event.clientX,
-          y: event.clientY,
-        },
         lastSpatialSampleAt: readPointerTime(),
         lastSpatialSampleCenter: {
           x: rect.left + rect.width / 2,
@@ -424,13 +422,11 @@ export function CardGamePrototype({
 
       suppressNextClickRef.current = true;
 
-      const finalLeft = clientX - session.offsetX;
-      const finalTop = clientY - session.offsetY;
       const displayedPreview = session.dropPreview;
       const finalPreview = resolveDragDropPreview(
         session,
-        finalLeft,
-        finalTop,
+        clientX,
+        clientY,
       );
       const committedTargetCardId = resolveCommittedCardDropTarget(
         displayedPreview,
@@ -458,20 +454,26 @@ export function CardGamePrototype({
 
       event.preventDefault();
       const startedDragging = !session.isDragging;
-      const nextLeft = event.clientX - session.offsetX;
-      const nextTop = event.clientY - session.offsetY;
+      const placement = resolveCardDragPlacement({
+        height: session.height,
+        offsetX: session.offsetX,
+        offsetY: session.offsetY,
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+        width: session.width,
+      });
       const dropPreview = resolveDragDropPreview(
         session,
-        nextLeft,
-        nextTop,
+        event.clientX,
+        event.clientY,
       );
       let nextSession: DragSession = {
         ...session,
         dropPreview,
         isDragging: true,
-        left: nextLeft,
+        left: placement.left,
         targetBrainCardId: dropPreview?.targetCardId ?? null,
-        top: nextTop,
+        top: placement.top,
       };
 
       dragSessionRef.current = nextSession;
@@ -625,7 +627,7 @@ export function CardGamePrototype({
 
       return zone === 'brain' ? (
         <div
-          className={`brain-card-float${dropPreview ? ` brain-card-float--drop-${dropPreview.phase}` : ''}`}
+          className={`brain-card-float${dropPreview ? ' brain-card-float--drop-locked' : ''}`}
           key={card.id}
           style={brainCardFloatStyle}
         >
