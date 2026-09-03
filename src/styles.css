@@ -365,37 +365,62 @@ input {
 
 .brain-card-float {
   --brain-float-distance: -3px;
+  --brain-drop-retreat-y: 0px;
+  --brain-drop-rotation: 0deg;
+  --brain-drop-scale: 1;
   position: relative;
-  transform: translate(
-    var(--brain-drop-retreat-x, 0px),
-    var(--brain-drop-retreat-y, 0px)
-  );
-  transition: transform 180ms cubic-bezier(0.2, 0.85, 0.25, 1);
+  transform: translateY(var(--brain-drop-retreat-y))
+    scale(var(--brain-drop-scale)) rotate(var(--brain-drop-rotation));
+  transition:
+    filter 140ms ease,
+    transform 180ms cubic-bezier(0.2, 0.85, 0.25, 1);
   animation: brain-card-float 6s ease-in-out infinite alternate;
 }
 
-.brain-card-float--drop-target {
+.brain-card-float--drop-candidate,
+.brain-card-float--drop-locked {
   z-index: 6;
+  filter: brightness(1.08);
   will-change: transform;
 }
 
-.brain-card-float--drop-target::after {
-  position: absolute;
-  z-index: 9;
-  right: -0.35rem;
-  bottom: -0.45rem;
-  padding: 0.16rem 0.38rem;
+.brain-card-float--drop-candidate .wildcard-card--drop-target,
+.brain-card-float--drop-locked .wildcard-card--drop-target {
+  animation: none;
+  transform: translateY(var(--card-lift)) rotate(var(--card-rotation));
+}
+
+.card-drop-target-label {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 148px;
+  min-height: 28px;
+  gap: 0.3rem;
+  padding: 0.22rem 0.5rem;
   border: 1px solid rgb(255 241 198 / 72%);
   border-radius: 999px;
   background: rgb(31 24 42 / 92%);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 34%);
   color: #fff1c6;
-  content: '押し出す';
-  font-size: 0.62rem;
-  font-weight: 760;
+  font-size: 0.68rem;
+  line-height: 1.15;
   letter-spacing: 0.04em;
-  opacity: max(0.55, var(--brain-drop-progress, 0));
   pointer-events: none;
   white-space: nowrap;
+}
+
+.card-drop-target-label span {
+  color: rgb(255 241 198 / 78%);
+  font-weight: 620;
+}
+
+.card-drop-target-label strong {
+  overflow: hidden;
+  font-weight: 800;
+  text-overflow: ellipsis;
 }
 
 .brain-card-float:nth-child(2n) {

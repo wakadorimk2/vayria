@@ -22,6 +22,7 @@ import type {
   CardZone,
 } from './useCardGamePrototype';
 import {
+  resolveCommittedCardDropTarget,
   resolveCardDropPreview,
   type CardDropPreview,
   type CardDropPreviewLayout,
@@ -184,6 +185,31 @@ function readPointerTime(): number {
   return typeof performance !== 'undefined' && Number.isFinite(performance.now())
     ? performance.now()
     : Date.now();
+}
+
+function resolveDragDropPreview(
+  session: DragSession,
+  left: number,
+  top: number,
+  pointerX: number,
+  pointerY: number,
+): CardDropPreview | null {
+  return resolveCardDropPreview(
+    session.brainDropLayout,
+    {
+      height: session.height,
+      left,
+      pointerX,
+      pointerY,
+      top,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth,
+      width: session.width,
+    },
+    session.dropPreview?.phase === 'locked'
+      ? session.dropPreview.targetCardId
+      : null,
+  );
 }
 
 export function CardGamePrototype({
@@ -404,15 +430,22 @@ export function CardGamePrototype({
 
       suppressNextClickRef.current = true;
 
-      const finalPreview = resolveCardDropPreview(
-        session.brainDropLayout,
-        {
-          x: clientX - session.offsetX + session.width / 2,
-          y: clientY - session.offsetY + session.height / 2,
-        },
+      const finalLeft = clientX - session.offsetX;
+      const finalTop = clientY - session.offsetY;
+      const displayedPreview = session.dropPreview;
+      const finalPreview = resolveDragDropPreview(
+        session,
+        finalLeft,
+        finalTop,
+        clientX,
+        clientY,
       );
-      if (finalPreview) {
-        if (commitSwap(finalPreview.targetCardId, session.cardId)) {
+      const committedTargetCardId = resolveCommittedCardDropTarget(
+        displayedPreview,
+        finalPreview,
+      );
+      if (committedTargetCardId) {
+        if (commitSwap(committedTargetCardId, session.cardId)) {
           suppressNextAppearanceAttentionRef.current = true;
         }
       }
@@ -435,10 +468,13 @@ export function CardGamePrototype({
       const startedDragging = !session.isDragging;
       const nextLeft = event.clientX - session.offsetX;
       const nextTop = event.clientY - session.offsetY;
-      const dropPreview = resolveCardDropPreview(session.brainDropLayout, {
-        x: nextLeft + session.width / 2,
-        y: nextTop + session.height / 2,
-      });
+      const dropPreview = resolveDragDropPreview(
+        session,
+        nextLeft,
+        nextTop,
+        event.clientX,
+        event.clientY,
+      );
       let nextSession: DragSession = {
         ...session,
         dropPreview,
@@ -565,9 +601,9 @@ export function CardGamePrototype({
       const dropPreview = isDropTarget ? dragState.dropPreview : null;
       const brainCardFloatStyle = dropPreview
         ? ({
-            '--brain-drop-progress': dropPreview.progress,
-            '--brain-drop-retreat-x': `${dropPreview.retreatX}px`,
             '--brain-drop-retreat-y': `${dropPreview.retreatY}px`,
+            '--brain-drop-rotation': `${dropPreview.rotationDeg}deg`,
+            '--brain-drop-scale': dropPreview.scale,
           } as CSSProperties)
         : undefined;
 
@@ -599,7 +635,7 @@ export function CardGamePrototype({
 
       return zone === 'brain' ? (
         <div
-          className={`brain-card-float${isDropTarget ? ' brain-card-float--drop-target' : ''}`}
+          className={`brain-card-float${dropPreview ? ` brain-card-float--drop-${dropPreview.phase}` : ''}`}
           key={card.id}
           style={brainCardFloatStyle}
         >
@@ -613,6 +649,14 @@ export function CardGamePrototype({
 
   const dragCard = dragState
     ? zones.hand.find((card) => card.id === dragState.cardId)
+    : null;
+  const lockedDropPreview =
+    dragState?.dropPreview?.phase === 'locked'
+      ? dragState.dropPreview
+      : null;
+  const lockedDropCard = lockedDropPreview
+    ? zones.brain.find((card) => card.id === lockedDropPreview.targetCardId) ??
+      null
     : null;
 
   return (
@@ -694,6 +738,20 @@ export function CardGamePrototype({
             motion="dragging"
             state="selected"
           />
+        </div>
+      )}
+      {lockedDropPreview?.labelPlacement && lockedDropCard && (
+        <div
+          aria-live="polite"
+          className="card-drop-target-label"
+          role="status"
+          style={{
+            left: lockedDropPreview.labelPlacement.left,
+            top: lockedDropPreview.labelPlacement.top,
+          }}
+        >
+          <span>押し出す:</span>
+          <strong>{lockedDropCard.label}</strong>
         </div>
       )}
     </div>
