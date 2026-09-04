@@ -350,6 +350,19 @@ export function isRetryableIncompleteResponseError(error: unknown): boolean {
       error.incompleteReason === 'max_tokens')
   );
 }
+
+export function buildUsedReasonIdsProperty(
+  reasonIds: readonly string[],
+): Record<string, unknown> {
+  return {
+    type: 'array',
+    items: {
+      type: 'string',
+      enum: [...reasonIds],
+    },
+    maxItems: Math.min(reasonIds.length, MAX_CANDIDATE_REASONS),
+  };
+}
 type ConversationEventSource = ChatMode;
 type ConversationEventName = (typeof CONVERSATION_EVENTS)[number];
 
@@ -3489,6 +3502,9 @@ async function generateReply(
     minItems: minActivatedCardItems,
     maxItems: MAX_ACTIVATED_CARDS,
   };
+  const usedReasonIdsProperty = buildUsedReasonIdsProperty(
+    autonomyCandidate?.reasons.map((reason) => reason.id) ?? [],
+  );
   const deliveryHeaderProperties =
     mode === 'voice'
       ? {
@@ -3507,13 +3523,7 @@ async function generateReply(
               type: 'string',
               enum: AUTONOMY_EXTERNAL_ACTIONS,
             },
-            usedReasonIds: {
-              type: 'array',
-              items: {
-                type: 'string',
-              },
-              maxItems: MAX_CANDIDATE_REASONS,
-            },
+            usedReasonIds: usedReasonIdsProperty,
           }
         : {};
   const responseProperties = streamingEnabled
@@ -3618,13 +3628,7 @@ async function generateReply(
             type: 'string',
             enum: AUTONOMY_EXTERNAL_ACTIONS,
           },
-            usedReasonIds: {
-              type: 'array',
-              items: {
-                type: 'string',
-              },
-            maxItems: MAX_CANDIDATE_REASONS,
-          },
+          usedReasonIds: usedReasonIdsProperty,
         }
       : {}),
     ...deliveryHeaderProperties,

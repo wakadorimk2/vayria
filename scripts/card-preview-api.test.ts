@@ -12,6 +12,7 @@ import {
   buildProgramContextDynamicPrompt,
   buildProgramContextStaticPrompt,
   buildUtterancePlanInstruction,
+  buildUsedReasonIdsProperty,
   buildVoiceInteractionPolicySystemPrompt,
   createInteractionReactionResponse,
   isActionCommitmentMessage,
@@ -108,6 +109,28 @@ test('only output-limit incomplete responses retry before speech commit', () => 
     ),
     false,
   );
+});
+
+test('autonomous used reason schema permits only offered reason IDs', () => {
+  assert.deepEqual(
+    buildUsedReasonIdsProperty(['reason-1', 'reason-2']),
+    {
+      type: 'array',
+      items: {
+        type: 'string',
+        enum: ['reason-1', 'reason-2'],
+      },
+      maxItems: 2,
+    },
+  );
+  assert.deepEqual(buildUsedReasonIdsProperty([]), {
+    type: 'array',
+    items: {
+      type: 'string',
+      enum: [],
+    },
+    maxItems: 0,
+  });
 });
 
 test('provisional card metadata keeps speaking turns valid', () => {
