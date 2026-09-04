@@ -79,6 +79,7 @@ import {
   ATTENTION_TARGETS,
   PERFORMER_PHASES,
   type PerformerStateContext,
+  type WeightedSemanticCue,
 } from '../src/performer/types.js';
 import { cardPool } from '../src/cards/cardPool.js';
 import type { WildcardCardData } from '../src/cards/cardTypes.js';
@@ -136,6 +137,7 @@ import type {
 } from '../src/networkState.js';
 import {
   createLlmProviderCallTracker,
+  type LlmExternalRequestEvent,
   type LlmProviderCallTracker,
   type LlmProviderEvent,
   type LlmProviderPurpose,
@@ -332,14 +334,31 @@ interface AivisStyle {
 }
 
 type ChatMode = 'manual' | 'voice' | 'autonomous';
+export type ChatRetryCause = 'output_limit' | 'contract' | null;
 const CHAT_MAX_OUTPUT_TOKENS: Record<ChatMode, number> = {
   manual: 2_048,
   voice: 2_048,
   autonomous: 2_048,
 };
 
-export function maxOutputTokensForChatMode(mode: ChatMode): number {
+export function maxOutputTokensForChatMode(
+  mode: ChatMode,
+  retryCause: ChatRetryCause = null,
+): number {
+  if (mode === 'voice' && retryCause === 'output_limit') return 4_096;
   return CHAT_MAX_OUTPUT_TOKENS[mode];
+}
+
+export function runtimeForReplyAttempt(
+  runtime: LlmRuntimeOptions,
+  source: LlmProviderSource,
+  retryCause: ChatRetryCause = null,
+): LlmRuntimeOptions {
+  return runtime.profile === 'nano-implicit' &&
+    retryCause === 'output_limit' &&
+    (source === 'voice' || source === 'card_change')
+    ? { ...runtime, profile: 'luna-prefix' }
+    : runtime;
 }
 
 export function isRetryableIncompleteResponseError(error: unknown): boolean {
@@ -349,6 +368,17 @@ export function isRetryableIncompleteResponseError(error: unknown): boolean {
     (error.incompleteReason === 'max_output_tokens' ||
       error.incompleteReason === 'max_tokens')
   );
+}
+
+export function classifyTerminalStreamingEnvelope(
+  value: string,
+): 'terminal_envelope_parseable' | 'terminal_envelope_unparseable' {
+  try {
+    parseStreamingSpeechEnvelope(value);
+    return 'terminal_envelope_parseable';
+  } catch {
+    return 'terminal_envelope_unparseable';
+  }
 }
 
 export function buildUsedReasonIdsProperty(
@@ -374,7 +404,7 @@ interface ChatHistoryItem {
 export interface PerformanceContextPayload {
   callbackTendency: number;
   fragmentation: number;
-  semanticBiases: string[];
+  semanticBiases: WeightedSemanticCue[];
 }
 
 interface ChatRequestPayload {
@@ -690,9 +720,15 @@ const PLAYCHECK_RECORD_FIELDS = [
   'purpose',
   'callIndex',
   'retry',
+  'externalRequestIndex',
   'providerCallCount',
   'profile',
   'apiEndpoint',
+  'maxOutputTokens',
+  'providerMaxOutputTokens',
+  'terminationKind',
+  'httpStatus',
+  'incompleteReason',
   'cacheMode',
   'cacheKeyVersion',
   'cacheStatus',
@@ -704,6 +740,9 @@ const PLAYCHECK_RECORD_FIELDS = [
   'cacheWriteTokens',
   'outputTokens',
   'reasoningTokens',
+  'outputTextChars',
+  'outputTextDeltaCount',
+  'outputTextDone',
   'staticPrefixChars',
   'dynamicContextChars',
   'schemaBytes',
@@ -863,6 +902,13 @@ function createRequestLlmProviderTracker(
     source: fields.source,
     signal: fields.signal,
     observe: fields.observe,
+    recordExternal: ({ event, ...externalFields }: LlmExternalRequestEvent) =>
+      recordStructuredEvent(config, event, {
+        origin: 'server',
+        requestId: fields.requestId,
+        runId: fields.runId,
+        ...externalFields,
+      }),
     record: ({ event, ...providerFields }) =>
       recordStructuredEvent(config, event, {
         origin: 'server',
@@ -1434,6 +1480,88 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   }
 }
 
+function readWeightedSemanticCues(value: unknown): WeightedSemanticCue[] {
+  if (!Array.isArray(value) || value.length > 12) {
+    throw new RequestError('performanceContext format is invalid.', 400);
+  }
+
+  const cues = new Map<string, number>();
+  for (const candidate of value) {
+    if (
+      !candidate ||
+      typeof candidate !== 'object' ||
+      Array.isArray(candidate)
+    ) {
+      throw new RequestError('performanceContext format is invalid.', 400);
+    }
+    const record = candidate as Record<string, unknown>;
+    if (
+      Object.keys(record).some((key) => key !== 'cue' && key !== 'weight')
+    ) {
+      throw new RequestError('performanceContext format is invalid.', 400);
+    }
+    const cue = typeof record.cue === 'string' ? record.cue.trim() : '';
+    const weight = record.weight;
+    if (
+      cue.length < 1 ||
+      cue.length > 200 ||
+      typeof weight !== 'number' ||
+      !Number.isFinite(weight) ||
+      weight <= 0 ||
+      weight > 1
+    ) {
+      throw new RequestError('performanceContext format is invalid.', 400);
+    }
+    cues.set(cue, Math.max(cues.get(cue) ?? 0, weight));
+  }
+
+  return [...cues.entries()]
+    .map(([cue, weight]) => ({ cue, weight }))
+    .sort(
+      (left, right) =>
+        right.weight - left.weight || left.cue.localeCompare(right.cue),
+    );
+}
+
+function readPerformanceContext(value: unknown): PerformanceContextPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RequestError('performanceContext must be an object.', 400);
+  }
+  const context = value as Record<string, unknown>;
+  if (
+    Object.keys(context).some(
+      (key) =>
+        key !== 'callbackTendency' &&
+        key !== 'fragmentation' &&
+        key !== 'semanticBiases',
+    )
+  ) {
+    throw new RequestError(
+      'performanceContext contains an unsupported field.',
+      400,
+    );
+  }
+  const callbackTendency = context.callbackTendency;
+  const fragmentation = context.fragmentation;
+  if (
+    typeof callbackTendency !== 'number' ||
+    !Number.isFinite(callbackTendency) ||
+    callbackTendency < 0 ||
+    callbackTendency > 1 ||
+    typeof fragmentation !== 'number' ||
+    !Number.isFinite(fragmentation) ||
+    fragmentation < 0 ||
+    fragmentation > 1
+  ) {
+    throw new RequestError('performanceContext format is invalid.', 400);
+  }
+  return {
+    callbackTendency,
+    fragmentation,
+    semanticBiases: readWeightedSemanticCues(context.semanticBiases),
+  };
+}
+
 export function readCardPreviewRequest(
   payload: unknown,
 ): CardPreviewRequestPayload {
@@ -1455,59 +1583,9 @@ export function readCardPreviewRequest(
     throw new RequestError('cardId must be a known card ID.', 400);
   }
 
-  const performanceContextValue = record.performanceContext;
-  if (
-    !performanceContextValue ||
-    typeof performanceContextValue !== 'object' ||
-    Array.isArray(performanceContextValue)
-  ) {
-    throw new RequestError('performanceContext must be an object.', 400);
-  }
-
-  const context = performanceContextValue as Record<string, unknown>;
-  if (
-    Object.keys(context).some(
-      (key) =>
-        key !== 'callbackTendency' &&
-        key !== 'fragmentation' &&
-        key !== 'semanticBiases',
-    )
-  ) {
-    throw new RequestError(
-      'performanceContext contains an unsupported field.',
-      400,
-    );
-  }
-
-  const callbackTendency = context.callbackTendency;
-  const fragmentation = context.fragmentation;
-  const semanticBiases = context.semanticBiases;
-  if (
-    typeof callbackTendency !== 'number' ||
-    !Number.isFinite(callbackTendency) ||
-    callbackTendency < 0 ||
-    callbackTendency > 1 ||
-    typeof fragmentation !== 'number' ||
-    !Number.isFinite(fragmentation) ||
-    fragmentation < 0 ||
-    fragmentation > 1 ||
-    !Array.isArray(semanticBiases) ||
-    semanticBiases.length > 12 ||
-    !semanticBiases.every(
-      (cue): cue is string =>
-        typeof cue === 'string' && cue.trim().length <= 200,
-    )
-  ) {
-    throw new RequestError('performanceContext format is invalid.', 400);
-  }
-
   return {
     cardId,
-    performanceContext: {
-      callbackTendency,
-      fragmentation,
-      semanticBiases: semanticBiases.map((cue) => cue.trim()).filter(Boolean),
-    },
+    performanceContext: readPerformanceContext(record.performanceContext),
   };
 }
 
@@ -1850,53 +1928,7 @@ function readChatRequest(payload: unknown): ChatRequestPayload {
     semanticBiases: [],
   };
   if (performanceContextValue !== undefined) {
-    if (
-      !performanceContextValue ||
-      typeof performanceContextValue !== 'object' ||
-      Array.isArray(performanceContextValue)
-    ) {
-      throw new RequestError('performanceContext must be an object.', 400);
-    }
-    const context = performanceContextValue as Record<string, unknown>;
-    if (
-      Object.keys(context).some(
-        (key) =>
-          key !== 'callbackTendency' &&
-          key !== 'fragmentation' &&
-          key !== 'semanticBiases',
-      )
-    ) {
-      throw new RequestError(
-        'performanceContext contains an unsupported field.',
-        400,
-      );
-    }
-    const callbackTendency = context.callbackTendency;
-    const fragmentation = context.fragmentation;
-    const semanticBiases = context.semanticBiases;
-    if (
-      typeof callbackTendency !== 'number' ||
-      !Number.isFinite(callbackTendency) ||
-      callbackTendency < 0 ||
-      callbackTendency > 1 ||
-      typeof fragmentation !== 'number' ||
-      !Number.isFinite(fragmentation) ||
-      fragmentation < 0 ||
-      fragmentation > 1 ||
-      !Array.isArray(semanticBiases) ||
-      semanticBiases.length > 12 ||
-      !semanticBiases.every(
-        (cue): cue is string =>
-          typeof cue === 'string' && cue.trim().length <= 200,
-      )
-    ) {
-      throw new RequestError('performanceContext format is invalid.', 400);
-    }
-    performanceContext = {
-      callbackTendency,
-      fragmentation,
-      semanticBiases: semanticBiases.map((cue) => cue.trim()).filter(Boolean),
-    };
+    performanceContext = readPerformanceContext(performanceContextValue);
   }
 
   const autonomyCandidateValue = record.autonomyCandidate;
@@ -2970,9 +3002,34 @@ function buildVoiceInteractionPolicyDynamicPrompt(
     `callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
     `speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
     performanceContext.semanticBiases.length
-      ? `live direction cues: ${performanceContext.semanticBiases.join(' / ')}`
+      ? `live direction cues:\n${formatSemanticBiasesForPrompt(performanceContext.semanticBiases)}`
       : 'live direction cues: none',
   ].join('\n');
+}
+
+export function formatSemanticBiasesForPrompt(
+  semanticBiases: readonly WeightedSemanticCue[],
+): string {
+  if (!semanticBiases.length) return 'none';
+  const sorted = [...semanticBiases].sort(
+    (left, right) =>
+      right.weight - left.weight || left.cue.localeCompare(right.cue),
+  );
+  const primaryWeight = sorted[0]!.weight.toFixed(2);
+  const hasSecondaryWeight = sorted.some(
+    ({ weight }) => weight.toFixed(2) !== primaryWeight,
+  );
+  return sorted
+    .map(({ cue, weight }) => {
+      const formattedWeight = weight.toFixed(2);
+      if (!hasSecondaryWeight) {
+        return `- Influence (weight=${formattedWeight}): ${cue}`;
+      }
+      const role =
+        formattedWeight === primaryWeight ? 'Primary' : 'Secondary';
+      return `- ${role} influence (weight=${formattedWeight}): ${cue}`;
+    })
+    .join('\n');
 }
 
 export function buildConversationActionPolicySystemPrompt(
@@ -3017,7 +3074,7 @@ function buildConversationActionPolicyDynamicPrompt(
     `callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
     `speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
     performanceContext.semanticBiases.length
-      ? `live direction cues: ${performanceContext.semanticBiases.join(' / ')}`
+      ? `live direction cues:\n${formatSemanticBiasesForPrompt(performanceContext.semanticBiases)}`
       : 'live direction cues: none',
   ].join('\n');
 }
@@ -3077,7 +3134,7 @@ async function generateConversationActionPolicy(
     let completedReply = '';
     await telemetry.run(
       { purpose: 'conversation-policy', retry },
-      async (markFirstChunk, setMetadata) => {
+      async (markFirstChunk, setMetadata, trackExternalRequest) => {
         const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
         const result = await processStructuredLlm({
           apiKey: llm.apiKey,
@@ -3096,6 +3153,7 @@ async function generateConversationActionPolicy(
           maxOutputTokens: 128,
           cacheKey: 'vayria:policy:interactive:v2',
           signal: llm.signal,
+          trackExternalRequest,
           onFallback: llm.onFallback,
           onTextDelta: (partial) => {
             markFirstChunk();
@@ -3237,7 +3295,19 @@ interface StreamingReplyCallbacks {
       | 'speech_lead_complete'
       | 'provisional_validation_rejected'
       | 'full_json_complete'
-      | 'speech_unit_written',
+      | 'full_json_rejected'
+      | 'speech_lead_rejected'
+      | 'delivery_contract_rejected'
+      | 'committed_units_changed'
+      | 'state_contract_rejected'
+      | 'speech_unit_written'
+      | 'terminal_envelope_parseable'
+      | 'terminal_envelope_unparseable',
+    metadata: {
+      callIndex: number;
+      retry: number;
+      externalRequestIndex: number;
+    },
   ) => void;
 }
 
@@ -3436,6 +3506,11 @@ async function generateReply(
   recentExpressionLevels: readonly ExpressionLevel[] = [],
 ): Promise<GeneratedChatResponse> {
   const streamingEnabled = streaming !== null;
+  const providerSource = resolveLlmProviderSource(
+    mode,
+    forcedCardId,
+    programContext,
+  );
   const includesInternalDelta = mode === 'autonomous';
   const forcedCardEnergy = forcedCardId
     ? CARD_REACTION_PROFILES[forcedCardId]?.behavior.energy ?? null
@@ -3727,7 +3802,7 @@ async function generateReply(
     `callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
     `speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
     performanceContext.semanticBiases.length
-      ? `live direction cues: ${performanceContext.semanticBiases.join(' / ')}`
+      ? `live direction cues:\n${formatSemanticBiasesForPrompt(performanceContext.semanticBiases)}`
       : 'live direction cues: none',
   ].join('\n');
   const internalDeltaInstruction = mode === 'autonomous' ? [
@@ -3832,6 +3907,21 @@ async function generateReply(
       expressionBudget,
     );
 
+  type ParserMilestone = Parameters<
+    NonNullable<StreamingReplyCallbacks['onParserMilestone']>
+  >[0];
+  type ParserMilestoneMetadata = Parameters<
+    NonNullable<StreamingReplyCallbacks['onParserMilestone']>
+  >[1];
+  let lastParserMilestoneMetadata: ParserMilestoneMetadata | null = null;
+  const recordLastParserMilestone = (parserMilestone: ParserMilestone): void => {
+    if (!lastParserMilestoneMetadata) return;
+    streaming?.onParserMilestone?.(
+      parserMilestone,
+      lastParserMilestoneMetadata,
+    );
+  };
+
   const commitSpeechUnit = (
     header: Record<string, unknown>,
     rawUnit: string,
@@ -3843,29 +3933,50 @@ async function generateReply(
     committedUnits.push(unit);
     committedResponse = candidate;
     streaming.onSpeechUnit(committedUnits.length - 1, unit, candidate);
+    recordLastParserMilestone('speech_unit_written');
   };
 
   const requestReply = async (
     correction?: string,
     fallbackOnOutputLimit = false,
+    retryCause: ChatRetryCause = null,
   ): Promise<string> => {
     const retry = providerCallCount;
     providerCallCount += 1;
+    const callIndex = telemetry.callCount + 1;
     let streamedReply = '';
     let completedReply = '';
+    let attemptExternalRequestIndex = 0;
     let envelopeParser = streamingEnabled
       ? new IncrementalSpeechEnvelopeParser()
       : null;
     let attemptHeader: Record<string, unknown> | null = null;
     let headerMilestoneRecorded = false;
     let leadMilestoneRecorded = false;
-    await telemetry.run(
-      { purpose: 'response-generation', retry },
-      async (markFirstChunk, setMetadata) => {
+    const recordAttemptParserMilestone = (
+      parserMilestone: ParserMilestone,
+    ): void => {
+      if (attemptExternalRequestIndex < 1) return;
+      lastParserMilestoneMetadata = {
+        callIndex,
+        retry,
+        externalRequestIndex: attemptExternalRequestIndex,
+      };
+      recordLastParserMilestone(parserMilestone);
+    };
+    try {
+      await telemetry.run(
+        { purpose: 'response-generation', retry },
+        async (markFirstChunk, setMetadata, trackExternalRequest) => {
         const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
+        const attemptRuntime = runtimeForReplyAttempt(
+          llm.runtime,
+          providerSource,
+          retryCause,
+        );
         const result = await processStructuredLlm({
           apiKey: llm.apiKey,
-          runtime: llm.runtime,
+          runtime: attemptRuntime,
           legacyPrompt: prompt,
           staticPrompt: staticSystemPrompt,
           dynamicPrompt: correction
@@ -3880,7 +3991,7 @@ async function generateReply(
             name: 'wildcard_assistant_response',
             schema: responseSchema,
           },
-          maxOutputTokens: maxOutputTokensForChatMode(mode),
+          maxOutputTokens: maxOutputTokensForChatMode(mode, retryCause),
           cacheKey:
             mode === 'voice'
               ? 'vayria:reply:voice:lead1:v2'
@@ -3888,9 +3999,23 @@ async function generateReply(
                 ? 'vayria:reply:manual:lead1:v2'
                 : 'vayria:reply:autonomous:lead0:v2',
           signal: llm.signal,
+          trackExternalRequest,
+          onExternalRequestStart: (externalRequestIndex) => {
+            attemptExternalRequestIndex = externalRequestIndex;
+            lastParserMilestoneMetadata = {
+              callIndex,
+              retry,
+              externalRequestIndex,
+            };
+          },
           canFallback: () => committedUnits.length === 0,
           fallbackOnOutputLimit,
           onFallback: (reason) => {
+            if (reason === 'output_limit') {
+              recordAttemptParserMilestone(
+                classifyTerminalStreamingEnvelope(streamedReply),
+              );
+            }
             streamedReply = '';
             completedReply = '';
             attemptHeader = null;
@@ -3901,7 +4026,8 @@ async function generateReply(
               : null;
             llm.onFallback(reason);
           },
-          onTextDelta: (partial) => {
+          onTextDelta: (partial, externalRequestIndex) => {
+            attemptExternalRequestIndex = externalRequestIndex;
             if (partial) markFirstChunk();
             streamedReply += partial;
             if (!partial || !envelopeParser || committedUnits.length >= 2) return;
@@ -3914,13 +4040,13 @@ async function generateReply(
               attemptHeader = parsed.deliveryHeader as Record<string, unknown>;
               if (!headerMilestoneRecorded) {
                 headerMilestoneRecorded = true;
-                streaming?.onParserMilestone?.('delivery_header_complete');
+                recordAttemptParserMilestone('delivery_header_complete');
               }
             }
             if (!attemptHeader) return;
             if (parsed.speechLead !== undefined && !leadMilestoneRecorded) {
               leadMilestoneRecorded = true;
-              streaming?.onParserMilestone?.('speech_lead_complete');
+              recordAttemptParserMilestone('speech_lead_complete');
             }
             if (
               parsed.speechLead !== undefined &&
@@ -3930,7 +4056,7 @@ async function generateReply(
               try {
                 commitSpeechUnit(attemptHeader, parsed.speechLead);
               } catch {
-                streaming?.onParserMilestone?.(
+                recordAttemptParserMilestone(
                   'provisional_validation_rejected',
                 );
                 // The full contract decides whether the attempt can retry.
@@ -3941,14 +4067,15 @@ async function generateReply(
               try {
                 commitSpeechUnit(attemptHeader, unit);
               } catch {
-                streaming?.onParserMilestone?.(
+                recordAttemptParserMilestone(
                   'provisional_validation_rejected',
                 );
                 // The full contract decides whether the attempt can retry.
               }
             }
           },
-          onComplete: (complete) => {
+          onComplete: (complete, externalRequestIndex) => {
+            attemptExternalRequestIndex = externalRequestIndex;
             markFirstChunk();
             completedReply = complete;
           },
@@ -3962,8 +4089,19 @@ async function generateReply(
             : {}),
         });
         if (!completedReply) completedReply = result.text;
-      },
-    );
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof OpenAiResponsesError &&
+        error.kind === 'incomplete'
+      ) {
+        recordAttemptParserMilestone(
+          classifyTerminalStreamingEnvelope(streamedReply),
+        );
+      }
+      throw error;
+    }
     const responseText = (completedReply || streamedReply).trim();
     if (!responseText) {
       throw new CardContractError('The chat provider returned an empty reply.');
@@ -3990,14 +4128,16 @@ async function generateReply(
     let envelope;
     try {
       envelope = parseStreamingSpeechEnvelope(value);
-      streaming?.onParserMilestone?.('full_json_complete');
+      recordLastParserMilestone('full_json_complete');
     } catch (error) {
+      recordLastParserMilestone('full_json_rejected');
       throw new CardContractError(
         error instanceof Error ? error.message : 'Invalid streaming response.',
       );
     }
     const normalizedLead = envelope.speechLead.trim();
     if (!isAcceptedSpeechLead(normalizedLead)) {
+      recordLastParserMilestone('speech_lead_rejected');
       throw new CardContractError('speechLead must contain 4 to 12 characters.');
     }
     const normalizedUnits = [
@@ -4027,7 +4167,10 @@ async function generateReply(
         );
         streaming?.onDeliveryMetadataRejected();
       } catch {
-        if (!committedResponse) throw error;
+        if (!committedResponse) {
+          recordLastParserMilestone('delivery_contract_rejected');
+          throw error;
+        }
         effectiveUnits = committedUnits;
         effectiveActivatedCards = provisionalActivatedCards(
           envelope.deliveryHeader,
@@ -4044,6 +4187,7 @@ async function generateReply(
     if (
       committedUnits.some((unit, index) => effectiveUnits[index] !== unit)
     ) {
+      recordLastParserMilestone('committed_units_changed');
       throw new CardContractError('Committed speech units changed before completion.');
     }
     for (const unit of effectiveUnits.slice(committedUnits.length)) {
@@ -4059,7 +4203,10 @@ async function generateReply(
         effectiveActivatedCards,
       );
     } catch (error) {
-      if (!committedResponse) throw error;
+      if (!committedResponse) {
+        recordLastParserMilestone('state_contract_rejected');
+        throw error;
+      }
       streaming?.onStateRejected();
       return {
         ...delivery,
@@ -4068,6 +4215,7 @@ async function generateReply(
     }
   };
 
+  let retryCause: Exclude<ChatRetryCause, null>;
   try {
     const response = parseAttempt(await requestReply());
     return { response, providerCallCount };
@@ -4084,11 +4232,13 @@ async function generateReply(
       };
     }
     if (isRetryableIncompleteResponseError(error)) {
+      retryCause = 'output_limit';
       console.warn(
         'Chat response reached its output limit before speech commit. Retrying once.',
       );
     } else {
       if (!(error instanceof CardContractError)) throw error;
+      retryCause = 'contract';
       console.warn('Chat card contract failed. Retrying once.', error.message);
     }
   }
@@ -4101,6 +4251,7 @@ async function generateReply(
           : 'Your previous attempt violated the voice action, utterance-plan, or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text, empty activatedCards, null speechAct, and null expressionLevel for listen, react_nonverbally, or backchannel. For take_floor, return a valid speechAct and an expressionLevel within the budget. The text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Put the forced current card first when one exists.'
         : 'Your previous attempt violated the utterance-plan or card contract, or did not complete. Emit deliveryHeader and the short speech fields immediately. Keep internalDelta.reasonUpdates empty unless a state update is necessary. Follow the current brain-card subset, expression budget, forced-card-first requirements, and offered reason IDs exactly.',
       true,
+      retryCause,
     ),
   );
   return { response, providerCallCount };
@@ -4178,7 +4329,7 @@ async function generateCardPreviewReply(
   let completedReply = '';
   await telemetry.run(
     { purpose: 'card-preview', retry: 0 },
-    async (markFirstChunk, setMetadata) => {
+    async (markFirstChunk, setMetadata, trackExternalRequest) => {
       const result = await processStructuredLlm({
         apiKey: llm.apiKey,
         runtime: llm.runtime,
@@ -4194,6 +4345,7 @@ async function generateCardPreviewReply(
         maxOutputTokens: 256,
         cacheKey: 'vayria:card-preview:v2',
         signal: llm.signal,
+        trackExternalRequest,
         onFallback: llm.onFallback,
         onTextDelta: (partial) => {
           if (partial) markFirstChunk();
@@ -4264,7 +4416,7 @@ function buildCardPreviewDynamicPrompt(
     `Behavior engagement: ${behavior.engagement}`,
     `Behavior gesture intention: ${behavior.gestureIntent}`,
     performanceContext.semanticBiases.length
-      ? `Runtime semantic cues: ${performanceContext.semanticBiases.join(' / ')}`
+      ? `Runtime semantic cues:\n${formatSemanticBiasesForPrompt(performanceContext.semanticBiases)}`
       : 'Runtime semantic cues: none',
     `Callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
     `Speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
@@ -5080,7 +5232,6 @@ async function handleRequest(
                 text: unit,
                 response: streamedCandidate,
               });
-              streamingCallbacks?.onParserMilestone?.('speech_unit_written');
             },
             onStateRejected: () => {
               stateRejected = true;
@@ -5088,7 +5239,7 @@ async function handleRequest(
             onDeliveryMetadataRejected: () => {
               deliveryMetadataRejected = true;
             },
-            onParserMilestone: (parserMilestone) => {
+            onParserMilestone: (parserMilestone, metadata) => {
               void recordStructuredEvent(config, 'llm_parser_milestone', {
                 origin: 'server',
                 requestId,
@@ -5096,6 +5247,7 @@ async function handleRequest(
                 turnId: providerTurnId,
                 source: providerSource,
                 parserMilestone,
+                ...metadata,
               });
             },
           }

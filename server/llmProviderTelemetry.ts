@@ -5,6 +5,22 @@ export const LLM_PROVIDER_EVENTS = [
 ] as const;
 
 export type LlmProviderEventName = (typeof LLM_PROVIDER_EVENTS)[number];
+export const LLM_EXTERNAL_REQUEST_EVENTS = [
+  'llm_external_request_start',
+  'llm_external_request_first_chunk',
+  'llm_external_request_done',
+] as const;
+export type LlmExternalRequestEventName =
+  (typeof LLM_EXTERNAL_REQUEST_EVENTS)[number];
+export type LlmExternalRequestEndpoint = 'responses' | 'chat-completions';
+export type LlmExternalRequestTerminationKind =
+  | 'success'
+  | 'incomplete'
+  | 'http_error'
+  | 'connection_error'
+  | 'provider_error'
+  | 'aborted'
+  | 'unknown_error';
 export type LlmProviderPurpose =
   | 'conversation-policy'
   | 'response-generation'
@@ -49,6 +65,71 @@ export interface LlmProviderEvent {
   fallbackReason?: string;
 }
 
+export interface LlmExternalRequestEvent {
+  event: LlmExternalRequestEventName;
+  turnId: string;
+  source: LlmProviderSource;
+  purpose: LlmProviderPurpose;
+  callIndex: number;
+  retry: number;
+  externalRequestIndex: number;
+  provider: string;
+  model: string;
+  apiEndpoint: LlmExternalRequestEndpoint;
+  elapsedMs: number;
+  maxOutputTokens?: number;
+  terminationKind?: LlmExternalRequestTerminationKind;
+  httpStatus?: number;
+  incompleteReason?: string;
+  inputTokens?: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  providerMaxOutputTokens?: number;
+  actualModel?: string;
+  outputTextChars?: number;
+  outputTextDeltaCount?: number;
+  outputTextDone?: 0 | 1;
+  requestedTier?: string;
+  actualTier?: string;
+  cacheMode?: string;
+  cacheStatus?: string;
+}
+
+export type LlmExternalRequestMetadata = Omit<
+  Partial<LlmExternalRequestEvent>,
+  | 'event'
+  | 'turnId'
+  | 'source'
+  | 'purpose'
+  | 'callIndex'
+  | 'retry'
+  | 'externalRequestIndex'
+  | 'provider'
+  | 'model'
+  | 'apiEndpoint'
+  | 'elapsedMs'
+  | 'maxOutputTokens'
+  | 'terminationKind'
+>;
+
+export interface TrackLlmExternalRequestOptions {
+  apiEndpoint: LlmExternalRequestEndpoint;
+  model?: string;
+  maxOutputTokens?: number;
+  metadata?: LlmExternalRequestMetadata;
+}
+
+export type TrackLlmExternalRequest = <T>(
+  options: TrackLlmExternalRequestOptions,
+  execute: (
+    markFirstChunk: () => void,
+    setMetadata: (metadata: LlmExternalRequestMetadata) => void,
+    externalRequestIndex: number,
+  ) => Promise<T>,
+) => Promise<T>;
+
 export type LlmProviderEventMetadata = Omit<
   Partial<LlmProviderEvent>,
   | 'event'
@@ -70,6 +151,9 @@ export interface LlmProviderLatencySummary {
 }
 
 type RecordLlmProviderEvent = (event: LlmProviderEvent) => void | Promise<void>;
+type RecordLlmExternalRequestEvent = (
+  event: LlmExternalRequestEvent,
+) => void | Promise<void>;
 
 interface LlmProviderCallTrackerOptions {
   turnId: string;
@@ -77,6 +161,7 @@ interface LlmProviderCallTrackerOptions {
   model: string;
   source: LlmProviderSource;
   record: RecordLlmProviderEvent;
+  recordExternal?: RecordLlmExternalRequestEvent;
   observe?: (event: LlmProviderEvent) => void;
   now?: () => number;
   signal?: AbortSignal;
@@ -94,8 +179,103 @@ export interface LlmProviderCallTracker {
     execute: (
       markFirstChunk: () => void,
       setMetadata: (metadata: LlmProviderEventMetadata) => void,
+      trackExternalRequest: TrackLlmExternalRequest,
     ) => Promise<T>,
   ): Promise<T>;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function safeHttpStatus(value: unknown): number | undefined {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 100 &&
+    value <= 599
+    ? value
+    : undefined;
+}
+
+function safeErrorRecord(error: unknown): Record<string, unknown> | null {
+  return error && typeof error === 'object'
+    ? (error as Record<string, unknown>)
+    : null;
+}
+
+function classifyExternalRequestError(error: unknown): {
+  terminationKind: LlmExternalRequestTerminationKind;
+  metadata: LlmExternalRequestMetadata;
+} {
+  const record = safeErrorRecord(error);
+  const name = record?.name;
+  const kind = record?.kind;
+  const status = safeHttpStatus(record?.status);
+  const metadata: LlmExternalRequestMetadata = {};
+  if (status !== undefined) metadata.httpStatus = status;
+
+  if (name === 'OpenAiResponsesError') {
+    if (kind === 'incomplete') {
+      const incompleteReason = record?.incompleteReason;
+      if (typeof incompleteReason === 'string') {
+        metadata.incompleteReason = incompleteReason;
+      }
+      const usage = safeErrorRecord(record?.usage);
+      for (const field of [
+        'inputTokens',
+        'cachedTokens',
+        'cacheWriteTokens',
+        'outputTokens',
+        'reasoningTokens',
+      ] as const) {
+        const value = finiteNumber(usage?.[field]);
+        if (value !== undefined) metadata[field] = value;
+      }
+      const diagnostics = safeErrorRecord(record?.diagnostics);
+      const providerMaxOutputTokens = finiteNumber(
+        diagnostics?.providerMaxOutputTokens,
+      );
+      if (providerMaxOutputTokens !== undefined) {
+        metadata.providerMaxOutputTokens = providerMaxOutputTokens;
+      }
+      const actualModel = diagnostics?.actualModel;
+      if (
+        typeof actualModel === 'string' &&
+        /^[A-Za-z0-9._:-]{1,128}$/u.test(actualModel)
+      ) {
+        metadata.actualModel = actualModel;
+      }
+      for (const field of ['outputTextChars', 'outputTextDeltaCount'] as const) {
+        const value = finiteNumber(diagnostics?.[field]);
+        if (value !== undefined) metadata[field] = value;
+      }
+      if (
+        diagnostics?.outputTextDone === 0 ||
+        diagnostics?.outputTextDone === 1
+      ) {
+        metadata.outputTextDone = diagnostics.outputTextDone;
+      }
+      return { terminationKind: 'incomplete', metadata };
+    }
+    if (kind === 'http') return { terminationKind: 'http_error', metadata };
+    if (kind === 'connection') {
+      return { terminationKind: 'connection_error', metadata };
+    }
+    if (kind === 'provider') {
+      return { terminationKind: 'provider_error', metadata };
+    }
+    if (kind === 'aborted') return { terminationKind: 'aborted', metadata };
+  }
+  if (name === 'HttpError' && status !== undefined) {
+    return { terminationKind: 'http_error', metadata };
+  }
+  if (name === 'AbortError') return { terminationKind: 'aborted', metadata };
+  if (name === 'TypeError') {
+    return { terminationKind: 'connection_error', metadata };
+  }
+  return { terminationKind: 'unknown_error', metadata };
 }
 
 function createAbortError(): Error {
@@ -121,6 +301,8 @@ export function createLlmProviderCallTracker(
 ): LlmProviderCallTracker {
   const now = options.now ?? performance.now.bind(performance);
   let callCount = 0;
+  let externalRequestCount = 0;
+  let externalRecordQueue: Promise<void> | null = null;
 
   return {
     get callCount() {
@@ -131,6 +313,7 @@ export function createLlmProviderCallTracker(
       execute: (
         markFirstChunk: () => void,
         setMetadata: (metadata: LlmProviderEventMetadata) => void,
+        trackExternalRequest: TrackLlmExternalRequest,
       ) => Promise<T>,
     ) {
       callCount += 1;
@@ -176,10 +359,94 @@ export function createLlmProviderCallTracker(
       const setMetadata = (next: LlmProviderEventMetadata): void => {
         metadata = { ...metadata, ...next };
       };
+      const trackExternalRequest: TrackLlmExternalRequest = async (
+        externalOptions,
+        externalExecute,
+      ) => {
+        externalRequestCount += 1;
+        const externalRequestIndex = externalRequestCount;
+        const externalStartedAt = now();
+        let externalActive = true;
+        let externalFirstChunkRecorded = false;
+        let externalMetadata = externalOptions.metadata ?? {};
+        let terminationKind: LlmExternalRequestTerminationKind = 'success';
+        const recordExternal = (
+          event: LlmExternalRequestEventName,
+        ): Promise<void> => {
+          if (!options.recordExternal) return Promise.resolve();
+          const payload: LlmExternalRequestEvent = {
+            event,
+            turnId: options.turnId,
+            source: options.source,
+            purpose: callOptions.purpose,
+            callIndex,
+            retry: callOptions.retry,
+            externalRequestIndex,
+            provider: options.provider,
+            model: externalOptions.model ?? options.model,
+            apiEndpoint: externalOptions.apiEndpoint,
+            elapsedMs: Math.max(0, Math.round(now() - externalStartedAt)),
+            ...(externalOptions.maxOutputTokens !== undefined
+              ? { maxOutputTokens: externalOptions.maxOutputTokens }
+              : {}),
+            ...(event === 'llm_external_request_done'
+              ? { terminationKind, ...externalMetadata }
+              : {}),
+          };
+          const write = async (): Promise<void> => {
+            try {
+              await options.recordExternal?.(payload);
+            } catch (recordError) {
+              console.warn(
+                'LLM external request telemetry recording failed.',
+                recordError,
+              );
+            }
+          };
+          externalRecordQueue = externalRecordQueue
+            ? externalRecordQueue.then(write)
+            : write();
+          return externalRecordQueue;
+        };
+        const markExternalFirstChunk = (): void => {
+          if (!externalActive || externalFirstChunkRecorded) return;
+          externalFirstChunkRecorded = true;
+          void recordExternal('llm_external_request_first_chunk');
+        };
+        const setExternalMetadata = (
+          next: LlmExternalRequestMetadata,
+        ): void => {
+          externalMetadata = { ...externalMetadata, ...next };
+        };
+
+        void recordExternal('llm_external_request_start');
+        try {
+          return await externalExecute(
+            markExternalFirstChunk,
+            setExternalMetadata,
+            externalRequestIndex,
+          );
+        } catch (error) {
+          const classified = classifyExternalRequestError(error);
+          terminationKind = classified.terminationKind;
+          externalMetadata = {
+            ...externalMetadata,
+            ...classified.metadata,
+          };
+          throw error;
+        } finally {
+          externalActive = false;
+          void recordExternal('llm_external_request_done');
+        }
+      };
 
       void record('llm_provider_start');
       try {
-        const providerCall = execute(markFirstChunk, setMetadata);
+        const providerCall = execute(
+          markFirstChunk,
+          setMetadata,
+          trackExternalRequest,
+        );
         return options.signal
           ? await raceWithAbort(providerCall, options.signal)
           : await providerCall;

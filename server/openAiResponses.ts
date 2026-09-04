@@ -13,10 +13,19 @@ export interface OpenAiResponseUsage {
   reasoningTokens: number;
 }
 
+export interface OpenAiResponseDiagnostics {
+  providerMaxOutputTokens: number | null;
+  actualModel: string | null;
+  outputTextChars: number;
+  outputTextDeltaCount: number;
+  outputTextDone: 0 | 1;
+}
+
 export interface OpenAiResponseResult {
   text: string;
   serviceTier: string | null;
   usage: OpenAiResponseUsage;
+  diagnostics: OpenAiResponseDiagnostics;
 }
 
 export interface OpenAiResponseRequest {
@@ -58,6 +67,7 @@ export class OpenAiResponsesError extends Error {
   readonly status: number | null;
   readonly incompleteReason: OpenAiIncompleteReason | null;
   readonly usage: OpenAiResponseUsage | null;
+  readonly diagnostics: OpenAiResponseDiagnostics | null;
   readonly retryableAvailabilityFailure: boolean;
 
   constructor(
@@ -67,6 +77,7 @@ export class OpenAiResponsesError extends Error {
       status?: number;
       incompleteReason?: OpenAiIncompleteReason;
       usage?: OpenAiResponseUsage;
+      diagnostics?: OpenAiResponseDiagnostics;
       cause?: unknown;
     },
   ) {
@@ -76,6 +87,7 @@ export class OpenAiResponsesError extends Error {
     this.status = options.status ?? null;
     this.incompleteReason = options.incompleteReason ?? null;
     this.usage = options.usage ?? null;
+    this.diagnostics = options.diagnostics ?? null;
     this.retryableAvailabilityFailure =
       options.kind === 'connection' ||
       (options.kind === 'http' &&
@@ -122,6 +134,40 @@ function readUsage(response: Record<string, unknown>): OpenAiResponseUsage {
     ),
     outputTokens: numberOrZero(usage.output_tokens),
     reasoningTokens: numberOrZero(outputDetails.reasoning_tokens),
+  };
+}
+
+function readProviderMaxOutputTokens(
+  response: Record<string, unknown>,
+): number | null {
+  const value = response.max_output_tokens;
+  return typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+    ? value
+    : null;
+}
+
+function readActualModel(response: Record<string, unknown>): string | null {
+  const value = response.model;
+  return typeof value === 'string' &&
+    /^[A-Za-z0-9._:-]{1,128}$/u.test(value)
+    ? value
+    : null;
+}
+
+function buildDiagnostics(
+  response: Record<string, unknown>,
+  text: string,
+  outputTextDeltaCount: number,
+  outputTextDone: boolean,
+): OpenAiResponseDiagnostics {
+  return {
+    providerMaxOutputTokens: readProviderMaxOutputTokens(response),
+    actualModel: readActualModel(response),
+    outputTextChars: Array.from(text).length,
+    outputTextDeltaCount,
+    outputTextDone: outputTextDone ? 1 : 0,
   };
 }
 
@@ -285,6 +331,8 @@ export async function streamOpenAiResponse(
   const decoder = new TextDecoder();
   let buffer = '';
   let text = '';
+  let outputTextDeltaCount = 0;
+  let outputTextDone = false;
   let completed: Record<string, unknown> | null = null;
   const consume = (block: string): void => {
     const event = readSseEvent(block);
@@ -304,8 +352,13 @@ export async function streamOpenAiResponse(
       const delta = typeof parsed.delta === 'string' ? parsed.delta : '';
       if (delta) {
         text += delta;
+        outputTextDeltaCount += 1;
         request.onTextDelta?.(delta);
       }
+      return;
+    }
+    if (eventType === 'response.output_text.done') {
+      outputTextDone = true;
       return;
     }
     if (eventType === 'response.completed') {
@@ -318,6 +371,12 @@ export async function streamOpenAiResponse(
         kind: 'incomplete',
         incompleteReason: readIncompleteReason(incompleteResponse),
         usage: readUsage(incompleteResponse ?? {}),
+        diagnostics: buildDiagnostics(
+          incompleteResponse ?? {},
+          text,
+          outputTextDeltaCount,
+          outputTextDone,
+        ),
       });
     }
     if (eventType === 'response.failed' || eventType === 'error') {
@@ -372,5 +431,11 @@ export async function streamOpenAiResponse(
         ? finalResponse.service_tier
         : null,
     usage: readUsage(finalResponse),
+    diagnostics: buildDiagnostics(
+      finalResponse,
+      text,
+      outputTextDeltaCount,
+      outputTextDone,
+    ),
   };
 }

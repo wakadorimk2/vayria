@@ -5,9 +5,11 @@ import test from 'node:test';
 import {
   createLlmProviderCallTracker,
   summarizeInteractiveLlmProviderLatency,
+  type LlmExternalRequestEvent,
   type LlmProviderEvent,
   type LlmProviderSource,
 } from '../server/llmProviderTelemetry.js';
+import { OpenAiResponsesError } from '../server/openAiResponses.js';
 import {
   bindLlmProviderAbort,
   resolveLlmProviderSource,
@@ -16,6 +18,7 @@ import { DEFAULT_PROGRAM_CONTEXT } from '../src/conversation/programContext.js';
 
 function createHarness(source: LlmProviderSource = 'manual') {
   const events: LlmProviderEvent[] = [];
+  const externalEvents: LlmExternalRequestEvent[] = [];
   let clock = 0;
   const tracker = createLlmProviderCallTracker({
     turnId: 'turn-telemetry-1',
@@ -26,15 +29,384 @@ function createHarness(source: LlmProviderSource = 'manual') {
     record: (event) => {
       events.push(event);
     },
+    recordExternal: (event) => {
+      externalEvents.push(event);
+    },
   });
   return {
     events,
+    externalEvents,
     tracker,
     setClock(value: number) {
       clock = value;
     },
   };
 }
+
+async function flushTelemetryQueue(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+test('external requests keep turn-wide indexes and parent call metadata', async () => {
+  const harness = createHarness('voice');
+  const callbackIndexes: number[] = [];
+  const incomplete = new OpenAiResponsesError('sensitive provider message', {
+    kind: 'incomplete',
+    incompleteReason: 'max_output_tokens',
+    usage: {
+      inputTokens: 100,
+      cachedTokens: 80,
+      cacheWriteTokens: 0,
+      outputTokens: 2_048,
+      reasoningTokens: 2_000,
+    },
+    diagnostics: {
+      providerMaxOutputTokens: 2_048,
+      actualModel: 'gpt-5-nano-2026-08-07',
+      outputTextChars: 72,
+      outputTextDeltaCount: 6,
+      outputTextDone: 0,
+    },
+  });
+
+  await assert.rejects(
+    harness.tracker.run(
+      { purpose: 'response-generation', retry: 0 },
+      async (_markProviderChunk, _setProviderMetadata, trackExternalRequest) =>
+        trackExternalRequest(
+          {
+            apiEndpoint: 'responses',
+            maxOutputTokens: 2_048,
+            metadata: { requestedTier: 'standard', cacheMode: 'implicit' },
+          },
+          async (markFirstChunk, _setMetadata, externalRequestIndex) => {
+            callbackIndexes.push(externalRequestIndex);
+            harness.setClock(4);
+            markFirstChunk();
+            harness.setClock(10);
+            throw incomplete;
+          },
+        ),
+    ),
+    (error: unknown) => error === incomplete,
+  );
+
+  harness.setClock(20);
+  await harness.tracker.run(
+    { purpose: 'response-generation', retry: 1 },
+    async (_markProviderChunk, _setProviderMetadata, trackExternalRequest) => {
+      await assert.rejects(
+        trackExternalRequest(
+          {
+            apiEndpoint: 'responses',
+            maxOutputTokens: 4_096,
+            metadata: { requestedTier: 'standard', cacheMode: 'implicit' },
+          },
+          async (_markFirstChunk, _setMetadata, externalRequestIndex) => {
+            callbackIndexes.push(externalRequestIndex);
+            harness.setClock(30);
+            throw incomplete;
+          },
+        ),
+        (error: unknown) => error === incomplete,
+      );
+      return trackExternalRequest(
+        {
+          apiEndpoint: 'chat-completions',
+          model: 'gpt-5-nano',
+          metadata: { cacheMode: 'disabled', cacheStatus: 'disabled' },
+        },
+        async (markFirstChunk, _setMetadata, externalRequestIndex) => {
+          callbackIndexes.push(externalRequestIndex);
+          harness.setClock(35);
+          markFirstChunk();
+          harness.setClock(40);
+          return 'ok';
+        },
+      );
+    },
+  );
+  await flushTelemetryQueue();
+  assert.deepEqual(callbackIndexes, [1, 2, 3]);
+
+  const done = harness.externalEvents.filter(
+    (event) => event.event === 'llm_external_request_done',
+  );
+  assert.deepEqual(
+    done.map((event) => ({
+      externalRequestIndex: event.externalRequestIndex,
+      callIndex: event.callIndex,
+      retry: event.retry,
+      apiEndpoint: event.apiEndpoint,
+      maxOutputTokens: event.maxOutputTokens,
+      terminationKind: event.terminationKind,
+    })),
+    [
+      {
+        externalRequestIndex: 1,
+        callIndex: 1,
+        retry: 0,
+        apiEndpoint: 'responses',
+        maxOutputTokens: 2_048,
+        terminationKind: 'incomplete',
+      },
+      {
+        externalRequestIndex: 2,
+        callIndex: 2,
+        retry: 1,
+        apiEndpoint: 'responses',
+        maxOutputTokens: 4_096,
+        terminationKind: 'incomplete',
+      },
+      {
+        externalRequestIndex: 3,
+        callIndex: 2,
+        retry: 1,
+        apiEndpoint: 'chat-completions',
+        maxOutputTokens: undefined,
+        terminationKind: 'success',
+      },
+    ],
+  );
+  assert.deepEqual(
+    {
+      incompleteReason: done[0]?.incompleteReason,
+      inputTokens: done[0]?.inputTokens,
+      outputTokens: done[0]?.outputTokens,
+      reasoningTokens: done[0]?.reasoningTokens,
+      providerMaxOutputTokens: done[0]?.providerMaxOutputTokens,
+      actualModel: done[0]?.actualModel,
+      outputTextChars: done[0]?.outputTextChars,
+      outputTextDeltaCount: done[0]?.outputTextDeltaCount,
+      outputTextDone: done[0]?.outputTextDone,
+    },
+    {
+      incompleteReason: 'max_output_tokens',
+      inputTokens: 100,
+      outputTokens: 2_048,
+      reasoningTokens: 2_000,
+      providerMaxOutputTokens: 2_048,
+      actualModel: 'gpt-5-nano-2026-08-07',
+      outputTextChars: 72,
+      outputTextDeltaCount: 6,
+      outputTextDone: 0,
+    },
+  );
+  assert.deepEqual(
+    harness.externalEvents.map((event) => event.event),
+    [
+      'llm_external_request_start',
+      'llm_external_request_first_chunk',
+      'llm_external_request_done',
+      'llm_external_request_start',
+      'llm_external_request_done',
+      'llm_external_request_start',
+      'llm_external_request_first_chunk',
+      'llm_external_request_done',
+    ],
+  );
+});
+
+test('external telemetry records safe legacy HTTP status without error content', async () => {
+  const harness = createHarness('voice');
+  const legacyError = Object.assign(new Error('secret response body'), {
+    name: 'HttpError',
+    status: 503,
+    body: 'private body',
+    statusText: 'private status text',
+  });
+  await assert.rejects(
+    harness.tracker.run(
+      { purpose: 'response-generation', retry: 1 },
+      async (_markProviderChunk, _setProviderMetadata, trackExternalRequest) =>
+        trackExternalRequest(
+          { apiEndpoint: 'chat-completions' },
+          async () => {
+            throw legacyError;
+          },
+        ),
+    ),
+    (error: unknown) => error === legacyError,
+  );
+  await flushTelemetryQueue();
+  const done = harness.externalEvents.at(-1);
+  assert.equal(done?.terminationKind, 'http_error');
+  assert.equal(done?.httpStatus, 503);
+  assert.doesNotMatch(
+    JSON.stringify(done),
+    /apiKey|body|history|message|prompt|statusText|text|secret|private/i,
+  );
+});
+
+test('external telemetry failures do not change the provider result', async () => {
+  const tracker = createLlmProviderCallTracker({
+    turnId: 'turn-external-record-failure',
+    provider: 'openai',
+    model: 'gpt-5-nano',
+    source: 'voice',
+    record: () => undefined,
+    recordExternal: async () => {
+      throw new Error('telemetry storage failed');
+    },
+  });
+  const result = await tracker.run(
+    { purpose: 'response-generation', retry: 0 },
+    async (_markProviderChunk, _setProviderMetadata, trackExternalRequest) =>
+      trackExternalRequest(
+        { apiEndpoint: 'responses', maxOutputTokens: 2_048 },
+        async (markFirstChunk) => {
+          markFirstChunk();
+          return 'provider result';
+        },
+      ),
+  );
+  assert.equal(result, 'provider result');
+});
+
+test('external storage latency does not extend the logical provider call', async () => {
+  let releaseStorage: (() => void) | undefined;
+  const storageBlocked = new Promise<void>((resolve) => {
+    releaseStorage = resolve;
+  });
+  const tracker = createLlmProviderCallTracker({
+    turnId: 'turn-external-storage-latency',
+    provider: 'openai',
+    model: 'gpt-5-nano',
+    source: 'voice',
+    record: () => undefined,
+    recordExternal: () => storageBlocked,
+  });
+  let settled = false;
+  const resultPromise = tracker
+    .run(
+      { purpose: 'response-generation', retry: 0 },
+      async (_markProviderChunk, _setProviderMetadata, trackExternalRequest) =>
+        trackExternalRequest(
+          { apiEndpoint: 'responses', maxOutputTokens: 2_048 },
+          async () => 'provider result',
+        ),
+    )
+    .then((result) => {
+      settled = true;
+      return result;
+    });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(settled, true);
+  assert.equal(await resultPromise, 'provider result');
+  releaseStorage?.();
+});
+
+test('external telemetry classifies abort without recording error details', async () => {
+  const harness = createHarness('voice');
+  const abortError = new OpenAiResponsesError('private abort detail', {
+    kind: 'aborted',
+  });
+  await assert.rejects(
+    harness.tracker.run(
+      { purpose: 'response-generation', retry: 0 },
+      async (_markProviderChunk, _setProviderMetadata, trackExternalRequest) =>
+        trackExternalRequest(
+          { apiEndpoint: 'responses', maxOutputTokens: 2_048 },
+          async () => {
+            throw abortError;
+          },
+        ),
+    ),
+    (error: unknown) => error === abortError,
+  );
+  await flushTelemetryQueue();
+  const done = harness.externalEvents.at(-1);
+  assert.equal(done?.terminationKind, 'aborted');
+  assert.doesNotMatch(JSON.stringify(done), /detail|message|private/i);
+});
+
+test('external events stay server-only and use the safe field allowlist', async () => {
+  const observed: LlmProviderEvent[] = [];
+  const externalEvents: LlmExternalRequestEvent[] = [];
+  const tracker = createLlmProviderCallTracker({
+    turnId: 'turn-server-only',
+    provider: 'openai',
+    model: 'gpt-5-nano',
+    source: 'voice',
+    observe: (event) => observed.push(event),
+    record: () => undefined,
+    recordExternal: (event) => {
+      externalEvents.push(event);
+    },
+  });
+  await tracker.run(
+    { purpose: 'response-generation', retry: 0 },
+    async (markProviderChunk, _setProviderMetadata, trackExternalRequest) =>
+      trackExternalRequest(
+        {
+          apiEndpoint: 'responses',
+          maxOutputTokens: 2_048,
+          metadata: { requestedTier: 'standard', cacheMode: 'implicit' },
+        },
+        async (markExternalChunk, setExternalMetadata) => {
+          markExternalChunk();
+          markProviderChunk();
+          setExternalMetadata({
+            actualModel: 'gpt-5-nano-2026-08-07',
+            actualTier: 'default',
+            cacheStatus: 'hit',
+            inputTokens: 120,
+            cachedTokens: 100,
+            cacheWriteTokens: 0,
+            outputTokens: 20,
+            reasoningTokens: 10,
+            providerMaxOutputTokens: 2_048,
+            outputTextChars: 42,
+            outputTextDeltaCount: 4,
+            outputTextDone: 1,
+          });
+        },
+      ),
+  );
+  await flushTelemetryQueue();
+
+  assert.deepEqual(
+    observed.map((event) => event.event),
+    ['llm_provider_start', 'llm_provider_first_chunk', 'llm_provider_done'],
+  );
+  const approvedExternalFields = [
+    'actualModel',
+    'actualTier',
+    'apiEndpoint',
+    'cacheMode',
+    'cacheStatus',
+    'cacheWriteTokens',
+    'cachedTokens',
+    'callIndex',
+    'elapsedMs',
+    'event',
+    'externalRequestIndex',
+    'inputTokens',
+    'maxOutputTokens',
+    'model',
+    'outputTextChars',
+    'outputTextDeltaCount',
+    'outputTextDone',
+    'outputTokens',
+    'provider',
+    'providerMaxOutputTokens',
+    'purpose',
+    'reasoningTokens',
+    'requestedTier',
+    'retry',
+    'source',
+    'terminationKind',
+    'turnId',
+  ];
+  assert.deepEqual(
+    Object.keys(externalEvents.at(-1) ?? {}).sort(),
+    approvedExternalFields,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(externalEvents),
+    /apiKey|body|history|message|prompt|statusText|generated content/i,
+  );
+});
 
 test('one streaming provider call records start, first chunk, and completion', async () => {
   const harness = createHarness();
