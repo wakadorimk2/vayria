@@ -9,7 +9,7 @@ import {
   readTtsFallback,
   type TtsBenchmarkSample,
 } from './audio/ttsBenchmark.js';
-import { apiUrl } from './runtimeConfig.js';
+import { apiUrl, runtimeConfig } from './runtimeConfig.js';
 import { TtsPlaybackDiagnosticsPanel } from './TtsPlaybackDiagnosticsPanel.js';
 import './ttsBenchmark.css';
 
@@ -63,7 +63,9 @@ export function BenchmarkApp() {
       throw error;
     }
 
-    const source = await readAudioPlaybackSource(response);
+    const source = await readAudioPlaybackSource(response, {
+      streamMpegPlayback: runtimeConfig.cloudTtsStreamPlaybackEnabled,
+    });
     let firstAudioAt = source.kind === 'buffer' ? performance.now() : 0;
     let ttsCompletedAt = source.kind === 'buffer' ? firstAudioAt : 0;
     let playbackStartedAt = 0;

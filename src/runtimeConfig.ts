@@ -81,6 +81,31 @@ function readRouterEnabled(search: string): boolean {
   return new URLSearchParams(search).get('router') === '1';
 }
 
+function readStreamingSpeechEnabled(search: string): boolean {
+  const queryValue = new URLSearchParams(search).get('streamingSpeech');
+  const value = queryValue ?? import.meta.env.VITE_STREAMING_SPEECH_ENABLED;
+  if (typeof value !== 'string' || value.trim() === '') return true;
+
+  return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
+}
+
+function readEarlySpeechLeadEnabled(search: string): boolean {
+  const queryValue = new URLSearchParams(search).get('earlySpeechLead');
+  const value = queryValue ?? import.meta.env.VITE_EARLY_SPEECH_LEAD_ENABLED;
+  if (typeof value !== 'string' || value.trim() === '') return true;
+
+  return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
+}
+
+function readCloudTtsStreamPlaybackEnabled(search: string): boolean {
+  const queryValue = new URLSearchParams(search).get('cloudTtsStreamPlayback');
+  const value =
+    queryValue ?? import.meta.env.VITE_CLOUD_TTS_STREAM_PLAYBACK_ENABLED;
+  if (typeof value !== 'string' || value.trim() === '') return false;
+
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
 function readConfiguredAutonomyTimingMode(search: string) {
   const queryValue = new URLSearchParams(search).get('autonomyTiming');
   return resolveAutonomyTimingMode(
@@ -113,6 +138,10 @@ export const runtimeConfig = Object.freeze({
   audioLabEnabled: readAudioLabEnabled(browserSearch),
   sttCaptureEnabled: readSttCaptureEnabled(browserSearch),
   routerEnabled: readRouterEnabled(browserSearch),
+  streamingSpeechEnabled: readStreamingSpeechEnabled(browserSearch),
+  earlySpeechLeadEnabled: readEarlySpeechLeadEnabled(browserSearch),
+  cloudTtsStreamPlaybackEnabled:
+    readCloudTtsStreamPlaybackEnabled(browserSearch),
   cardDropReactionMode: readCardDropReactionMode(
     browserSearch,
     import.meta.env.VITE_CARD_DROP_REACTION_MODE,

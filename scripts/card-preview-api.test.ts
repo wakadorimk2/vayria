@@ -3,15 +3,24 @@ import test from 'node:test';
 import {
   buildAutonomousDirectorInstruction,
   buildCharacterIdentitySystemPrompt,
+  buildCharacterIdentityDynamicPrompt,
+  buildCharacterIdentityStaticPrompt,
   buildCardPreviewSystemPrompt,
+  buildCardPreviewStaticPrompt,
+  buildConversationActionPolicyStaticPrompt,
   buildProgramContextSystemPrompt,
+  buildProgramContextDynamicPrompt,
+  buildProgramContextStaticPrompt,
   buildUtterancePlanInstruction,
+  buildUsedReasonIdsProperty,
   buildVoiceInteractionPolicySystemPrompt,
   createInteractionReactionResponse,
   isActionCommitmentMessage,
   isContentBearingVoiceMessage,
   isDirectActionRequestMessage,
   isMetaOnlyActionResponse,
+  isRetryableIncompleteResponseError,
+  maxOutputTokensForChatMode,
   normalizeVoiceInteractionDecision,
   parseAutonomousAssistantResponse,
   parseCardPreviewResponse,
@@ -21,8 +30,10 @@ import {
   readCardPreviewRequest,
   readConversationEvent,
   readAutonomyCandidate,
+  resolveProvisionalActivatedCards,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
+import { OpenAiResponsesError } from '../server/openAiResponses.js';
 import {
   DEFAULT_PROGRAM_CONTEXT,
   isProgramContext,
@@ -66,6 +77,101 @@ const AUTONOMY_CANDIDATE = {
     },
   ],
 } as const;
+
+test('chat reserves output space for nano reasoning and structured output', () => {
+  assert.equal(maxOutputTokensForChatMode('voice'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('manual'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('autonomous'), 2_048);
+});
+
+test('only output-limit incomplete responses retry before speech commit', () => {
+  assert.equal(
+    isRetryableIncompleteResponseError(
+      new OpenAiResponsesError('incomplete', {
+        kind: 'incomplete',
+        incompleteReason: 'max_output_tokens',
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    isRetryableIncompleteResponseError(
+      new OpenAiResponsesError('filtered', {
+        kind: 'incomplete',
+        incompleteReason: 'content_filter',
+      }),
+    ),
+    false,
+  );
+  assert.equal(
+    isRetryableIncompleteResponseError(
+      new OpenAiResponsesError('provider', { kind: 'provider' }),
+    ),
+    false,
+  );
+});
+
+test('autonomous used reason schema permits only offered reason IDs', () => {
+  assert.deepEqual(
+    buildUsedReasonIdsProperty(['reason-1', 'reason-2']),
+    {
+      type: 'array',
+      items: {
+        type: 'string',
+        enum: ['reason-1', 'reason-2'],
+      },
+      maxItems: 2,
+    },
+  );
+  assert.deepEqual(buildUsedReasonIdsProperty([]), {
+    type: 'array',
+    items: {
+      type: 'string',
+      enum: [],
+    },
+    maxItems: 0,
+  });
+});
+
+test('provisional card metadata keeps speaking turns valid', () => {
+  const cards = ['rain', 'sleepy'];
+  assert.deepEqual(
+    resolveProvisionalActivatedCards(
+      'voice',
+      { voiceAction: 'take_floor' },
+      cards,
+      null,
+    ),
+    ['rain'],
+  );
+  assert.deepEqual(
+    resolveProvisionalActivatedCards(
+      'autonomous',
+      { externalAction: 'speak' },
+      cards,
+      'sleepy',
+    ),
+    ['sleepy'],
+  );
+  assert.deepEqual(
+    resolveProvisionalActivatedCards(
+      'voice',
+      { voiceAction: 'listen' },
+      cards,
+      'sleepy',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    resolveProvisionalActivatedCards(
+      'autonomous',
+      { externalAction: 'none' },
+      cards,
+      'sleepy',
+    ),
+    [],
+  );
+});
 
 const AUTONOMY_CANDIDATE_WIRE = {
   episodeId: AUTONOMY_CANDIDATE.episodeId,
@@ -236,6 +342,46 @@ test('card preview prompt uses behavior state without motion asset details', () 
   assert.match(prompt, /Behavior gesture intention: inspect/);
   assert.equal(prompt.includes('card-chicken'), false);
   assert.equal(prompt.includes('.vrma'), false);
+});
+
+test('cache prefixes exclude turn-specific identity, cards, and runtime values', () => {
+  const policyPrefix = buildConversationActionPolicyStaticPrompt();
+  const previewPrefix = buildCardPreviewStaticPrompt();
+  const identityPrefix = buildCharacterIdentityStaticPrompt();
+  const programPrefix = buildProgramContextStaticPrompt();
+  assert.doesNotMatch(policyPrefix, /character-identity|forced card is|0\.25/u);
+  assert.doesNotMatch(previewPrefix, /Selected card|Callback tendency|0\.25/u);
+  assert.doesNotMatch(identityPrefix, /ベイリア、聞こえる|"role":"direct_address"/u);
+  assert.doesNotMatch(programPrefix, /before_card_change|after_card_change/u);
+  assert.match(identityPrefix, /The character is Vayria/u);
+  assert.match(programPrefix, /behavior context, not spoken content/u);
+});
+
+test('dynamic prompt sections retain turn-specific identity and program values', () => {
+  const identity = buildCharacterIdentityDynamicPrompt(
+    'ベイリア、聞こえる？',
+    {
+      version: 1,
+      canonicalName: 'Vayria',
+      displayName: 'ヴェイリア',
+      aliases: [],
+    },
+  );
+  const program = buildProgramContextDynamicPrompt({
+    ...DEFAULT_PROGRAM_CONTEXT,
+    phase: 'after_card_change',
+  });
+  assert.match(identity, /"role":"direct_address"/u);
+  assert.match(program, /A card change has occurred/u);
+});
+
+test('voice prompt includes identity and program context once', () => {
+  const prompt = buildVoiceInteractionPolicySystemPrompt(
+    'concept-chicken',
+    VALID_CONTEXT,
+  );
+  assert.equal(prompt.match(/<character-identity>/gu)?.length, 1);
+  assert.equal(prompt.match(/<program-context>/gu)?.length, 1);
 });
 
 test('program context keeps the card segment viewer-directed', () => {
@@ -715,6 +861,58 @@ test('conversation events validate the shared interactionAction field', () => {
         interactionAction: 'unknown',
       }),
     /interactionAction is invalid/,
+  );
+});
+
+test('provider timing events accept only safe lifecycle metadata', () => {
+  const event = readConversationEvent({
+    at: '2026-09-03T00:00:00.000Z',
+    elapsedMs: 750,
+    event: 'llm_provider_first_chunk',
+    source: 'voice',
+    turnId: 'turn-provider-timing-1',
+    purpose: 'response-generation',
+    callIndex: 1,
+    retry: 0,
+  });
+  assert.equal(event.purpose, 'response-generation');
+  assert.equal(event.callIndex, 1);
+  assert.equal(event.retry, 0);
+  assert.throws(
+    () =>
+      readConversationEvent({
+        ...event,
+        event: 'llm_done',
+      }),
+    /only valid for provider timing events/,
+  );
+  assert.throws(
+    () =>
+      readConversationEvent({
+        ...event,
+        prompt: 'must not be logged',
+      }),
+    /unsupported field/,
+  );
+});
+
+test('unit TTS events accept only a bounded unit index', () => {
+  const event = readConversationEvent({
+    at: '2026-09-03T00:00:00.000Z',
+    elapsedMs: 1_000,
+    event: 'tts_unit_playback_started',
+    source: 'voice',
+    turnId: 'turn-unit-1',
+    unitIndex: 1,
+  });
+  assert.equal(event.unitIndex, 1);
+  assert.throws(
+    () => readConversationEvent({ ...event, unitIndex: 2 }),
+    /unitIndex must be 0 or 1/,
+  );
+  assert.throws(
+    () => readConversationEvent({ ...event, event: 'tts_start' }),
+    /only valid for unit TTS events/,
   );
 });
 

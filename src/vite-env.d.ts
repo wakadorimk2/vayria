@@ -7,6 +7,9 @@ interface ImportMetaEnv {
   readonly VITE_AUDIO_PRESET?: string;
   readonly VITE_AUDIO_ENDPOINT_MS?: string;
   readonly VITE_VOICE_INPUT_TRANSPORT?: string;
+  readonly VITE_STREAMING_SPEECH_ENABLED?: string;
+  readonly VITE_EARLY_SPEECH_LEAD_ENABLED?: string;
+  readonly VITE_CLOUD_TTS_STREAM_PLAYBACK_ENABLED?: string;
   readonly VITE_CARD_DROP_REACTION_MODE?: string;
 }
 

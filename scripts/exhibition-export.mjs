@@ -29,6 +29,34 @@ const CSV_COLUMNS = [
   'axis',
   'score',
   'note',
+  'provider',
+  'model',
+  'purpose',
+  'callIndex',
+  'retry',
+  'unitIndex',
+  'characterCount',
+  'profile',
+  'apiEndpoint',
+  'cacheMode',
+  'cacheKeyVersion',
+  'cacheStatus',
+  'requestedTier',
+  'actualTier',
+  'actualModel',
+  'inputTokens',
+  'cachedTokens',
+  'cacheWriteTokens',
+  'outputTokens',
+  'reasoningTokens',
+  'staticPrefixChars',
+  'dynamicContextChars',
+  'schemaBytes',
+  'historyItemCount',
+  'historyChars',
+  'requestBytes',
+  'warmup',
+  'fallbackReason',
 ];
 
 function average(values) {
@@ -76,6 +104,269 @@ function summarizeLatency(events) {
     averageMs: average(values),
     p95Ms: values[p95Index],
   };
+}
+
+function summarizeLlmProviderLatency(events) {
+  const interactiveSources = ['voice', 'manual', 'card_change'];
+  return Object.fromEntries(
+    interactiveSources.map((source) => {
+      const values = events
+        .filter(
+          (event) =>
+            event.event === 'llm_provider_done' &&
+            event.source === source &&
+            event.warmup !== 1,
+        )
+        .map((event) => event.elapsedMs)
+        .filter(
+          (value) =>
+            typeof value === 'number' &&
+            Number.isFinite(value) &&
+            value >= 0,
+        )
+        .sort((left, right) => left - right);
+      const p50Index = Math.max(0, Math.ceil(values.length * 0.5) - 1);
+      const p95Index = Math.max(0, Math.ceil(values.length * 0.95) - 1);
+      return [
+        source,
+        {
+          count: values.length,
+          p50Ms: values[p50Index] ?? null,
+          p95Ms: values[p95Index] ?? null,
+        },
+      ];
+    }),
+  );
+}
+
+function summarizeLlmCacheProfiles(events) {
+  const abortedTurns = new Set(
+    events
+      .filter(
+        (event) =>
+          event.event === 'turn_aborted' && typeof event.turnId === 'string',
+      )
+      .map((event) => event.turnId),
+  );
+  const groups = new Map();
+  for (const event of events) {
+    if (event.event !== 'llm_provider_done' || event.origin !== 'server') continue;
+    if (!Number.isFinite(event.elapsedMs) || event.elapsedMs < 0) continue;
+    const group = {
+      source: event.source ?? 'unknown',
+      purpose: event.purpose ?? 'unknown',
+      profile: event.profile ?? 'unknown',
+      apiEndpoint: event.apiEndpoint ?? 'unknown',
+      cacheMode: event.cacheMode ?? 'unknown',
+      tier: event.actualTier ?? event.requestedTier ?? 'unknown',
+      retry: Number.isInteger(event.retry) ? event.retry : 0,
+      fallback: typeof event.fallbackReason === 'string',
+      warmup: event.warmup === 1,
+      aborted:
+        typeof event.turnId === 'string' && abortedTurns.has(event.turnId),
+    };
+    const key = JSON.stringify(group);
+    const values = groups.get(key) ?? {
+      ...group,
+      values: [],
+      eligibleRequests: 0,
+      hitRequests: 0,
+      writeRequests: 0,
+      missRequests: 0,
+      totalInputTokens: 0,
+      totalCachedTokens: 0,
+      totalCacheWriteTokens: 0,
+    };
+    values.values.push(event.elapsedMs);
+    const cacheEligible =
+      event.cacheMode !== 'disabled' &&
+      event.cacheMode !== undefined &&
+      typeof event.fallbackReason !== 'string';
+    if (cacheEligible) values.eligibleRequests += 1;
+    if (cacheEligible && event.cacheStatus === 'hit') values.hitRequests += 1;
+    if (cacheEligible && event.cacheStatus === 'write') values.writeRequests += 1;
+    if (cacheEligible && event.cacheStatus === 'miss') values.missRequests += 1;
+    if (Number.isFinite(event.inputTokens) && event.inputTokens >= 0) {
+      values.totalInputTokens += event.inputTokens;
+    }
+    if (Number.isFinite(event.cachedTokens) && event.cachedTokens >= 0) {
+      values.totalCachedTokens += event.cachedTokens;
+    }
+    if (
+      Number.isFinite(event.cacheWriteTokens) &&
+      event.cacheWriteTokens >= 0
+    ) {
+      values.totalCacheWriteTokens += event.cacheWriteTokens;
+    }
+    groups.set(key, values);
+  }
+  return [...groups.values()]
+    .map(({ values, ...group }) => ({
+      ...group,
+      count: values.length,
+      p50Ms: nearestRank(values, 0.5),
+      p95Ms: nearestRank(values, 0.95),
+      requestHitRate:
+        group.eligibleRequests > 0
+          ? group.hitRequests / group.eligibleRequests
+          : null,
+      tokenHitRate:
+        group.totalInputTokens > 0
+          ? group.totalCachedTokens / group.totalInputTokens
+          : null,
+    }))
+    .sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right)),
+    );
+}
+
+function nearestRank(values, fraction) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)];
+}
+
+function summarizePipelineMetric(values) {
+  return {
+    count: values.length,
+    p50Ms: nearestRank(values, 0.5),
+    p95Ms: nearestRank(values, 0.95),
+  };
+}
+
+function firstClientEventElapsed(events, eventName) {
+  const elapsedValues = events
+    .filter(
+      (event) =>
+        event.event === eventName &&
+        event.origin === 'client' &&
+        Number.isInteger(event.elapsedMs) &&
+        event.elapsedMs >= 0,
+    )
+    .map((event) => event.elapsedMs)
+    .sort((left, right) => left - right);
+  return elapsedValues[0] ?? null;
+}
+
+function firstClientEventDuration(events, eventName) {
+  const values = events
+    .filter(
+      (event) =>
+        event.event === eventName &&
+        event.origin === 'client' &&
+        Number.isInteger(event.durationMs) &&
+        event.durationMs >= 0,
+    )
+    .map((event) => event.durationMs)
+    .sort((left, right) => left - right);
+  return values[0] ?? null;
+}
+
+function segmentDuration(from, to) {
+  return from !== null && to !== null && to >= from ? to - from : null;
+}
+
+function summarizeInteractivePipeline(events) {
+  const interactiveSources = ['voice', 'manual', 'card_change'];
+  const groups = ['normal', 'retry', 'aborted'];
+  const metricNames = [
+    'inputToProviderRequestMs',
+    'providerRequestToFirstChunkMs',
+    'inputToProviderFirstChunkMs',
+    'providerFirstChunkToSpeechUnitMs',
+    'speechUnitToTtsRequestMs',
+    'ttsRequestToFirstAudioMs',
+    'speechUnitToTtsFirstAudioMs',
+    'ttsFirstAudioToPlaybackMs',
+    'inputToPlaybackMs',
+    'continuationQueueGapMs',
+  ];
+  const turns = new Map();
+  for (const event of events) {
+    if (typeof event.turnId !== 'string') continue;
+    const turn = turns.get(event.turnId) ?? { events: [] };
+    turn.events.push(event);
+    turns.set(event.turnId, turn);
+  }
+
+  const result = Object.fromEntries(
+    interactiveSources.map((source) => [
+      source,
+      Object.fromEntries(
+        groups.map((group) => [
+          group,
+          Object.fromEntries(metricNames.map((name) => [name, []])),
+        ]),
+      ),
+    ]),
+  );
+
+  for (const turn of turns.values()) {
+    const source =
+      turn.events.find(
+        (event) =>
+          event.event.startsWith('llm_provider_') &&
+          interactiveSources.includes(event.source),
+      )?.source ??
+      turn.events.find((event) => interactiveSources.includes(event.source))?.source;
+    if (!source) continue;
+    const aborted = turn.events.some((event) => event.event === 'turn_aborted');
+    const retried = turn.events.some(
+      (event) =>
+        event.event === 'llm_provider_done' &&
+        Number.isInteger(event.retry) &&
+        event.retry > 0,
+    );
+    const group = aborted ? 'aborted' : retried ? 'retry' : 'normal';
+    const input = firstClientEventElapsed(turn.events, 'input_received');
+    const providerRequest = firstClientEventElapsed(turn.events, 'llm_start');
+    const providerFirstChunk = firstClientEventElapsed(
+      turn.events,
+      'llm_provider_first_chunk',
+    );
+    const speechUnit = firstClientEventElapsed(turn.events, 'speech_unit_ready');
+    const ttsRequest = firstClientEventElapsed(turn.events, 'tts_start');
+    const ttsFirstAudio = firstClientEventElapsed(turn.events, 'tts_first_audio');
+    const playback = firstClientEventElapsed(turn.events, 'playback_started');
+    const values = {
+      inputToProviderRequestMs: segmentDuration(input, providerRequest),
+      providerRequestToFirstChunkMs: segmentDuration(
+        providerRequest,
+        providerFirstChunk,
+      ),
+      inputToProviderFirstChunkMs: segmentDuration(input, providerFirstChunk),
+      providerFirstChunkToSpeechUnitMs: segmentDuration(providerFirstChunk, speechUnit),
+      speechUnitToTtsRequestMs: segmentDuration(speechUnit, ttsRequest),
+      ttsRequestToFirstAudioMs: segmentDuration(ttsRequest, ttsFirstAudio),
+      speechUnitToTtsFirstAudioMs: segmentDuration(speechUnit, ttsFirstAudio),
+      ttsFirstAudioToPlaybackMs: segmentDuration(ttsFirstAudio, playback),
+      inputToPlaybackMs: segmentDuration(input, playback),
+      continuationQueueGapMs: firstClientEventDuration(
+        turn.events,
+        'tts_queue_gap',
+      ),
+    };
+    for (const [name, value] of Object.entries(values)) {
+      if (value !== null) result[source][group][name].push(value);
+    }
+  }
+
+  return Object.fromEntries(
+    interactiveSources.map((source) => [
+      source,
+      Object.fromEntries(
+        groups.map((group) => [
+          group,
+          Object.fromEntries(
+            metricNames.map((name) => [
+              name,
+              summarizePipelineMetric(result[source][group][name]),
+            ]),
+          ),
+        ]),
+      ),
+    ]),
+  );
 }
 
 function summarizeAxisScores(observations) {
@@ -140,6 +431,9 @@ export function summarizeCapture({ metadata, events, observations }, generatedAt
       firstAt: timestamps[0]?.at ?? null,
       lastAt: timestamps.at(-1)?.at ?? null,
       latency: summarizeLatency(events),
+      llmProviderLatency: summarizeLlmProviderLatency(events),
+      llmCacheProfiles: summarizeLlmCacheProfiles(events),
+      interactivePipelineLatency: summarizeInteractivePipeline(events),
     },
     observations: {
       count: observations.length,
@@ -176,6 +470,34 @@ function eventRow(captureId, event) {
     durationMs: event.durationMs,
     activeRequests: event.activeRequests,
     audioBytes: event.audioBytes,
+    provider: event.provider,
+    model: event.model,
+    purpose: event.purpose,
+    callIndex: event.callIndex,
+    retry: event.retry,
+    unitIndex: event.unitIndex,
+    characterCount: event.characterCount,
+    profile: event.profile,
+    apiEndpoint: event.apiEndpoint,
+    cacheMode: event.cacheMode,
+    cacheKeyVersion: event.cacheKeyVersion,
+    cacheStatus: event.cacheStatus,
+    requestedTier: event.requestedTier,
+    actualTier: event.actualTier,
+    actualModel: event.actualModel,
+    inputTokens: event.inputTokens,
+    cachedTokens: event.cachedTokens,
+    cacheWriteTokens: event.cacheWriteTokens,
+    outputTokens: event.outputTokens,
+    reasoningTokens: event.reasoningTokens,
+    staticPrefixChars: event.staticPrefixChars,
+    dynamicContextChars: event.dynamicContextChars,
+    schemaBytes: event.schemaBytes,
+    historyItemCount: event.historyItemCount,
+    historyChars: event.historyChars,
+    requestBytes: event.requestBytes,
+    warmup: event.warmup,
+    fallbackReason: event.fallbackReason,
     emotion: event.emotion,
     phase: event.phase,
     reason: event.reason,

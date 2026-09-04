@@ -4,6 +4,15 @@ import { resolve } from 'node:path';
 const testFiles = [
   resolve('node_modules/.tmp/performer-test/scripts/card-preview-api.test.js'),
   resolve('node_modules/.tmp/performer-test/scripts/local-api-capture.test.js'),
+  resolve(
+    'node_modules/.tmp/performer-test/scripts/llm-provider-telemetry.test.js',
+  ),
+  resolve(
+    'node_modules/.tmp/performer-test/scripts/openai-responses.test.js',
+  ),
+  resolve(
+    'node_modules/.tmp/performer-test/scripts/streaming-speech.test.js',
+  ),
   resolve('node_modules/.tmp/performer-test/scripts/card-reactions.test.js'),
   resolve(
     'node_modules/.tmp/performer-test/scripts/card-drop-reaction.test.js',
