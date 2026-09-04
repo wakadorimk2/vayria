@@ -9,6 +9,7 @@ import {
 import {
   modelForProfile,
   resolveLlmRuntimeOptions,
+  shouldFallbackToLegacy,
 } from '../server/llmRuntime.js';
 
 const baseRequest: OpenAiResponseRequest = {
@@ -225,4 +226,35 @@ test('LLM profiles default to implicit nano and exhibition-only safety features'
   assert.equal(modelForProfile('nano-implicit'), 'gpt-5-nano');
   assert.equal(modelForProfile('nano-legacy'), 'gpt-5-nano');
   assert.equal(modelForProfile('luna-explicit'), 'gpt-5.6-luna');
+});
+
+test('legacy fallback accepts output-limit incomplete only when explicitly enabled', () => {
+  const error = new OpenAiResponsesError('incomplete', {
+    kind: 'incomplete',
+    incompleteReason: 'max_output_tokens',
+  });
+  assert.equal(
+    shouldFallbackToLegacy(error, {
+      fallbackEnabled: true,
+      fallbackOnOutputLimit: false,
+      canFallback: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldFallbackToLegacy(error, {
+      fallbackEnabled: true,
+      fallbackOnOutputLimit: true,
+      canFallback: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldFallbackToLegacy(error, {
+      fallbackEnabled: true,
+      fallbackOnOutputLimit: true,
+      canFallback: false,
+    }),
+    false,
+  );
 });

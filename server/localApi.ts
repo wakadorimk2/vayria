@@ -3845,7 +3845,10 @@ async function generateReply(
     streaming.onSpeechUnit(committedUnits.length - 1, unit, candidate);
   };
 
-  const requestReply = async (correction?: string): Promise<string> => {
+  const requestReply = async (
+    correction?: string,
+    fallbackOnOutputLimit = false,
+  ): Promise<string> => {
     const retry = providerCallCount;
     providerCallCount += 1;
     let streamedReply = '';
@@ -3886,6 +3889,7 @@ async function generateReply(
                 : 'vayria:reply:autonomous:lead0:v2',
           signal: llm.signal,
           canFallback: () => committedUnits.length === 0,
+          fallbackOnOutputLimit,
           onFallback: (reason) => {
             streamedReply = '';
             completedReply = '';
@@ -4095,7 +4099,8 @@ async function generateReply(
         ? streamingEnabled
           ? 'Your previous attempt violated the voice action, utterance-plan, or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty speechUnits, empty activatedCards, null speechAct, and null expressionLevel for listen, react_nonverbally, or backchannel. For take_floor, return a valid speechAct and an expressionLevel within the budget. speechUnits must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Put the forced current card first when one exists.'
           : 'Your previous attempt violated the voice action, utterance-plan, or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text, empty activatedCards, null speechAct, and null expressionLevel for listen, react_nonverbally, or backchannel. For take_floor, return a valid speechAct and an expressionLevel within the budget. The text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Put the forced current card first when one exists.'
-        : 'Your previous attempt violated the utterance-plan or card contract. Follow the current brain-card subset, expression budget, and forced-card-first requirements exactly.',
+        : 'Your previous attempt violated the utterance-plan or card contract, or did not complete. Emit deliveryHeader and the short speech fields immediately. Keep internalDelta.reasonUpdates empty unless a state update is necessary. Follow the current brain-card subset, expression budget, forced-card-first requirements, and offered reason IDs exactly.',
+      true,
     ),
   );
   return { response, providerCallCount };

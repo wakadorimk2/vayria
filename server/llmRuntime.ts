@@ -45,6 +45,7 @@ export interface StructuredLlmRequest {
   cacheKey: string;
   signal?: AbortSignal;
   canFallback?: () => boolean;
+  fallbackOnOutputLimit?: boolean;
   onFallback?: (reason: string) => void;
   onTextDelta?: (delta: string) => void;
   onComplete?: (text: string) => void | Promise<void>;
@@ -206,10 +207,41 @@ function runLegacyNano(request: StructuredLlmRequest): Promise<string> {
 }
 
 function fallbackReason(error: OpenAiResponsesError): string {
+  if (
+    error.kind === 'incomplete' &&
+    (error.incompleteReason === 'max_output_tokens' ||
+      error.incompleteReason === 'max_tokens')
+  ) {
+    return 'output_limit';
+  }
   if (error.kind === 'connection') return 'connection';
   if (error.status === 408) return 'timeout';
   if (error.status === 429) return 'rate_limit';
   return 'provider_error';
+}
+
+export function shouldFallbackToLegacy(
+  error: unknown,
+  options: {
+    fallbackEnabled: boolean;
+    fallbackOnOutputLimit: boolean;
+    canFallback: boolean;
+  },
+): error is OpenAiResponsesError {
+  if (
+    !(error instanceof OpenAiResponsesError) ||
+    !options.fallbackEnabled ||
+    !options.canFallback
+  ) {
+    return false;
+  }
+  if (error.retryableAvailabilityFailure) return true;
+  return (
+    options.fallbackOnOutputLimit &&
+    error.kind === 'incomplete' &&
+    (error.incompleteReason === 'max_output_tokens' ||
+      error.incompleteReason === 'max_tokens')
+  );
 }
 
 export async function processStructuredLlm(
@@ -285,10 +317,11 @@ export async function processStructuredLlm(
     };
   } catch (error) {
     if (
-      !(error instanceof OpenAiResponsesError) ||
-      !error.retryableAvailabilityFailure ||
-      !request.runtime.fallbackEnabled ||
-      request.canFallback?.() === false
+      !shouldFallbackToLegacy(error, {
+        fallbackEnabled: request.runtime.fallbackEnabled,
+        fallbackOnOutputLimit: request.fallbackOnOutputLimit === true,
+        canFallback: request.canFallback?.() !== false,
+      })
     ) {
       throw error;
     }
