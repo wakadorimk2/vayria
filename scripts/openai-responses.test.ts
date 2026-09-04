@@ -29,9 +29,10 @@ const baseRequest: OpenAiResponseRequest = {
   },
   maxOutputTokens: 128,
   serviceTier: 'fast',
+  reasoningEffort: 'none',
   cache: {
     key: 'vayria:test:v1',
-    explicitBreakpoint: true,
+    mode: 'explicit',
   },
 };
 
@@ -79,6 +80,25 @@ test('standard tier is explicit and cache-disabled requests omit cache fields', 
   });
   assert.equal(body.service_tier, 'default');
   assert.equal('prompt_cache_key' in body, false);
+  assert.equal('prompt_cache_options' in body, false);
+  const input = body.input as Array<Record<string, unknown>>;
+  const firstContent = input[0]?.content as Array<Record<string, unknown>>;
+  assert.equal('prompt_cache_breakpoint' in firstContent[0]!, false);
+});
+
+test('nano Responses requests use minimal reasoning and implicit caching', () => {
+  const body = buildOpenAiResponsesBody({
+    ...baseRequest,
+    model: 'gpt-5-nano',
+    reasoningEffort: 'minimal',
+    cache: {
+      key: 'vayria:test:nano:v1',
+      mode: 'implicit',
+    },
+  });
+  assert.equal(body.model, 'gpt-5-nano');
+  assert.deepEqual(body.reasoning, { effort: 'minimal' });
+  assert.equal(body.prompt_cache_key, 'vayria:test:nano:v1');
   assert.equal('prompt_cache_options' in body, false);
   const input = body.input as Array<Record<string, unknown>>;
   const firstContent = input[0]?.content as Array<Record<string, unknown>>;
@@ -169,19 +189,20 @@ test('request abort is forwarded and is not an availability fallback', async () 
   });
 });
 
-test('LLM profiles default to explicit Luna and exhibition-only safety features', () => {
+test('LLM profiles default to implicit nano and exhibition-only safety features', () => {
   assert.deepEqual(resolveLlmRuntimeOptions({}, false), {
-    profile: 'luna-explicit',
+    profile: 'nano-implicit',
     serviceTier: 'standard',
     fallbackEnabled: false,
     cacheWarmupEnabled: false,
   });
   assert.deepEqual(resolveLlmRuntimeOptions({}, true), {
-    profile: 'luna-explicit',
+    profile: 'nano-implicit',
     serviceTier: 'standard',
     fallbackEnabled: true,
     cacheWarmupEnabled: true,
   });
+  assert.equal(modelForProfile('nano-implicit'), 'gpt-5-nano');
   assert.equal(modelForProfile('nano-legacy'), 'gpt-5-nano');
   assert.equal(modelForProfile('luna-explicit'), 'gpt-5.6-luna');
 });

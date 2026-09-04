@@ -283,7 +283,7 @@ interface LlmRequestContext {
 }
 
 const DEFAULT_LLM_RUNTIME: LlmRuntimeOptions = {
-  profile: 'luna-explicit',
+  profile: 'nano-implicit',
   serviceTier: 'standard',
   fallbackEnabled: false,
   cacheWarmupEnabled: false,

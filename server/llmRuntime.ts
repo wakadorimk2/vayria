@@ -14,6 +14,7 @@ const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
 ) as typeof import('@aituber-onair/chat');
 
 export const LLM_PROFILES = [
+  'nano-implicit',
   'nano-legacy',
   'luna-legacy',
   'luna-prefix',
@@ -58,7 +59,7 @@ export interface StructuredLlmResult {
   telemetry: {
     profile: LlmProfile;
     apiEndpoint: 'chat-completions' | 'responses';
-    cacheMode: 'disabled' | 'explicit';
+    cacheMode: 'disabled' | 'implicit' | 'explicit';
     cacheKeyVersion: string;
     cacheStatus: 'disabled' | 'hit' | 'write' | 'miss';
     requestedTier: OpenAiServiceTier;
@@ -81,9 +82,8 @@ function buildTelemetry(
   request: StructuredLlmRequest,
   responses: OpenAiResponseResult | null,
   apiEndpoint: 'chat-completions' | 'responses',
+  cacheMode: StructuredLlmResult['telemetry']['cacheMode'],
 ): StructuredLlmResult['telemetry'] {
-  const cacheMode =
-    request.runtime.profile === 'luna-explicit' ? 'explicit' : 'disabled';
   const cachedTokens = responses?.usage.cachedTokens ?? 0;
   const cacheWriteTokens = responses?.usage.cacheWriteTokens ?? 0;
   const cacheStatus =
@@ -146,7 +146,7 @@ export function resolveLlmRuntimeOptions(
   },
   exhibition: boolean,
 ): LlmRuntimeOptions {
-  const profile = values.profile?.trim() || 'luna-explicit';
+  const profile = values.profile?.trim() || 'nano-implicit';
   if (!LLM_PROFILES.includes(profile as LlmProfile)) {
     throw new Error(`VAYRIA_LLM_PROFILE must be one of ${LLM_PROFILES.join(', ')}.`);
   }
@@ -163,7 +163,9 @@ export function resolveLlmRuntimeOptions(
 }
 
 export function modelForProfile(profile: LlmProfile): string {
-  return profile === 'nano-legacy' ? String(MODEL_GPT_5_NANO) : 'gpt-5.6-luna';
+  return profile === 'nano-implicit' || profile === 'nano-legacy'
+    ? String(MODEL_GPT_5_NANO)
+    : 'gpt-5.6-luna';
 }
 
 function runLegacyNano(request: StructuredLlmRequest): Promise<string> {
@@ -222,11 +224,12 @@ export async function processStructuredLlm(
       actualModel: requestedModel,
       fallbackReason: null,
       responses: null,
-      telemetry: buildTelemetry(request, null, 'chat-completions'),
+      telemetry: buildTelemetry(request, null, 'chat-completions', 'disabled'),
     };
   }
 
   const usesStablePrefix =
+    request.runtime.profile === 'nano-implicit' ||
     request.runtime.profile === 'luna-prefix' ||
     request.runtime.profile === 'luna-explicit';
   try {
@@ -242,13 +245,22 @@ export async function processStructuredLlm(
       output: request.output,
       maxOutputTokens: request.maxOutputTokens,
       serviceTier: request.runtime.serviceTier,
+      reasoningEffort:
+        request.runtime.profile === 'nano-implicit' ? 'minimal' : 'none',
       ...(request.runtime.profile === 'luna-explicit'
         ? {
             cache: {
               key: request.cacheKey,
-              explicitBreakpoint: true,
+              mode: 'explicit' as const,
             },
           }
+        : request.runtime.profile === 'nano-implicit'
+          ? {
+              cache: {
+                key: request.cacheKey,
+                mode: 'implicit' as const,
+              },
+            }
         : {}),
       signal: request.signal,
       onTextDelta: request.onTextDelta,
@@ -260,7 +272,16 @@ export async function processStructuredLlm(
       actualModel: requestedModel,
       fallbackReason: null,
       responses,
-      telemetry: buildTelemetry(request, responses, 'responses'),
+      telemetry: buildTelemetry(
+        request,
+        responses,
+        'responses',
+        request.runtime.profile === 'luna-explicit'
+          ? 'explicit'
+          : request.runtime.profile === 'nano-implicit'
+            ? 'implicit'
+            : 'disabled',
+      ),
     };
   } catch (error) {
     if (
@@ -280,7 +301,7 @@ export async function processStructuredLlm(
       actualModel: String(MODEL_GPT_5_NANO),
       fallbackReason: reason,
       responses: null,
-      telemetry: buildTelemetry(request, null, 'responses'),
+      telemetry: buildTelemetry(request, null, 'chat-completions', 'disabled'),
     };
   }
 }

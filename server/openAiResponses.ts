@@ -29,9 +29,10 @@ export interface OpenAiResponseRequest {
   output: OpenAiStructuredOutput;
   maxOutputTokens: number;
   serviceTier: OpenAiServiceTier;
+  reasoningEffort: 'none' | 'minimal';
   cache?: {
     key: string;
-    explicitBreakpoint: boolean;
+    mode: 'implicit' | 'explicit';
   };
   signal?: AbortSignal;
   onTextDelta?: (delta: string) => void;
@@ -126,7 +127,7 @@ function buildInput(request: OpenAiResponseRequest): unknown[] {
     type: 'input_text',
     text: request.staticPrompt,
   };
-  if (request.cache?.explicitBreakpoint) {
+  if (request.cache?.mode === 'explicit') {
     staticContent.prompt_cache_breakpoint = { mode: 'explicit' };
   }
   return [
@@ -160,7 +161,7 @@ export function buildOpenAiResponsesBody(
     model: request.model,
     stream: true,
     store: false,
-    reasoning: { effort: 'none' },
+    reasoning: { effort: request.reasoningEffort },
     max_output_tokens: request.maxOutputTokens,
     text: {
       verbosity: 'low',
@@ -176,7 +177,11 @@ export function buildOpenAiResponsesBody(
     ...(request.cache
       ? {
           prompt_cache_key: request.cache.key,
-          prompt_cache_options: { mode: 'explicit', ttl: '30m' },
+          ...(request.cache.mode === 'explicit'
+            ? {
+                prompt_cache_options: { mode: 'explicit', ttl: '30m' },
+              }
+            : {}),
         }
       : {}),
   };
