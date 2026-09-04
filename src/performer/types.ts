@@ -332,6 +332,11 @@ export interface DirectionContribution {
   };
 }
 
+export interface WeightedSemanticCue {
+  cue: string;
+  weight: number;
+}
+
 export interface ActionIntent {
   trigger: PerformerTrigger['kind'];
   preferredIntent: 'speak' | 'wait' | 'ignore' | 'react_nonverbally';
@@ -386,7 +391,7 @@ export interface PerformancePlan {
     llmContext: {
       callbackTendency: number;
       fragmentation: number;
-      semanticBiases: string[];
+      semanticBiases: WeightedSemanticCue[];
     };
   };
   ttsProfile?: {

@@ -15,6 +15,7 @@ import {
   buildUsedReasonIdsProperty,
   buildVoiceInteractionPolicySystemPrompt,
   createInteractionReactionResponse,
+  formatSemanticBiasesForPrompt,
   isActionCommitmentMessage,
   isContentBearingVoiceMessage,
   isDirectActionRequestMessage,
@@ -43,7 +44,9 @@ import {
 const VALID_CONTEXT = {
   callbackTendency: 0.25,
   fragmentation: 0.1,
-  semanticBiases: ['鶏に関係する具体物を一つ連想する'],
+  semanticBiases: [
+    { cue: '鶏に関係する具体物を一つ連想する', weight: 1 },
+  ],
 };
 
 const VALID_PERFORMER_STATE = {
@@ -354,6 +357,59 @@ test('card preview request validates runtime context bounds', () => {
       }),
     /performanceContext format is invalid/,
   );
+  for (const semanticBiases of [
+    ['legacy-string'],
+    [{ cue: '', weight: 1 }],
+    [{ cue: 'valid', weight: 0 }],
+    [{ cue: 'valid', weight: 1.1 }],
+    [{ cue: 'valid', weight: 1, extra: true }],
+  ]) {
+    assert.throws(
+      () =>
+        readCardPreviewRequest({
+          cardId: 'chicken',
+          performanceContext: { ...VALID_CONTEXT, semanticBiases },
+        }),
+      /performanceContext format is invalid/,
+    );
+  }
+});
+
+test('card preview request normalizes weighted semantic cue order and duplicates', () => {
+  const request = readCardPreviewRequest({
+    cardId: 'chicken',
+    performanceContext: {
+      ...VALID_CONTEXT,
+      semanticBiases: [
+        { cue: ' secondary ', weight: 0.2 },
+        { cue: 'primary', weight: 1 },
+        { cue: 'secondary', weight: 0.4 },
+      ],
+    },
+  });
+  assert.deepEqual(request.performanceContext.semanticBiases, [
+    { cue: 'primary', weight: 1 },
+    { cue: 'secondary', weight: 0.4 },
+  ]);
+});
+
+test('semantic cue formatter keeps weights and adds roles only for distinct levels', () => {
+  const ranked = formatSemanticBiasesForPrompt([
+    { cue: 'secondary', weight: 0.2 },
+    { cue: 'primary-b', weight: 1 },
+    { cue: 'primary-a', weight: 1 },
+  ]);
+  assert.match(ranked, /Primary influence \(weight=1\.00\): primary-a/);
+  assert.match(ranked, /Primary influence \(weight=1\.00\): primary-b/);
+  assert.match(ranked, /Secondary influence \(weight=0\.20\): secondary/);
+  assert.ok(ranked.indexOf('primary-a') < ranked.indexOf('secondary'));
+
+  const equal = formatSemanticBiasesForPrompt([
+    { cue: 'beta', weight: 0.2 },
+    { cue: 'alpha', weight: 0.2 },
+  ]);
+  assert.match(equal, /Influence \(weight=0\.20\): alpha/);
+  assert.doesNotMatch(equal, /Primary|Secondary/);
 });
 
 test('card preview response keeps only text and normalized emotion', () => {

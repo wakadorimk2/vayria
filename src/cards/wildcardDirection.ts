@@ -70,16 +70,13 @@ function createContribution(
   const activeEffects = effects.filter(
     (effect) => getEffectIntensity(effect, now) > 0.001,
   );
-  const semanticCues = activeEffects.flatMap(
-    (effect) => effect.modifiers.semanticBiases ?? [],
-  );
   return {
     directionId: 'wildcard',
     effects: activeEffects,
     constraints: requiresSpeech
       ? [{ kind: 'require_speech', scope: 'current_plan' }]
       : [],
-    semanticCues: [...new Set(semanticCues)],
+    semanticCues: [],
     triggers: [trigger],
     ...(requiresSpeech ? { attentionTarget: 'viewer' as const } : {}),
     ...(planOverrides === undefined ? {} : { planOverrides }),
