@@ -348,6 +348,18 @@ export function maxOutputTokensForChatMode(
   return CHAT_MAX_OUTPUT_TOKENS[mode];
 }
 
+export function runtimeForReplyAttempt(
+  runtime: LlmRuntimeOptions,
+  source: LlmProviderSource,
+  retryCause: ChatRetryCause = null,
+): LlmRuntimeOptions {
+  return runtime.profile === 'nano-implicit' &&
+    retryCause === 'output_limit' &&
+    (source === 'voice' || source === 'card_change')
+    ? { ...runtime, profile: 'luna-prefix' }
+    : runtime;
+}
+
 export function isRetryableIncompleteResponseError(error: unknown): boolean {
   return (
     error instanceof OpenAiResponsesError &&
@@ -3256,6 +3268,11 @@ interface StreamingReplyCallbacks {
       | 'speech_lead_complete'
       | 'provisional_validation_rejected'
       | 'full_json_complete'
+      | 'full_json_rejected'
+      | 'speech_lead_rejected'
+      | 'delivery_contract_rejected'
+      | 'committed_units_changed'
+      | 'state_contract_rejected'
       | 'speech_unit_written',
   ) => void;
 }
@@ -3455,6 +3472,11 @@ async function generateReply(
   recentExpressionLevels: readonly ExpressionLevel[] = [],
 ): Promise<GeneratedChatResponse> {
   const streamingEnabled = streaming !== null;
+  const providerSource = resolveLlmProviderSource(
+    mode,
+    forcedCardId,
+    programContext,
+  );
   const includesInternalDelta = mode === 'autonomous';
   const forcedCardEnergy = forcedCardId
     ? CARD_REACTION_PROFILES[forcedCardId]?.behavior.energy ?? null
@@ -3883,9 +3905,14 @@ async function generateReply(
       { purpose: 'response-generation', retry },
       async (markFirstChunk, setMetadata, trackExternalRequest) => {
         const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
+        const attemptRuntime = runtimeForReplyAttempt(
+          llm.runtime,
+          providerSource,
+          retryCause,
+        );
         const result = await processStructuredLlm({
           apiKey: llm.apiKey,
-          runtime: llm.runtime,
+          runtime: attemptRuntime,
           legacyPrompt: prompt,
           staticPrompt: staticSystemPrompt,
           dynamicPrompt: correction
@@ -4013,12 +4040,14 @@ async function generateReply(
       envelope = parseStreamingSpeechEnvelope(value);
       streaming?.onParserMilestone?.('full_json_complete');
     } catch (error) {
+      streaming?.onParserMilestone?.('full_json_rejected');
       throw new CardContractError(
         error instanceof Error ? error.message : 'Invalid streaming response.',
       );
     }
     const normalizedLead = envelope.speechLead.trim();
     if (!isAcceptedSpeechLead(normalizedLead)) {
+      streaming?.onParserMilestone?.('speech_lead_rejected');
       throw new CardContractError('speechLead must contain 4 to 12 characters.');
     }
     const normalizedUnits = [
@@ -4048,7 +4077,10 @@ async function generateReply(
         );
         streaming?.onDeliveryMetadataRejected();
       } catch {
-        if (!committedResponse) throw error;
+        if (!committedResponse) {
+          streaming?.onParserMilestone?.('delivery_contract_rejected');
+          throw error;
+        }
         effectiveUnits = committedUnits;
         effectiveActivatedCards = provisionalActivatedCards(
           envelope.deliveryHeader,
@@ -4065,6 +4097,7 @@ async function generateReply(
     if (
       committedUnits.some((unit, index) => effectiveUnits[index] !== unit)
     ) {
+      streaming?.onParserMilestone?.('committed_units_changed');
       throw new CardContractError('Committed speech units changed before completion.');
     }
     for (const unit of effectiveUnits.slice(committedUnits.length)) {
@@ -4080,7 +4113,10 @@ async function generateReply(
         effectiveActivatedCards,
       );
     } catch (error) {
-      if (!committedResponse) throw error;
+      if (!committedResponse) {
+        streaming?.onParserMilestone?.('state_contract_rejected');
+        throw error;
+      }
       streaming?.onStateRejected();
       return {
         ...delivery,

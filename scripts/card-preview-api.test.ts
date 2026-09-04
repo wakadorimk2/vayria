@@ -31,6 +31,7 @@ import {
   readConversationEvent,
   readAutonomyCandidate,
   resolveProvisionalActivatedCards,
+  runtimeForReplyAttempt,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
 import { OpenAiResponsesError } from '../server/openAiResponses.js';
@@ -86,6 +87,43 @@ test('chat reserves output space for nano reasoning and structured output', () =
   assert.equal(maxOutputTokensForChatMode('manual', 'output_limit'), 2_048);
   assert.equal(maxOutputTokensForChatMode('autonomous'), 2_048);
   assert.equal(maxOutputTokensForChatMode('autonomous', 'output_limit'), 2_048);
+});
+
+test('output-limit retry escalates only interactive nano failure paths to Luna', () => {
+  const runtime = {
+    profile: 'nano-implicit' as const,
+    serviceTier: 'standard' as const,
+    fallbackEnabled: true,
+    cacheWarmupEnabled: true,
+  };
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'voice', 'output_limit').profile,
+    'luna-prefix',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'card_change', 'output_limit').profile,
+    'luna-prefix',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'manual', 'output_limit').profile,
+    'nano-implicit',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'autonomous', 'output_limit').profile,
+    'nano-implicit',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'voice', 'contract').profile,
+    'nano-implicit',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(
+      { ...runtime, profile: 'luna-explicit' },
+      'voice',
+      'output_limit',
+    ).profile,
+    'luna-explicit',
+  );
 });
 
 test('only output-limit incomplete responses retry before speech commit', () => {
