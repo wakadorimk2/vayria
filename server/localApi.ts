@@ -370,6 +370,17 @@ export function isRetryableIncompleteResponseError(error: unknown): boolean {
   );
 }
 
+export function classifyTerminalStreamingEnvelope(
+  value: string,
+): 'terminal_envelope_parseable' | 'terminal_envelope_unparseable' {
+  try {
+    parseStreamingSpeechEnvelope(value);
+    return 'terminal_envelope_parseable';
+  } catch {
+    return 'terminal_envelope_unparseable';
+  }
+}
+
 export function buildUsedReasonIdsProperty(
   reasonIds: readonly string[],
 ): Record<string, unknown> {
@@ -714,6 +725,7 @@ const PLAYCHECK_RECORD_FIELDS = [
   'profile',
   'apiEndpoint',
   'maxOutputTokens',
+  'providerMaxOutputTokens',
   'terminationKind',
   'httpStatus',
   'incompleteReason',
@@ -728,6 +740,9 @@ const PLAYCHECK_RECORD_FIELDS = [
   'cacheWriteTokens',
   'outputTokens',
   'reasoningTokens',
+  'outputTextChars',
+  'outputTextDeltaCount',
+  'outputTextDone',
   'staticPrefixChars',
   'dynamicContextChars',
   'schemaBytes',
@@ -3285,7 +3300,14 @@ interface StreamingReplyCallbacks {
       | 'delivery_contract_rejected'
       | 'committed_units_changed'
       | 'state_contract_rejected'
-      | 'speech_unit_written',
+      | 'speech_unit_written'
+      | 'terminal_envelope_parseable'
+      | 'terminal_envelope_unparseable',
+    metadata: {
+      callIndex: number;
+      retry: number;
+      externalRequestIndex: number;
+    },
   ) => void;
 }
 
@@ -3885,6 +3907,21 @@ async function generateReply(
       expressionBudget,
     );
 
+  type ParserMilestone = Parameters<
+    NonNullable<StreamingReplyCallbacks['onParserMilestone']>
+  >[0];
+  type ParserMilestoneMetadata = Parameters<
+    NonNullable<StreamingReplyCallbacks['onParserMilestone']>
+  >[1];
+  let lastParserMilestoneMetadata: ParserMilestoneMetadata | null = null;
+  const recordLastParserMilestone = (parserMilestone: ParserMilestone): void => {
+    if (!lastParserMilestoneMetadata) return;
+    streaming?.onParserMilestone?.(
+      parserMilestone,
+      lastParserMilestoneMetadata,
+    );
+  };
+
   const commitSpeechUnit = (
     header: Record<string, unknown>,
     rawUnit: string,
@@ -3896,6 +3933,7 @@ async function generateReply(
     committedUnits.push(unit);
     committedResponse = candidate;
     streaming.onSpeechUnit(committedUnits.length - 1, unit, candidate);
+    recordLastParserMilestone('speech_unit_written');
   };
 
   const requestReply = async (
@@ -3905,17 +3943,31 @@ async function generateReply(
   ): Promise<string> => {
     const retry = providerCallCount;
     providerCallCount += 1;
+    const callIndex = telemetry.callCount + 1;
     let streamedReply = '';
     let completedReply = '';
+    let attemptExternalRequestIndex = 0;
     let envelopeParser = streamingEnabled
       ? new IncrementalSpeechEnvelopeParser()
       : null;
     let attemptHeader: Record<string, unknown> | null = null;
     let headerMilestoneRecorded = false;
     let leadMilestoneRecorded = false;
-    await telemetry.run(
-      { purpose: 'response-generation', retry },
-      async (markFirstChunk, setMetadata, trackExternalRequest) => {
+    const recordAttemptParserMilestone = (
+      parserMilestone: ParserMilestone,
+    ): void => {
+      if (attemptExternalRequestIndex < 1) return;
+      lastParserMilestoneMetadata = {
+        callIndex,
+        retry,
+        externalRequestIndex: attemptExternalRequestIndex,
+      };
+      recordLastParserMilestone(parserMilestone);
+    };
+    try {
+      await telemetry.run(
+        { purpose: 'response-generation', retry },
+        async (markFirstChunk, setMetadata, trackExternalRequest) => {
         const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
         const attemptRuntime = runtimeForReplyAttempt(
           llm.runtime,
@@ -3948,9 +4000,22 @@ async function generateReply(
                 : 'vayria:reply:autonomous:lead0:v2',
           signal: llm.signal,
           trackExternalRequest,
+          onExternalRequestStart: (externalRequestIndex) => {
+            attemptExternalRequestIndex = externalRequestIndex;
+            lastParserMilestoneMetadata = {
+              callIndex,
+              retry,
+              externalRequestIndex,
+            };
+          },
           canFallback: () => committedUnits.length === 0,
           fallbackOnOutputLimit,
           onFallback: (reason) => {
+            if (reason === 'output_limit') {
+              recordAttemptParserMilestone(
+                classifyTerminalStreamingEnvelope(streamedReply),
+              );
+            }
             streamedReply = '';
             completedReply = '';
             attemptHeader = null;
@@ -3961,7 +4026,8 @@ async function generateReply(
               : null;
             llm.onFallback(reason);
           },
-          onTextDelta: (partial) => {
+          onTextDelta: (partial, externalRequestIndex) => {
+            attemptExternalRequestIndex = externalRequestIndex;
             if (partial) markFirstChunk();
             streamedReply += partial;
             if (!partial || !envelopeParser || committedUnits.length >= 2) return;
@@ -3974,13 +4040,13 @@ async function generateReply(
               attemptHeader = parsed.deliveryHeader as Record<string, unknown>;
               if (!headerMilestoneRecorded) {
                 headerMilestoneRecorded = true;
-                streaming?.onParserMilestone?.('delivery_header_complete');
+                recordAttemptParserMilestone('delivery_header_complete');
               }
             }
             if (!attemptHeader) return;
             if (parsed.speechLead !== undefined && !leadMilestoneRecorded) {
               leadMilestoneRecorded = true;
-              streaming?.onParserMilestone?.('speech_lead_complete');
+              recordAttemptParserMilestone('speech_lead_complete');
             }
             if (
               parsed.speechLead !== undefined &&
@@ -3990,7 +4056,7 @@ async function generateReply(
               try {
                 commitSpeechUnit(attemptHeader, parsed.speechLead);
               } catch {
-                streaming?.onParserMilestone?.(
+                recordAttemptParserMilestone(
                   'provisional_validation_rejected',
                 );
                 // The full contract decides whether the attempt can retry.
@@ -4001,14 +4067,15 @@ async function generateReply(
               try {
                 commitSpeechUnit(attemptHeader, unit);
               } catch {
-                streaming?.onParserMilestone?.(
+                recordAttemptParserMilestone(
                   'provisional_validation_rejected',
                 );
                 // The full contract decides whether the attempt can retry.
               }
             }
           },
-          onComplete: (complete) => {
+          onComplete: (complete, externalRequestIndex) => {
+            attemptExternalRequestIndex = externalRequestIndex;
             markFirstChunk();
             completedReply = complete;
           },
@@ -4022,8 +4089,19 @@ async function generateReply(
             : {}),
         });
         if (!completedReply) completedReply = result.text;
-      },
-    );
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof OpenAiResponsesError &&
+        error.kind === 'incomplete'
+      ) {
+        recordAttemptParserMilestone(
+          classifyTerminalStreamingEnvelope(streamedReply),
+        );
+      }
+      throw error;
+    }
     const responseText = (completedReply || streamedReply).trim();
     if (!responseText) {
       throw new CardContractError('The chat provider returned an empty reply.');
@@ -4050,16 +4128,16 @@ async function generateReply(
     let envelope;
     try {
       envelope = parseStreamingSpeechEnvelope(value);
-      streaming?.onParserMilestone?.('full_json_complete');
+      recordLastParserMilestone('full_json_complete');
     } catch (error) {
-      streaming?.onParserMilestone?.('full_json_rejected');
+      recordLastParserMilestone('full_json_rejected');
       throw new CardContractError(
         error instanceof Error ? error.message : 'Invalid streaming response.',
       );
     }
     const normalizedLead = envelope.speechLead.trim();
     if (!isAcceptedSpeechLead(normalizedLead)) {
-      streaming?.onParserMilestone?.('speech_lead_rejected');
+      recordLastParserMilestone('speech_lead_rejected');
       throw new CardContractError('speechLead must contain 4 to 12 characters.');
     }
     const normalizedUnits = [
@@ -4090,7 +4168,7 @@ async function generateReply(
         streaming?.onDeliveryMetadataRejected();
       } catch {
         if (!committedResponse) {
-          streaming?.onParserMilestone?.('delivery_contract_rejected');
+          recordLastParserMilestone('delivery_contract_rejected');
           throw error;
         }
         effectiveUnits = committedUnits;
@@ -4109,7 +4187,7 @@ async function generateReply(
     if (
       committedUnits.some((unit, index) => effectiveUnits[index] !== unit)
     ) {
-      streaming?.onParserMilestone?.('committed_units_changed');
+      recordLastParserMilestone('committed_units_changed');
       throw new CardContractError('Committed speech units changed before completion.');
     }
     for (const unit of effectiveUnits.slice(committedUnits.length)) {
@@ -4126,7 +4204,7 @@ async function generateReply(
       );
     } catch (error) {
       if (!committedResponse) {
-        streaming?.onParserMilestone?.('state_contract_rejected');
+        recordLastParserMilestone('state_contract_rejected');
         throw error;
       }
       streaming?.onStateRejected();
@@ -5154,7 +5232,6 @@ async function handleRequest(
                 text: unit,
                 response: streamedCandidate,
               });
-              streamingCallbacks?.onParserMilestone?.('speech_unit_written');
             },
             onStateRejected: () => {
               stateRejected = true;
@@ -5162,7 +5239,7 @@ async function handleRequest(
             onDeliveryMetadataRejected: () => {
               deliveryMetadataRejected = true;
             },
-            onParserMilestone: (parserMilestone) => {
+            onParserMilestone: (parserMilestone, metadata) => {
               void recordStructuredEvent(config, 'llm_parser_milestone', {
                 origin: 'server',
                 requestId,
@@ -5170,6 +5247,7 @@ async function handleRequest(
                 turnId: providerTurnId,
                 source: providerSource,
                 parserMilestone,
+                ...metadata,
               });
             },
           }

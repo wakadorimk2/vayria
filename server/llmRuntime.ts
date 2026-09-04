@@ -51,8 +51,12 @@ export interface StructuredLlmRequest {
   canFallback?: () => boolean;
   fallbackOnOutputLimit?: boolean;
   onFallback?: (reason: string) => void;
-  onTextDelta?: (delta: string) => void;
-  onComplete?: (text: string) => void | Promise<void>;
+  onExternalRequestStart?: (externalRequestIndex: number) => void;
+  onTextDelta?: (delta: string, externalRequestIndex: number) => void;
+  onComplete?: (
+    text: string,
+    externalRequestIndex: number,
+  ) => void | Promise<void>;
   trackExternalRequest?: TrackLlmExternalRequest;
 }
 
@@ -180,11 +184,12 @@ function runExternalRequest<T>(
   execute: (
     markFirstChunk: () => void,
     setMetadata: (metadata: LlmExternalRequestMetadata) => void,
+    externalRequestIndex: number,
   ) => Promise<T>,
 ): Promise<T> {
   return request.trackExternalRequest
     ? request.trackExternalRequest(options, execute)
-    : execute(() => undefined, () => undefined);
+    : execute(() => undefined, () => undefined, 1);
 }
 
 function responseExternalMetadata(
@@ -194,6 +199,7 @@ function responseExternalMetadata(
 ): LlmExternalRequestMetadata {
   const cachedTokens = response.usage.cachedTokens;
   const cacheWriteTokens = response.usage.cacheWriteTokens;
+  const diagnostics = response.diagnostics;
   return {
     requestedTier: request.runtime.serviceTier,
     ...(response.serviceTier ? { actualTier: response.serviceTier } : {}),
@@ -207,6 +213,15 @@ function responseExternalMetadata(
             ? 'write'
             : 'miss',
     ...response.usage,
+    ...(diagnostics.providerMaxOutputTokens === null
+      ? {}
+      : { providerMaxOutputTokens: diagnostics.providerMaxOutputTokens }),
+    ...(diagnostics.actualModel === null
+      ? {}
+      : { actualModel: diagnostics.actualModel }),
+    outputTextChars: diagnostics.outputTextChars,
+    outputTextDeltaCount: diagnostics.outputTextDeltaCount,
+    outputTextDone: diagnostics.outputTextDone,
   };
 }
 
@@ -232,6 +247,7 @@ function runLegacyNano(request: StructuredLlmRequest): Promise<string> {
   ];
   let streamed = '';
   let completed = '';
+  let completedExternalRequestIndex = 0;
   return runExternalRequest(
     request,
     {
@@ -239,14 +255,16 @@ function runLegacyNano(request: StructuredLlmRequest): Promise<string> {
       model: String(MODEL_GPT_5_NANO),
       metadata: { cacheMode: 'disabled', cacheStatus: 'disabled' },
     },
-    async (markFirstChunk) => {
+    async (markFirstChunk, _setExternalMetadata, externalRequestIndex) => {
+      completedExternalRequestIndex = externalRequestIndex;
+      request.onExternalRequestStart?.(externalRequestIndex);
       await chat.processChat(
         messages,
         (partial) => {
           streamed += partial;
           if (partial) {
             markFirstChunk();
-            request.onTextDelta?.(partial);
+            request.onTextDelta?.(partial, externalRequestIndex);
           }
         },
         async (complete) => {
@@ -256,7 +274,7 @@ function runLegacyNano(request: StructuredLlmRequest): Promise<string> {
       return (completed || streamed).trim();
     },
   ).then(async (text) => {
-    await request.onComplete?.(text);
+    await request.onComplete?.(text, completedExternalRequestIndex);
     return text;
   });
 }
@@ -319,6 +337,7 @@ export async function processStructuredLlm(
     request.runtime.profile === 'nano-implicit' ||
     request.runtime.profile === 'luna-prefix' ||
     request.runtime.profile === 'luna-explicit';
+  let completedExternalRequestIndex = 0;
   try {
     const cacheMode =
       request.runtime.profile === 'luna-explicit'
@@ -337,7 +356,13 @@ export async function processStructuredLlm(
           cacheMode,
         },
       },
-      async (markFirstChunk, setExternalMetadata) => {
+      async (
+        markFirstChunk,
+        setExternalMetadata,
+        externalRequestIndex,
+      ) => {
+        completedExternalRequestIndex = externalRequestIndex;
+        request.onExternalRequestStart?.(externalRequestIndex);
         const response = await streamOpenAiResponse({
           apiKey: request.apiKey,
           model: requestedModel,
@@ -370,7 +395,7 @@ export async function processStructuredLlm(
           signal: request.signal,
           onTextDelta: (delta) => {
             if (delta) markFirstChunk();
-            request.onTextDelta?.(delta);
+            request.onTextDelta?.(delta, externalRequestIndex);
           },
         });
         setExternalMetadata(
@@ -379,7 +404,10 @@ export async function processStructuredLlm(
         return response;
       },
     );
-    await request.onComplete?.(responses.text);
+    await request.onComplete?.(
+      responses.text,
+      completedExternalRequestIndex,
+    );
     return {
       text: responses.text.trim(),
       requestedModel,

@@ -86,6 +86,11 @@ export interface LlmExternalRequestEvent {
   cacheWriteTokens?: number;
   outputTokens?: number;
   reasoningTokens?: number;
+  providerMaxOutputTokens?: number;
+  actualModel?: string;
+  outputTextChars?: number;
+  outputTextDeltaCount?: number;
+  outputTextDone?: 0 | 1;
   requestedTier?: string;
   actualTier?: string;
   cacheMode?: string;
@@ -121,6 +126,7 @@ export type TrackLlmExternalRequest = <T>(
   execute: (
     markFirstChunk: () => void,
     setMetadata: (metadata: LlmExternalRequestMetadata) => void,
+    externalRequestIndex: number,
   ) => Promise<T>,
 ) => Promise<T>;
 
@@ -226,6 +232,30 @@ function classifyExternalRequestError(error: unknown): {
       ] as const) {
         const value = finiteNumber(usage?.[field]);
         if (value !== undefined) metadata[field] = value;
+      }
+      const diagnostics = safeErrorRecord(record?.diagnostics);
+      const providerMaxOutputTokens = finiteNumber(
+        diagnostics?.providerMaxOutputTokens,
+      );
+      if (providerMaxOutputTokens !== undefined) {
+        metadata.providerMaxOutputTokens = providerMaxOutputTokens;
+      }
+      const actualModel = diagnostics?.actualModel;
+      if (
+        typeof actualModel === 'string' &&
+        /^[A-Za-z0-9._:-]{1,128}$/u.test(actualModel)
+      ) {
+        metadata.actualModel = actualModel;
+      }
+      for (const field of ['outputTextChars', 'outputTextDeltaCount'] as const) {
+        const value = finiteNumber(diagnostics?.[field]);
+        if (value !== undefined) metadata[field] = value;
+      }
+      if (
+        diagnostics?.outputTextDone === 0 ||
+        diagnostics?.outputTextDone === 1
+      ) {
+        metadata.outputTextDone = diagnostics.outputTextDone;
       }
       return { terminationKind: 'incomplete', metadata };
     }
@@ -394,6 +424,7 @@ export function createLlmProviderCallTracker(
           return await externalExecute(
             markExternalFirstChunk,
             setExternalMetadata,
+            externalRequestIndex,
           );
         } catch (error) {
           const classified = classifyExternalRequestError(error);

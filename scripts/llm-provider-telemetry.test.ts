@@ -49,6 +49,7 @@ async function flushTelemetryQueue(): Promise<void> {
 
 test('external requests keep turn-wide indexes and parent call metadata', async () => {
   const harness = createHarness('voice');
+  const callbackIndexes: number[] = [];
   const incomplete = new OpenAiResponsesError('sensitive provider message', {
     kind: 'incomplete',
     incompleteReason: 'max_output_tokens',
@@ -58,6 +59,13 @@ test('external requests keep turn-wide indexes and parent call metadata', async 
       cacheWriteTokens: 0,
       outputTokens: 2_048,
       reasoningTokens: 2_000,
+    },
+    diagnostics: {
+      providerMaxOutputTokens: 2_048,
+      actualModel: 'gpt-5-nano-2026-08-07',
+      outputTextChars: 72,
+      outputTextDeltaCount: 6,
+      outputTextDone: 0,
     },
   });
 
@@ -71,7 +79,8 @@ test('external requests keep turn-wide indexes and parent call metadata', async 
             maxOutputTokens: 2_048,
             metadata: { requestedTier: 'standard', cacheMode: 'implicit' },
           },
-          async (markFirstChunk) => {
+          async (markFirstChunk, _setMetadata, externalRequestIndex) => {
+            callbackIndexes.push(externalRequestIndex);
             harness.setClock(4);
             markFirstChunk();
             harness.setClock(10);
@@ -93,7 +102,8 @@ test('external requests keep turn-wide indexes and parent call metadata', async 
             maxOutputTokens: 4_096,
             metadata: { requestedTier: 'standard', cacheMode: 'implicit' },
           },
-          async () => {
+          async (_markFirstChunk, _setMetadata, externalRequestIndex) => {
+            callbackIndexes.push(externalRequestIndex);
             harness.setClock(30);
             throw incomplete;
           },
@@ -106,7 +116,8 @@ test('external requests keep turn-wide indexes and parent call metadata', async 
           model: 'gpt-5-nano',
           metadata: { cacheMode: 'disabled', cacheStatus: 'disabled' },
         },
-        async (markFirstChunk) => {
+        async (markFirstChunk, _setMetadata, externalRequestIndex) => {
+          callbackIndexes.push(externalRequestIndex);
           harness.setClock(35);
           markFirstChunk();
           harness.setClock(40);
@@ -116,6 +127,7 @@ test('external requests keep turn-wide indexes and parent call metadata', async 
     },
   );
   await flushTelemetryQueue();
+  assert.deepEqual(callbackIndexes, [1, 2, 3]);
 
   const done = harness.externalEvents.filter(
     (event) => event.event === 'llm_external_request_done',
@@ -162,12 +174,22 @@ test('external requests keep turn-wide indexes and parent call metadata', async 
       inputTokens: done[0]?.inputTokens,
       outputTokens: done[0]?.outputTokens,
       reasoningTokens: done[0]?.reasoningTokens,
+      providerMaxOutputTokens: done[0]?.providerMaxOutputTokens,
+      actualModel: done[0]?.actualModel,
+      outputTextChars: done[0]?.outputTextChars,
+      outputTextDeltaCount: done[0]?.outputTextDeltaCount,
+      outputTextDone: done[0]?.outputTextDone,
     },
     {
       incompleteReason: 'max_output_tokens',
       inputTokens: 100,
       outputTokens: 2_048,
       reasoningTokens: 2_000,
+      providerMaxOutputTokens: 2_048,
+      actualModel: 'gpt-5-nano-2026-08-07',
+      outputTextChars: 72,
+      outputTextDeltaCount: 6,
+      outputTextDone: 0,
     },
   );
   assert.deepEqual(
@@ -325,6 +347,7 @@ test('external events stay server-only and use the safe field allowlist', async 
           markExternalChunk();
           markProviderChunk();
           setExternalMetadata({
+            actualModel: 'gpt-5-nano-2026-08-07',
             actualTier: 'default',
             cacheStatus: 'hit',
             inputTokens: 120,
@@ -332,6 +355,10 @@ test('external events stay server-only and use the safe field allowlist', async 
             cacheWriteTokens: 0,
             outputTokens: 20,
             reasoningTokens: 10,
+            providerMaxOutputTokens: 2_048,
+            outputTextChars: 42,
+            outputTextDeltaCount: 4,
+            outputTextDone: 1,
           });
         },
       ),
@@ -343,6 +370,7 @@ test('external events stay server-only and use the safe field allowlist', async 
     ['llm_provider_start', 'llm_provider_first_chunk', 'llm_provider_done'],
   );
   const approvedExternalFields = [
+    'actualModel',
     'actualTier',
     'apiEndpoint',
     'cacheMode',
@@ -356,8 +384,12 @@ test('external events stay server-only and use the safe field allowlist', async 
     'inputTokens',
     'maxOutputTokens',
     'model',
+    'outputTextChars',
+    'outputTextDeltaCount',
+    'outputTextDone',
     'outputTokens',
     'provider',
+    'providerMaxOutputTokens',
     'purpose',
     'reasoningTokens',
     'requestedTier',
@@ -372,7 +404,7 @@ test('external events stay server-only and use the safe field allowlist', async 
   );
   assert.doesNotMatch(
     JSON.stringify(externalEvents),
-    /apiKey|body|history|message|prompt|statusText|text/i,
+    /apiKey|body|history|message|prompt|statusText|generated content/i,
   );
 });
 

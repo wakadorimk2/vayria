@@ -14,6 +14,7 @@ import {
   buildUtterancePlanInstruction,
   buildUsedReasonIdsProperty,
   buildVoiceInteractionPolicySystemPrompt,
+  classifyTerminalStreamingEnvelope,
   createInteractionReactionResponse,
   formatSemanticBiasesForPrompt,
   isActionCommitmentMessage,
@@ -373,6 +374,30 @@ test('card preview request validates runtime context bounds', () => {
       /performanceContext format is invalid/,
     );
   }
+});
+
+test('terminal streaming envelope classification does not expose content', () => {
+  const parseable = JSON.stringify({
+    deliveryHeader: {
+      externalAction: 'speak',
+      usedReasonIds: [],
+      emotion: 'neutral',
+      speechAct: 'reaction',
+      expressionLevel: 'low',
+    },
+    speechLead: '短い反応',
+    speechUnits: [],
+    activatedCards: ['rain'],
+    internalDelta: { reasonUpdates: [] },
+  });
+  assert.equal(
+    classifyTerminalStreamingEnvelope(parseable),
+    'terminal_envelope_parseable',
+  );
+  assert.equal(
+    classifyTerminalStreamingEnvelope(parseable.slice(0, -1)),
+    'terminal_envelope_unparseable',
+  );
 });
 
 test('card preview request normalizes weighted semantic cue order and duplicates', () => {
