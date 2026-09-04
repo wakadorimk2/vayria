@@ -7,6 +7,10 @@ import {
   type OpenAiResponseResult,
   type OpenAiServiceTier,
 } from './openAiResponses.js';
+import type {
+  LlmExternalRequestMetadata,
+  TrackLlmExternalRequest,
+} from './llmProviderTelemetry.js';
 
 const require = createRequire(import.meta.url);
 const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
@@ -49,6 +53,7 @@ export interface StructuredLlmRequest {
   onFallback?: (reason: string) => void;
   onTextDelta?: (delta: string) => void;
   onComplete?: (text: string) => void | Promise<void>;
+  trackExternalRequest?: TrackLlmExternalRequest;
 }
 
 export interface StructuredLlmResult {
@@ -169,6 +174,42 @@ export function modelForProfile(profile: LlmProfile): string {
     : 'gpt-5.6-luna';
 }
 
+function runExternalRequest<T>(
+  request: StructuredLlmRequest,
+  options: Parameters<TrackLlmExternalRequest>[0],
+  execute: (
+    markFirstChunk: () => void,
+    setMetadata: (metadata: LlmExternalRequestMetadata) => void,
+  ) => Promise<T>,
+): Promise<T> {
+  return request.trackExternalRequest
+    ? request.trackExternalRequest(options, execute)
+    : execute(() => undefined, () => undefined);
+}
+
+function responseExternalMetadata(
+  request: StructuredLlmRequest,
+  response: OpenAiResponseResult,
+  cacheMode: StructuredLlmResult['telemetry']['cacheMode'],
+): LlmExternalRequestMetadata {
+  const cachedTokens = response.usage.cachedTokens;
+  const cacheWriteTokens = response.usage.cacheWriteTokens;
+  return {
+    requestedTier: request.runtime.serviceTier,
+    ...(response.serviceTier ? { actualTier: response.serviceTier } : {}),
+    cacheMode,
+    cacheStatus:
+      cacheMode === 'disabled'
+        ? 'disabled'
+        : cachedTokens > 0
+          ? 'hit'
+          : cacheWriteTokens > 0
+            ? 'write'
+            : 'miss',
+    ...response.usage,
+  };
+}
+
 function runLegacyNano(request: StructuredLlmRequest): Promise<string> {
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey: request.apiKey,
@@ -191,19 +232,33 @@ function runLegacyNano(request: StructuredLlmRequest): Promise<string> {
   ];
   let streamed = '';
   let completed = '';
-  return chat
-    .processChat(
-      messages,
-      (partial) => {
-        streamed += partial;
-        if (partial) request.onTextDelta?.(partial);
-      },
-      async (complete) => {
-        completed = complete;
-        await request.onComplete?.(complete);
-      },
-    )
-    .then(() => (completed || streamed).trim());
+  return runExternalRequest(
+    request,
+    {
+      apiEndpoint: 'chat-completions',
+      model: String(MODEL_GPT_5_NANO),
+      metadata: { cacheMode: 'disabled', cacheStatus: 'disabled' },
+    },
+    async (markFirstChunk) => {
+      await chat.processChat(
+        messages,
+        (partial) => {
+          streamed += partial;
+          if (partial) {
+            markFirstChunk();
+            request.onTextDelta?.(partial);
+          }
+        },
+        async (complete) => {
+          completed = complete;
+        },
+      );
+      return (completed || streamed).trim();
+    },
+  ).then(async (text) => {
+    await request.onComplete?.(text);
+    return text;
+  });
 }
 
 function fallbackReason(error: OpenAiResponsesError): string {
@@ -265,38 +320,65 @@ export async function processStructuredLlm(
     request.runtime.profile === 'luna-prefix' ||
     request.runtime.profile === 'luna-explicit';
   try {
-    const responses = await streamOpenAiResponse({
-      apiKey: request.apiKey,
-      model: requestedModel,
-      staticPrompt: usesStablePrefix
-        ? request.staticPrompt
-        : request.legacyPrompt,
-      dynamicPrompt: usesStablePrefix ? request.dynamicPrompt : undefined,
-      history: request.history,
-      userMessage: request.userMessage,
-      output: request.output,
-      maxOutputTokens: request.maxOutputTokens,
-      serviceTier: request.runtime.serviceTier,
-      reasoningEffort:
-        request.runtime.profile === 'nano-implicit' ? 'minimal' : 'none',
-      ...(request.runtime.profile === 'luna-explicit'
-        ? {
-            cache: {
-              key: request.cacheKey,
-              mode: 'explicit' as const,
-            },
-          }
+    const cacheMode =
+      request.runtime.profile === 'luna-explicit'
+        ? 'explicit'
         : request.runtime.profile === 'nano-implicit'
-          ? {
-              cache: {
-                key: request.cacheKey,
-                mode: 'implicit' as const,
-              },
-            }
-        : {}),
-      signal: request.signal,
-      onTextDelta: request.onTextDelta,
-    });
+          ? 'implicit'
+          : 'disabled';
+    const responses = await runExternalRequest(
+      request,
+      {
+        apiEndpoint: 'responses',
+        model: requestedModel,
+        maxOutputTokens: request.maxOutputTokens,
+        metadata: {
+          requestedTier: request.runtime.serviceTier,
+          cacheMode,
+        },
+      },
+      async (markFirstChunk, setExternalMetadata) => {
+        const response = await streamOpenAiResponse({
+          apiKey: request.apiKey,
+          model: requestedModel,
+          staticPrompt: usesStablePrefix
+            ? request.staticPrompt
+            : request.legacyPrompt,
+          dynamicPrompt: usesStablePrefix ? request.dynamicPrompt : undefined,
+          history: request.history,
+          userMessage: request.userMessage,
+          output: request.output,
+          maxOutputTokens: request.maxOutputTokens,
+          serviceTier: request.runtime.serviceTier,
+          reasoningEffort:
+            request.runtime.profile === 'nano-implicit' ? 'minimal' : 'none',
+          ...(request.runtime.profile === 'luna-explicit'
+            ? {
+                cache: {
+                  key: request.cacheKey,
+                  mode: 'explicit' as const,
+                },
+              }
+            : request.runtime.profile === 'nano-implicit'
+              ? {
+                  cache: {
+                    key: request.cacheKey,
+                    mode: 'implicit' as const,
+                  },
+                }
+              : {}),
+          signal: request.signal,
+          onTextDelta: (delta) => {
+            if (delta) markFirstChunk();
+            request.onTextDelta?.(delta);
+          },
+        });
+        setExternalMetadata(
+          responseExternalMetadata(request, response, cacheMode),
+        );
+        return response;
+      },
+    );
     await request.onComplete?.(responses.text);
     return {
       text: responses.text.trim(),
@@ -308,11 +390,7 @@ export async function processStructuredLlm(
         request,
         responses,
         'responses',
-        request.runtime.profile === 'luna-explicit'
-          ? 'explicit'
-          : request.runtime.profile === 'nano-implicit'
-            ? 'implicit'
-            : 'disabled',
+        cacheMode,
       ),
     };
   } catch (error) {

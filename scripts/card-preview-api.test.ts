@@ -80,8 +80,12 @@ const AUTONOMY_CANDIDATE = {
 
 test('chat reserves output space for nano reasoning and structured output', () => {
   assert.equal(maxOutputTokensForChatMode('voice'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('voice', 'output_limit'), 4_096);
+  assert.equal(maxOutputTokensForChatMode('voice', 'contract'), 2_048);
   assert.equal(maxOutputTokensForChatMode('manual'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('manual', 'output_limit'), 2_048);
   assert.equal(maxOutputTokensForChatMode('autonomous'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('autonomous', 'output_limit'), 2_048);
 });
 
 test('only output-limit incomplete responses retry before speech commit', () => {

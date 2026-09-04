@@ -136,6 +136,7 @@ import type {
 } from '../src/networkState.js';
 import {
   createLlmProviderCallTracker,
+  type LlmExternalRequestEvent,
   type LlmProviderCallTracker,
   type LlmProviderEvent,
   type LlmProviderPurpose,
@@ -332,13 +333,18 @@ interface AivisStyle {
 }
 
 type ChatMode = 'manual' | 'voice' | 'autonomous';
+export type ChatRetryCause = 'output_limit' | 'contract' | null;
 const CHAT_MAX_OUTPUT_TOKENS: Record<ChatMode, number> = {
   manual: 2_048,
   voice: 2_048,
   autonomous: 2_048,
 };
 
-export function maxOutputTokensForChatMode(mode: ChatMode): number {
+export function maxOutputTokensForChatMode(
+  mode: ChatMode,
+  retryCause: ChatRetryCause = null,
+): number {
+  if (mode === 'voice' && retryCause === 'output_limit') return 4_096;
   return CHAT_MAX_OUTPUT_TOKENS[mode];
 }
 
@@ -690,9 +696,14 @@ const PLAYCHECK_RECORD_FIELDS = [
   'purpose',
   'callIndex',
   'retry',
+  'externalRequestIndex',
   'providerCallCount',
   'profile',
   'apiEndpoint',
+  'maxOutputTokens',
+  'terminationKind',
+  'httpStatus',
+  'incompleteReason',
   'cacheMode',
   'cacheKeyVersion',
   'cacheStatus',
@@ -863,6 +874,13 @@ function createRequestLlmProviderTracker(
     source: fields.source,
     signal: fields.signal,
     observe: fields.observe,
+    recordExternal: ({ event, ...externalFields }: LlmExternalRequestEvent) =>
+      recordStructuredEvent(config, event, {
+        origin: 'server',
+        requestId: fields.requestId,
+        runId: fields.runId,
+        ...externalFields,
+      }),
     record: ({ event, ...providerFields }) =>
       recordStructuredEvent(config, event, {
         origin: 'server',
@@ -3077,7 +3095,7 @@ async function generateConversationActionPolicy(
     let completedReply = '';
     await telemetry.run(
       { purpose: 'conversation-policy', retry },
-      async (markFirstChunk, setMetadata) => {
+      async (markFirstChunk, setMetadata, trackExternalRequest) => {
         const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
         const result = await processStructuredLlm({
           apiKey: llm.apiKey,
@@ -3096,6 +3114,7 @@ async function generateConversationActionPolicy(
           maxOutputTokens: 128,
           cacheKey: 'vayria:policy:interactive:v2',
           signal: llm.signal,
+          trackExternalRequest,
           onFallback: llm.onFallback,
           onTextDelta: (partial) => {
             markFirstChunk();
@@ -3848,6 +3867,7 @@ async function generateReply(
   const requestReply = async (
     correction?: string,
     fallbackOnOutputLimit = false,
+    retryCause: ChatRetryCause = null,
   ): Promise<string> => {
     const retry = providerCallCount;
     providerCallCount += 1;
@@ -3861,7 +3881,7 @@ async function generateReply(
     let leadMilestoneRecorded = false;
     await telemetry.run(
       { purpose: 'response-generation', retry },
-      async (markFirstChunk, setMetadata) => {
+      async (markFirstChunk, setMetadata, trackExternalRequest) => {
         const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
         const result = await processStructuredLlm({
           apiKey: llm.apiKey,
@@ -3880,7 +3900,7 @@ async function generateReply(
             name: 'wildcard_assistant_response',
             schema: responseSchema,
           },
-          maxOutputTokens: maxOutputTokensForChatMode(mode),
+          maxOutputTokens: maxOutputTokensForChatMode(mode, retryCause),
           cacheKey:
             mode === 'voice'
               ? 'vayria:reply:voice:lead1:v2'
@@ -3888,6 +3908,7 @@ async function generateReply(
                 ? 'vayria:reply:manual:lead1:v2'
                 : 'vayria:reply:autonomous:lead0:v2',
           signal: llm.signal,
+          trackExternalRequest,
           canFallback: () => committedUnits.length === 0,
           fallbackOnOutputLimit,
           onFallback: (reason) => {
@@ -4068,6 +4089,7 @@ async function generateReply(
     }
   };
 
+  let retryCause: Exclude<ChatRetryCause, null>;
   try {
     const response = parseAttempt(await requestReply());
     return { response, providerCallCount };
@@ -4084,11 +4106,13 @@ async function generateReply(
       };
     }
     if (isRetryableIncompleteResponseError(error)) {
+      retryCause = 'output_limit';
       console.warn(
         'Chat response reached its output limit before speech commit. Retrying once.',
       );
     } else {
       if (!(error instanceof CardContractError)) throw error;
+      retryCause = 'contract';
       console.warn('Chat card contract failed. Retrying once.', error.message);
     }
   }
@@ -4101,6 +4125,7 @@ async function generateReply(
           : 'Your previous attempt violated the voice action, utterance-plan, or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text, empty activatedCards, null speechAct, and null expressionLevel for listen, react_nonverbally, or backchannel. For take_floor, return a valid speechAct and an expressionLevel within the budget. The text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Put the forced current card first when one exists.'
         : 'Your previous attempt violated the utterance-plan or card contract, or did not complete. Emit deliveryHeader and the short speech fields immediately. Keep internalDelta.reasonUpdates empty unless a state update is necessary. Follow the current brain-card subset, expression budget, forced-card-first requirements, and offered reason IDs exactly.',
       true,
+      retryCause,
     ),
   );
   return { response, providerCallCount };
@@ -4178,7 +4203,7 @@ async function generateCardPreviewReply(
   let completedReply = '';
   await telemetry.run(
     { purpose: 'card-preview', retry: 0 },
-    async (markFirstChunk, setMetadata) => {
+    async (markFirstChunk, setMetadata, trackExternalRequest) => {
       const result = await processStructuredLlm({
         apiKey: llm.apiKey,
         runtime: llm.runtime,
@@ -4194,6 +4219,7 @@ async function generateCardPreviewReply(
         maxOutputTokens: 256,
         cacheKey: 'vayria:card-preview:v2',
         signal: llm.signal,
+        trackExternalRequest,
         onFallback: llm.onFallback,
         onTextDelta: (partial) => {
           if (partial) markFirstChunk();
