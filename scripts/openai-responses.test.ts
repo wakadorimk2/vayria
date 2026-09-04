@@ -135,7 +135,7 @@ test('Responses SSE parser preserves Unicode across every byte boundary', async 
 
 test('incomplete output is not classified as availability fallback', async () => {
   const wire =
-    'data: {"type":"response.incomplete","response":{"status":"incomplete"}}\n\n';
+    'data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"output_tokens":512,"output_tokens_details":{"reasoning_tokens":500}}}}\n\n';
   await assert.rejects(
     streamOpenAiResponse({
       ...baseRequest,
@@ -145,7 +145,27 @@ test('incomplete output is not classified as availability fallback', async () =>
     (error: unknown) => {
       assert.ok(error instanceof OpenAiResponsesError);
       assert.equal(error.kind, 'incomplete');
+      assert.equal(error.incompleteReason, 'max_output_tokens');
+      assert.equal(error.usage?.outputTokens, 512);
+      assert.equal(error.usage?.reasoningTokens, 500);
       assert.equal(error.retryableAvailabilityFailure, false);
+      return true;
+    },
+  );
+});
+
+test('unknown incomplete reasons are reduced to a safe classification', async () => {
+  const wire =
+    'data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"provider-private-detail"}}}\n\n';
+  await assert.rejects(
+    streamOpenAiResponse({
+      ...baseRequest,
+      fetchImpl: async () =>
+        streamResponse([new TextEncoder().encode(wire)]),
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof OpenAiResponsesError);
+      assert.equal(error.incompleteReason, 'unknown');
       return true;
     },
   );

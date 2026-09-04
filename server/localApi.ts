@@ -332,6 +332,24 @@ interface AivisStyle {
 }
 
 type ChatMode = 'manual' | 'voice' | 'autonomous';
+const CHAT_MAX_OUTPUT_TOKENS: Record<ChatMode, number> = {
+  manual: 2_048,
+  voice: 2_048,
+  autonomous: 2_048,
+};
+
+export function maxOutputTokensForChatMode(mode: ChatMode): number {
+  return CHAT_MAX_OUTPUT_TOKENS[mode];
+}
+
+export function isRetryableIncompleteResponseError(error: unknown): boolean {
+  return (
+    error instanceof OpenAiResponsesError &&
+    error.kind === 'incomplete' &&
+    (error.incompleteReason === 'max_output_tokens' ||
+      error.incompleteReason === 'max_tokens')
+  );
+}
 type ConversationEventSource = ChatMode;
 type ConversationEventName = (typeof CONVERSATION_EVENTS)[number];
 
@@ -3855,7 +3873,7 @@ async function generateReply(
             name: 'wildcard_assistant_response',
             schema: responseSchema,
           },
-          maxOutputTokens: 512,
+          maxOutputTokens: maxOutputTokensForChatMode(mode),
           cacheKey:
             mode === 'voice'
               ? 'vayria:reply:voice:lead1:v2'
@@ -4057,8 +4075,14 @@ async function generateReply(
         providerCallCount,
       };
     }
-    if (!(error instanceof CardContractError)) throw error;
-    console.warn('Chat card contract failed. Retrying once.', error.message);
+    if (isRetryableIncompleteResponseError(error)) {
+      console.warn(
+        'Chat response reached its output limit before speech commit. Retrying once.',
+      );
+    } else {
+      if (!(error instanceof CardContractError)) throw error;
+      console.warn('Chat card contract failed. Retrying once.', error.message);
+    }
   }
 
   const response = parseAttempt(
@@ -5472,6 +5496,9 @@ async function handleRequest(
         console.error('Local chat Responses request failed.', {
           kind: error.kind,
           status: error.status,
+          incompleteReason: error.incompleteReason,
+          outputTokens: error.usage?.outputTokens ?? null,
+          reasoningTokens: error.usage?.reasoningTokens ?? null,
         });
       }
       writeNdjson(response, {

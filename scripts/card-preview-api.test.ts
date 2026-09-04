@@ -18,6 +18,8 @@ import {
   isContentBearingVoiceMessage,
   isDirectActionRequestMessage,
   isMetaOnlyActionResponse,
+  isRetryableIncompleteResponseError,
+  maxOutputTokensForChatMode,
   normalizeVoiceInteractionDecision,
   parseAutonomousAssistantResponse,
   parseCardPreviewResponse,
@@ -30,6 +32,7 @@ import {
   resolveProvisionalActivatedCards,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
+import { OpenAiResponsesError } from '../server/openAiResponses.js';
 import {
   DEFAULT_PROGRAM_CONTEXT,
   isProgramContext,
@@ -73,6 +76,39 @@ const AUTONOMY_CANDIDATE = {
     },
   ],
 } as const;
+
+test('chat reserves output space for nano reasoning and structured output', () => {
+  assert.equal(maxOutputTokensForChatMode('voice'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('manual'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('autonomous'), 2_048);
+});
+
+test('only output-limit incomplete responses retry before speech commit', () => {
+  assert.equal(
+    isRetryableIncompleteResponseError(
+      new OpenAiResponsesError('incomplete', {
+        kind: 'incomplete',
+        incompleteReason: 'max_output_tokens',
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    isRetryableIncompleteResponseError(
+      new OpenAiResponsesError('filtered', {
+        kind: 'incomplete',
+        incompleteReason: 'content_filter',
+      }),
+    ),
+    false,
+  );
+  assert.equal(
+    isRetryableIncompleteResponseError(
+      new OpenAiResponsesError('provider', { kind: 'provider' }),
+    ),
+    false,
+  );
+});
 
 test('provisional card metadata keeps speaking turns valid', () => {
   const cards = ['rain', 'sleepy'];

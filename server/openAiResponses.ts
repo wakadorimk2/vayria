@@ -47,9 +47,17 @@ type ProviderFailureKind =
   | 'incomplete'
   | 'provider';
 
+export type OpenAiIncompleteReason =
+  | 'content_filter'
+  | 'max_output_tokens'
+  | 'max_tokens'
+  | 'unknown';
+
 export class OpenAiResponsesError extends Error {
   readonly kind: ProviderFailureKind;
   readonly status: number | null;
+  readonly incompleteReason: OpenAiIncompleteReason | null;
+  readonly usage: OpenAiResponseUsage | null;
   readonly retryableAvailabilityFailure: boolean;
 
   constructor(
@@ -57,6 +65,8 @@ export class OpenAiResponsesError extends Error {
     options: {
       kind: ProviderFailureKind;
       status?: number;
+      incompleteReason?: OpenAiIncompleteReason;
+      usage?: OpenAiResponseUsage;
       cause?: unknown;
     },
   ) {
@@ -64,6 +74,8 @@ export class OpenAiResponsesError extends Error {
     this.name = 'OpenAiResponsesError';
     this.kind = options.kind;
     this.status = options.status ?? null;
+    this.incompleteReason = options.incompleteReason ?? null;
+    this.usage = options.usage ?? null;
     this.retryableAvailabilityFailure =
       options.kind === 'connection' ||
       (options.kind === 'http' &&
@@ -71,6 +83,18 @@ export class OpenAiResponsesError extends Error {
           options.status === 429 ||
           (options.status !== undefined && options.status >= 500)));
   }
+}
+
+function readIncompleteReason(
+  response: Record<string, unknown> | null,
+): OpenAiIncompleteReason {
+  const details = readRecord(response?.incomplete_details);
+  const reason = details?.reason;
+  return reason === 'content_filter' ||
+    reason === 'max_output_tokens' ||
+    reason === 'max_tokens'
+    ? reason
+    : 'unknown';
 }
 
 function numberOrZero(value: unknown): number {
@@ -289,8 +313,11 @@ export async function streamOpenAiResponse(
       return;
     }
     if (eventType === 'response.incomplete') {
+      const incompleteResponse = readRecord(parsed.response);
       throw new OpenAiResponsesError('The Responses request was incomplete.', {
         kind: 'incomplete',
+        incompleteReason: readIncompleteReason(incompleteResponse),
+        usage: readUsage(incompleteResponse ?? {}),
       });
     }
     if (eventType === 'response.failed' || eventType === 'error') {
