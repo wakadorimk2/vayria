@@ -150,13 +150,14 @@ function summarizeLlmCacheProfiles(events) {
   );
   const groups = new Map();
   for (const event of events) {
-    if (event.event !== 'llm_provider_done') continue;
+    if (event.event !== 'llm_provider_done' || event.origin !== 'server') continue;
     if (!Number.isFinite(event.elapsedMs) || event.elapsedMs < 0) continue;
     const group = {
       source: event.source ?? 'unknown',
       purpose: event.purpose ?? 'unknown',
       profile: event.profile ?? 'unknown',
-      cacheStatus: event.cacheStatus ?? 'unknown',
+      apiEndpoint: event.apiEndpoint ?? 'unknown',
+      cacheMode: event.cacheMode ?? 'unknown',
       tier: event.actualTier ?? event.requestedTier ?? 'unknown',
       retry: Number.isInteger(event.retry) ? event.retry : 0,
       fallback: typeof event.fallbackReason === 'string',
@@ -165,8 +166,38 @@ function summarizeLlmCacheProfiles(events) {
         typeof event.turnId === 'string' && abortedTurns.has(event.turnId),
     };
     const key = JSON.stringify(group);
-    const values = groups.get(key) ?? { ...group, values: [] };
+    const values = groups.get(key) ?? {
+      ...group,
+      values: [],
+      eligibleRequests: 0,
+      hitRequests: 0,
+      writeRequests: 0,
+      missRequests: 0,
+      totalInputTokens: 0,
+      totalCachedTokens: 0,
+      totalCacheWriteTokens: 0,
+    };
     values.values.push(event.elapsedMs);
+    const cacheEligible =
+      event.cacheMode !== 'disabled' &&
+      event.cacheMode !== undefined &&
+      typeof event.fallbackReason !== 'string';
+    if (cacheEligible) values.eligibleRequests += 1;
+    if (cacheEligible && event.cacheStatus === 'hit') values.hitRequests += 1;
+    if (cacheEligible && event.cacheStatus === 'write') values.writeRequests += 1;
+    if (cacheEligible && event.cacheStatus === 'miss') values.missRequests += 1;
+    if (Number.isFinite(event.inputTokens) && event.inputTokens >= 0) {
+      values.totalInputTokens += event.inputTokens;
+    }
+    if (Number.isFinite(event.cachedTokens) && event.cachedTokens >= 0) {
+      values.totalCachedTokens += event.cachedTokens;
+    }
+    if (
+      Number.isFinite(event.cacheWriteTokens) &&
+      event.cacheWriteTokens >= 0
+    ) {
+      values.totalCacheWriteTokens += event.cacheWriteTokens;
+    }
     groups.set(key, values);
   }
   return [...groups.values()]
@@ -175,6 +206,14 @@ function summarizeLlmCacheProfiles(events) {
       count: values.length,
       p50Ms: nearestRank(values, 0.5),
       p95Ms: nearestRank(values, 0.95),
+      requestHitRate:
+        group.eligibleRequests > 0
+          ? group.hitRequests / group.eligibleRequests
+          : null,
+      tokenHitRate:
+        group.totalInputTokens > 0
+          ? group.totalCachedTokens / group.totalInputTokens
+          : null,
     }))
     .sort((left, right) =>
       JSON.stringify(left).localeCompare(JSON.stringify(right)),

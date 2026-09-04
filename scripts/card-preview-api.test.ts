@@ -3,10 +3,14 @@ import test from 'node:test';
 import {
   buildAutonomousDirectorInstruction,
   buildCharacterIdentitySystemPrompt,
+  buildCharacterIdentityDynamicPrompt,
+  buildCharacterIdentityStaticPrompt,
   buildCardPreviewSystemPrompt,
   buildCardPreviewStaticPrompt,
   buildConversationActionPolicyStaticPrompt,
   buildProgramContextSystemPrompt,
+  buildProgramContextDynamicPrompt,
+  buildProgramContextStaticPrompt,
   buildUtterancePlanInstruction,
   buildVoiceInteractionPolicySystemPrompt,
   createInteractionReactionResponse,
@@ -284,8 +288,32 @@ test('card preview prompt uses behavior state without motion asset details', () 
 test('cache prefixes exclude turn-specific identity, cards, and runtime values', () => {
   const policyPrefix = buildConversationActionPolicyStaticPrompt();
   const previewPrefix = buildCardPreviewStaticPrompt();
+  const identityPrefix = buildCharacterIdentityStaticPrompt();
+  const programPrefix = buildProgramContextStaticPrompt();
   assert.doesNotMatch(policyPrefix, /character-identity|forced card is|0\.25/u);
   assert.doesNotMatch(previewPrefix, /Selected card|Callback tendency|0\.25/u);
+  assert.doesNotMatch(identityPrefix, /ベイリア、聞こえる|"role":"direct_address"/u);
+  assert.doesNotMatch(programPrefix, /before_card_change|after_card_change/u);
+  assert.match(identityPrefix, /The character is Vayria/u);
+  assert.match(programPrefix, /behavior context, not spoken content/u);
+});
+
+test('dynamic prompt sections retain turn-specific identity and program values', () => {
+  const identity = buildCharacterIdentityDynamicPrompt(
+    'ベイリア、聞こえる？',
+    {
+      version: 1,
+      canonicalName: 'Vayria',
+      displayName: 'ヴェイリア',
+      aliases: [],
+    },
+  );
+  const program = buildProgramContextDynamicPrompt({
+    ...DEFAULT_PROGRAM_CONTEXT,
+    phase: 'after_card_change',
+  });
+  assert.match(identity, /"role":"direct_address"/u);
+  assert.match(program, /A card change has occurred/u);
 });
 
 test('voice prompt includes identity and program context once', () => {

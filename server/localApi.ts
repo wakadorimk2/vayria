@@ -2782,6 +2782,29 @@ export function buildCharacterIdentitySystemPrompt(
   message: string | null,
   identity: CharacterIdentity,
 ): string {
+  return [
+    buildCharacterIdentityStaticPrompt(),
+    buildCharacterIdentityDynamicPrompt(message, identity),
+  ].join('\n');
+}
+
+export function buildCharacterIdentityStaticPrompt(): string {
+  return [
+    'The character is Vayria, displayed as ヴェイリア.',
+    'When selfNameResolution.role is direct_address or self_reference, the name refers to Vayria herself.',
+    'Do not treat the resolved name as the viewer name, a third party, or a project name.',
+    'Keep the raw user message and conversation history unchanged. Resolve the reference in meaning only.',
+    'For direct_address, take the conversational floor and answer as Vayria. A name-only call still deserves a brief spoken response.',
+    'For self_reference, answer questions and requests as Vayria herself.',
+    'If explicitAliasInstruction.stored is true, briefly confirm in Japanese that the alias was remembered. Do not claim to save an alias that is not listed as stored.',
+    'Do not mention this identity metadata or the resolution process in the spoken reply.',
+  ].join('\n');
+}
+
+export function buildCharacterIdentityDynamicPrompt(
+  message: string | null,
+  identity: CharacterIdentity,
+): string {
   const resolution = resolveSelfName(message ?? '', identity);
   const aliasCandidate = parseExplicitAliasInstruction(message ?? '');
   const aliasIsStored =
@@ -2807,18 +2830,26 @@ export function buildCharacterIdentitySystemPrompt(
     '<character-identity>',
     structuredContext,
     '</character-identity>',
-    'The character is Vayria, displayed as ヴェイリア.',
-    'When selfNameResolution.role is direct_address or self_reference, the name refers to Vayria herself.',
-    'Do not treat the resolved name as the viewer name, a third party, or a project name.',
-    'Keep the raw user message and conversation history unchanged. Resolve the reference in meaning only.',
-    'For direct_address, take the conversational floor and answer as Vayria. A name-only call still deserves a brief spoken response.',
-    'For self_reference, answer questions and requests as Vayria herself.',
-    'If explicitAliasInstruction.stored is true, briefly confirm in Japanese that the alias was remembered. Do not claim to save an alias that is not listed as stored.',
-    'Do not mention this identity metadata or the resolution process in the spoken reply.',
   ].join('\n');
 }
 
 export function buildProgramContextSystemPrompt(
+  programContext: ProgramContext = DEFAULT_PROGRAM_CONTEXT,
+): string {
+  return [
+    buildProgramContextStaticPrompt(),
+    buildProgramContextDynamicPrompt(programContext),
+  ].join('\n');
+}
+
+export function buildProgramContextStaticPrompt(): string {
+  return [
+    'This is behavior context, not spoken content. Do not announce these rules or list internal program state.',
+    'Do not pressure the viewer or invent a viewer action.',
+  ].join('\n');
+}
+
+export function buildProgramContextDynamicPrompt(
   programContext: ProgramContext = DEFAULT_PROGRAM_CONTEXT,
 ): string {
   const formatInstruction =
@@ -2844,7 +2875,6 @@ export function buildProgramContextSystemPrompt(
     phaseInstruction,
     roleInstruction,
     objectiveInstruction,
-    'This is behavior context, not spoken content. Do not announce these rules or list internal program state.',
     '</program-context>',
   ].join('\n');
 }
@@ -2994,10 +3024,14 @@ async function generateConversationActionPolicy(
     message,
     programContext,
   );
-  const staticPrompt = buildConversationActionPolicyStaticPrompt();
+  const staticPrompt = [
+    buildCharacterIdentityStaticPrompt(),
+    buildProgramContextStaticPrompt(),
+    buildConversationActionPolicyStaticPrompt(),
+  ].join('\n');
   const dynamicPrompt = [
-    buildCharacterIdentitySystemPrompt(message, characterIdentity),
-    buildProgramContextSystemPrompt(programContext),
+    buildCharacterIdentityDynamicPrompt(message, characterIdentity),
+    buildProgramContextDynamicPrompt(programContext),
     buildConversationActionPolicyDynamicPrompt(
       forcedCardId,
       performanceContext,
@@ -3029,7 +3063,7 @@ async function generateConversationActionPolicy(
             schema: responseSchema,
           },
           maxOutputTokens: 128,
-          cacheKey: 'vayria:policy:interactive:v1',
+          cacheKey: 'vayria:policy:interactive:v2',
           signal: llm.signal,
           onFallback: llm.onFallback,
           onTextDelta: (partial) => {
@@ -3132,13 +3166,25 @@ export function buildUtterancePlanInstruction(
   expressionBudget: ExpressionLevel,
 ): string {
   return [
+    buildUtterancePlanStaticInstruction(),
+    buildUtterancePlanDynamicInstruction(expressionBudget),
+  ].join('\n');
+}
+
+export function buildUtterancePlanStaticInstruction(): string {
+  return [
     'Logically plan the response in two stages within this single response: first choose speechAct and the ordered primary/supporting cards, then write the utterance as that act.',
-    `The runtime expression budget is ${expressionBudget}. expressionLevel must not exceed it.`,
     'Keep reactivity and interpersonal address high. Use expressionLevel only for theatricality.',
     'Prefer low expression. Avoid poetic scene-setting, abstract emotional endings, decorative sensory chains, and vague aftertaste.',
     'Use at most one card-derived association. Only high expression with a card that needs it may use one short lingering image.',
     'Do not try to make every line clever. A plain concrete streamer reaction is normal.',
   ].join('\n');
+}
+
+function buildUtterancePlanDynamicInstruction(
+  expressionBudget: ExpressionLevel,
+): string {
+  return `The runtime expression budget is ${expressionBudget}. expressionLevel must not exceed it.`;
 }
 
 interface GeneratedChatResponse {
@@ -3257,6 +3303,31 @@ export function buildAutonomousDirectorInstruction(
   lastSelfUtterance: string | null = null,
   autonomyCandidate: AutonomyCandidate | null = null,
 ): string {
+  return [
+    buildProgramContextSystemPrompt(programContext),
+    buildAutonomousDirectorDynamicInstruction(
+      topic,
+      topicTurns,
+      viewerIntent,
+      viewerTurnsSince,
+      viewerEngagement,
+      performerState,
+      lastSelfUtterance,
+      autonomyCandidate,
+    ),
+  ].join('\n');
+}
+
+function buildAutonomousDirectorDynamicInstruction(
+  topic: string | null,
+  topicTurns: number,
+  viewerIntent: ViewerIntent | null,
+  viewerTurnsSince: number,
+  viewerEngagement: ViewerEngagement,
+  performerState: PerformerStateContext | null,
+  lastSelfUtterance: string | null,
+  autonomyCandidate: AutonomyCandidate | null,
+): string {
   const performerStateLines = performerState
     ? [
         `Self phase: ${performerState.phase}`,
@@ -3287,7 +3358,6 @@ export function buildAutonomousDirectorInstruction(
       ]
     : ['Autonomy candidate: (none)'];
   return [
-    buildProgramContextSystemPrompt(programContext),
     `Current topic: ${topic ?? '(none)'}`,
     `Current topic spoken-turn count: ${topicTurns}`,
     `Latest viewer intent: ${viewerIntent ?? '(none)'}`,
@@ -3599,14 +3669,13 @@ async function generateReply(
       : 'Reply in the same language as the user. Usually use one short Japanese sentence of about 20 to 40 characters with no Markdown. When a card strongly affects the speaking form, allow one short second sentence for an interruption, self-correction, private aside, or unfinished thought. Keep the reply to at most two short sentences.';
   const autonomousDirectorInstruction =
     mode === 'autonomous'
-      ? buildAutonomousDirectorInstruction(
+      ? buildAutonomousDirectorDynamicInstruction(
           topic,
           topicTurns,
           viewerIntent,
           viewerTurnsSince,
           viewerEngagement,
           performerState,
-          programContext,
           lastSelfUtterance,
           autonomyCandidate,
         )
@@ -3627,17 +3696,17 @@ async function generateReply(
       : forcedCardId
         ? 'For speak, return the forced card first and at most one supporting card. For none, return empty activatedCards and null speechAct and expressionLevel.'
         : 'For speak, return one primary card and at most one supporting card. For none, return empty activatedCards and null speechAct and expressionLevel.';
-  const utterancePlanInstruction =
-    buildUtterancePlanInstruction(expressionBudget);
-  const performerPolicyInstruction = [
+  const performerPolicyStaticInstruction = [
     'The performer runtime has already selected the following behavior parameters.',
+    'Treat these values as behavior context. Do not mention the values or the runtime.',
+    'Use callback tendency to decide whether to refer back to the viewer. Use fragmentation for a small interruption or self-correction only when it sounds natural.',
+  ].join('\n');
+  const performerPolicyDynamicInstruction = [
     `callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
     `speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
     performanceContext.semanticBiases.length
       ? `live direction cues: ${performanceContext.semanticBiases.join(' / ')}`
       : 'live direction cues: none',
-    'Treat these values as behavior context. Do not mention the values or the runtime.',
-    'Use callback tendency to decide whether to refer back to the viewer. Use fragmentation for a small interruption or self-correction only when it sounds natural.',
   ].join('\n');
   const internalDeltaInstruction = mode === 'autonomous' ? [
     'Every assistant response must include internalDelta with a reasonUpdates array.',
@@ -3652,12 +3721,26 @@ async function generateReply(
     'For autonomous updates, use only reason IDs from the offered candidate and keep each parent in the same causal episode.',
     'Do not invent reason IDs or repeat the same reason update in one delta.',
   ].join('\n') : '';
+  const stableCardInfluenceInstruction =
+    mode === 'voice' || mode === 'manual' ? cardInfluenceInstruction : '';
+  const dynamicCardInfluenceInstruction =
+    stableCardInfluenceInstruction ? '' : cardInfluenceInstruction;
+  const stableActivationInstruction =
+    mode === 'voice' || mode === 'manual' ? activationInstruction : '';
+  const dynamicActivationInstruction =
+    stableActivationInstruction ? '' : activationInstruction;
   const staticSystemPrompt = [
+    buildCharacterIdentityStaticPrompt(),
+    buildProgramContextStaticPrompt(),
     mode === 'voice'
       ? buildVoiceInteractionPolicyStaticPrompt()
       : '',
     `${responseInstruction} Choose emotion as the character's overall feeling while speaking. Keep the emotion subtle when the wording is calm. A card may disrupt the sentence form without requiring a strong emotion. neutral is normal, fun is mildly upbeat, joy is clearly happy, sorrow is sad or lonely, angry is displeased or strongly rejecting, and surprised is clearly surprised.`,
     ...(internalDeltaInstruction ? [internalDeltaInstruction] : []),
+    stableCardInfluenceInstruction,
+    performerPolicyStaticInstruction,
+    buildUtterancePlanStaticInstruction(),
+    stableActivationInstruction,
     streamingEnabled
       ? [
           `Return fields in this exact order: deliveryHeader, speechLead, speechUnits, activatedCards${includesInternalDelta ? ', internalDelta' : ''}.`,
@@ -3672,8 +3755,8 @@ async function generateReply(
     'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
   ].join('\n');
   const dynamicSystemPrompt = [
-    buildCharacterIdentitySystemPrompt(message, characterIdentity),
-    buildProgramContextSystemPrompt(programContext),
+    buildCharacterIdentityDynamicPrompt(message, characterIdentity),
+    buildProgramContextDynamicPrompt(programContext),
     mode === 'voice'
       ? buildVoiceInteractionPolicyDynamicPrompt(
           forcedCardId,
@@ -3681,13 +3764,13 @@ async function generateReply(
         )
       : '',
     autonomousDirectorInstruction,
-    cardInfluenceInstruction,
+    dynamicCardInfluenceInstruction,
     'The character has the following five brain cards:',
     cardInstructions,
     forcedInstruction,
-    performerPolicyInstruction,
-    utterancePlanInstruction,
-    activationInstruction,
+    performerPolicyDynamicInstruction,
+    buildUtterancePlanDynamicInstruction(expressionBudget),
+    dynamicActivationInstruction,
   ].join('\n');
   const systemPrompt = [staticSystemPrompt, dynamicSystemPrompt].join('\n');
 
@@ -3775,10 +3858,10 @@ async function generateReply(
           maxOutputTokens: 512,
           cacheKey:
             mode === 'voice'
-              ? 'vayria:reply:voice:lead1:v1'
+              ? 'vayria:reply:voice:lead1:v2'
               : mode === 'manual'
-                ? 'vayria:reply:manual:lead1:v1'
-                : 'vayria:reply:autonomous:lead0:v1',
+                ? 'vayria:reply:manual:lead1:v2'
+                : 'vayria:reply:autonomous:lead0:v2',
           signal: llm.signal,
           canFallback: () => committedUnits.length === 0,
           onFallback: (reason) => {
@@ -4076,7 +4159,7 @@ async function generateCardPreviewReply(
           schema: responseSchema,
         },
         maxOutputTokens: 256,
-        cacheKey: 'vayria:card-preview:v1',
+        cacheKey: 'vayria:card-preview:v2',
         signal: llm.signal,
         onFallback: llm.onFallback,
         onTextDelta: (partial) => {
@@ -5497,7 +5580,8 @@ async function warmInteractiveLlmCache(config: LocalApiConfig): Promise<boolean>
   if (
     !config.openAiApiKey ||
     !runtime.cacheWarmupEnabled ||
-    runtime.profile !== 'luna-explicit'
+    (runtime.profile !== 'luna-explicit' &&
+      runtime.profile !== 'nano-implicit')
   ) {
     return false;
   }

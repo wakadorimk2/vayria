@@ -139,6 +139,56 @@ test('LLM provider latency summary separates interactive sources', () => {
   });
 });
 
+test('LLM cache summary uses server usage and reports request and token hit rates', () => {
+  const metadata = {
+    schemaVersion: 1,
+    captureId: 'ex-20260822000000-cache001',
+    mode: 'exhibition',
+    startedAt: '2026-08-22T00:00:00.000Z',
+    finishedAt: null,
+    status: 'active',
+  };
+  const providerDone = (origin, cacheStatus, inputTokens, cachedTokens) => ({
+    captureId: metadata.captureId,
+    event: 'llm_provider_done',
+    origin,
+    at: '2026-08-22T00:00:01.000Z',
+    source: 'voice',
+    purpose: 'response-generation',
+    profile: 'nano-implicit',
+    apiEndpoint: 'responses',
+    cacheMode: 'implicit',
+    cacheStatus,
+    actualTier: 'default',
+    retry: 0,
+    elapsedMs: 800,
+    inputTokens,
+    cachedTokens,
+    cacheWriteTokens: cacheStatus === 'write' ? inputTokens : 0,
+  });
+  const summary = summarizeCapture({
+    metadata,
+    observations: [],
+    events: [
+      providerDone('server', 'hit', 100, 80),
+      providerDone('server', 'write', 300, 0),
+      providerDone('client', 'hit', 1_000, 1_000),
+    ],
+  });
+  const [cache] = summary.runtime.llmCacheProfiles;
+  assert.equal(summary.runtime.llmCacheProfiles.length, 1);
+  assert.equal(cache.profile, 'nano-implicit');
+  assert.equal(cache.eligibleRequests, 2);
+  assert.equal(cache.hitRequests, 1);
+  assert.equal(cache.writeRequests, 1);
+  assert.equal(cache.missRequests, 0);
+  assert.equal(cache.totalInputTokens, 400);
+  assert.equal(cache.totalCachedTokens, 80);
+  assert.equal(cache.totalCacheWriteTokens, 300);
+  assert.equal(cache.requestHitRate, 0.5);
+  assert.equal(cache.tokenHitRate, 0.2);
+});
+
 test('interactive pipeline latency separates normal, retry, and aborted turns', () => {
   const metadata = {
     schemaVersion: 1,
