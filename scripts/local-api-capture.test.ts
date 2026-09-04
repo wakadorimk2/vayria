@@ -198,6 +198,22 @@ async function waitForCaptureCompletion(
   throw new Error('Exhibition capture was not finalized.');
 }
 
+async function waitForResponseEnd(ended: Promise<void>): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      ended,
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('Local API test response did not end within 2 seconds.'));
+        }, 2_000);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 async function postEvent(
   handler: Middleware,
   body: object,
@@ -225,12 +241,7 @@ async function postEvent(
     },
   } as unknown as ServerResponse;
   handler(request, response, () => undefined);
-  await Promise.race([
-    ended,
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, 100);
-    }),
-  ]);
+  await waitForResponseEnd(ended);
   return statusCode;
 }
 
@@ -322,12 +333,7 @@ async function requestRoute(
       request.emit('aborted');
     }, options.abortAfterMs);
   }
-  await Promise.race([
-    ended,
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, 100);
-    }),
-  ]);
+  await waitForResponseEnd(ended);
   return {
     statusCode,
     body,

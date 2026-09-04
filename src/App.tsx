@@ -149,6 +149,8 @@ const STATUS_LABELS = {
   error: '処理を完了できませんでした。',
 } as const;
 
+type MicrophoneInputTransition = 'starting' | 'stopping';
+
 function readAnimationNow(): number {
   return typeof performance !== 'undefined' && Number.isFinite(performance.now())
     ? performance.now()
@@ -854,6 +856,10 @@ export default function App() {
   );
   const [isMicrophoneControlExpanded, setIsMicrophoneControlExpanded] =
     useState(false);
+  const [microphoneInputTransition, setMicrophoneInputTransition] =
+    useState<MicrophoneInputTransition | null>(null);
+  const microphoneInputTransitionRef =
+    useRef<MicrophoneInputTransition | null>(null);
   const microphoneControlRef = useRef<HTMLDivElement>(null);
   const [audioEndpointMs, setAudioEndpointMs] = useState<AudioEndpointMs>(
     runtimeConfig.audioEndpointMs,
@@ -1508,6 +1514,14 @@ export default function App() {
   const displayThreshold = browserGateAvailable
     ? (effectiveThreshold ?? vadThreshold)
     : null;
+  const isMicrophoneInputTransitionPending =
+    microphoneInputTransition !== null;
+  const isMicrophoneInputVisuallyEnabled =
+    microphoneInputTransition === 'starting' ||
+    (microphoneInputTransition === null && isVoiceInputEnabled);
+  const microphoneInputVisualState =
+    microphoneInputTransition ??
+    (voiceError ? 'error' : isVoiceInputEnabled ? 'on' : 'off');
   const microphoneLevel = Math.max(0, displayedAudioLevel ?? 0);
   const microphoneMeterValue = Math.min(
     MICROPHONE_METER_MAX,
@@ -1517,11 +1531,11 @@ export default function App() {
     100,
     (microphoneLevel / MICROPHONE_METER_MAX) * 100,
   );
-  const microphoneThresholdValue = Math.min(
+  const microphoneThresholdSettingValue = Math.min(
     VAD_THRESHOLD_MAX,
-    Math.max(VAD_THRESHOLD_MIN, displayThreshold ?? vadThreshold),
+    Math.max(VAD_THRESHOLD_MIN, vadThreshold),
   );
-  const thresholdPercent =
+  const effectiveThresholdPercent =
     displayThreshold === null
       ? null
       : Math.min(
@@ -1544,9 +1558,14 @@ export default function App() {
     isVoiceInputEnabled &&
     displayThreshold !== null &&
     microphoneLevel >= displayThreshold;
-  const microphoneStatusLabel = voiceError
-    ? 'マイクを確認'
-    : isSttProcessing
+  const microphoneStatusLabel =
+    microphoneInputTransition === 'starting'
+      ? '開始中'
+      : microphoneInputTransition === 'stopping'
+        ? '停止中'
+        : voiceError
+          ? 'マイクを確認'
+          : isSttProcessing
       ? '判定中'
       : isVadSpeech
         ? '聞き取り中'
@@ -1665,18 +1684,26 @@ export default function App() {
     startCameraAttention,
     stopCameraAttention,
   ]);
-  const microphoneToggleLabel = voiceError
-    ? '音声入力を再試行'
-    : isVoiceInputEnabled
-      ? '音声入力を停止'
-      : '音声入力を有効化';
-  const microphoneDisclosureLabel = voiceError
-    ? '音声入力を再試行してマイク調整を表示'
-    : isVoiceInputEnabled
-      ? isMicrophoneControlExpanded
-        ? 'マイク調整を閉じる'
-        : 'マイク調整を表示'
-      : '音声入力を有効化してマイク調整を表示';
+  const microphoneToggleLabel =
+    microphoneInputTransition === 'starting'
+      ? '音声入力を開始中'
+      : microphoneInputTransition === 'stopping'
+        ? '音声入力を停止中'
+        : voiceError
+          ? '音声入力を再試行'
+          : isVoiceInputEnabled
+            ? '音声入力を停止'
+            : '音声入力を有効化';
+  const microphoneDisclosureLabel =
+    microphoneInputTransition === 'starting'
+      ? '音声入力を開始中'
+      : microphoneInputTransition === 'stopping'
+        ? '音声入力を停止中'
+        : voiceError
+          ? '音声入力を再試行'
+          : isVoiceInputEnabled
+            ? 'マイク調整を表示'
+            : '音声入力を有効化';
   const shouldShowAudioUnlockControl =
     !isExhibitionMode ||
     !isAudioUnlocked ||
@@ -2520,14 +2547,24 @@ export default function App() {
   );
 
   const handleVoiceToggle = useCallback(async () => {
-    if (isVoiceInputEnabled) {
-      await stopVoiceInput();
-      return;
-    }
+    if (microphoneInputTransitionRef.current !== null) return;
 
-    if (!(await startVoiceInput())) return;
-    void prepare();
-    preloadBackchannel();
+    const transition = isVoiceInputEnabled ? 'stopping' : 'starting';
+    microphoneInputTransitionRef.current = transition;
+    setMicrophoneInputTransition(transition);
+    try {
+      if (isVoiceInputEnabled) {
+        await stopVoiceInput();
+        return;
+      }
+
+      if (!(await startVoiceInput())) return;
+      void prepare();
+      preloadBackchannel();
+    } finally {
+      microphoneInputTransitionRef.current = null;
+      setMicrophoneInputTransition(null);
+    }
   }, [
     isVoiceInputEnabled,
     preloadBackchannel,
@@ -2669,6 +2706,7 @@ export default function App() {
       voiceStartedPromise,
     ]);
     if (voiceStarted) preloadBackchannel();
+    return voiceStarted;
   }, [
     isMuted,
     lastAudibleVolume,
@@ -2678,29 +2716,22 @@ export default function App() {
     volume,
   ]);
 
-  const handleExhibitionAudioToggle = useCallback(async () => {
+  const handleMicrophoneControlToggle = useCallback(() => {
+    if (microphoneInputTransitionRef.current !== null) return;
+
     if (isVoiceInputEnabled && !voiceError) {
-      await stopVoiceInput();
+      setIsMicrophoneControlExpanded(true);
       return;
     }
-    await handleExhibitionAudioUnlock();
+
+    microphoneInputTransitionRef.current = 'starting';
+    setMicrophoneInputTransition('starting');
+    void handleExhibitionAudioUnlock().finally(() => {
+      microphoneInputTransitionRef.current = null;
+      setMicrophoneInputTransition(null);
+    });
   }, [
     handleExhibitionAudioUnlock,
-    isVoiceInputEnabled,
-    stopVoiceInput,
-    voiceError,
-  ]);
-
-  const handleMicrophoneControlToggle = useCallback(() => {
-    if (isVoiceInputEnabled && !voiceError) {
-      setIsMicrophoneControlExpanded((current) => !current);
-      return;
-    }
-
-    setIsMicrophoneControlExpanded(true);
-    void handleExhibitionAudioToggle();
-  }, [
-    handleExhibitionAudioToggle,
     isVoiceInputEnabled,
     voiceError,
   ]);
@@ -2798,18 +2829,14 @@ export default function App() {
                     aria-controls={EXHIBITION_MICROPHONE_PANEL_ID}
                     aria-expanded={isMicrophoneControlExpanded}
                     aria-label={microphoneDisclosureLabel}
+                    aria-busy={isMicrophoneInputTransitionPending}
                     className="audio-unlock-button microphone-disclosure-button"
                     data-input-active={isMicrophoneInputActive ? 'true' : 'false'}
-                    data-state={
-                      voiceError
-                        ? 'error'
-                        : isVoiceInputEnabled
-                          ? 'on'
-                          : 'off'
-                    }
+                    data-state={microphoneInputVisualState}
                     data-threshold-crossing={
                       isThresholdCurrentlyCrossed ? 'true' : 'false'
                     }
+                    disabled={isMicrophoneInputTransitionPending}
                     onClick={handleMicrophoneControlToggle}
                     style={microphoneFeedbackStyle}
                     title={`${microphoneDisclosureLabel}。${microphoneStatusLabel}`}
@@ -2824,7 +2851,7 @@ export default function App() {
                     aria-label="マイク入力と反応ライン"
                     className="microphone-adjuster"
                     data-gate={browserGateAvailable ? 'enabled' : 'disabled'}
-                    data-state={voiceError ? 'error' : isVoiceInputEnabled ? 'on' : 'off'}
+                    data-state={microphoneInputVisualState}
                     data-threshold-crossing={
                       isThresholdCurrentlyCrossed ? 'true' : 'false'
                     }
@@ -2848,46 +2875,45 @@ export default function App() {
                         className="microphone-vertical-meter__fill"
                         style={{ height: `${microphoneLevelPercent}%` }}
                       />
-                      {thresholdPercent !== null && (
+                      {effectiveThresholdPercent !== null && (
                         <span
                           aria-hidden="true"
                           className="microphone-vertical-meter__threshold"
-                          style={{ bottom: `${thresholdPercent}%` }}
+                          style={{ bottom: `${effectiveThresholdPercent}%` }}
                         />
                       )}
+                      <span className="visually-hidden">
+                        {displayThreshold === null
+                          ? '実効反応ラインは利用できません'
+                          : `実効反応ライン ${displayThreshold.toFixed(3)}`}
+                      </span>
                       <input
-                        aria-label="マイクの反応ライン"
+                        aria-label="マイクの反応ライン設定"
                         aria-valuemax={VAD_THRESHOLD_MAX}
                         aria-valuemin={VAD_THRESHOLD_MIN}
-                        aria-valuenow={microphoneThresholdValue}
-                        aria-valuetext={
-                          displayThreshold === null
-                            ? '反応ラインなし'
-                            : `現在の反応ライン ${displayThreshold.toFixed(3)}`
-                        }
+                        aria-valuenow={microphoneThresholdSettingValue}
+                        aria-valuetext={`設定した反応ライン ${microphoneThresholdSettingValue.toFixed(3)}`}
                         className="microphone-vertical-meter__input"
                         disabled={!browserGateAvailable}
                         max={VAD_THRESHOLD_MAX}
                         min={VAD_THRESHOLD_MIN}
-                        onChange={(event) =>
-                          handleVadThresholdChange(Number(event.target.value))
+                        onInput={(event) =>
+                          handleVadThresholdChange(
+                            Number(event.currentTarget.value),
+                          )
                         }
                         step={VAD_THRESHOLD_STEP}
                         type="range"
-                        value={microphoneThresholdValue}
+                        value={microphoneThresholdSettingValue}
                       />
                     </div>
                     <button
                       aria-label={microphoneToggleLabel}
-                      aria-pressed={isVoiceInputEnabled}
+                      aria-busy={isMicrophoneInputTransitionPending}
+                      aria-pressed={isMicrophoneInputVisuallyEnabled}
                       className="microphone-adjuster__toggle"
-                      data-state={
-                        voiceError
-                          ? 'error'
-                          : isVoiceInputEnabled
-                            ? 'on'
-                            : 'off'
-                      }
+                      data-state={microphoneInputVisualState}
+                      disabled={isMicrophoneInputTransitionPending}
                       onClick={handleVoiceToggle}
                       title={microphoneToggleLabel}
                       type="button"
