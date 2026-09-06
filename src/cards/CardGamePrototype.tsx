@@ -12,6 +12,7 @@ import {
 import { WildcardCard } from './WildcardCard';
 import { runtimeConfig } from '../runtimeConfig';
 import type { CardMotion } from './cardTypes';
+import type { ExhibitionUiMode } from '../exhibition/exhibitionUi';
 import type {
   SpatialTargetRegistry,
   SpatialViewportPoint,
@@ -50,6 +51,7 @@ export interface CardDragPositionUpdate {
 }
 
 interface CardGamePrototypeProps {
+  exhibitionUiMode?: ExhibitionUiMode;
   game: CardGamePrototypeController;
   isResetLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
@@ -222,6 +224,7 @@ function resolveDragDropPreview(
 }
 
 export function CardGamePrototype({
+  exhibitionUiMode = 'baseline',
   game,
   isResetLocked = false,
   onCardInserted,
@@ -256,6 +259,8 @@ export function CardGamePrototype({
     dragActive ||
     selectedBrainCardId !== null ||
     selectedHandCardId !== null;
+  const isCandidateUi =
+    runtimeConfig.mode === 'exhibition' && exhibitionUiMode === 'candidate';
 
   useEffect(() => {
     onSelectionActiveChange?.(selectionActive);
@@ -551,12 +556,18 @@ export function CardGamePrototype({
   ]);
 
   const selectionHint =
-    runtimeConfig.mode === 'exhibition'
+    isCandidateUi
+      ? isSpent
+        ? '作用したカードを確認して、返答を待ってください'
+        : selectionActive
+          ? '選んだ一枚を Vayria の脳内へ'
+          : '気になる一枚を選んでください'
+      : runtimeConfig.mode === 'exhibition'
         ? isSpent
           ? 'このターンは操作済み'
           : selectionActive
-          ? '脳内へ一枚'
-          : '気になる一枚を選んで'
+            ? '脳内へ一枚'
+            : '気になる一枚を選んで'
       : isSpent
         ? zones.forcedCardId
           ? `脳へ干渉しました。「${zones.brain.find((card) => card.id === zones.forcedCardId)?.label ?? zones.forcedCardId}」の返答を待っています`
@@ -631,6 +642,8 @@ export function CardGamePrototype({
                     : 'normal'
           }
           interactionDisabled={interactionLocked}
+          showStateLabel={isCandidateUi && zone === 'brain'}
+          showArtwork={isCandidateUi}
         />
       );
 
@@ -656,7 +669,7 @@ export function CardGamePrototype({
     <div className="card-prototype" aria-label="Brain and hand cards">
       <section className="card-zone card-zone--brain" aria-label="脳内">
         <header className="card-zone__header">
-          <h2>脳内</h2>
+          <h2>{isCandidateUi ? 'Vayriaの脳内' : '脳内'}</h2>
         </header>
         <div className="card-zone__cards" ref={brainCardsRef}>
           {renderCards('brain')}
@@ -665,7 +678,7 @@ export function CardGamePrototype({
 
       <section className="card-zone card-zone--hand" aria-label="手札">
         <header className="card-zone__header card-zone__header--hand">
-          <h2>手札</h2>
+          <h2>{isCandidateUi ? '一枚、どうぞ。' : '手札'}</h2>
           <div className="card-zone__turn-status">
             <span
               className={`interference-counter interference-counter--${isSpent ? 'spent' : 'ready'}`}

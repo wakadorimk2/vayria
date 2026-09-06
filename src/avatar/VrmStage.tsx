@@ -228,6 +228,7 @@ interface VrmStageProps {
   attentionReader: AttentionReader;
   emotion: Emotion;
   isExhibitionMode?: boolean;
+  isCandidateExhibitionUi?: boolean;
   listeningReaction?: ListeningReactionCue;
   motionScale?: number;
   mouthOpen: number;
@@ -479,6 +480,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       attentionReader,
       emotion,
       isExhibitionMode = false,
+      isCandidateExhibitionUi = false,
       listeningReaction,
       motionScale = 1,
       mouthOpen,
@@ -1059,7 +1061,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             camera,
             width,
             height,
-            usesExhibitionPortraitCamera()
+            isCandidateExhibitionUi
+              ? { ...STAGE_PRESET.camera, visibleHeightRatio: 0.34 }
+              : usesExhibitionPortraitCamera()
               ? EXHIBITION_PORTRAIT_CAMERA
               : STAGE_PRESET.camera,
           );
@@ -1187,7 +1191,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               camera,
               container.clientWidth,
               container.clientHeight,
-              usesExhibitionPortraitCamera()
+              isCandidateExhibitionUi
+                ? { ...STAGE_PRESET.camera, visibleHeightRatio: 0.34 }
+                : usesExhibitionPortraitCamera()
                 ? EXHIBITION_PORTRAIT_CAMERA
                 : STAGE_PRESET.camera,
             );
@@ -2417,6 +2423,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       };
     }, [
       isExhibitionMode,
+      isCandidateExhibitionUi,
       lifeDynamicsDebugEnabled,
       lifeDynamicsEnabled,
       lifeDynamicsProfileId,

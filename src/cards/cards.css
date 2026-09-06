@@ -1524,6 +1524,40 @@
   text-shadow: 0 2px 8px rgb(8 8 21 / 80%);
 }
 
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"]
+  .wildcard-card__state-label {
+  position: absolute;
+  z-index: 6;
+  top: 0.42rem;
+  left: 50%;
+  display: inline-flex;
+  min-height: 1.2rem;
+  padding: 0.16rem 0.38rem;
+  align-items: center;
+  border: 1px solid rgb(214 184 117 / 54%);
+  border-radius: 999px;
+  background: rgb(23 23 37 / 82%);
+  color: #f4dfac;
+  font-size: clamp(0.48rem, 0.75vw, 0.62rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"]
+  .wildcard-card--drop-target
+  .wildcard-card__state-label,
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"]
+  .wildcard-card--pending-insertion
+  .wildcard-card__state-label {
+  border-color: rgb(244 239 230 / 76%);
+  background: rgb(91 60 98 / 88%);
+  color: var(--ivory);
+}
+
 .app-shell .card-zone--hand .wildcard-card:nth-child(1) {
   --card-rotation: -7deg;
   z-index: 1;

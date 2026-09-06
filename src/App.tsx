@@ -140,6 +140,10 @@ import {
   type VoiceInputEvent,
 } from './voice/voiceInput';
 import { PerformancePlaybackCoordinator } from './performer/performancePlayback';
+import {
+  getExhibitionUiPhasePresentation,
+  resolveExhibitionUiPhase,
+} from './exhibition/exhibitionUi';
 
 const STATUS_LABELS = {
   idle: '話しかけてください。',
@@ -436,6 +440,8 @@ export default function App() {
   const [sessionGeneration, setSessionGeneration] = useState(0);
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
+  const isCandidateExhibitionUi =
+    isExhibitionMode && runtimeConfig.exhibitionUiMode === 'candidate';
   const networkState = useNetworkState(isExhibitionMode);
   const [spatialTargetRegistry] = useState(
     () => new SpatialTargetRegistry(),
@@ -1506,6 +1512,25 @@ export default function App() {
     Boolean(reply) && (!isExhibitionMode || isSubtitleVisible);
   const voiceError = getVoiceErrorMessage(voiceInputErrorCode);
   const conversationError = error || voiceValidationError || voiceError;
+  const exhibitionUiPhase = resolveExhibitionUiPhase({
+    conversationStatus: status,
+    hasError: Boolean(conversationError),
+    needsPlaybackGesture,
+    voiceInputEnabled: isVoiceInputEnabled,
+    voiceInputPhase,
+  });
+  const exhibitionUiPhasePresentation =
+    getExhibitionUiPhasePresentation(exhibitionUiPhase);
+  const candidateErrorFeature =
+    voiceValidationError || voiceError ? '音声入力' : '会話';
+  const candidateServiceNotConfigured =
+    Boolean(conversationError?.includes('OPENAI_API_KEY'));
+  const candidateErrorRecovery =
+    candidateServiceNotConfigured
+      ? '展示スタッフにお知らせください。'
+      : voiceValidationError || voiceError
+      ? '右上のマイクを確認して、もう一度話しかけてください。カード操作も利用できます。'
+      : 'もう一度話しかけるか、手札からカードを選んでください。';
   const displayedAudioLevel = isVoiceInputEnabled ? audioLevel : null;
   const browserGateAvailable =
     audioLabMode === 'processed-vad' ||
@@ -2781,6 +2806,8 @@ export default function App() {
       className="app-shell"
       data-app-mode={runtimeConfig.mode}
       data-exhibition-state={exhibitionPresentationState}
+      data-exhibition-ui-mode={runtimeConfig.exhibitionUiMode}
+      data-exhibition-ui-phase={exhibitionUiPhase}
     >
       {(shouldShowAudioUnlockControl || isExhibitionMode) && (
         <header className="app-title">
@@ -2843,6 +2870,14 @@ export default function App() {
                     type="button"
                   >
                     <MicrophoneIcon />
+                    {isCandidateExhibitionUi && (
+                      <span
+                        aria-hidden="true"
+                        className="microphone-disclosure-button__label"
+                      >
+                        {isVoiceInputEnabled ? '話しかける' : 'マイクをオン'}
+                      </span>
+                    )}
                     <span className="visually-hidden">
                       {`${microphoneDisclosureLabel}。${microphoneStatusLabel}。`}
                     </span>
@@ -3025,6 +3060,7 @@ export default function App() {
           attentionReader={readAttention}
           emotion={displayEmotion}
           isExhibitionMode={isExhibitionMode}
+          isCandidateExhibitionUi={isCandidateExhibitionUi}
           listeningReaction={listeningReaction}
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
@@ -3033,7 +3069,7 @@ export default function App() {
           sessionGeneration={sessionGeneration}
           spatialTargetRegistry={spatialTargetRegistry}
         />
-        {isExhibitionMode && (
+        {isExhibitionMode && !isCandidateExhibitionUi && (
           <aside className="exhibition-copy" aria-label="展示案内">
             <p className="exhibition-copy__title">Vayriaに一枚、どうぞ。</p>
             <p className="exhibition-copy__hint">
@@ -3042,6 +3078,7 @@ export default function App() {
           </aside>
         )}
         <CardGamePrototype
+          exhibitionUiMode={runtimeConfig.exhibitionUiMode}
           game={cardGame}
           isResetLocked={isPerformerBusy}
           onCardAttentionInput={handleCardAttentionInput}
@@ -3058,11 +3095,26 @@ export default function App() {
       <section
         className={`conversation conversation--${status}`}
         aria-label="Character conversation"
+        tabIndex={isCandidateExhibitionUi ? 0 : undefined}
         ref={registerChatTarget}
       >
         <div className="conversation-copy" aria-live="polite">
+          {isCandidateExhibitionUi && (
+            <p
+              className="exhibition-phase"
+              role="status"
+              data-phase={exhibitionUiPhase}
+            >
+              <span aria-hidden="true" className="exhibition-phase__mark">
+                {exhibitionUiPhasePresentation.mark}
+              </span>
+              <span className="exhibition-phase__label">
+                {exhibitionUiPhasePresentation.label}
+              </span>
+            </p>
+          )}
           {shouldShowReply && <p className="reply">{reply}</p>}
-          {(!isExhibitionMode || !shouldShowReply) && (
+          {!isCandidateExhibitionUi && (!isExhibitionMode || !shouldShowReply) && (
             <p className="status">
               {isMuted && status === 'idle'
                 ? 'ミュート中です。テキスト会話は利用できます。'
@@ -3071,7 +3123,15 @@ export default function App() {
           )}
           {needsPlaybackGesture && (
             <div className="playback-permission" role="alert">
-              <p>音声の再生許可が必要です。</p>
+              {isCandidateExhibitionUi ? (
+                <>
+                  <strong>音声再生</strong>
+                  <p>ブラウザーが音声を止めています。</p>
+                  <small>下のボタンで会話へ戻れます。</small>
+                </>
+              ) : (
+                <p>音声の再生許可が必要です。</p>
+              )}
               <button
                 autoFocus
                 className="playback-resume-button"
@@ -3083,9 +3143,20 @@ export default function App() {
             </div>
           )}
           {conversationError && !needsPlaybackGesture && (
-            <p className="conversation-error" role="alert">
-              {conversationError}
-            </p>
+            isCandidateExhibitionUi ? (
+              <div className="conversation-error" role="alert">
+                <strong>{candidateErrorFeature}</strong>
+                <span>{candidateServiceNotConfigured
+                  ? '会話サービスの準備ができていません。'
+                  : '接続または音声の準備を確認してください。'}</span>
+                <small>{candidateErrorRecovery}</small>
+                <details><summary>詳細</summary>{conversationError}</details>
+              </div>
+            ) : (
+              <p className="conversation-error" role="alert">
+                {conversationError}
+              </p>
+            )
           )}
           {isVoiceInputEnabled && !isExhibitionMode && (
             <p className="voice-input-hint">

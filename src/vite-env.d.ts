@@ -11,6 +11,7 @@ interface ImportMetaEnv {
   readonly VITE_EARLY_SPEECH_LEAD_ENABLED?: string;
   readonly VITE_CLOUD_TTS_STREAM_PLAYBACK_ENABLED?: string;
   readonly VITE_CARD_DROP_REACTION_MODE?: string;
+  readonly VITE_EXHIBITION_UI_MODE?: string;
 }
 
 interface ImportMeta {

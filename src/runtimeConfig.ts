@@ -7,6 +7,7 @@ import {
   type ExhibitionAudioPreset,
 } from './voice/audioLab.js';
 import { readCardDropReactionMode } from './cards/cardDropReaction.js';
+import { resolveExhibitionUiMode } from './exhibition/exhibitionUi.js';
 
 const APP_MODES = ['local', 'exhibition', 'public'] as const;
 const VOICE_INPUT_TRANSPORTS = ['web-speech', 'remote'] as const;
@@ -145,6 +146,10 @@ export const runtimeConfig = Object.freeze({
   cardDropReactionMode: readCardDropReactionMode(
     browserSearch,
     import.meta.env.VITE_CARD_DROP_REACTION_MODE,
+  ),
+  exhibitionUiMode: resolveExhibitionUiMode(
+    browserSearch,
+    import.meta.env.VITE_EXHIBITION_UI_MODE,
   ),
   autonomyTimingMode: readConfiguredAutonomyTimingMode(browserSearch),
   audioPreset: readAudioPreset(browserSearch),

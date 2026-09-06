@@ -9,7 +9,9 @@ import type {
   CardState,
   WildcardCardData,
 } from './cardTypes';
+import { getVisibleCardStateLabel } from './cardPresentation';
 import './cards.css';
+import { CardArtwork } from './CardArtwork';
 
 export interface WildcardCardProps {
   card: WildcardCardData;
@@ -20,6 +22,8 @@ export interface WildcardCardProps {
   onPointerDown?: PointerEventHandler<HTMLElement>;
   motion?: CardMotion;
   state?: CardState;
+  showStateLabel?: boolean;
+  showArtwork?: boolean;
 }
 
 const KIND_LABELS: Record<CardKind, string> = {
@@ -64,6 +68,8 @@ export function WildcardCard({
   motion = 'none',
   onSelect,
   onPointerDown,
+  showStateLabel = false,
+  showArtwork = false,
   state = 'normal',
 }: WildcardCardProps) {
   const isInteractive = Boolean(onSelect);
@@ -72,6 +78,9 @@ export function WildcardCard({
   const stateLabel =
     state === 'active' ? '、主役' : state === 'supporting' ? '、補助' : '';
   const motionClass = motion === 'none' ? '' : `wildcard-card--${motion}`;
+  const visibleStateLabel = showStateLabel
+    ? getVisibleCardStateLabel(state, motion)
+    : null;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (isInputDisabled || !onSelect) return;
@@ -105,7 +114,8 @@ export function WildcardCard({
         {KIND_MARKS[card.kind]}
       </span>
 
-      {CARD_MOTIFS[card.id] && (
+      {showArtwork && <CardArtwork cardId={card.id} />}
+      {!showArtwork && CARD_MOTIFS[card.id] && (
         <span className="wildcard-card__motif" aria-hidden="true">
           {CARD_MOTIFS[card.id]}
         </span>
@@ -114,6 +124,12 @@ export function WildcardCard({
       <h2 className="wildcard-card__label" data-label={card.label}>
         {card.label}
       </h2>
+
+      {visibleStateLabel && (
+        <span className="wildcard-card__state-label">
+          {visibleStateLabel}
+        </span>
+      )}
 
       <span
         className="wildcard-card__pip wildcard-card__pip--bottom"

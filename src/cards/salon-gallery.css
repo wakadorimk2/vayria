@@ -1,0 +1,13 @@
+.salon-artwork-gallery { padding: 32px; min-height: 100vh; background: #242033; color: #efe4d5; }
+.salon-artwork-gallery h1 { font: 26px Georgia, serif; letter-spacing: .08em; }
+.salon-artwork-gallery p { color: #bfb1c2; font-size: 13px; }
+.salon-artwork-gallery__grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 24px; max-width: 1200px; margin: 28px auto; }
+.salon-artwork-gallery__pair { display: flex; gap: 8px; }
+.salon-artwork-gallery__pair > div { width: 50%; aspect-ratio: 4 / 5; display: grid; place-items: center; border-radius: 8px; background: linear-gradient(135deg, #f5eddf, #e6d9c5); color: #514051; }
+.salon-artwork-gallery__pair > div + div { background: #ffffff0b; border: 1px solid #d6b87555; color: #e5dce7; }
+.salon-artwork-gallery .card-art { width: 75%; }
+.salon-artwork-gallery h2 { font-size: 13px; font-weight: 400; text-align: center; }
+@media (max-width: 800px) { .salon-artwork-gallery__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.salon-preview-controls { position: absolute; z-index: 20; top: 24px; left: 24px; display: flex; flex-wrap: wrap; gap: 8px; max-width: 290px; color: #c9bdc8; font-size: 11px; }
+.salon-preview-controls span { width: 100%; }
+.salon-preview-controls button { min-height: 44px; padding: 8px; border: 1px solid #d6b87555; border-radius: 6px; background: #282236; color: #efe4d5; cursor: pointer; }

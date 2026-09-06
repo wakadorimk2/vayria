@@ -2679,3 +2679,402 @@ input {
     transition: none;
   }
 }
+
+/* Candidate salon: character above a three-row table. */
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] {
+  --salon-person-height: 55dvh;
+  --salon-brain-height: clamp(104px, 14dvh, 150px);
+  --salon-reply-height: clamp(76px, 10dvh, 140px);
+  --salon-accent: #d6b875;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .avatar-area {
+  position: absolute;
+  inset: 0;
+  height: 100dvh;
+  min-height: 0;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .vrm-stage {
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--salon-person-height);
+  min-height: 0;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-prototype {
+  top: var(--salon-person-height);
+  bottom: 0;
+  left: 50%;
+  right: auto;
+  width: min(760px, calc(100% - 40px));
+  height: auto;
+  transform: translateX(-50%);
+  border-top: 1px solid rgb(214 184 117 / 30%);
+  border-radius: 50% 50% 0 0 / 14px 14px 0 0;
+  background: radial-gradient(ellipse at 50% 0%, #473548 0%, #282236 68%);
+  box-shadow: 0 -12px 45px rgb(9 8 19 / 24%);
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--brain {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: var(--salon-brain-height);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transform: none;
+  --wildcard-card-width: clamp(54px, 6.5vw, 76px);
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand {
+  top: calc(var(--salon-brain-height) + var(--salon-reply-height));
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 8px;
+  opacity: 1;
+  transform: none;
+  --wildcard-card-width: clamp(64px, 10dvh, 100px);
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"][data-exhibition-state] .card-zone--hand {
+  transform: none;
+  opacity: 1;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone__header {
+  margin: 0 0 6px;
+  min-height: 16px;
+  width: auto;
+  gap: 16px;
+  opacity: 1;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone__header h2 {
+  font-size: 10px;
+  letter-spacing: .16em;
+  font-weight: 500;
+  color: #c9bdc8;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone__cards {
+  gap: clamp(6px, 1vw, 12px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .brain-card-float {
+  animation: none;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .wildcard-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 0;
+  padding: 8px 4px;
+  margin: 0;
+  aspect-ratio: 4 / 5;
+  height: auto;
+  border-radius: 8px;
+  overflow: visible;
+  transform: none;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--brain .wildcard-card {
+  aspect-ratio: 1 / 1;
+  color: #e5dce7;
+  border: 1px solid rgb(229 217 235 / 25%);
+  background: linear-gradient(145deg, rgb(224 201 229 / 13%), rgb(199 169 216 / 3%));
+  box-shadow: inset 0 1px rgb(255 255 255 / 8%);
+  opacity: 1;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--brain .wildcard-card:not(.wildcard-card--active):not(.wildcard-card--supporting):not(.wildcard-card--pending-insertion):not(.wildcard-card--drop-target) {
+  opacity: .72;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand .wildcard-card {
+  margin: 0;
+  background: linear-gradient(135deg, #f5eddf, #e6d9c5);
+  border: 1px solid #c9b79b;
+  color: #514051;
+  box-shadow: 0 4px 10px rgb(8 8 21 / 24%), inset 0 1px rgb(255 255 255 / 60%);
+  --card-lift: 0px;
+  --card-rotation: 0deg;
+  transform: rotate(var(--card-rotation));
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand .wildcard-card:nth-child(1) {
+  --card-rotation: -4deg;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand .wildcard-card:nth-child(2) {
+  --card-rotation: -2deg;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand .wildcard-card:nth-child(4) {
+  --card-rotation: 2deg;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand .wildcard-card:nth-child(5) {
+  --card-rotation: 4deg;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand .wildcard-card--selected:not(.wildcard-card--dragging) {
+  transform: translateY(-12px) rotate(var(--card-rotation));
+  border-color: var(--salon-accent);
+  box-shadow: 0 5px 18px rgb(0 0 0 / 25%), 0 0 0 2px rgb(214 184 117 / 35%);
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand .wildcard-card:hover:not(.wildcard-card--disabled):not(.wildcard-card--selected) {
+  transform: translateY(-4px) rotate(var(--card-rotation));
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .wildcard-card::before {
+  display: none;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .wildcard-card__label {
+  position: static;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  font-size: clamp(10px, 1.15vw, 14px);
+  line-height: 1.2;
+  letter-spacing: .02em;
+  color: inherit;
+  text-shadow: none;
+  transform: none;
+  writing-mode: horizontal-tb;
+  white-space: nowrap;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .wildcard-card__pip {
+  display: none;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-art {
+  display: block;
+  width: 56%;
+  height: auto;
+  max-height: 62%;
+  flex: 0 1 auto;
+  overflow: visible;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--brain .card-art {
+  width: 48%;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .wildcard-card__state-label {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #433343;
+  color: #eddaa8;
+  font-size: 9px;
+  white-space: nowrap;
+  z-index: 6;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"][data-exhibition-state="selecting"] .card-zone--brain .wildcard-card:not([aria-disabled="true"]) {
+  border-color: rgb(214 184 117 / 65%);
+  opacity: 1;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--brain .wildcard-card--drop-target {
+  border-color: #f6df9e;
+  box-shadow: 0 0 0 2px #d6b875, 0 0 18px rgb(214 184 117 / 24%);
+  opacity: 1;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--brain :is(.wildcard-card--active, .wildcard-card--pending-insertion, .wildcard-card--inserted) {
+  border-color: var(--salon-accent);
+  box-shadow: 0 0 0 1px var(--salon-accent);
+  opacity: 1;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--brain .wildcard-card--supporting {
+  border-style: dashed;
+  border-color: var(--salon-accent);
+  opacity: .9;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand .wildcard-card--disabled {
+  opacity: .58;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone__action {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .interference-counter {
+  transform: scale(.8);
+  transform-origin: center;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .interference-counter__label {
+  display: none;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .conversation {
+  position: absolute;
+  z-index: 5;
+  top: calc(var(--salon-person-height) + var(--salon-brain-height) + 1px);
+  bottom: auto;
+  left: 50%;
+  right: auto;
+  width: min(680px, calc(100% - 64px));
+  height: var(--salon-reply-height);
+  max-width: none;
+  padding: 6px 14px;
+  margin: 0;
+  transform: translateX(-50%);
+  display: block;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: auto;
+  overflow: auto;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .conversation::before {
+  content: '';
+  display: block;
+  width: 44px;
+  height: 2px;
+  margin: 0 auto 5px;
+  background: var(--salon-accent);
+  opacity: .55;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .conversation-copy {
+  display: block;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+  text-align: center;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .exhibition-phase {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  color: #cabecb;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .exhibition-phase__mark {
+  color: var(--salon-accent);
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .conversation .reply {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: initial;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  margin: 0;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1.45;
+  color: #f4efe6;
+  text-shadow: none;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .conversation :is(.conversation-error, .playback-permission) {
+  display: block;
+  margin: 0;
+  padding: 4px 8px;
+  width: 100%;
+  max-width: none;
+  font-size: 12px;
+  line-height: 1.4;
+  background: #482e3b;
+  color: #f3d8d7;
+  border: 1px solid #9f727c;
+  border-radius: 6px;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .conversation-error details {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .conversation-error small {
+  display: block;
+  font-size: 11px;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .microphone-disclosure-button__label {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  color: #d3c8d4;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .microphone-disclosure-button::before {
+  animation: none;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] :is(.microphone-disclosure-button, .attention-button) {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .exhibition-network-status__item[data-state="available"] {
+  opacity: .42;
+}
+
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .wildcard-card:focus-visible {
+  outline: 2px solid #f5dda2;
+  outline-offset: 3px;
+}
+
+@media (orientation: portrait) {
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] { --salon-person-height: 60dvh; }
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .conversation .reply { font-size: 20px; }
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--brain { --wildcard-card-width: clamp(64px, 9vw, 100px); }
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .card-zone--hand { --wildcard-card-width: clamp(72px, 12vw, 128px); }
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .wildcard-card__label { font-size: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+.app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .wildcard-card, .app-shell[data-app-mode="exhibition"][data-exhibition-ui-mode="candidate"] .brain-card-float { animation: none;
+  transition: none; }
+}
