@@ -14,7 +14,9 @@ import {
   buildUtterancePlanInstruction,
   buildUsedReasonIdsProperty,
   buildVoiceInteractionPolicySystemPrompt,
+  classifyTerminalStreamingEnvelope,
   createInteractionReactionResponse,
+  formatSemanticBiasesForPrompt,
   isActionCommitmentMessage,
   isContentBearingVoiceMessage,
   isDirectActionRequestMessage,
@@ -31,6 +33,7 @@ import {
   readConversationEvent,
   readAutonomyCandidate,
   resolveProvisionalActivatedCards,
+  runtimeForReplyAttempt,
   VOICE_REPLY_INSTRUCTION,
 } from '../server/localApi.js';
 import { OpenAiResponsesError } from '../server/openAiResponses.js';
@@ -42,7 +45,9 @@ import {
 const VALID_CONTEXT = {
   callbackTendency: 0.25,
   fragmentation: 0.1,
-  semanticBiases: ['鶏に関係する具体物を一つ連想する'],
+  semanticBiases: [
+    { cue: '鶏に関係する具体物を一つ連想する', weight: 1 },
+  ],
 };
 
 const VALID_PERFORMER_STATE = {
@@ -80,8 +85,49 @@ const AUTONOMY_CANDIDATE = {
 
 test('chat reserves output space for nano reasoning and structured output', () => {
   assert.equal(maxOutputTokensForChatMode('voice'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('voice', 'output_limit'), 4_096);
+  assert.equal(maxOutputTokensForChatMode('voice', 'contract'), 2_048);
   assert.equal(maxOutputTokensForChatMode('manual'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('manual', 'output_limit'), 2_048);
   assert.equal(maxOutputTokensForChatMode('autonomous'), 2_048);
+  assert.equal(maxOutputTokensForChatMode('autonomous', 'output_limit'), 2_048);
+});
+
+test('output-limit retry escalates only interactive nano failure paths to Luna', () => {
+  const runtime = {
+    profile: 'nano-implicit' as const,
+    serviceTier: 'standard' as const,
+    fallbackEnabled: true,
+    cacheWarmupEnabled: true,
+  };
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'voice', 'output_limit').profile,
+    'luna-prefix',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'card_change', 'output_limit').profile,
+    'luna-prefix',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'manual', 'output_limit').profile,
+    'nano-implicit',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'autonomous', 'output_limit').profile,
+    'nano-implicit',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(runtime, 'voice', 'contract').profile,
+    'nano-implicit',
+  );
+  assert.equal(
+    runtimeForReplyAttempt(
+      { ...runtime, profile: 'luna-explicit' },
+      'voice',
+      'output_limit',
+    ).profile,
+    'luna-explicit',
+  );
 });
 
 test('only output-limit incomplete responses retry before speech commit', () => {
@@ -312,6 +358,83 @@ test('card preview request validates runtime context bounds', () => {
       }),
     /performanceContext format is invalid/,
   );
+  for (const semanticBiases of [
+    ['legacy-string'],
+    [{ cue: '', weight: 1 }],
+    [{ cue: 'valid', weight: 0 }],
+    [{ cue: 'valid', weight: 1.1 }],
+    [{ cue: 'valid', weight: 1, extra: true }],
+  ]) {
+    assert.throws(
+      () =>
+        readCardPreviewRequest({
+          cardId: 'chicken',
+          performanceContext: { ...VALID_CONTEXT, semanticBiases },
+        }),
+      /performanceContext format is invalid/,
+    );
+  }
+});
+
+test('terminal streaming envelope classification does not expose content', () => {
+  const parseable = JSON.stringify({
+    deliveryHeader: {
+      externalAction: 'speak',
+      usedReasonIds: [],
+      emotion: 'neutral',
+      speechAct: 'reaction',
+      expressionLevel: 'low',
+    },
+    speechLead: '短い反応',
+    speechUnits: [],
+    activatedCards: ['rain'],
+    internalDelta: { reasonUpdates: [] },
+  });
+  assert.equal(
+    classifyTerminalStreamingEnvelope(parseable),
+    'terminal_envelope_parseable',
+  );
+  assert.equal(
+    classifyTerminalStreamingEnvelope(parseable.slice(0, -1)),
+    'terminal_envelope_unparseable',
+  );
+});
+
+test('card preview request normalizes weighted semantic cue order and duplicates', () => {
+  const request = readCardPreviewRequest({
+    cardId: 'chicken',
+    performanceContext: {
+      ...VALID_CONTEXT,
+      semanticBiases: [
+        { cue: ' secondary ', weight: 0.2 },
+        { cue: 'primary', weight: 1 },
+        { cue: 'secondary', weight: 0.4 },
+      ],
+    },
+  });
+  assert.deepEqual(request.performanceContext.semanticBiases, [
+    { cue: 'primary', weight: 1 },
+    { cue: 'secondary', weight: 0.4 },
+  ]);
+});
+
+test('semantic cue formatter keeps weights and adds roles only for distinct levels', () => {
+  const ranked = formatSemanticBiasesForPrompt([
+    { cue: 'secondary', weight: 0.2 },
+    { cue: 'primary-b', weight: 1 },
+    { cue: 'primary-a', weight: 1 },
+  ]);
+  assert.match(ranked, /Primary influence \(weight=1\.00\): primary-a/);
+  assert.match(ranked, /Primary influence \(weight=1\.00\): primary-b/);
+  assert.match(ranked, /Secondary influence \(weight=0\.20\): secondary/);
+  assert.ok(ranked.indexOf('primary-a') < ranked.indexOf('secondary'));
+
+  const equal = formatSemanticBiasesForPrompt([
+    { cue: 'beta', weight: 0.2 },
+    { cue: 'alpha', weight: 0.2 },
+  ]);
+  assert.match(equal, /Influence \(weight=0\.20\): alpha/);
+  assert.doesNotMatch(equal, /Primary|Secondary/);
 });
 
 test('card preview response keeps only text and normalized emotion', () => {

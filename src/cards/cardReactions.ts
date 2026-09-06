@@ -516,7 +516,7 @@ export function createCardPreviewContribution(
       },
     ],
     constraints: [{ kind: 'require_speech', scope: 'current_plan' }],
-    semanticCues: [...(modifiers.semanticBiases ?? [])],
+    semanticCues: [],
     triggers: [trigger],
     attentionTarget: 'viewer',
     planOverrides: { behavior },

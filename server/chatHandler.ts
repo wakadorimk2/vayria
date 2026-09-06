@@ -110,7 +110,6 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
           text: unit,
           response: streamedCandidate,
         });
-        streamingCallbacks?.onParserMilestone?.('speech_unit_written');
       },
       onStateRejected: () => {
         stateRejected = true;
@@ -118,7 +117,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
       onDeliveryMetadataRejected: () => {
         deliveryMetadataRejected = true;
       },
-      onParserMilestone: (parserMilestone) => {
+      onParserMilestone: (parserMilestone, metadata) => {
         void recordStructuredEvent(config, 'llm_parser_milestone', {
           origin: 'server',
           requestId,
@@ -126,6 +125,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
           turnId: providerTurnId,
           source: providerSource,
           parserMilestone,
+          ...metadata,
         });
       },
     }

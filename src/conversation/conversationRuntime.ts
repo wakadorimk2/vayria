@@ -15,6 +15,7 @@ import type {
   PerformancePlan,
   PerformanceResult,
   PerformerStateContext,
+  WeightedSemanticCue,
 } from '../performer/types.js';
 import { isConversationActionDecision } from '../performer/types.js';
 import type { VoiceInputEvent } from '../voice/voiceInput.js';
@@ -99,7 +100,7 @@ export interface ChatCardContext {
 export interface PerformanceContextPayload {
   callbackTendency: number;
   fragmentation: number;
-  semanticBiases: string[];
+  semanticBiases: WeightedSemanticCue[];
 }
 
 export interface AutonomyEvidenceContext {

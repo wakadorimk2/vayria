@@ -39,7 +39,8 @@ import {
 import {
   CONVERSATION_BACKCHANNEL_CUES,
   type ConversationActionDecision,
-  type PerformerStateContext
+  type PerformerStateContext,
+  type WeightedSemanticCue
 } from '../src/performer/types.js';
 import {
   VOICE_BACKCHANNEL_CUES,
@@ -54,6 +55,8 @@ import {
 } from './llmRuntime.js';
 import { ALL_CARD_IDS, BRAIN_CARD_COUNT, CARD_BY_ID, CardContractError, ConversationPolicyContractError, DEFAULT_LLM_RUNTIME, INTERACTIVE_POLICY_ACTIONS, MAX_ACTIVATED_CARDS, RequestError, VOICE_REPLY_INSTRUCTION, buildUsedReasonIdsProperty, isRetryableIncompleteResponseError, maxOutputTokensForChatMode, normalizeConversationActionDecision, type CardAssistantResponse, type ChatHistoryItem, type ChatMode, type GeneratedChatResponse, type LlmRequestContext, type LocalApiConfig, type PerformanceContextPayload, type StreamingReplyCallbacks } from './localApiSupport.js';
 import { createRequestLlmProviderTracker } from './localApiTelemetry.js';
+import { classifyTerminalStreamingEnvelope, resolveLlmProviderSource, runtimeForReplyAttempt, type ChatRetryCause } from './localApiSupport.js';
+import { OpenAiResponsesError } from './openAiResponses.js';
 import {
   IncrementalSpeechEnvelopeParser,
   isAcceptedSpeechLead,
@@ -222,9 +225,34 @@ export function buildVoiceInteractionPolicyDynamicPrompt(
     `callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
     `speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
     performanceContext.semanticBiases.length
-      ? `live direction cues: ${performanceContext.semanticBiases.join(' / ')}`
+      ? `live direction cues:\n${formatSemanticBiasesForPrompt(performanceContext.semanticBiases)}`
       : 'live direction cues: none',
   ].join('\n');
+}
+
+export function formatSemanticBiasesForPrompt(
+  semanticBiases: readonly WeightedSemanticCue[],
+): string {
+  if (!semanticBiases.length) return 'none';
+  const sorted = [...semanticBiases].sort(
+    (left, right) =>
+      right.weight - left.weight || left.cue.localeCompare(right.cue),
+  );
+  const primaryWeight = sorted[0]!.weight.toFixed(2);
+  const hasSecondaryWeight = sorted.some(
+    ({ weight }) => weight.toFixed(2) !== primaryWeight,
+  );
+  return sorted
+    .map(({ cue, weight }) => {
+      const formattedWeight = weight.toFixed(2);
+      if (!hasSecondaryWeight) {
+        return `- Influence (weight=${formattedWeight}): ${cue}`;
+      }
+      const role =
+        formattedWeight === primaryWeight ? 'Primary' : 'Secondary';
+      return `- ${role} influence (weight=${formattedWeight}): ${cue}`;
+    })
+    .join('\n');
 }
 
 export function buildConversationActionPolicySystemPrompt(
@@ -269,7 +297,7 @@ export function buildConversationActionPolicyDynamicPrompt(
     `callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
     `speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
     performanceContext.semanticBiases.length
-      ? `live direction cues: ${performanceContext.semanticBiases.join(' / ')}`
+      ? `live direction cues:\n${formatSemanticBiasesForPrompt(performanceContext.semanticBiases)}`
       : 'live direction cues: none',
   ].join('\n');
 }
@@ -329,7 +357,7 @@ export async function generateConversationActionPolicy(
     let completedReply = '';
     await telemetry.run(
       { purpose: 'conversation-policy', retry },
-      async (markFirstChunk, setMetadata) => {
+      async (markFirstChunk, setMetadata, trackExternalRequest) => {
         const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
         const result = await processStructuredLlm({
           apiKey: llm.apiKey,
@@ -348,6 +376,7 @@ export async function generateConversationActionPolicy(
           maxOutputTokens: 128,
           cacheKey: 'vayria:policy:interactive:v2',
           signal: llm.signal,
+          trackExternalRequest,
           onFallback: llm.onFallback,
           onTextDelta: (partial) => {
             markFirstChunk();
@@ -639,6 +668,11 @@ export async function generateReply(
   recentExpressionLevels: readonly ExpressionLevel[] = [],
 ): Promise<GeneratedChatResponse> {
   const streamingEnabled = streaming !== null;
+  const providerSource = resolveLlmProviderSource(
+    mode,
+    forcedCardId,
+    programContext,
+  );
   const includesInternalDelta = mode === 'autonomous';
   const forcedCardEnergy = forcedCardId
     ? CARD_REACTION_PROFILES[forcedCardId]?.behavior.energy ?? null
@@ -930,7 +964,7 @@ export async function generateReply(
     `callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
     `speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,
     performanceContext.semanticBiases.length
-      ? `live direction cues: ${performanceContext.semanticBiases.join(' / ')}`
+      ? `live direction cues:\n${formatSemanticBiasesForPrompt(performanceContext.semanticBiases)}`
       : 'live direction cues: none',
   ].join('\n');
   const internalDeltaInstruction = mode === 'autonomous' ? [
@@ -1035,6 +1069,21 @@ export async function generateReply(
       expressionBudget,
     );
 
+  type ParserMilestone = Parameters<
+    NonNullable<StreamingReplyCallbacks['onParserMilestone']>
+  >[0];
+  type ParserMilestoneMetadata = Parameters<
+    NonNullable<StreamingReplyCallbacks['onParserMilestone']>
+  >[1];
+  let lastParserMilestoneMetadata: ParserMilestoneMetadata | null = null;
+  const recordLastParserMilestone = (parserMilestone: ParserMilestone): void => {
+    if (!lastParserMilestoneMetadata) return;
+    streaming?.onParserMilestone?.(
+      parserMilestone,
+      lastParserMilestoneMetadata,
+    );
+  };
+
   const commitSpeechUnit = (
     header: Record<string, unknown>,
     rawUnit: string,
@@ -1046,29 +1095,50 @@ export async function generateReply(
     committedUnits.push(unit);
     committedResponse = candidate;
     streaming.onSpeechUnit(committedUnits.length - 1, unit, candidate);
+    recordLastParserMilestone('speech_unit_written');
   };
 
   const requestReply = async (
     correction?: string,
     fallbackOnOutputLimit = false,
+    retryCause: ChatRetryCause = null,
   ): Promise<string> => {
     const retry = providerCallCount;
     providerCallCount += 1;
+    const callIndex = telemetry.callCount + 1;
     let streamedReply = '';
     let completedReply = '';
+    let attemptExternalRequestIndex = 0;
     let envelopeParser = streamingEnabled
       ? new IncrementalSpeechEnvelopeParser()
       : null;
     let attemptHeader: Record<string, unknown> | null = null;
     let headerMilestoneRecorded = false;
     let leadMilestoneRecorded = false;
-    await telemetry.run(
-      { purpose: 'response-generation', retry },
-      async (markFirstChunk, setMetadata) => {
+    const recordAttemptParserMilestone = (
+      parserMilestone: ParserMilestone,
+    ): void => {
+      if (attemptExternalRequestIndex < 1) return;
+      lastParserMilestoneMetadata = {
+        callIndex,
+        retry,
+        externalRequestIndex: attemptExternalRequestIndex,
+      };
+      recordLastParserMilestone(parserMilestone);
+    };
+    try {
+      await telemetry.run(
+        { purpose: 'response-generation', retry },
+        async (markFirstChunk, setMetadata, trackExternalRequest) => {
         const prompt = correction ? `${systemPrompt}\n${correction}` : systemPrompt;
+        const attemptRuntime = runtimeForReplyAttempt(
+          llm.runtime,
+          providerSource,
+          retryCause,
+        );
         const result = await processStructuredLlm({
           apiKey: llm.apiKey,
-          runtime: llm.runtime,
+          runtime: attemptRuntime,
           legacyPrompt: prompt,
           staticPrompt: staticSystemPrompt,
           dynamicPrompt: correction
@@ -1083,7 +1153,7 @@ export async function generateReply(
             name: 'wildcard_assistant_response',
             schema: responseSchema,
           },
-          maxOutputTokens: maxOutputTokensForChatMode(mode),
+          maxOutputTokens: maxOutputTokensForChatMode(mode, retryCause),
           cacheKey:
             mode === 'voice'
               ? 'vayria:reply:voice:lead1:v2'
@@ -1091,9 +1161,23 @@ export async function generateReply(
                 ? 'vayria:reply:manual:lead1:v2'
                 : 'vayria:reply:autonomous:lead0:v2',
           signal: llm.signal,
+          trackExternalRequest,
+          onExternalRequestStart: (externalRequestIndex) => {
+            attemptExternalRequestIndex = externalRequestIndex;
+            lastParserMilestoneMetadata = {
+              callIndex,
+              retry,
+              externalRequestIndex,
+            };
+          },
           canFallback: () => committedUnits.length === 0,
           fallbackOnOutputLimit,
           onFallback: (reason) => {
+            if (reason === 'output_limit') {
+              recordAttemptParserMilestone(
+                classifyTerminalStreamingEnvelope(streamedReply),
+              );
+            }
             streamedReply = '';
             completedReply = '';
             attemptHeader = null;
@@ -1104,7 +1188,8 @@ export async function generateReply(
               : null;
             llm.onFallback(reason);
           },
-          onTextDelta: (partial) => {
+          onTextDelta: (partial, externalRequestIndex) => {
+            attemptExternalRequestIndex = externalRequestIndex;
             if (partial) markFirstChunk();
             streamedReply += partial;
             if (!partial || !envelopeParser || committedUnits.length >= 2) return;
@@ -1117,13 +1202,13 @@ export async function generateReply(
               attemptHeader = parsed.deliveryHeader as Record<string, unknown>;
               if (!headerMilestoneRecorded) {
                 headerMilestoneRecorded = true;
-                streaming?.onParserMilestone?.('delivery_header_complete');
+                recordAttemptParserMilestone('delivery_header_complete');
               }
             }
             if (!attemptHeader) return;
             if (parsed.speechLead !== undefined && !leadMilestoneRecorded) {
               leadMilestoneRecorded = true;
-              streaming?.onParserMilestone?.('speech_lead_complete');
+              recordAttemptParserMilestone('speech_lead_complete');
             }
             if (
               parsed.speechLead !== undefined &&
@@ -1133,7 +1218,7 @@ export async function generateReply(
               try {
                 commitSpeechUnit(attemptHeader, parsed.speechLead);
               } catch {
-                streaming?.onParserMilestone?.(
+                recordAttemptParserMilestone(
                   'provisional_validation_rejected',
                 );
                 // The full contract decides whether the attempt can retry.
@@ -1144,14 +1229,15 @@ export async function generateReply(
               try {
                 commitSpeechUnit(attemptHeader, unit);
               } catch {
-                streaming?.onParserMilestone?.(
+                recordAttemptParserMilestone(
                   'provisional_validation_rejected',
                 );
                 // The full contract decides whether the attempt can retry.
               }
             }
           },
-          onComplete: (complete) => {
+          onComplete: (complete, externalRequestIndex) => {
+            attemptExternalRequestIndex = externalRequestIndex;
             markFirstChunk();
             completedReply = complete;
           },
@@ -1165,8 +1251,19 @@ export async function generateReply(
             : {}),
         });
         if (!completedReply) completedReply = result.text;
-      },
-    );
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof OpenAiResponsesError &&
+        error.kind === 'incomplete'
+      ) {
+        recordAttemptParserMilestone(
+          classifyTerminalStreamingEnvelope(streamedReply),
+        );
+      }
+      throw error;
+    }
     const responseText = (completedReply || streamedReply).trim();
     if (!responseText) {
       throw new CardContractError('The chat provider returned an empty reply.');
@@ -1193,14 +1290,16 @@ export async function generateReply(
     let envelope;
     try {
       envelope = parseStreamingSpeechEnvelope(value);
-      streaming?.onParserMilestone?.('full_json_complete');
+      recordLastParserMilestone('full_json_complete');
     } catch (error) {
+      recordLastParserMilestone('full_json_rejected');
       throw new CardContractError(
         error instanceof Error ? error.message : 'Invalid streaming response.',
       );
     }
     const normalizedLead = envelope.speechLead.trim();
     if (!isAcceptedSpeechLead(normalizedLead)) {
+      recordLastParserMilestone('speech_lead_rejected');
       throw new CardContractError('speechLead must contain 4 to 12 characters.');
     }
     const normalizedUnits = [
@@ -1230,7 +1329,10 @@ export async function generateReply(
         );
         streaming?.onDeliveryMetadataRejected();
       } catch {
-        if (!committedResponse) throw error;
+        if (!committedResponse) {
+          recordLastParserMilestone('delivery_contract_rejected');
+          throw error;
+        }
         effectiveUnits = committedUnits;
         effectiveActivatedCards = provisionalActivatedCards(
           envelope.deliveryHeader,
@@ -1247,6 +1349,7 @@ export async function generateReply(
     if (
       committedUnits.some((unit, index) => effectiveUnits[index] !== unit)
     ) {
+      recordLastParserMilestone('committed_units_changed');
       throw new CardContractError('Committed speech units changed before completion.');
     }
     for (const unit of effectiveUnits.slice(committedUnits.length)) {
@@ -1262,7 +1365,10 @@ export async function generateReply(
         effectiveActivatedCards,
       );
     } catch (error) {
-      if (!committedResponse) throw error;
+      if (!committedResponse) {
+        recordLastParserMilestone('state_contract_rejected');
+        throw error;
+      }
       streaming?.onStateRejected();
       return {
         ...delivery,
@@ -1271,6 +1377,7 @@ export async function generateReply(
     }
   };
 
+  let retryCause: Exclude<ChatRetryCause, null>;
   try {
     const response = parseAttempt(await requestReply());
     return { response, providerCallCount };
@@ -1287,11 +1394,13 @@ export async function generateReply(
       };
     }
     if (isRetryableIncompleteResponseError(error)) {
+      retryCause = 'output_limit';
       console.warn(
         'Chat response reached its output limit before speech commit. Retrying once.',
       );
     } else {
       if (!(error instanceof CardContractError)) throw error;
+      retryCause = 'contract';
       console.warn('Chat card contract failed. Retrying once.', error.message);
     }
   }
@@ -1304,6 +1413,7 @@ export async function generateReply(
           : 'Your previous attempt violated the voice action, utterance-plan, or card contract. Return exactly one compatible voiceAction and backchannelCue. Use empty text, empty activatedCards, null speechAct, and null expressionLevel for listen, react_nonverbally, or backchannel. For take_floor, return a valid speechAct and an expressionLevel within the budget. The text must contain a concrete reaction and must not be only a generic acknowledgment. When the input announces or directly requests an action, perform the first concrete step or ask one concrete missing-information question; do not answer with meta-agreement only. Put the forced current card first when one exists.'
         : 'Your previous attempt violated the utterance-plan or card contract, or did not complete. Emit deliveryHeader and the short speech fields immediately. Keep internalDelta.reasonUpdates empty unless a state update is necessary. Follow the current brain-card subset, expression budget, forced-card-first requirements, and offered reason IDs exactly.',
       true,
+      retryCause,
     ),
   );
   return { response, providerCallCount };
@@ -1349,7 +1459,7 @@ export async function generateCardPreviewReply(
   let completedReply = '';
   await telemetry.run(
     { purpose: 'card-preview', retry: 0 },
-    async (markFirstChunk, setMetadata) => {
+    async (markFirstChunk, setMetadata, trackExternalRequest) => {
       const result = await processStructuredLlm({
         apiKey: llm.apiKey,
         runtime: llm.runtime,
@@ -1365,6 +1475,7 @@ export async function generateCardPreviewReply(
         maxOutputTokens: 256,
         cacheKey: 'vayria:card-preview:v2',
         signal: llm.signal,
+        trackExternalRequest,
         onFallback: llm.onFallback,
         onTextDelta: (partial) => {
           if (partial) markFirstChunk();
@@ -1435,7 +1546,7 @@ export function buildCardPreviewDynamicPrompt(
     `Behavior engagement: ${behavior.engagement}`,
     `Behavior gesture intention: ${behavior.gestureIntent}`,
     performanceContext.semanticBiases.length
-      ? `Runtime semantic cues: ${performanceContext.semanticBiases.join(' / ')}`
+      ? `Runtime semantic cues:\n${formatSemanticBiasesForPrompt(performanceContext.semanticBiases)}`
       : 'Runtime semantic cues: none',
     `Callback tendency: ${performanceContext.callbackTendency.toFixed(2)}`,
     `Speech fragmentation: ${performanceContext.fragmentation.toFixed(2)}`,

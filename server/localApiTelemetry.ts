@@ -4,6 +4,7 @@ import {
 } from './exhibitionCaptureStore.js';
 import {
   createLlmProviderCallTracker,
+  type LlmExternalRequestEvent,
   type LlmProviderCallTracker,
   type LlmProviderEvent,
   type LlmProviderSource
@@ -134,6 +135,13 @@ export function createRequestLlmProviderTracker(
     source: fields.source,
     signal: fields.signal,
     observe: fields.observe,
+    recordExternal: ({ event, ...externalFields }: LlmExternalRequestEvent) =>
+      recordStructuredEvent(config, event, {
+        origin: 'server',
+        requestId: fields.requestId,
+        runId: fields.runId,
+        ...externalFields,
+      }),
     record: ({ event, ...providerFields }) =>
       recordStructuredEvent(config, event, {
         origin: 'server',

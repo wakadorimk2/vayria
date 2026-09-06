@@ -48,7 +48,8 @@ import {
   type ConversationAction,
   type ConversationActionDecision,
   type ConversationBackchannelCue,
-  type PerformerStateContext
+  type PerformerStateContext,
+  type WeightedSemanticCue
 } from '../src/performer/types.js';
 import { isPlaycheckRunId } from '../src/playcheck.js';
 import {
@@ -68,6 +69,7 @@ import {
   type LlmRuntimeOptions
 } from './llmRuntime.js';
 import { OpenAiResponsesError } from './openAiResponses.js';
+import { parseStreamingSpeechEnvelope } from './streamingSpeech.js';
 import {
   type AivisCloudSynthesisResult
 } from './tts/aivisCloud.js';
@@ -280,14 +282,31 @@ export interface AivisStyle {
 
 export type ChatMode = 'manual' | 'voice' | 'autonomous';
 
+export type ChatRetryCause = 'output_limit' | 'contract' | null;
 export const CHAT_MAX_OUTPUT_TOKENS: Record<ChatMode, number> = {
   manual: 2_048,
   voice: 2_048,
   autonomous: 2_048,
 };
 
-export function maxOutputTokensForChatMode(mode: ChatMode): number {
+export function maxOutputTokensForChatMode(
+  mode: ChatMode,
+  retryCause: ChatRetryCause = null,
+): number {
+  if (mode === 'voice' && retryCause === 'output_limit') return 4_096;
   return CHAT_MAX_OUTPUT_TOKENS[mode];
+}
+
+export function runtimeForReplyAttempt(
+  runtime: LlmRuntimeOptions,
+  source: LlmProviderSource,
+  retryCause: ChatRetryCause = null,
+): LlmRuntimeOptions {
+  return runtime.profile === 'nano-implicit' &&
+    retryCause === 'output_limit' &&
+    (source === 'voice' || source === 'card_change')
+    ? { ...runtime, profile: 'luna-prefix' }
+    : runtime;
 }
 
 export function isRetryableIncompleteResponseError(error: unknown): boolean {
@@ -297,6 +316,17 @@ export function isRetryableIncompleteResponseError(error: unknown): boolean {
     (error.incompleteReason === 'max_output_tokens' ||
       error.incompleteReason === 'max_tokens')
   );
+}
+
+export function classifyTerminalStreamingEnvelope(
+  value: string,
+): 'terminal_envelope_parseable' | 'terminal_envelope_unparseable' {
+  try {
+    parseStreamingSpeechEnvelope(value);
+    return 'terminal_envelope_parseable';
+  } catch {
+    return 'terminal_envelope_unparseable';
+  }
 }
 
 export function buildUsedReasonIdsProperty(
@@ -324,7 +354,7 @@ export interface ChatHistoryItem {
 export interface PerformanceContextPayload {
   callbackTendency: number;
   fragmentation: number;
-  semanticBiases: string[];
+  semanticBiases: WeightedSemanticCue[];
 }
 
 export interface ChatRequestPayload {
@@ -573,9 +603,15 @@ export const PLAYCHECK_RECORD_FIELDS = [
   'purpose',
   'callIndex',
   'retry',
+  'externalRequestIndex',
   'providerCallCount',
   'profile',
   'apiEndpoint',
+  'maxOutputTokens',
+  'providerMaxOutputTokens',
+  'terminationKind',
+  'httpStatus',
+  'incompleteReason',
   'cacheMode',
   'cacheKeyVersion',
   'cacheStatus',
@@ -587,6 +623,9 @@ export const PLAYCHECK_RECORD_FIELDS = [
   'cacheWriteTokens',
   'outputTokens',
   'reasoningTokens',
+  'outputTextChars',
+  'outputTextDeltaCount',
+  'outputTextDone',
   'staticPrefixChars',
   'dynamicContextChars',
   'schemaBytes',
@@ -739,7 +778,19 @@ export interface StreamingReplyCallbacks {
       | 'speech_lead_complete'
       | 'provisional_validation_rejected'
       | 'full_json_complete'
-      | 'speech_unit_written',
+      | 'full_json_rejected'
+      | 'speech_lead_rejected'
+      | 'delivery_contract_rejected'
+      | 'committed_units_changed'
+      | 'state_contract_rejected'
+      | 'speech_unit_written'
+      | 'terminal_envelope_parseable'
+      | 'terminal_envelope_unparseable',
+    metadata: {
+      callIndex: number;
+      retry: number;
+      externalRequestIndex: number;
+    },
   ) => void;
 }
 

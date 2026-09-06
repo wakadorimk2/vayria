@@ -528,3 +528,6 @@ export { parseAutonomousAssistantResponse, parseCardPreviewResponse, parseConver
 export { VOICE_REPLY_INSTRUCTION, bindLlmProviderAbort, buildUsedReasonIdsProperty, createHealthResponse, isRetryableIncompleteResponseError, maxOutputTokensForChatMode, normalizeConversationActionDecision, normalizeVoiceInteractionDecision, resolveLlmProviderSource } from './localApiSupport.js';
 export type { LocalApiConfig, PerformanceContextPayload, TtsBackend } from './localApiSupport.js';
 export { createAivisSpeakerCatalogCache } from './ttsService.js';
+export { formatSemanticBiasesForPrompt } from './chatGeneration.js';
+export { classifyTerminalStreamingEnvelope, runtimeForReplyAttempt } from './localApiSupport.js';
+export type { ChatRetryCause } from './localApiSupport.js';

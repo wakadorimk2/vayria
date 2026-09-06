@@ -14,6 +14,7 @@ import type {
   PerformerState,
   PerformerStateContext,
   PerformerTrigger,
+  WeightedSemanticCue,
 } from './types.js';
 
 const MIN_EFFECT_INTENSITY = 0.001;
@@ -513,10 +514,34 @@ function createEmptyModifiers(): DirectionModifiers {
 export interface AggregatedDirectionState {
   modifiers: DirectionModifiers;
   constraints: DirectionContribution['constraints'];
-  semanticCues: string[];
+  semanticCues: WeightedSemanticCue[];
   activeDirectionIds: string[];
   attentionTarget: AttentionTarget | null;
   planOverrides?: DirectionContribution['planOverrides'];
+}
+
+function addSemanticCue(
+  cues: Map<string, number>,
+  rawCue: string,
+  weight: number,
+): void {
+  const cue = rawCue.trim();
+  if (!cue) return;
+  const normalizedWeight = clamp(weight);
+  if (normalizedWeight < MIN_EFFECT_INTENSITY) return;
+  cues.set(cue, Math.max(cues.get(cue) ?? 0, normalizedWeight));
+}
+
+function sortSemanticCues(
+  cues: ReadonlyMap<string, number>,
+): WeightedSemanticCue[] {
+  return [...cues.entries()]
+    .map(([cue, weight]) => ({ cue, weight }))
+    .sort(
+      (left, right) =>
+        right.weight - left.weight || left.cue.localeCompare(right.cue),
+    )
+    .slice(0, MAX_SEMANTIC_BIASES);
 }
 
 export function aggregateDirectionContributions(
@@ -525,7 +550,7 @@ export function aggregateDirectionContributions(
 ): AggregatedDirectionState {
   const modifiers = createEmptyModifiers();
   const constraints: DirectionContribution['constraints'] = [];
-  const semanticCues = new Set<string>();
+  const semanticCues = new Map<string, number>();
   const activeDirectionIds = new Set<string>();
   const sortedContributions = [...contributions].sort((left, right) =>
     left.directionId.localeCompare(right.directionId),
@@ -547,7 +572,7 @@ export function aggregateDirectionContributions(
       }
     }
     for (const cue of contribution.semanticCues) {
-      if (cue.trim()) semanticCues.add(cue.trim());
+      addSemanticCue(semanticCues, cue, 1);
     }
     const sortedEffects = [...contribution.effects].sort((left, right) =>
       left.id.localeCompare(right.id),
@@ -564,7 +589,7 @@ export function aggregateDirectionContributions(
         }
       }
       for (const cue of effect.modifiers.semanticBiases ?? []) {
-        if (cue.trim()) semanticCues.add(cue.trim());
+        addSemanticCue(semanticCues, cue, intensity);
       }
     }
   }
@@ -573,17 +598,17 @@ export function aggregateDirectionContributions(
     .filter((contribution) => contribution.attentionTarget !== undefined)
     .map((contribution) => contribution.attentionTarget as AttentionTarget)
     .sort((left, right) => left.localeCompare(right))[0] ?? null;
-  const sortedSemanticCues = [...semanticCues].sort();
+  const sortedSemanticCues = sortSemanticCues(semanticCues);
 
   return {
     modifiers: {
       ...modifiers,
-      semanticBiases: sortedSemanticCues.slice(0, MAX_SEMANTIC_BIASES),
+      semanticBiases: sortedSemanticCues.map(({ cue }) => cue),
     },
     constraints: [...constraints].sort((left, right) =>
       `${left.kind}:${left.scope}`.localeCompare(`${right.kind}:${right.scope}`),
     ),
-    semanticCues: sortedSemanticCues.slice(0, MAX_SEMANTIC_BIASES),
+    semanticCues: sortedSemanticCues,
     activeDirectionIds: [...activeDirectionIds].sort(),
     attentionTarget,
     planOverrides,
@@ -678,6 +703,13 @@ export function resolvePerformancePlan(
     aggregate.attentionTarget ?? getAttentionTarget(intent.attentionTarget);
   const planId = createPlanId();
   const activeDirectionIds = aggregate.activeDirectionIds;
+  const llmSemanticCues = new Map<string, number>();
+  for (const cue of intent.speechContext.semanticBiases) {
+    addSemanticCue(llmSemanticCues, cue, 1);
+  }
+  for (const { cue, weight } of aggregate.semanticCues) {
+    addSemanticCue(llmSemanticCues, cue, weight);
+  }
   const motion = aggregate.planOverrides
     ? aggregate.planOverrides.motion
     : resolvedIntent === 'speak'
@@ -725,14 +757,7 @@ export function resolvePerformancePlan(
                 effectiveProfile.callbackTendencyBaseline,
               ),
               fragmentation: clamp(effectiveProfile.fragmentationBaseline),
-              semanticBiases: [
-                ...new Set([
-                  ...intent.speechContext.semanticBiases,
-                  ...aggregate.semanticCues,
-                ]),
-              ]
-                .sort()
-                .slice(0, MAX_SEMANTIC_BIASES),
+              semanticBiases: sortSemanticCues(llmSemanticCues),
             },
           }
         : undefined,

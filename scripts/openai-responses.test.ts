@@ -110,8 +110,10 @@ test('Responses SSE parser preserves Unicode across every byte boundary', async 
   const wire = [
     'event: response.output_text.delta\n',
     'data: {"type":"response.output_text.delta","delta":"えっ🌙"}\n\n',
+    'event: response.output_text.done\n',
+    'data: {"type":"response.output_text.done","text":"private generated text"}\n\n',
     'event: response.completed\n',
-    'data: {"type":"response.completed","response":{"service_tier":"priority","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"cache_write_tokens":20},"output_tokens":12,"output_tokens_details":{"reasoning_tokens":0}}}}\n\n',
+    'data: {"type":"response.completed","response":{"model":"gpt-5.6-luna-2026-08-01","max_output_tokens":128,"service_tier":"priority","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"cache_write_tokens":20},"output_tokens":12,"output_tokens_details":{"reasoning_tokens":0}}}}\n\n',
     'data: [DONE]\n\n',
   ].join('');
   const encoded = new TextEncoder().encode(wire);
@@ -132,11 +134,20 @@ test('Responses SSE parser preserves Unicode across every byte boundary', async 
     outputTokens: 12,
     reasoningTokens: 0,
   });
+  assert.deepEqual(result.diagnostics, {
+    providerMaxOutputTokens: 128,
+    actualModel: 'gpt-5.6-luna-2026-08-01',
+    outputTextChars: 3,
+    outputTextDeltaCount: 1,
+    outputTextDone: 1,
+  });
 });
 
 test('incomplete output is not classified as availability fallback', async () => {
-  const wire =
-    'data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"output_tokens":512,"output_tokens_details":{"reasoning_tokens":500}}}}\n\n';
+  const wire = [
+    'data: {"type":"response.output_text.delta","delta":"未完🌙"}\n\n',
+    'data: {"type":"response.incomplete","response":{"status":"incomplete","model":"gpt-5-nano-2026-08-07","max_output_tokens":2048,"incomplete_details":{"reason":"max_output_tokens"},"usage":{"output_tokens":512,"output_tokens_details":{"reasoning_tokens":500}}}}\n\n',
+  ].join('');
   await assert.rejects(
     streamOpenAiResponse({
       ...baseRequest,
@@ -149,6 +160,13 @@ test('incomplete output is not classified as availability fallback', async () =>
       assert.equal(error.incompleteReason, 'max_output_tokens');
       assert.equal(error.usage?.outputTokens, 512);
       assert.equal(error.usage?.reasoningTokens, 500);
+      assert.deepEqual(error.diagnostics, {
+        providerMaxOutputTokens: 2_048,
+        actualModel: 'gpt-5-nano-2026-08-07',
+        outputTextChars: 3,
+        outputTextDeltaCount: 1,
+        outputTextDone: 0,
+      });
       assert.equal(error.retryableAvailabilityFailure, false);
       return true;
     },

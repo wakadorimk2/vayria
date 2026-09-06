@@ -153,7 +153,84 @@ test('direction aggregation is independent of contribution order', () => {
 
   assert.deepEqual(forward, reverse);
   assert.deepEqual(forward.activeDirectionIds, ['effect-a', 'effect-b']);
-  assert.deepEqual(forward.semanticCues, ['alpha', 'beta', 'gamma', 'zeta']);
+  assert.deepEqual(forward.semanticCues, [
+    { cue: 'alpha', weight: 1 },
+    { cue: 'beta', weight: 1 },
+    { cue: 'gamma', weight: 1 },
+    { cue: 'zeta', weight: 1 },
+  ]);
+});
+
+test('semantic cues preserve effective weight, max duplicates, and decay', () => {
+  const forced = {
+    ...createEffect('forced', { semanticBiases: ['primary', 'duplicate'] }),
+    intensity: 1,
+  };
+  const background = {
+    ...createEffect('background', {
+      semanticBiases: ['secondary', 'duplicate'],
+    }),
+    intensity: 0.2,
+  };
+  const decaying = {
+    ...createEffect('decaying', { semanticBiases: ['decaying'] }),
+    durationMs: 1_000,
+    decay: 'linear' as const,
+  };
+  const contribution = createContribution(
+    'weighted',
+    [background, decaying, forced],
+    {
+      constraints: [{ kind: 'require_speech', scope: 'current_plan' }],
+    },
+  );
+  const aggregate = aggregateDirectionContributions([contribution], 500);
+
+  assert.deepEqual(aggregate.semanticCues, [
+    { cue: 'duplicate', weight: 1 },
+    { cue: 'primary', weight: 1 },
+    { cue: 'decaying', weight: 0.5 },
+    { cue: 'secondary', weight: 0.2 },
+  ]);
+
+  const plan = resolvePerformancePlan(
+    createActionIntent(
+      { kind: 'external_stimulus', semanticCue: 'weighted-test' },
+      createState(),
+    ),
+    [contribution],
+    createState(),
+    DEFAULT_PERFORMER_PROFILE,
+    500,
+  );
+  assert.deepEqual(plan.speech?.llmContext.semanticBiases, aggregate.semanticCues);
+});
+
+test('semantic cue limit keeps highest weights with stable tie ordering', () => {
+  const effects = Array.from({ length: 13 }, (_, index) => ({
+    ...createEffect(`effect-${index}`, {
+      semanticBiases: [`cue-${String(index).padStart(2, '0')}`],
+    }),
+    intensity: index === 12 ? 1 : 0.2,
+  }));
+  const aggregate = aggregateDirectionContributions(
+    [
+      createContribution('weighted', effects, {
+        semanticCues: ['direct'],
+      }),
+    ],
+    0,
+  );
+
+  assert.equal(aggregate.semanticCues.length, 12);
+  assert.deepEqual(aggregate.semanticCues.slice(0, 2), [
+    { cue: 'cue-12', weight: 1 },
+    { cue: 'direct', weight: 1 },
+  ]);
+  assert.equal(
+    aggregate.semanticCues.some(({ cue }) => cue === 'cue-11'),
+    false,
+  );
 });
 
 test('opaque external stimulus uses the neutral Core baseline', () => {

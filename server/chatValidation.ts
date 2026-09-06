@@ -63,6 +63,7 @@ import {
   isConversationActionDecision,
   type ConversationActionDecision,
   type PerformerStateContext,
+  type WeightedSemanticCue,
 } from '../src/performer/types.js';
 import { isPlaycheckRunId } from '../src/playcheck.js';
 import {
@@ -587,6 +588,88 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
   return eventPayload;
 }
 
+function readWeightedSemanticCues(value: unknown): WeightedSemanticCue[] {
+  if (!Array.isArray(value) || value.length > 12) {
+    throw new RequestError('performanceContext format is invalid.', 400);
+  }
+
+  const cues = new Map<string, number>();
+  for (const candidate of value) {
+    if (
+      !candidate ||
+      typeof candidate !== 'object' ||
+      Array.isArray(candidate)
+    ) {
+      throw new RequestError('performanceContext format is invalid.', 400);
+    }
+    const record = candidate as Record<string, unknown>;
+    if (
+      Object.keys(record).some((key) => key !== 'cue' && key !== 'weight')
+    ) {
+      throw new RequestError('performanceContext format is invalid.', 400);
+    }
+    const cue = typeof record.cue === 'string' ? record.cue.trim() : '';
+    const weight = record.weight;
+    if (
+      cue.length < 1 ||
+      cue.length > 200 ||
+      typeof weight !== 'number' ||
+      !Number.isFinite(weight) ||
+      weight <= 0 ||
+      weight > 1
+    ) {
+      throw new RequestError('performanceContext format is invalid.', 400);
+    }
+    cues.set(cue, Math.max(cues.get(cue) ?? 0, weight));
+  }
+
+  return [...cues.entries()]
+    .map(([cue, weight]) => ({ cue, weight }))
+    .sort(
+      (left, right) =>
+        right.weight - left.weight || left.cue.localeCompare(right.cue),
+    );
+}
+
+function readPerformanceContext(value: unknown): PerformanceContextPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RequestError('performanceContext must be an object.', 400);
+  }
+  const context = value as Record<string, unknown>;
+  if (
+    Object.keys(context).some(
+      (key) =>
+        key !== 'callbackTendency' &&
+        key !== 'fragmentation' &&
+        key !== 'semanticBiases',
+    )
+  ) {
+    throw new RequestError(
+      'performanceContext contains an unsupported field.',
+      400,
+    );
+  }
+  const callbackTendency = context.callbackTendency;
+  const fragmentation = context.fragmentation;
+  if (
+    typeof callbackTendency !== 'number' ||
+    !Number.isFinite(callbackTendency) ||
+    callbackTendency < 0 ||
+    callbackTendency > 1 ||
+    typeof fragmentation !== 'number' ||
+    !Number.isFinite(fragmentation) ||
+    fragmentation < 0 ||
+    fragmentation > 1
+  ) {
+    throw new RequestError('performanceContext format is invalid.', 400);
+  }
+  return {
+    callbackTendency,
+    fragmentation,
+    semanticBiases: readWeightedSemanticCues(context.semanticBiases),
+  };
+}
+
 export function readCardPreviewRequest(
   payload: unknown,
 ): CardPreviewRequestPayload {
@@ -608,59 +691,9 @@ export function readCardPreviewRequest(
     throw new RequestError('cardId must be a known card ID.', 400);
   }
 
-  const performanceContextValue = record.performanceContext;
-  if (
-    !performanceContextValue ||
-    typeof performanceContextValue !== 'object' ||
-    Array.isArray(performanceContextValue)
-  ) {
-    throw new RequestError('performanceContext must be an object.', 400);
-  }
-
-  const context = performanceContextValue as Record<string, unknown>;
-  if (
-    Object.keys(context).some(
-      (key) =>
-        key !== 'callbackTendency' &&
-        key !== 'fragmentation' &&
-        key !== 'semanticBiases',
-    )
-  ) {
-    throw new RequestError(
-      'performanceContext contains an unsupported field.',
-      400,
-    );
-  }
-
-  const callbackTendency = context.callbackTendency;
-  const fragmentation = context.fragmentation;
-  const semanticBiases = context.semanticBiases;
-  if (
-    typeof callbackTendency !== 'number' ||
-    !Number.isFinite(callbackTendency) ||
-    callbackTendency < 0 ||
-    callbackTendency > 1 ||
-    typeof fragmentation !== 'number' ||
-    !Number.isFinite(fragmentation) ||
-    fragmentation < 0 ||
-    fragmentation > 1 ||
-    !Array.isArray(semanticBiases) ||
-    semanticBiases.length > 12 ||
-    !semanticBiases.every(
-      (cue): cue is string =>
-        typeof cue === 'string' && cue.trim().length <= 200,
-    )
-  ) {
-    throw new RequestError('performanceContext format is invalid.', 400);
-  }
-
   return {
     cardId,
-    performanceContext: {
-      callbackTendency,
-      fragmentation,
-      semanticBiases: semanticBiases.map((cue) => cue.trim()).filter(Boolean),
-    },
+    performanceContext: readPerformanceContext(record.performanceContext),
   };
 }
 
@@ -1003,53 +1036,7 @@ export function readChatRequest(payload: unknown): ChatRequestPayload {
     semanticBiases: [],
   };
   if (performanceContextValue !== undefined) {
-    if (
-      !performanceContextValue ||
-      typeof performanceContextValue !== 'object' ||
-      Array.isArray(performanceContextValue)
-    ) {
-      throw new RequestError('performanceContext must be an object.', 400);
-    }
-    const context = performanceContextValue as Record<string, unknown>;
-    if (
-      Object.keys(context).some(
-        (key) =>
-          key !== 'callbackTendency' &&
-          key !== 'fragmentation' &&
-          key !== 'semanticBiases',
-      )
-    ) {
-      throw new RequestError(
-        'performanceContext contains an unsupported field.',
-        400,
-      );
-    }
-    const callbackTendency = context.callbackTendency;
-    const fragmentation = context.fragmentation;
-    const semanticBiases = context.semanticBiases;
-    if (
-      typeof callbackTendency !== 'number' ||
-      !Number.isFinite(callbackTendency) ||
-      callbackTendency < 0 ||
-      callbackTendency > 1 ||
-      typeof fragmentation !== 'number' ||
-      !Number.isFinite(fragmentation) ||
-      fragmentation < 0 ||
-      fragmentation > 1 ||
-      !Array.isArray(semanticBiases) ||
-      semanticBiases.length > 12 ||
-      !semanticBiases.every(
-        (cue): cue is string =>
-          typeof cue === 'string' && cue.trim().length <= 200,
-      )
-    ) {
-      throw new RequestError('performanceContext format is invalid.', 400);
-    }
-    performanceContext = {
-      callbackTendency,
-      fragmentation,
-      semanticBiases: semanticBiases.map((cue) => cue.trim()).filter(Boolean),
-    };
+    performanceContext = readPerformanceContext(performanceContextValue);
   }
 
   const autonomyCandidateValue = record.autonomyCandidate;

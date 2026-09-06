@@ -6,17 +6,26 @@ export interface OpenAiStructuredOutput {
 }
 
 export interface OpenAiResponseUsage {
-  inputTokens: number;
-  cachedTokens: number;
-  cacheWriteTokens: number;
-  outputTokens: number;
-  reasoningTokens: number;
+  inputTokens?: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+}
+
+export interface OpenAiResponseDiagnostics {
+  providerMaxOutputTokens: number | null;
+  actualModel: string | null;
+  outputTextChars: number;
+  outputTextDeltaCount: number;
+  outputTextDone: 0 | 1;
 }
 
 export interface OpenAiResponseResult {
   text: string;
   serviceTier: string | null;
   usage: OpenAiResponseUsage;
+  diagnostics: OpenAiResponseDiagnostics;
 }
 
 export interface OpenAiResponseRequest {
@@ -58,6 +67,7 @@ export class OpenAiResponsesError extends Error {
   readonly status: number | null;
   readonly incompleteReason: OpenAiIncompleteReason | null;
   readonly usage: OpenAiResponseUsage | null;
+  readonly diagnostics: OpenAiResponseDiagnostics | null;
   readonly retryableAvailabilityFailure: boolean;
 
   constructor(
@@ -67,6 +77,7 @@ export class OpenAiResponsesError extends Error {
       status?: number;
       incompleteReason?: OpenAiIncompleteReason;
       usage?: OpenAiResponseUsage;
+      diagnostics?: OpenAiResponseDiagnostics;
       cause?: unknown;
     },
   ) {
@@ -76,6 +87,7 @@ export class OpenAiResponsesError extends Error {
     this.status = options.status ?? null;
     this.incompleteReason = options.incompleteReason ?? null;
     this.usage = options.usage ?? null;
+    this.diagnostics = options.diagnostics ?? null;
     this.retryableAvailabilityFailure =
       options.kind === 'connection' ||
       (options.kind === 'http' &&
@@ -97,10 +109,6 @@ function readIncompleteReason(
     : 'unknown';
 }
 
-function numberOrZero(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
 function readUsage(response: Record<string, unknown>): OpenAiResponseUsage {
   const usage =
     response.usage && typeof response.usage === 'object'
@@ -114,14 +122,53 @@ function readUsage(response: Record<string, unknown>): OpenAiResponseUsage {
     usage.output_tokens_details && typeof usage.output_tokens_details === 'object'
       ? (usage.output_tokens_details as Record<string, unknown>)
       : {};
+  const fields = {
+    inputTokens: usage.input_tokens,
+    cachedTokens: inputDetails.cached_tokens,
+    cacheWriteTokens: inputDetails.cache_write_tokens ?? usage.cache_write_tokens,
+    outputTokens: usage.output_tokens,
+    reasoningTokens: outputDetails.reasoning_tokens,
+  };
+  const result: OpenAiResponseUsage = {};
+  for (const field of Object.keys(fields) as (keyof OpenAiResponseUsage)[]) {
+    const value = fields[field];
+    // Keep absent usage distinct from a provider-reported zero.
+    if (typeof value === 'number' && Number.isFinite(value)) result[field] = value;
+  }
+  return result;
+}
+
+function readProviderMaxOutputTokens(
+  response: Record<string, unknown>,
+): number | null {
+  const value = response.max_output_tokens;
+  return typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+    ? value
+    : null;
+}
+
+function readActualModel(response: Record<string, unknown>): string | null {
+  const value = response.model;
+  return typeof value === 'string' &&
+    /^[A-Za-z0-9._:-]{1,128}$/u.test(value)
+    ? value
+    : null;
+}
+
+function buildDiagnostics(
+  response: Record<string, unknown>,
+  text: string,
+  outputTextDeltaCount: number,
+  outputTextDone: boolean,
+): OpenAiResponseDiagnostics {
   return {
-    inputTokens: numberOrZero(usage.input_tokens),
-    cachedTokens: numberOrZero(inputDetails.cached_tokens),
-    cacheWriteTokens: numberOrZero(
-      inputDetails.cache_write_tokens ?? usage.cache_write_tokens,
-    ),
-    outputTokens: numberOrZero(usage.output_tokens),
-    reasoningTokens: numberOrZero(outputDetails.reasoning_tokens),
+    providerMaxOutputTokens: readProviderMaxOutputTokens(response),
+    actualModel: readActualModel(response),
+    outputTextChars: Array.from(text).length,
+    outputTextDeltaCount,
+    outputTextDone: outputTextDone ? 1 : 0,
   };
 }
 
@@ -285,6 +332,8 @@ export async function streamOpenAiResponse(
   const decoder = new TextDecoder();
   let buffer = '';
   let text = '';
+  let outputTextDeltaCount = 0;
+  let outputTextDone = false;
   let completed: Record<string, unknown> | null = null;
   const consume = (block: string): void => {
     const event = readSseEvent(block);
@@ -304,8 +353,13 @@ export async function streamOpenAiResponse(
       const delta = typeof parsed.delta === 'string' ? parsed.delta : '';
       if (delta) {
         text += delta;
+        outputTextDeltaCount += 1;
         request.onTextDelta?.(delta);
       }
+      return;
+    }
+    if (eventType === 'response.output_text.done') {
+      outputTextDone = true;
       return;
     }
     if (eventType === 'response.completed') {
@@ -318,6 +372,12 @@ export async function streamOpenAiResponse(
         kind: 'incomplete',
         incompleteReason: readIncompleteReason(incompleteResponse),
         usage: readUsage(incompleteResponse ?? {}),
+        diagnostics: buildDiagnostics(
+          incompleteResponse ?? {},
+          text,
+          outputTextDeltaCount,
+          outputTextDone,
+        ),
       });
     }
     if (eventType === 'response.failed' || eventType === 'error') {
@@ -372,5 +432,11 @@ export async function streamOpenAiResponse(
         ? finalResponse.service_tier
         : null,
     usage: readUsage(finalResponse),
+    diagnostics: buildDiagnostics(
+      finalResponse,
+      text,
+      outputTextDeltaCount,
+      outputTextDone,
+    ),
   };
 }
