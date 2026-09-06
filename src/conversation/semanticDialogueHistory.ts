@@ -16,9 +16,16 @@ export interface SemanticAssistantUtterance {
   committedAt: number;
 }
 
+export interface SemanticUserUtterance {
+  kind: 'user_utterance';
+  user: string;
+  committedAt: number;
+}
+
 export type SemanticDialogueEntry =
   | SemanticDialogueTurn
-  | SemanticAssistantUtterance;
+  | SemanticAssistantUtterance
+  | SemanticUserUtterance;
 
 export const DEFAULT_HISTORY_TURN_LIMIT = 5;
 export const MAX_SEMANTIC_HISTORY_MESSAGES = 10;
@@ -35,6 +42,7 @@ function normalizeLimit(value: number): number {
 export class SemanticDialogueHistory {
   private readonly entries: SemanticDialogueEntry[] = [];
   private readonly limit: number;
+  private readonly turns = new Map<string, { entry: SemanticDialogueEntry; units: Set<number> }>();
 
   constructor(limit = DEFAULT_HISTORY_TURN_LIMIT) {
     this.limit = normalizeLimit(limit);
@@ -68,6 +76,33 @@ export class SemanticDialogueHistory {
 
   clear(): void {
     this.entries.length = 0;
+    this.turns.clear();
+  }
+
+  beginTurn(id: string, user: string | null, at = Date.now()): void {
+    if (this.turns.has(id)) return;
+    const entry: SemanticDialogueEntry = user?.trim()
+      ? { kind: 'user_utterance', user: user.trim(), committedAt: at }
+      : { kind: 'assistant_utterance', assistant: '', committedAt: at };
+    this.turns.set(id, { entry, units: new Set() });
+    this.entries.push(entry);
+    this.trim();
+  }
+
+  appendDeliveredUnit(id: string, index: number, text: string): string | null {
+    const turn = this.turns.get(id);
+    if (!turn || turn.units.has(index) || !text.trim()) return null;
+    turn.units.add(index);
+    const old = turn.entry;
+    const assistant = ('assistant' in old ? old.assistant : '') + text.trim();
+    const entry: SemanticDialogueEntry = 'user' in old
+      ? { kind: 'dialogue_turn', user: old.user, assistant, committedAt: old.committedAt }
+      : { kind: 'assistant_utterance', assistant, committedAt: old.committedAt };
+    const position = this.entries.indexOf(old);
+    if (position < 0) return null;
+    this.entries[position] = entry;
+    turn.entry = entry;
+    return assistant;
   }
 
   snapshot(): readonly SemanticDialogueEntry[] {
@@ -81,7 +116,9 @@ export class SemanticDialogueHistory {
             { role: 'user' as const, content: entry.user },
             { role: 'assistant' as const, content: entry.assistant },
           ]
-        : [{ role: 'assistant' as const, content: entry.assistant }],
+        : entry.kind === 'user_utterance'
+        ? [{ role: 'user' as const, content: entry.user }]
+        : entry.assistant ? [{ role: 'assistant' as const, content: entry.assistant }] : [],
     );
     return messages.slice(-MAX_SEMANTIC_HISTORY_MESSAGES);
   }
@@ -89,6 +126,9 @@ export class SemanticDialogueHistory {
   private trim(): void {
     if (this.entries.length > this.limit) {
       this.entries.splice(0, this.entries.length - this.limit);
+    }
+    for (const [id, turn] of this.turns) {
+      if (!this.entries.includes(turn.entry)) this.turns.delete(id);
     }
   }
 }

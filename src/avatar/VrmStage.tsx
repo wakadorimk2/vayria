@@ -1,3 +1,4 @@
+import { AvatarLoadOwnership } from './avatarLoadOwnership';
 import {
   forwardRef,
   useCallback,
@@ -7,6 +8,7 @@ import {
   useState,
 } from 'react';
 import {
+  type Object3D,
   Box3,
   Clock,
   PerspectiveCamera,
@@ -985,6 +987,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       renderer.outputColorSpace = SRGBColorSpace;
 
       let disposed = false;
+      const avatarOwnership = new AvatarLoadOwnership<Object3D>((model) => VRMUtils.deepDispose(model));
       let loadedVrm: VRM | null = null;
       let animationFrame = 0;
       let mouthExpression: string | null = null;
@@ -1088,6 +1091,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           return;
         }
 
+        if (!avatarOwnership.active) return;
         loader.load(
           MODEL_URL,
           (gltf) => {
@@ -2411,8 +2415,9 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         loadedVrmRef.current = null;
         if (loadedVrm) {
           scene.remove(loadedVrm.scene);
-          VRMUtils.deepDispose(loadedVrm.scene);
+
         }
+        avatarOwnership.dispose();
         renderer.dispose();
       };
     }, [
