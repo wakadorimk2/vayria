@@ -1,3 +1,5 @@
+import { createServer, request as httpRequest } from 'node:http';
+import { bindLlmProviderAbort } from '../server/localApi.js';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -249,6 +251,7 @@ async function requestRoute(
   handler: Middleware,
   options: {
     abortAfterMs?: number;
+    closeAfterMs?: number;
     backpressureOnFirstWrite?: boolean;
     method: string;
     url: string;
@@ -333,7 +336,12 @@ async function requestRoute(
       request.emit('aborted');
     }, options.abortAfterMs);
   }
+  if (options.closeAfterMs !== undefined) {
+    setTimeout(() => { responseDestroyed = true; response.emit('close'); resolveEnded(); }, options.closeAfterMs);
+  }
   await waitForResponseEnd(ended);
+  // The handler must also finish its upstream cancellation after socket close.
+  if (options.closeAfterMs !== undefined) await new Promise(resolve => setTimeout(resolve, 10));
   return {
     statusCode,
     body,
@@ -999,5 +1007,132 @@ test('normal local API configuration does not create exhibition files', async ()
     );
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Local TTS abort stops the turn while a shared speaker request remains pending (response close after body)', async () => {
+  const originalFetch = globalThis.fetch;
+  let audioQueryCalls = 0;
+  globalThis.fetch = async (input) => {
+    const pathname = new URL(String(input)).pathname;
+    if (pathname === '/speakers') return new Promise<Response>(() => undefined);
+    if (pathname === '/audio_query') audioQueryCalls += 1;
+    return new Response(null, { status: 500 });
+  };
+  try {
+    const fake = createFakeServer();
+    configurePlugin({ ttsBackend: 'local' }, fake.server);
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'abort fixture', emotion: 'neutral', unitIndex: 0 },
+      closeAfterMs: 5,
+    });
+    assert.equal(result.destroyed, true);
+    assert.equal(audioQueryCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Cloud-with-fallback stops without Local synthesis after a client abort (response close after body)', async () => {
+  const originalFetch = globalThis.fetch;
+  let localCalls = 0;
+  globalThis.fetch = async (input, init) => {
+    if (createLocalTtsResponse(input)) {
+      localCalls += 1;
+      return createLocalTtsResponse(input)!;
+    }
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        },
+      }),
+      { status: 200 },
+    );
+  };
+  try {
+    const fake = createFakeServer();
+    configurePlugin({
+      ttsBackend: 'cloud-with-fallback',
+      aivisCloudApiKey: 'route-cloud-key',
+      aivisCloudBaseUrl: 'https://cloud.example.test',
+      aivisCloudFirstAudioTimeoutMs: 50,
+      aivisCloudModelUuid: '11111111-2222-4333-8444-555555555555',
+    }, fake.server);
+    const result = await requestRoute(fake.handlers[0], {
+      method: 'POST',
+      url: '/api/tts',
+      body: { text: 'private fixture text', emotion: 'neutral' },
+      closeAfterMs: 5,
+    });
+
+    assert.equal(result.statusCode, 0);
+    assert.equal(result.destroyed, true);
+    assert.equal(localCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('abort binding detects an already closed response and preserves normal completion', () => {
+  const req = new EventEmitter() as IncomingMessage;
+  const res = Object.assign(new EventEmitter(), { writableEnded: false, destroyed: true }) as ServerResponse;
+  const controller = new AbortController();
+  const unbind = bindLlmProviderAbort(req, res, controller);
+  assert.equal(controller.signal.aborted, true);
+  unbind();
+  assert.equal(req.listenerCount('aborted'), 0);
+  assert.equal(res.listenerCount('close'), 0);
+  const normal = Object.assign(new EventEmitter(), { writableEnded: true, destroyed: false }) as ServerResponse;
+  const completed = new AbortController();
+  const detach = bindLlmProviderAbort(req, normal, completed);
+  normal.emit('close');
+  assert.equal(completed.signal.aborted, false);
+  detach();
+});
+
+test('real HTTP disconnect after request body aborts Local synthesis', { timeout: 3000 }, async () => {
+  const originalFetch = globalThis.fetch;
+  const fake = createFakeServer();
+  configurePlugin({ ttsBackend: 'local' }, fake.server);
+  let resolveWaiting!: () => void;
+  let resolveAborted!: () => void;
+  const waiting = new Promise<void>(resolve => { resolveWaiting = resolve; });
+  const aborted = new Promise<void>(resolve => { resolveAborted = resolve; });
+  let bodyComplete = false;
+  globalThis.fetch = async (input, init) => {
+    if (new URL(String(input)).pathname === '/audio_query') {
+      resolveWaiting();
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => { resolveAborted(); reject(new DOMException('aborted', 'AbortError')); }, { once: true });
+      });
+    }
+    return createLocalTtsResponse(input)!;
+  };
+  const server = createServer((req, res) => {
+    req.on('end', () => { bodyComplete = req.complete; });
+    fake.handlers[0](req, res, () => res.end());
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const client = httpRequest({ host: '127.0.0.1', port: address.port, method: 'POST', path: '/api/tts', headers: { 'Content-Type': 'application/json' } });
+  client.on('error', () => {});
+  try {
+    client.end(JSON.stringify({ text: 'fixture', emotion: 'neutral' }));
+    await waiting;
+    assert.equal(bodyComplete, true);
+    client.destroy();
+    await aborted;
+  } finally {
+    client.destroy(); server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    globalThis.fetch = originalFetch;
   }
 });

@@ -833,6 +833,27 @@ test('cancellation stops waiting playback and ignores stale motion', async () =>
   assert.deepEqual(events, ['audio_stop', 'motion_stop']);
 });
 
+test('a superseded audio rejection cannot stop the new playback', async () => {
+  let stops = 0;
+  const pending: { resolve: () => void; reject: (error: Error) => void }[] = [];
+  const coordinator = new PerformancePlaybackCoordinator({
+    getMotionPort: () => null,
+    playAudio: () => new Promise<void>((resolve, reject) => pending.push({ resolve, reject })),
+    stopAudio: () => { stops += 1; },
+  });
+  const old = coordinator.play(createPlan({ planId: 'old', motion: undefined }), bufferSource());
+  await flushPlaybackMicrotasks();
+  const next = coordinator.play(createPlan({ planId: 'next', motion: undefined }), bufferSource());
+  await flushPlaybackMicrotasks();
+  assert.equal(pending.length, 2);
+  const stopsBeforeRejection = stops;
+  pending[0].reject(new Error('late audio failure'));
+  assert.equal(await old, null);
+  assert.equal(stops, stopsBeforeRejection);
+  pending[1].resolve();
+  assert.ok(await next);
+});
+
 test('cancellation before audio completion suppresses stale speech end and finish', async () => {
   const events: string[] = [];
   const clock = new FakeClock();

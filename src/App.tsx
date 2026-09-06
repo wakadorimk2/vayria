@@ -7,23 +7,28 @@ import {
   type CSSProperties,
   type FormEvent,
 } from 'react';
-import { VrmStage, type VrmStageHandle } from './avatar/VrmStage';
+import { useAutonomyReasons } from './app/useAutonomyReasons';
+import { useBargeInControl } from './app/useBargeInControl';
+import { useCardAttention } from './app/useCardAttention';
+import { useListeningBackchannels } from './app/useListeningBackchannels';
+import { usePerformancePresentation } from './app/usePerformancePresentation';
+import { SpatialTargetRegistry } from './attention/spatialTargetRegistry';
 import { useCameraAttention } from './attention/useCameraAttention';
-import { AttentionEnergyController } from './attention/attentionEnergyController';
-import {
-  DragAttentionController,
-  DRAG_ATTENTION_TICK_MS,
-} from './attention/dragAttentionController';
 import { useAudioLipSync } from './audio/useAudioLipSync';
+import { VrmStage, type VrmStageHandle } from './avatar/VrmStage';
 import {
   CardGamePrototype,
   type CardAttentionInput,
-  type CardInteractionTarget,
   type CardDragPositionUpdate,
+  type CardInteractionTarget,
 } from './cards/CardGamePrototype';
+import {
+  CARD_INTERACTION_CUE_DURATION_MS,
+  shouldReactToCardInteraction
+} from './cards/cardReactions';
+import type { CardSwapResult } from './cards/useCardGamePrototype';
 import { useCardGamePrototype } from './cards/useCardGamePrototype';
-import { CardDropReactionController } from './cards/cardDropReaction';
-import { SpatialTargetRegistry } from './attention/spatialTargetRegistry';
+import { useWildcardDirection } from './cards/wildcardDirection';
 import {
   addCharacterAlias,
   parseExplicitAliasInstruction,
@@ -32,89 +37,58 @@ import {
   type CharacterIdentity,
 } from './character/identity';
 import {
-  useAutonomousTalk,
-  type AutonomyCandidateTelemetry,
-  type AutonomyExternalEventSignal,
-  type AutonomousTurnOutcome,
-} from './conversation/useAutonomousTalk';
-import {
-  readAutonomyTurnGateTiming,
-  type AutonomyTurnGateExternalEvent,
-} from './conversation/autonomyTurnGate';
-import { emitAutonomyGateEvent } from './conversation/conversationEvents';
-import {
   INITIAL_AUTONOMOUS_CONTEXT,
   recordViewerIntent,
 } from './conversation/autonomousContext';
 import {
-  applyReasonUpdates,
   completeInactiveEpisodes,
-  createAutonomyEvidenceId,
   createInitialAutonomyState,
   markCandidateOffered,
-  observeAutonomyEvidence,
   resolveUsedReasons,
   selectAutonomyCandidate,
-  type AutonomyCandidate,
-  type AutonomyEvidence,
-  type AutonomyInternalDelta,
-  type AutonomyState,
+  type AutonomyCandidate
 } from './conversation/autonomyState';
 import {
-  useConversation,
-  type AutonomyDeltaContext,
-  type AutonomyEvidenceContext,
-  type AutonomousContext,
-  type ChatCardContext,
-} from './conversation/useConversation';
+  readAutonomyTurnGateTiming
+} from './conversation/autonomyTurnGate';
+import { emitAutonomyGateEvent } from './conversation/conversationEvents';
 import {
   DEFAULT_PROGRAM_CONTEXT,
   type ProgramContext,
   type ProgramPhase,
 } from './conversation/programContext';
-import type { CardSwapResult } from './cards/useCardGamePrototype';
 import {
-  CARD_INTERACTION_CUE_DURATION_MS,
-  CARD_INTERACTION_ATTENTION_DURATION_MS,
-  shouldReactToCardInteraction,
-} from './cards/cardReactions';
-import { useWildcardDirection } from './cards/wildcardDirection';
-import { usePerformerRuntime } from './performer/usePerformerRuntime';
+  useAutonomousTalk,
+  type AutonomousTurnOutcome,
+  type AutonomyCandidateTelemetry
+} from './conversation/useAutonomousTalk';
+import {
+  useConversation,
+  type AutonomousContext,
+  type AutonomyEvidenceContext,
+  type ChatCardContext
+} from './conversation/useConversation';
+import { PerformancePlaybackCoordinator } from './performer/performancePlayback';
+import { isContentBearingVoiceMessage } from './performer/runtime';
 import type {
   Attention,
+  AttentionReader,
   ConversationActionDecision,
   DirectionContribution,
-  AttentionReader,
   PerformancePlan,
   PerformanceResult,
   PerformerTrigger,
 } from './performer/types';
-import { isContentBearingVoiceMessage } from './performer/runtime';
-import { runtimeConfig } from './runtimeConfig';
-import { useNetworkState } from './useNetworkState';
-import { fetchListeningBackchannels } from './voice/backchannel';
-import type { ListeningBackchannelAudio } from './voice/backchannelPolicy';
-import {
-  selectListeningBackchannelIndex,
-} from './voice/backchannelPolicy';
-import { useVoiceInput } from './voice/useVoiceInput';
-import { AudioLabPanel } from './voice/AudioLabPanel';
+import { usePerformerRuntime } from './performer/usePerformerRuntime';
 import { RouterPanel } from './router/RouterPanel';
-import { useConversationRouter } from './router/useConversationRouter';
 import type {
   RouterEffect,
   RouterSignal,
 } from './router/routerTypes.js';
+import { useConversationRouter } from './router/useConversationRouter';
+import { runtimeConfig } from './runtimeConfig';
+import { useNetworkState } from './useNetworkState';
 import {
-  isConfirmedBargeInTranscript,
-  isRejectedBargeInCandidate,
-  reduceBargeIn,
-  shouldSuppressStartupDuck,
-  shouldInterruptBusyTurn,
-  type BargeInEvent,
-} from './voice/bargeIn';
-import {
-  BARGE_IN_TIMEOUT_MS,
   clampVadThreshold,
   DEFAULT_VAD_THRESHOLD,
   getEffectiveAudioEndpointMs,
@@ -126,20 +100,28 @@ import {
   VAD_THRESHOLD_MIN,
   VAD_THRESHOLD_STEP,
   type AudioEndpointMs,
-  type AudioLabMode,
-  type BargeInState,
+  type AudioLabMode
 } from './voice/audioLab.js';
-import { useVoiceLab } from './voice/useVoiceLab';
+import { AudioLabPanel } from './voice/AudioLabPanel';
 import {
-  LISTENING_THINKING_MOTION_ASSET_ID,
-  type VoiceBackchannelCue,
-} from './voice/voiceInteraction';
+  selectListeningBackchannelIndex,
+} from './voice/backchannelPolicy';
+import {
+  isConfirmedBargeInTranscript,
+  isRejectedBargeInCandidate,
+  shouldInterruptBusyTurn,
+  shouldSuppressStartupDuck
+} from './voice/bargeIn';
+import { useVoiceInput } from './voice/useVoiceInput';
+import { useVoiceLab } from './voice/useVoiceLab';
 import {
   MAX_VOICE_TEXT_LENGTH,
   type ListeningReactionCue,
   type VoiceInputEvent,
 } from './voice/voiceInput';
-import { PerformancePlaybackCoordinator } from './performer/performancePlayback';
+import {
+  LISTENING_THINKING_MOTION_ASSET_ID
+} from './voice/voiceInteraction';
 
 const STATUS_LABELS = {
   idle: '話しかけてください。',
@@ -409,9 +391,7 @@ export default function App() {
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
-  const [cardAttentionPhase, setCardAttentionPhase] = useState<
-    'transient' | 'default' | 'drag-acquire' | 'drag-priority' | null
-  >(null);
+
   const [audioControl, setAudioControl] = useState(readAudioControlState);
   const [characterIdentity, setCharacterIdentity] = useState(
     readCharacterIdentity,
@@ -425,12 +405,7 @@ export default function App() {
   );
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>(INITIAL_AUTONOMOUS_CONTEXT);
-  const [autonomyState, setAutonomyState] = useState<AutonomyState>(
-    createInitialAutonomyState,
-  );
-  const [autonomyExternalEvent, setAutonomyExternalEvent] = useState<
-    AutonomyExternalEventSignal | null
-  >(null);
+
   const [isAutonomousLoopEnabled, setIsAutonomousLoopEnabled] =
     useState(true);
   const [sessionGeneration, setSessionGeneration] = useState(0);
@@ -440,7 +415,7 @@ export default function App() {
   const [spatialTargetRegistry] = useState(
     () => new SpatialTargetRegistry(),
   );
-  const spatialTargetDisposeTimerRef = useRef<number | null>(null);
+
   const cardGame = useCardGamePrototype();
   const {
     acceptReply,
@@ -485,38 +460,21 @@ export default function App() {
     confidence: 0,
   });
   const characterIdentityRef = useRef<CharacterIdentity>(characterIdentity);
-  const autonomyStateRef = useRef(autonomyState);
+
   const pendingCardStimulusRef = useRef<{
     cardContext: ChatCardContext;
     contribution: DirectionContribution;
     programContext: ProgramContext;
   } | null>(null);
-  const cardDropReactionControllerRef = useRef(
-    new CardDropReactionController(),
-  );
+
   useEffect(() => {
     characterIdentityRef.current = characterIdentity;
   }, [characterIdentity]);
-  const cardReactionPlanIdsRef = useRef(new Set<string>());
-  const cardDropReactionPlanIdsRef = useRef(new Set<string>());
-  const pendingActivatedCardIdsRef = useRef(new Map<string, string[]>());
+
   const stageRef = useRef<VrmStageHandle>(null);
   const [stageMotionPort, setStageMotionPort] =
     useState<VrmStageHandle | null>(null);
-  const nonSpeechTimerRef = useRef<number | null>(null);
-  const cardAttentionTimerRef = useRef<number | null>(null);
-  const cardAttentionStartedAtRef = useRef<number | null>(null);
-  const cardAttentionFallbackTimerRef = useRef<number | null>(null);
-  const dragAttentionTickRef = useRef<number | null>(null);
-  const dragAttentionLastTickAtRef = useRef<number | null>(null);
-  const dragAttentionSpeedRef = useRef<{
-    speedPxPerSecond: number;
-    capturedAt: number;
-  } | null>(null);
-  const dragAttentionControllerRef = useRef(new DragAttentionController());
-  const cardAttentionEnergyControllerRef = useRef(
-    new AttentionEnergyController(),
-  );
+
   const sessionGenerationRef = useRef(0);
   const {
     getPrimaryPlaybackAgeMs,
@@ -534,135 +492,7 @@ export default function App() {
   } = useAudioLipSync(volume);
   const [listeningReaction, setListeningReaction] =
     useState<ListeningReactionCue | undefined>();
-  const clearCardAttentionTimers = useCallback(() => {
-    if (cardAttentionTimerRef.current !== null) {
-      window.clearTimeout(cardAttentionTimerRef.current);
-      cardAttentionTimerRef.current = null;
-    }
-    if (cardAttentionFallbackTimerRef.current !== null) {
-      window.clearTimeout(cardAttentionFallbackTimerRef.current);
-      cardAttentionFallbackTimerRef.current = null;
-    }
-    if (dragAttentionTickRef.current !== null) {
-      window.clearInterval(dragAttentionTickRef.current);
-      dragAttentionTickRef.current = null;
-    }
-    dragAttentionLastTickAtRef.current = null;
-  }, []);
-
-  const scheduleDragAttentionTick = useCallback(() => {
-    if (dragAttentionTickRef.current !== null) return;
-
-    dragAttentionTickRef.current = window.setInterval(() => {
-      const now = readAnimationNow();
-      const previous = dragAttentionLastTickAtRef.current ?? now;
-      dragAttentionLastTickAtRef.current = now;
-      const movement = dragAttentionSpeedRef.current;
-      const speedPxPerSecond =
-        movement && now - movement.capturedAt <= 160
-          ? movement.speedPxPerSecond
-          : 0;
-      const snapshot = dragAttentionControllerRef.current.update(
-        Math.max(0, now - previous),
-        Math.random,
-        speedPxPerSecond,
-      );
-      if (snapshot.phase === 'idle') {
-        clearCardAttentionTimers();
-        return;
-      }
-
-      setCardAttentionPhase(
-        snapshot.phase === 'priority' ? 'drag-priority' : 'drag-acquire',
-      );
-    }, DRAG_ATTENTION_TICK_MS);
-  }, [clearCardAttentionTimers]);
-
-  const scheduleCardAttentionSequence = useCallback(
-    (transientDurationMs: number) => {
-      clearCardAttentionTimers();
-      cardAttentionStartedAtRef.current = readAnimationNow();
-      setCardAttentionPhase('transient');
-
-      const transientTimerId = window.setTimeout(() => {
-        if (cardAttentionTimerRef.current !== transientTimerId) return;
-        cardAttentionTimerRef.current = null;
-        setCardAttentionPhase('default');
-
-        const defaultTimerId = window.setTimeout(() => {
-          if (cardAttentionFallbackTimerRef.current !== defaultTimerId) {
-            return;
-          }
-          cardAttentionFallbackTimerRef.current = null;
-          spatialTargetRegistry.clearTransient('game');
-          cardAttentionEnergyControllerRef.current.clear();
-          cardAttentionStartedAtRef.current = null;
-          setCardAttentionPhase(null);
-        }, CARD_INTERACTION_ATTENTION_DURATION_MS);
-        cardAttentionFallbackTimerRef.current = defaultTimerId;
-      }, Math.max(0, transientDurationMs));
-      cardAttentionTimerRef.current = transientTimerId;
-    },
-    [clearCardAttentionTimers, spatialTargetRegistry],
-  );
-
-  const scheduleCardDefaultAttention = useCallback(() => {
-    clearCardAttentionTimers();
-    spatialTargetRegistry.clearTransient('game');
-    cardAttentionStartedAtRef.current = readAnimationNow();
-    setCardAttentionPhase('default');
-
-    const defaultTimerId = window.setTimeout(() => {
-      if (cardAttentionFallbackTimerRef.current !== defaultTimerId) return;
-      cardAttentionFallbackTimerRef.current = null;
-      cardAttentionEnergyControllerRef.current.clear();
-      cardAttentionStartedAtRef.current = null;
-      setCardAttentionPhase(null);
-    }, CARD_INTERACTION_ATTENTION_DURATION_MS);
-    cardAttentionFallbackTimerRef.current = defaultTimerId;
-  }, [clearCardAttentionTimers, spatialTargetRegistry]);
-
-  const finishDragAttention = useCallback(() => {
-    const previousSnapshot = dragAttentionControllerRef.current.snapshot();
-    const wasActive = previousSnapshot.phase !== 'idle';
-    dragAttentionControllerRef.current.end();
-    dragAttentionSpeedRef.current = null;
-    spatialTargetRegistry.setTransientDragActive('game', false);
-    clearCardAttentionTimers();
-    cardAttentionStartedAtRef.current = null;
-    if (!wasActive) return;
-    cardAttentionEnergyControllerRef.current.clear();
-    spatialTargetRegistry.clearTransient('game');
-    setCardAttentionPhase(null);
-  }, [
-    clearCardAttentionTimers,
-    spatialTargetRegistry,
-  ]);
-
-  useEffect(() => {
-    if (spatialTargetDisposeTimerRef.current !== null) {
-      window.clearTimeout(spatialTargetDisposeTimerRef.current);
-      spatialTargetDisposeTimerRef.current = null;
-    }
-    const controller = dragAttentionControllerRef.current;
-    const energyController = cardAttentionEnergyControllerRef.current;
-    return () => {
-      controller.end();
-      dragAttentionSpeedRef.current = null;
-      energyController.clear();
-      cardAttentionStartedAtRef.current = null;
-      clearCardAttentionTimers();
-      const disposeTimerId = window.setTimeout(() => {
-        if (spatialTargetDisposeTimerRef.current !== disposeTimerId) return;
-        spatialTargetDisposeTimerRef.current = null;
-        spatialTargetRegistry.dispose();
-      }, 0);
-      spatialTargetDisposeTimerRef.current = disposeTimerId;
-    };
-  }, [
-    clearCardAttentionTimers,
-    spatialTargetRegistry,
-  ]);
+  const { cardAttentionPhase, setCardAttentionPhase, cardAttentionStartedAtRef, dragAttentionLastTickAtRef, dragAttentionSpeedRef, dragAttentionControllerRef, cardAttentionEnergyControllerRef, clearCardAttentionTimers, scheduleDragAttentionTick, scheduleCardAttentionSequence, scheduleCardDefaultAttention, finishDragAttention } = useCardAttention({ spatialTargetRegistry });
 
   const readAttention: AttentionReader = useCallback(() => {
     const logicalAttention = logicalAttentionRef.current;
@@ -673,22 +503,22 @@ export default function App() {
       cardAttentionEnergyControllerRef.current.update(now);
     const dynamicGazeOverride = logicalAttention.gazeOverride
       ? {
-          ...logicalAttention.gazeOverride,
-          elapsedMs:
-            dragAttentionSnapshot.phase !== 'idle'
-              ? dragAttentionSnapshot.elapsedMs
-              : Math.max(
-                  0,
-                  now - (cardAttentionStartedAtRef.current ?? now),
-                ),
-          energy:
-            dragAttentionSnapshot.phase !== 'idle'
-              ? dragAttentionSnapshot.attentionEnergy
-              : cardAttentionEnergy.energy,
-          viewerCheckIn:
-            dragAttentionSnapshot.phase !== 'idle' &&
-            dragAttentionSnapshot.viewerCheckIn,
-        }
+        ...logicalAttention.gazeOverride,
+        elapsedMs:
+          dragAttentionSnapshot.phase !== 'idle'
+            ? dragAttentionSnapshot.elapsedMs
+            : Math.max(
+              0,
+              now - (cardAttentionStartedAtRef.current ?? now),
+            ),
+        energy:
+          dragAttentionSnapshot.phase !== 'idle'
+            ? dragAttentionSnapshot.attentionEnergy
+            : cardAttentionEnergy.energy,
+        viewerCheckIn:
+          dragAttentionSnapshot.phase !== 'idle' &&
+          dragAttentionSnapshot.viewerCheckIn,
+      }
       : undefined;
     return {
       ...logicalAttention,
@@ -700,129 +530,10 @@ export default function App() {
         cameraSnapshot.updatedAt,
       ),
     };
-  }, [readCameraSnapshot]);
+  }, [cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, dragAttentionControllerRef, readCameraSnapshot]);
 
-  const recordAutonomyEvidence = useCallback((evidence: AutonomyEvidence) => {
-    const nextState = observeAutonomyEvidence(autonomyStateRef.current, evidence);
-    autonomyStateRef.current = nextState;
-    setAutonomyState(nextState);
-    return nextState;
-  }, []);
+  const { autonomyState, setAutonomyState, autonomyExternalEvent, autonomyStateRef, recordAutonomyEvidence, notifyMeaningfulAutonomyEvent, readAutonomyEvidenceContext, handleAutonomyDelta } = useAutonomyReasons();
 
-  const notifyMeaningfulAutonomyEvent = useCallback(
-    (kind: AutonomyTurnGateExternalEvent) => {
-      setAutonomyExternalEvent((current) => ({
-        sequence: (current?.sequence ?? 0) + 1,
-        kind,
-      }));
-    },
-    [],
-  );
-
-  const readAutonomyEvidenceContext = useCallback(
-    (state: AutonomyState, evidenceId: string): AutonomyEvidenceContext | null => {
-      const matchingReasons = state.reasons.filter(
-        (reason) =>
-          reason.status === 'active' &&
-          reason.decisionEvidenceIds.includes(evidenceId),
-      );
-      const episodeId = matchingReasons[0]?.episodeId;
-      if (!episodeId) return null;
-      return {
-        episodeId,
-        evidenceId,
-        reasonIds: matchingReasons
-          .filter((reason) => reason.episodeId === episodeId)
-          .map((reason) => reason.id),
-      };
-    },
-    [],
-  );
-
-  const handleAutonomyDelta = useCallback(
-    (
-      delta: AutonomyInternalDelta,
-      context: AutonomyDeltaContext,
-    ) => {
-      const current = autonomyStateRef.current;
-      const episodeId =
-        context.episodeId ??
-        current.reasons.find((reason) =>
-          reason.decisionEvidenceIds.includes(context.evidenceId),
-        )?.episodeId ??
-        null;
-      if (!episodeId) return;
-      let nextState = current;
-      let createdReasonIds: readonly string[] = [];
-      let resolvedReasonIds: readonly string[] = [];
-      const internalDeltaOperations = delta.reasonUpdates.map(
-        (update) => update.operation,
-      );
-      if (delta.reasonUpdates.length) {
-        const deltaEvidenceId = createAutonomyEvidenceId('autonomy-delta');
-        const stateWithDeltaEvidence = observeAutonomyEvidence(current, {
-          id: deltaEvidenceId,
-          kind: 'internal_state_change',
-          at: Date.now(),
-          semanticKey: `internal-delta:${context.source}`,
-          episodeId,
-        });
-        const result = applyReasonUpdates(stateWithDeltaEvidence, delta.reasonUpdates, {
-          episodeId,
-          evidenceId: deltaEvidenceId,
-          at: Date.now(),
-        });
-        createdReasonIds = result.createdReasonIds;
-        resolvedReasonIds = result.state.reasons
-          .filter((reason) => {
-            if (reason.status !== 'resolved') return false;
-            const previous = current.reasons.find(
-              (candidate) => candidate.id === reason.id,
-            );
-            return previous?.status !== 'resolved';
-          })
-          .map((reason) => reason.id);
-        if (result.changed) nextState = result.state;
-      }
-      const resolvableReasonIds = context.reasonIds.filter((reasonId) =>
-        nextState.reasons.some(
-          (reason) => reason.id === reasonId && reason.status === 'active',
-        ),
-      );
-      if (context.resolvesReason && resolvableReasonIds.length) {
-        resolvedReasonIds = [
-          ...new Set([...resolvedReasonIds, ...resolvableReasonIds]),
-        ];
-        nextState = resolveUsedReasons(
-          nextState,
-          resolvableReasonIds,
-          episodeId,
-        );
-      }
-      nextState = completeInactiveEpisodes(nextState);
-      if (delta.reasonUpdates.length || resolvedReasonIds.length) {
-        emitAutonomyGateEvent({
-          gateEvent: 'internal_delta',
-          gatePhase: 'running',
-          transition: 'ignored',
-          internalDeltaOperations,
-          affectedReasonIds: [
-            ...new Set([
-              ...context.reasonIds,
-              ...createdReasonIds,
-              ...resolvedReasonIds,
-            ]),
-          ],
-          createdReasonIds,
-          resolvedReasonIds,
-        });
-      }
-      if (nextState === current) return;
-      autonomyStateRef.current = nextState;
-      setAutonomyState(nextState);
-    },
-    [],
-  );
   const [voiceValidationError, setVoiceValidationError] = useState('');
   const voiceEventHandlerRef = useRef<((event: VoiceInputEvent) => void) | null>(
     null,
@@ -831,17 +542,10 @@ export default function App() {
     ((signal: RouterSignal) => unknown) | null
   >(null);
   const voiceReactionIdRef = useRef(0);
-  const activeBargeInSegmentRef = useRef<string | null>(null);
+
   const routerBlockedSegmentRef = useRef<string | null>(null);
-  const backchannelAudioRef = useRef<ListeningBackchannelAudio[]>([]);
-  const backchannelVariantIndexRef = useRef<
-    Record<Exclude<VoiceBackchannelCue, 'none'>, number | null>
-  >({ un: null, uun: null });
-  const backchannelLoadingRef = useRef<Promise<void> | null>(null);
-  const bargeInTimerRef = useRef<number | null>(null);
-  const bargeInStateRef = useRef<BargeInState>('idle');
-  const [bargeInState, setBargeInState] = useState<BargeInState>('idle');
-  const [bargeInTimeoutToken, setBargeInTimeoutToken] = useState(0);
+  const { backchannelAudioRef, backchannelVariantIndexRef, backchannelLoadingRef, preloadBackchannel } = useListeningBackchannels();
+
   const [audioLabMode, setAudioLabMode] = useState<AudioLabMode>(
     () =>
       resolveInitialAudioLabMode(
@@ -1073,7 +777,7 @@ export default function App() {
         playCue();
       }
     },
-    [handleInteractionTimelineEvent, playReaction, stopReaction],
+    [backchannelAudioRef, backchannelLoadingRef, backchannelVariantIndexRef, handleInteractionTimelineEvent, playReaction, stopReaction],
   );
 
   const handlePerformancePlan = useCallback((plan: PerformancePlan) => {
@@ -1093,116 +797,7 @@ export default function App() {
     [],
   );
 
-  const handlePerformanceResult = useCallback(
-    (result: PerformanceResult) => {
-      const isCardDropReactionPlan = cardDropReactionPlanIdsRef.current.delete(
-        result.planId,
-      );
-      if (isCardDropReactionPlan) {
-        cardDropReactionControllerRef.current.settleReaction(
-          result.planId,
-          result.outcome,
-        );
-      }
-      cardDropReactionControllerRef.current.settleReply(result.planId);
-      if (activePlanRef.current?.planId !== result.planId) return;
-      const isCardReactionPlan = cardReactionPlanIdsRef.current.delete(
-        result.planId,
-      );
-      const pendingActivatedCardIds = pendingActivatedCardIdsRef.current.get(
-        result.planId,
-      );
-      pendingActivatedCardIdsRef.current.delete(result.planId);
-      if (result.outcome === 'failed') {
-        setIsAutonomousLoopEnabled(false);
-      }
-      playbackCoordinator.stop();
-      completePlan(result);
-      if (isCardReactionPlan) {
-        if (result.outcome === 'completed' && pendingActivatedCardIds) {
-          acceptReply(pendingActivatedCardIds);
-        } else {
-          resetTurn();
-        }
-      }
-      activePlanRef.current = null;
-      setActivePlan(null);
-      setActiveEmotionCue(null);
-    },
-    [acceptReply, completePlan, playbackCoordinator, resetTurn],
-  );
-
-  const handleReplyAccepted = useCallback(
-    (activatedCardIds: string[]) => {
-      const planId = activePlanRef.current?.planId;
-      if (planId && cardReactionPlanIdsRef.current.has(planId)) {
-        pendingActivatedCardIdsRef.current.set(planId, activatedCardIds);
-        return;
-      }
-      acceptReply(activatedCardIds);
-    },
-    [acceptReply],
-  );
-
-  const cancelActiveCardReactionPlan = useCallback(() => {
-    const plan = activePlanRef.current;
-    if (!plan || !cardReactionPlanIdsRef.current.has(plan.planId)) {
-      return false;
-    }
-    handlePerformanceResult({
-      planId: plan.planId,
-      completedAt: Date.now(),
-      outcome: 'cancelled',
-      trigger: plan.trigger,
-      intent: plan.intent,
-    });
-    return true;
-  }, [handlePerformanceResult]);
-
-  const executeNonSpeechPlan = useCallback(
-    (plan: PerformancePlan) => {
-      const expectedSessionGeneration = sessionGeneration;
-      handlePerformancePlan(plan);
-      if (nonSpeechTimerRef.current !== null) {
-        window.clearTimeout(nonSpeechTimerRef.current);
-      }
-      const timer = window.setTimeout(() => {
-        if (nonSpeechTimerRef.current === timer) {
-          nonSpeechTimerRef.current = null;
-        }
-        if (expectedSessionGeneration !== sessionGenerationRef.current) return;
-        handlePerformanceResult({
-          planId: plan.planId,
-          completedAt: Date.now(),
-          outcome: 'completed',
-          trigger: plan.trigger,
-          intent: plan.intent,
-          interactionAction: plan.actionDecision?.action,
-        });
-      }, plan.preReaction?.leadBeforeSpeechMs ?? 0);
-      nonSpeechTimerRef.current = timer;
-      return true;
-    },
-    [handlePerformancePlan, handlePerformanceResult, sessionGeneration],
-  );
-
-  const cancelNonSpeechPlan = useCallback(() => {
-    if (nonSpeechTimerRef.current === null) return;
-
-    window.clearTimeout(nonSpeechTimerRef.current);
-    nonSpeechTimerRef.current = null;
-    const plan = activePlanRef.current;
-    if (!plan) return;
-
-    handlePerformanceResult({
-      planId: plan.planId,
-      completedAt: Date.now(),
-      outcome: 'cancelled',
-      trigger: plan.trigger,
-      intent: plan.intent,
-      interactionAction: plan.actionDecision?.action,
-    });
-  }, [handlePerformanceResult]);
+  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, pendingActivatedCardIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, resetTurn, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
 
   const {
     cancelAutonomous,
@@ -1321,118 +916,7 @@ export default function App() {
     return nextIdentity;
   }, []);
 
-  const clearBargeInTimer = useCallback(() => {
-    if (bargeInTimerRef.current === null) return;
-    window.clearTimeout(bargeInTimerRef.current);
-    bargeInTimerRef.current = null;
-  }, []);
-
-  const dispatchBargeIn = useCallback(
-    (event: BargeInEvent) => {
-      const previousState = bargeInStateRef.current;
-      const transition = reduceBargeIn(previousState, event);
-      bargeInStateRef.current = transition.state;
-      if (transition.state !== previousState) {
-        setBargeInState(transition.state);
-      }
-
-      if (transition.effects.includes('duck')) {
-        clearBargeInTimer();
-        setDucked(true);
-        voiceLab.handleDiagnostic({
-          type: 'barge_in',
-          at: Date.now(),
-          action: 'duck',
-          state: transition.state,
-          ttsPlaying,
-          reason: transition.reason,
-        });
-        bargeInTimerRef.current = window.setTimeout(() => {
-          bargeInTimerRef.current = null;
-          setBargeInTimeoutToken((token) => token + 1);
-        }, BARGE_IN_TIMEOUT_MS);
-      }
-
-      if (transition.effects.includes('suppress_duck')) {
-        const playbackAgeMs =
-          event.type === 'speech_started' ? event.playbackAgeMs : undefined;
-        voiceLab.handleDiagnostic({
-          type: 'barge_in',
-          at: Date.now(),
-          action: 'suppress_duck',
-          state: transition.state,
-          ttsPlaying,
-          ...(playbackAgeMs === undefined ? {} : { playbackAgeMs }),
-          reason: transition.reason,
-        });
-      }
-
-      if (transition.effects.includes('interrupt')) {
-        voiceLab.handleDiagnostic({
-          type: 'barge_in',
-          at: Date.now(),
-          action: 'interrupt',
-          state: transition.state,
-          ttsPlaying,
-          reason: transition.reason,
-        });
-      }
-
-      if (transition.effects.includes('restore')) {
-        clearBargeInTimer();
-        setDucked(false);
-        voiceLab.handleDiagnostic({
-          type: 'barge_in',
-          at: Date.now(),
-          action: 'restore',
-          state: transition.state,
-          ttsPlaying,
-          reason: transition.reason,
-        });
-      }
-
-      if (transition.effects.length > 0) {
-        handleInteractionTimelineEvent({
-          kind: 'barge_in',
-          at: Date.now(),
-          action: transition.effects.join('+'),
-          state: transition.state,
-          ...(transition.reason ? { reason: transition.reason } : {}),
-        });
-      }
-
-      return transition;
-    },
-    [
-      clearBargeInTimer,
-      handleInteractionTimelineEvent,
-      setDucked,
-      ttsPlaying,
-      voiceLab,
-    ],
-  );
-  const latestDispatchBargeInRef = useRef(dispatchBargeIn);
-  useEffect(() => {
-    latestDispatchBargeInRef.current = dispatchBargeIn;
-  }, [dispatchBargeIn]);
-
-  useEffect(() => {
-    if (bargeInTimeoutToken === 0) return;
-    dispatchBargeIn({ type: 'timeout' });
-  }, [bargeInTimeoutToken, dispatchBargeIn]);
-
-  useEffect(() => {
-    if (ttsPlaying) return;
-    if (bargeInStateRef.current !== 'candidate') return;
-    dispatchBargeIn({ type: 'tts_stopped' });
-  }, [dispatchBargeIn, ttsPlaying]);
-
-  useEffect(() => {
-    clearBargeInTimer();
-    activeBargeInSegmentRef.current = null;
-    if (bargeInStateRef.current === 'idle') return;
-    latestDispatchBargeInRef.current({ type: 'reset' });
-  }, [audioLabMode, clearBargeInTimer]);
+  const { activeBargeInSegmentRef, bargeInStateRef, bargeInState, clearBargeInTimer, dispatchBargeIn } = useBargeInControl({ setDucked, voiceLab, ttsPlaying, handleInteractionTimelineEvent, audioLabMode });
 
   useEffect(() => {
     return () => {
@@ -1476,16 +960,16 @@ export default function App() {
   );
   const autonomyCandidateKey = autonomyCandidate
     ? `${autonomyCandidate.episodeId}:${autonomyCandidate.reasons
-        .map((reason) => reason.id)
-        .join(',')}:${autonomyCandidate.decisionEvidenceIds.join(',')}`
+      .map((reason) => reason.id)
+      .join(',')}:${autonomyCandidate.decisionEvidenceIds.join(',')}`
     : null;
   const autonomyCandidateTelemetry: AutonomyCandidateTelemetry | null =
     autonomyCandidate
       ? {
-          episodeId: autonomyCandidate.episodeId,
-          reasonIds: autonomyCandidate.reasons.map((reason) => reason.id),
-          decisionEvidenceIds: autonomyCandidate.decisionEvidenceIds,
-        }
+        episodeId: autonomyCandidate.episodeId,
+        reasonIds: autonomyCandidate.reasons.map((reason) => reason.id),
+        decisionEvidenceIds: autonomyCandidate.decisionEvidenceIds,
+      }
       : null;
   const autonomyTurnGateTiming = useMemo(
     () => readAutonomyTurnGateTiming(performerProfile),
@@ -1539,9 +1023,9 @@ export default function App() {
     displayThreshold === null
       ? null
       : Math.min(
-          100,
-          Math.max(0, (displayThreshold / MICROPHONE_METER_MAX) * 100),
-        );
+        100,
+        Math.max(0, (displayThreshold / MICROPHONE_METER_MAX) * 100),
+      );
   const microphoneInputStrength = Math.min(
     1,
     microphoneLevel / MICROPHONE_METER_MAX,
@@ -1566,17 +1050,17 @@ export default function App() {
         : voiceError
           ? 'マイクを確認'
           : isSttProcessing
-      ? '判定中'
-      : isVadSpeech
-        ? '聞き取り中'
-        : !isVoiceInputEnabled
-          ? '待機中'
-          : displayedAudioLevel === null
-            ? '入力待ち'
-            : displayThreshold !== null &&
-                displayedAudioLevel < displayThreshold
-              ? '反応ライン未満'
-              : '入力あり';
+            ? '判定中'
+            : isVadSpeech
+              ? '聞き取り中'
+              : !isVoiceInputEnabled
+                ? '待機中'
+                : displayedAudioLevel === null
+                  ? '入力待ち'
+                  : displayThreshold !== null &&
+                    displayedAudioLevel < displayThreshold
+                    ? '反応ライン未満'
+                    : '入力あり';
 
   useEffect(() => {
     if (!isMicrophoneControlExpanded) return;
@@ -1603,7 +1087,7 @@ export default function App() {
     const logicalTargetFromPerformance =
       activePlan !== null
         ? activePlan.preReaction?.gaze?.target ??
-          performer.state.attention.target
+        performer.state.attention.target
         : listeningReaction?.target ?? 'none';
     const dragAcquireActive = cardAttentionPhase === 'drag-acquire';
     const dragPriorityActive = cardAttentionPhase === 'drag-priority';
@@ -1618,28 +1102,28 @@ export default function App() {
       : undefined;
     const spatialTarget: Attention['spatialTarget'] =
       logicalAttentionTarget === 'game' ||
-      logicalAttentionTarget === 'chat' ||
-      logicalAttentionTarget === 'viewer'
+        logicalAttentionTarget === 'chat' ||
+        logicalAttentionTarget === 'viewer'
         ? { kind: logicalAttentionTarget, anchor: 'default' }
         : undefined;
     const cardEnergy = cardAttentionEnergyControllerRef.current.snapshot();
     const dragEnergy = dragAttentionControllerRef.current.snapshot();
     const gazeOverride: Attention['gazeOverride'] = cardSpatialTarget
       ? {
-          kind:
-            dragAcquireActive || dragPriorityActive
-              ? 'card-drag'
-              : 'card-transient',
-          target: 'game',
-          spatialTarget: cardSpatialTarget,
-          elapsedMs: dragEnergy.elapsedMs,
-          energy:
-            dragEnergy.phase !== 'idle'
-              ? dragEnergy.attentionEnergy
-              : cardEnergy.energy,
-          viewerCheckIn:
-            dragEnergy.phase !== 'idle' && dragEnergy.viewerCheckIn,
-        }
+        kind:
+          dragAcquireActive || dragPriorityActive
+            ? 'card-drag'
+            : 'card-transient',
+        target: 'game',
+        spatialTarget: cardSpatialTarget,
+        elapsedMs: dragEnergy.elapsedMs,
+        energy:
+          dragEnergy.phase !== 'idle'
+            ? dragEnergy.attentionEnergy
+            : cardEnergy.energy,
+        viewerCheckIn:
+          dragEnergy.phase !== 'idle' && dragEnergy.viewerCheckIn,
+      }
       : undefined;
     logicalAttentionRef.current = {
       ...performer.state.attention,
@@ -1656,12 +1140,7 @@ export default function App() {
       targetMode: performer.state.attention.targetMode ?? 'semantic',
       gazeOverride,
     };
-  }, [
-    activePlan,
-    cardAttentionPhase,
-    listeningReaction,
-    performer.state.attention,
-  ]);
+  }, [activePlan, cardAttentionEnergyControllerRef, cardAttentionPhase, dragAttentionControllerRef, listeningReaction, performer.state.attention]);
   const cameraAttentionStatusMessage = getCameraAttentionStatusMessage(
     cameraAttentionStatus,
     cameraAttentionErrorCode,
@@ -1760,19 +1239,7 @@ export default function App() {
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
-  }, [
-    clearBargeInTimer,
-    clearCardAttentionTimers,
-    dispatchBargeIn,
-    resetConversation,
-    resetRuntime,
-    resetTurn,
-    setProgramPhase,
-    setDucked,
-    spatialTargetRegistry,
-    stopReaction,
-    stopVoiceInput,
-  ]);
+  }, [stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetTurn, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, pendingActivatedCardIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
 
   useEffect(() => {
     routerResetSessionRef.current = resetSession;
@@ -1805,7 +1272,7 @@ export default function App() {
         clearCardAttentionTimers();
         dragAttentionControllerRef.current.start(
           logicalAttentionRef.current.gazeStrength ??
-            logicalAttentionRef.current.strength,
+          logicalAttentionRef.current.strength,
         );
         dragAttentionSpeedRef.current = null;
         dragAttentionLastTickAtRef.current = readAnimationNow();
@@ -1821,13 +1288,7 @@ export default function App() {
       spatialTargetRegistry.captureTransient('game', element);
       scheduleCardAttentionSequence(CARD_INTERACTION_CUE_DURATION_MS);
     },
-    [
-      clearCardAttentionTimers,
-      isExhibitionMode,
-      scheduleCardAttentionSequence,
-      scheduleDragAttentionTick,
-      spatialTargetRegistry,
-    ],
+    [cardAttentionStartedAtRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionLastTickAtRef, dragAttentionSpeedRef, isExhibitionMode, scheduleCardAttentionSequence, scheduleDragAttentionTick, setCardAttentionPhase, spatialTargetRegistry],
   );
 
   const handleCardAttentionInput = useCallback(
@@ -1842,7 +1303,7 @@ export default function App() {
       cardAttentionEnergyControllerRef.current.trigger(
         now,
         logicalAttentionRef.current.gazeStrength ??
-          logicalAttentionRef.current.strength,
+        logicalAttentionRef.current.strength,
       );
 
       if (interaction === 'appearance') {
@@ -1854,11 +1315,7 @@ export default function App() {
       spatialTargetRegistry.refreshDefault('game');
       scheduleCardDefaultAttention();
     },
-    [
-      isExhibitionMode,
-      scheduleCardDefaultAttention,
-      spatialTargetRegistry,
-    ],
+    [cardAttentionEnergyControllerRef, isExhibitionMode, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
 
   const handleCardDragPositionChange = useCallback(
@@ -1871,7 +1328,7 @@ export default function App() {
         capturedAt,
       };
     },
-    [spatialTargetRegistry],
+    [dragAttentionSpeedRef, spatialTargetRegistry],
   );
 
   const handleCardDragActiveChange = useCallback(
@@ -1944,7 +1401,7 @@ export default function App() {
       clearCardAttentionTimers();
       spatialTargetRegistry.clearTransient('game');
     };
-  }, [clearCardAttentionTimers, spatialTargetRegistry]);
+  }, [clearCardAttentionTimers, nonSpeechTimerRef, spatialTargetRegistry]);
 
   const readCardContext = useCallback(
     () => ({
@@ -1967,28 +1424,6 @@ export default function App() {
     ) => createPlan(trigger, [contribution]),
     [createPlan, getDirectionContribution],
   );
-
-  const preloadBackchannel = useCallback(() => {
-    if (backchannelAudioRef.current.length > 0 || backchannelLoadingRef.current) {
-      return;
-    }
-
-    const loading = fetchListeningBackchannels()
-      .then((audioData) => {
-        backchannelAudioRef.current = audioData;
-      })
-      .catch(() => {
-        // Voice input and visual reactions remain usable without the cue audio.
-      })
-      .finally(() => {
-        backchannelLoadingRef.current = null;
-      });
-    backchannelLoadingRef.current = loading;
-  }, []);
-
-  useEffect(() => {
-    preloadBackchannel();
-  }, [preloadBackchannel]);
 
   const handleVoiceEvent = useCallback(
     (event: VoiceInputEvent) => {
@@ -2245,33 +1680,7 @@ export default function App() {
           return;
       }
     },
-    [
-      beginReply,
-      cancelActiveCardReactionPlan,
-      cancelNonSpeechPlan,
-      createPlanForTrigger,
-      dispatchBargeIn,
-      evaluateVoiceParticipation,
-      getPrimaryPlaybackAgeMs,
-      handleReplyAccepted,
-      interruptCurrentTurn,
-      isBusy,
-      isMuted,
-      notifyMeaningfulAutonomyEvent,
-      observeRouterSignal,
-      prepare,
-      recordAutonomyEvidence,
-      recordVoiceSignal,
-      readCardContext,
-      readAutonomyEvidenceContext,
-      rememberExplicitAlias,
-      sendVoice,
-      source,
-      handleConversationInputReceived,
-      ttsPlaying,
-      stopReaction,
-      routerSnapshot.gptInputGate,
-    ],
+    [recordVoiceSignal, routerSnapshot.gptInputGate, observeRouterSignal, recordAutonomyEvidence, dispatchBargeIn, activeBargeInSegmentRef, stopReaction, ttsPlaying, getPrimaryPlaybackAgeMs, source, rememberExplicitAlias, isBusy, evaluateVoiceParticipation, readCardContext, cardDropReactionControllerRef, cancelNonSpeechPlan, cancelActiveCardReactionPlan, createPlanForTrigger, isMuted, prepare, handleConversationInputReceived, sendVoice, handleReplyAccepted, notifyMeaningfulAutonomyEvent, readAutonomyEvidenceContext, interruptCurrentTurn, beginReply],
   );
 
   useEffect(() => {
@@ -2333,9 +1742,9 @@ export default function App() {
         cardContextOverride?.forcedCardId !== undefined;
       const preactivatedPlan: PerformancePlan | null = isForcedCardTurn
         ? createPlanForTrigger(
-            trigger,
-            contribution ?? getDirectionContribution(trigger),
-          )
+          trigger,
+          contribution ?? getDirectionContribution(trigger),
+        )
         : null;
 
       if (preactivatedPlan) {
@@ -2437,27 +1846,7 @@ export default function App() {
       setAutonomyState(nextState);
       return decision.externalAction === 'speak' ? 'speak' : 'none';
     },
-    [
-      autonomousContext,
-      autonomyCandidate,
-      beginReply,
-      createPlanForTrigger,
-      executeNonSpeechPlan,
-      getDirectionContribution,
-      handlePerformancePlan,
-      handlePerformanceResult,
-      handleReplyAccepted,
-      isAutonomousLoopEnabled,
-      isExhibitionMode,
-      isBusy,
-      isMuted,
-      prepare,
-      readCardContext,
-      routerSnapshot.controlState,
-      routerSnapshot.vayriaOutputGate,
-      sendAutonomous,
-      sessionGeneration,
-    ],
+    [sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleReplyAccepted, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, pendingActivatedCardIdsRef, prepare, executeNonSpeechPlan],
   );
 
   const handleCardInserted = useCallback(
@@ -2488,10 +1877,10 @@ export default function App() {
         activePlanRef.current === null && !isBusy;
       const cardDropReaction = canStartCardDropReaction
         ? cardDropReactionControllerRef.current.begin(
-            result,
-            runtimeConfig.cardDropReactionMode,
-            reducedMotion,
-          )
+          result,
+          runtimeConfig.cardDropReactionMode,
+          reducedMotion,
+        )
         : null;
       if (!canStartCardDropReaction) {
         cardDropReactionControllerRef.current.supersede();
@@ -2503,7 +1892,7 @@ export default function App() {
           cardAttentionEnergyControllerRef.current.trigger(
             readAnimationNow(),
             logicalAttentionRef.current.gazeStrength ??
-              logicalAttentionRef.current.strength,
+            logicalAttentionRef.current.strength,
           );
           scheduleCardDefaultAttention();
         }
@@ -2530,20 +1919,7 @@ export default function App() {
         },
       };
     },
-    [
-      activateCardSwap,
-      createPlanForTrigger,
-      executeNonSpeechPlan,
-      isAutonomousLoopEnabled,
-      isBusy,
-      isMuted,
-      notifyMeaningfulAutonomyEvent,
-      programContext,
-      recordAutonomyEvidence,
-      scheduleCardDefaultAttention,
-      setProgramPhase,
-      spatialTargetRegistry,
-    ],
+    [activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
 
   const handleVoiceToggle = useCallback(async () => {
@@ -2940,8 +2316,8 @@ export default function App() {
                       cameraAttentionIsStarting
                         ? '視線追従を準備中'
                         : cameraAttentionEnabled
-                        ? '視線追従を停止する'
-                        : '視線追従を有効化する'
+                          ? '視線追従を停止する'
+                          : '視線追従を有効化する'
                     }
                     aria-pressed={cameraAttentionEnabled}
                     className="attention-button"

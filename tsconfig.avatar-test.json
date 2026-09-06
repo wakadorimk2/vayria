@@ -7,7 +7,9 @@
     "outDir": "./node_modules/.tmp/avatar-test",
     "rootDir": ".",
     "tsBuildInfoFile": "./node_modules/.tmp/avatar-test.tsbuildinfo",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "src/attention/attentionMath.ts",
@@ -50,6 +52,7 @@
     "scripts/life-dynamics-orienting-adapter.test.ts",
     "scripts/spatial-target.test.ts",
     "scripts/gaze-allocation.test.ts",
-    "scripts/vrm-look-at-boundary.test.ts"
+    "scripts/vrm-look-at-boundary.test.ts",
+    "scripts/avatar-load-ownership.test.ts"
   ]
 }
