@@ -10,6 +10,7 @@ import {
   type LlmProviderSource,
 } from '../server/llmProviderTelemetry.js';
 import { OpenAiResponsesError } from '../server/openAiResponses.js';
+import { processStructuredLlm } from '../server/llmRuntime.js';
 import {
   bindLlmProviderAbort,
   resolveLlmProviderSource,
@@ -45,6 +46,109 @@ function createHarness(source: LlmProviderSource = 'manual') {
 
 async function flushTelemetryQueue(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+for (const fixture of [
+  { name: 'absent usage', usage: undefined, expected: {} },
+  { name: 'null usage', usage: null, expected: {} },
+  { name: 'empty usage', usage: {}, expected: {} },
+  {
+    name: 'absent token details',
+    usage: { input_tokens: 100, output_tokens: 72 },
+    expected: { inputTokens: 100, outputTokens: 72 },
+  },
+  {
+    name: 'provider-reported zeros',
+    usage: {
+      input_tokens: 0,
+      output_tokens: 0,
+      input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+      output_tokens_details: { reasoning_tokens: 0 },
+    },
+    expected: {
+      inputTokens: 0, outputTokens: 0, cachedTokens: 0,
+      cacheWriteTokens: 0, reasoningTokens: 0,
+    },
+  },
+  {
+    name: 'invalid token details',
+    usage: {
+      input_tokens: null, output_tokens: '72',
+      input_tokens_details: { cached_tokens: false },
+      output_tokens_details: { reasoning_tokens: null },
+    },
+    expected: {},
+  },
+]) {
+  for (const terminal of ['completed', 'incomplete'] as const) {
+    test(`${terminal} external usage preserves ${fixture.name}`, async (t) => {
+      const harness = createHarness('card_change');
+      const response = {
+        model: 'gpt-5-nano', max_output_tokens: 2048,
+        usage: fixture.usage,
+        ...(terminal === 'incomplete'
+          ? { incomplete_details: { reason: 'max_output_tokens' } }
+          : {}),
+      };
+      const fetchMock = t.mock.method(globalThis, 'fetch', async () =>
+        new Response(`data: ${JSON.stringify({
+          type: `response.${terminal}`, response,
+        })}\n\n`, { status: 200 }),
+      );
+      const result = harness.tracker.run(
+        { purpose: 'response-generation', retry: 0 },
+        async (_markFirstChunk, setMetadata, trackExternalRequest) => {
+          const completed = await processStructuredLlm({
+            apiKey: 'fixture',
+            runtime: {
+              profile: 'nano-implicit', serviceTier: 'standard',
+              fallbackEnabled: false, cacheWarmupEnabled: false,
+            },
+            legacyPrompt: '', staticPrompt: '', dynamicPrompt: '',
+            history: [], userMessage: '',
+            output: { name: 'fixture', schema: {} },
+            maxOutputTokens: 2048, cacheKey: 'fixture', trackExternalRequest,
+          });
+          setMetadata(completed.telemetry);
+          return completed;
+        },
+      );
+      if (terminal === 'incomplete') {
+        await assert.rejects(result, (error: unknown) => {
+          assert.ok(error instanceof OpenAiResponsesError);
+          assert.deepEqual(error.usage, fixture.expected);
+          return true;
+        });
+      } else {
+        assert.deepEqual((await result).responses?.usage, fixture.expected);
+        // Logical provider SLOs retain their existing zero defaults.
+        const logicalDone = harness.events.at(-1)!;
+        for (const field of [
+          'inputTokens', 'cachedTokens', 'cacheWriteTokens',
+          'outputTokens', 'reasoningTokens',
+        ] as const) {
+          assert.equal(logicalDone[field], fixture.expected[field] ?? 0);
+        }
+      }
+      await flushTelemetryQueue();
+      assert.equal(fetchMock.mock.callCount(), 1);
+      assert.deepEqual(harness.externalEvents.map((event) => event.event), [
+        'llm_external_request_start', 'llm_external_request_done',
+      ]);
+      const done = harness.externalEvents.at(-1)!;
+      assert.equal(done.terminationKind, terminal === 'completed' ? 'success' : 'incomplete');
+      assert.deepEqual(
+        Object.fromEntries(Object.entries(done).filter(([key]) => [
+          'inputTokens', 'cachedTokens', 'cacheWriteTokens',
+          'outputTokens', 'reasoningTokens',
+        ].includes(key))),
+        fixture.expected,
+      );
+      assert.deepEqual(harness.events.map((event) => event.event), [
+        'llm_provider_start', 'llm_provider_done',
+      ]);
+    });
+  }
 }
 
 test('external requests keep turn-wide indexes and parent call metadata', async () => {

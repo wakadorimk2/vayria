@@ -6,11 +6,11 @@ export interface OpenAiStructuredOutput {
 }
 
 export interface OpenAiResponseUsage {
-  inputTokens: number;
-  cachedTokens: number;
-  cacheWriteTokens: number;
-  outputTokens: number;
-  reasoningTokens: number;
+  inputTokens?: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
 }
 
 export interface OpenAiResponseDiagnostics {
@@ -109,10 +109,6 @@ function readIncompleteReason(
     : 'unknown';
 }
 
-function numberOrZero(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
 function readUsage(response: Record<string, unknown>): OpenAiResponseUsage {
   const usage =
     response.usage && typeof response.usage === 'object'
@@ -126,15 +122,20 @@ function readUsage(response: Record<string, unknown>): OpenAiResponseUsage {
     usage.output_tokens_details && typeof usage.output_tokens_details === 'object'
       ? (usage.output_tokens_details as Record<string, unknown>)
       : {};
-  return {
-    inputTokens: numberOrZero(usage.input_tokens),
-    cachedTokens: numberOrZero(inputDetails.cached_tokens),
-    cacheWriteTokens: numberOrZero(
-      inputDetails.cache_write_tokens ?? usage.cache_write_tokens,
-    ),
-    outputTokens: numberOrZero(usage.output_tokens),
-    reasoningTokens: numberOrZero(outputDetails.reasoning_tokens),
+  const fields = {
+    inputTokens: usage.input_tokens,
+    cachedTokens: inputDetails.cached_tokens,
+    cacheWriteTokens: inputDetails.cache_write_tokens ?? usage.cache_write_tokens,
+    outputTokens: usage.output_tokens,
+    reasoningTokens: outputDetails.reasoning_tokens,
   };
+  const result: OpenAiResponseUsage = {};
+  for (const field of Object.keys(fields) as (keyof OpenAiResponseUsage)[]) {
+    const value = fields[field];
+    // Keep absent usage distinct from a provider-reported zero.
+    if (typeof value === 'number' && Number.isFinite(value)) result[field] = value;
+  }
+  return result;
 }
 
 function readProviderMaxOutputTokens(

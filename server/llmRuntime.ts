@@ -207,9 +207,9 @@ function responseExternalMetadata(
     cacheStatus:
       cacheMode === 'disabled'
         ? 'disabled'
-        : cachedTokens > 0
+        : (cachedTokens ?? 0) > 0
           ? 'hit'
-          : cacheWriteTokens > 0
+          : (cacheWriteTokens ?? 0) > 0
             ? 'write'
             : 'miss',
     ...response.usage,
