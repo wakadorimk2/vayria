@@ -215,6 +215,7 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
       };
     } catch (error) {
       if (error instanceof PlaybackCancelledError) return null;
+      if (!this.isCurrent(plan.planId, generation, controller)) return null;
       this.stopAudio();
       this.getMotionPort()?.stopMotion(plan.planId);
       throw error;

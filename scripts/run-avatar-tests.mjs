@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const testFiles = [
+  resolve('node_modules/.tmp/avatar-test/scripts/avatar-load-ownership.test.js'),
   resolve(
     'node_modules/.tmp/avatar-test/scripts/camera-attention-controller.test.js',
   ),
