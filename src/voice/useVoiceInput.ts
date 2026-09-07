@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createBrowserSpeechRecognitionAdapter } from './browserSpeechRecognition';
 import { createRemotePcmVoiceAdapter } from './remotePcmVoiceAdapter';
+import { createCloudVoiceAdapter } from './cloudVoiceAdapter';
 import type { VoiceInputAdapter } from './voiceAdapter';
 import {
   DEFAULT_AUDIO_ENDPOINT_MS,
@@ -248,7 +249,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     };
     const useRemote = audioMode !== 'baseline' || configuredTransport === 'remote';
     const adapter =
-      useRemote
+      runtimeConfig.mode === 'public' ? createCloudVoiceAdapter(adapterOptions) : useRemote
         ? createRemotePcmVoiceAdapter({
             ...adapterOptions,
             audioMode,

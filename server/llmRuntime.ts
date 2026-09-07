@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { Buffer } from 'node:buffer';
+import { llmExecutionScope } from './llmExecutionScope.js';
 import type { Message } from '@aituber-onair/chat';
 import {
   OpenAiResponsesError,
@@ -12,10 +13,7 @@ import type {
   TrackLlmExternalRequest,
 } from './llmProviderTelemetry.js';
 
-const require = createRequire(import.meta.url);
-const { ChatServiceFactory, MODEL_GPT_5_NANO } = require(
-  '@aituber-onair/chat',
-) as typeof import('@aituber-onair/chat');
+const MODEL_GPT_5_NANO = 'gpt-5-nano';
 
 export const LLM_PROFILES = [
   'nano-implicit',
@@ -226,6 +224,8 @@ function responseExternalMetadata(
 }
 
 function runLegacyNano(request: StructuredLlmRequest): Promise<string> {
+  const require = createRequire(import.meta.url);
+  const { ChatServiceFactory } = require('@aituber-onair/chat') as typeof import('@aituber-onair/chat');
   const chat = ChatServiceFactory.createChatService('openai', {
     apiKey: request.apiKey,
     model: MODEL_GPT_5_NANO,
@@ -320,6 +320,11 @@ export function shouldFallbackToLegacy(
 export async function processStructuredLlm(
   request: StructuredLlmRequest,
 ): Promise<StructuredLlmResult> {
+  const scope = llmExecutionScope.getStore();
+  return scope ? scope.execute(request, () => processStructuredLlmUnchecked(request)) : processStructuredLlmUnchecked(request);
+}
+
+async function processStructuredLlmUnchecked(request: StructuredLlmRequest): Promise<StructuredLlmResult> {
   const requestedModel = modelForProfile(request.runtime.profile);
   if (request.runtime.profile === 'nano-legacy') {
     const text = await runLegacyNano(request);

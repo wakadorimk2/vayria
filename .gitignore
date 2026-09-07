@@ -1,4 +1,6 @@
 node_modules/
+.npm-cache/
+.wrangler/
 dist/
 .project-view/
 *.log
@@ -25,3 +27,5 @@ tools/stt/**/__pycache__/
 tools/stt/benchmarks/local/
 *.npz
 *.npy
+.public-assets/
+dist-public/

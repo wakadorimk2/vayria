@@ -3,11 +3,12 @@ import { apiUrl, runtimeConfig } from '../runtimeConfig';
 import { createConversationEventEmitter } from './conversationEvents';
 import { createConversationRuntime, type ConversationOptions } from './conversationRuntime';
 import type { PerformancePlayback } from '../performer/performancePlayback';
+import { publicFetch } from '../public/session';
 export type * from './conversationRuntime';
 
 export function useConversation(playback: PerformancePlayback, options: ConversationOptions = {}) {
   const [runtime] = useState(() => createConversationRuntime(playback, options, {
-    fetch: (path, init) => fetch(apiUrl(String(path)), init),
+    fetch: (path, init) => publicFetch(apiUrl(String(path)), init),
     config: runtimeConfig,
     createEventEmitter: createConversationEventEmitter,
     now: Date.now,

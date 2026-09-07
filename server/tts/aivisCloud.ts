@@ -32,6 +32,7 @@ export interface AivisCloudSynthesisInput {
   emotionalIntensity: number;
   fetchImpl?: typeof fetch;
   modelUuid: string;
+  speakerUuid?: string;
   pitch: number;
   speakingRate: number;
   styleName: string;
@@ -173,6 +174,7 @@ export async function synthesizeAivisCloudSpeech(
       },
       body: JSON.stringify({
         model_uuid: modelUuid,
+        ...(input.speakerUuid ? { speaker_uuid: input.speakerUuid } : {}),
         text: input.text,
         use_ssml: false,
         style_name: input.styleName,

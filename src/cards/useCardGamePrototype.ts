@@ -49,7 +49,7 @@ function createInitialState(): CardZoneState {
   };
 }
 
-export function useCardGamePrototype() {
+export function useCardGamePrototype(unlimitedInterference = false) {
   const [zones, setZones] = useState<CardZoneState>(createInitialState);
   const swapSequenceRef = useRef(0);
   const [selectedBrainCardId, setSelectedBrainCardId] = useState<
@@ -93,7 +93,7 @@ export function useCardGamePrototype() {
         return {
           brain,
           hand,
-          remainingInterferenceCount: 0,
+          remainingInterferenceCount: unlimitedInterference ? MAX_INTERFERENCE_COUNT : 0,
           activatedCardIds: [],
           forcedCardId: insertedCard.id,
         };
@@ -110,7 +110,7 @@ export function useCardGamePrototype() {
         insertedCardId: insertedCard.id,
       };
     },
-    [zones],
+    [zones, unlimitedInterference],
   );
 
   const resetTurn = useCallback(() => {
