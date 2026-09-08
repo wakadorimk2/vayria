@@ -644,7 +644,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       const llmStartedAt = dependencies.monotonicNow();
       eventEmitter.emit('llm_start', { phase: 'llm' });
       const enqueueStreamingSpeechUnit = (index: number, text: string, candidate: ChatResponse) => {
-        if (generation !== generationRef.current ||
+        if (textOnlyTurn || isMutedRef.current || generation !== generationRef.current ||
           streamingUnitIndexes.has(index) ||
           !text.trim()) {
           return;
@@ -839,7 +839,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
               autonomyCandidate: serializeAutonomyCandidate(autonomyCandidate!),
             }
             : {}),
-          streamSpeech: runtimeConfig.streamingSpeechEnabled &&
+          streamSpeech: !textOnlyTurn && runtimeConfig.streamingSpeechEnabled &&
             (INTERACTIVE_SOURCES.includes(turnSource) || isCardChangeTurn),
           earlySpeechLead: runtimeConfig.earlySpeechLeadEnabled,
         }),
@@ -1030,7 +1030,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
       });
       onReplyAccepted(activatedCards);
-      if (!streamingSpeechStarted)
+      if (!textOnlyTurn && !streamingSpeechStarted)
         eventEmitter.emit('speech_unit_ready');
       if (INTERACTIVE_SOURCES.includes(turnSource)) {
         if (turnSource === 'voice' && interactionDecision) {
@@ -1046,8 +1046,32 @@ export function createConversationRuntime(playback: PerformancePlayback, options
           // Delivery commits the assistant text.
         }
       }
+      if (textOnlyTurn) {
+        recordDelivered(0, responseText);
+        if (abortControllerRef.current === chatController) {
+          abortControllerRef.current = null;
+        }
+        if (isExpressionLevel(expressionLevel)) {
+          recentExpressionLevelsRef.current = [
+            ...recentExpressionLevelsRef.current, expressionLevel,
+          ].slice(-10);
+        }
+        onAutonomyDeltaRef.current?.(internalDelta, autonomyDeltaContext);
+        if (turnSource === 'voice') floorController.release('response_completed');
+        setConversationState('idle', null);
+        const interactionAction = interactionDecision?.action ?? executionPlan.actionDecision?.action;
+        emitOwnedResult(executionPlan, 'completed', {
+          interactionAction,
+          spokenText: deliveredText,
+          emotionCue: {
+            emotion: responseEmotion,
+            intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
+          },
+        });
+        emitTerminalEvent('turn_completed', { interactionAction });
+        return { completed: true, decision: null };
+      }
       if (isMutedRef.current) {
-        if (textOnlyTurn) recordDelivered(0, responseText);
         if (turnSource === 'voice') {
           floorController.release('muted');
         }
