@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { WildcardCard } from './WildcardCard';
+import { cardInvitations } from './cardInvitation';
 import { runtimeConfig } from '../runtimeConfig';
 import { getPublicInteractionHint, type MicrophoneState } from '../public/microphoneState';
 import type { CardMotion } from './cardTypes';
@@ -53,6 +54,10 @@ export interface CardDragPositionUpdate {
 interface CardGamePrototypeProps {
   publicMicrophoneState?: MicrophoneState;
   game: CardGamePrototypeController;
+  feedbackMessage?: string;
+  onAskQuestion?: (question: string) => void;
+  lastReply?: string;
+  isQuestionDisabled?: boolean;
   isResetLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
   onCardInteraction?: (target: CardInteractionTarget) => void;
@@ -226,6 +231,10 @@ function resolveDragDropPreview(
 export function CardGamePrototype({
   publicMicrophoneState = 'off',
   game,
+  feedbackMessage,
+  onAskQuestion,
+  lastReply,
+  isQuestionDisabled = false,
   isResetLocked = false,
   onCardInserted,
   onCardInteraction,
@@ -247,6 +256,8 @@ export function CardGamePrototype({
   } = game;
   const [dragState, setDragState] = useState<DragSession | null>(null);
   const [lastSwap, setLastSwap] = useState<CardSwapResult | null>(null);
+  // Keep the exchange receipt after the short insertion animation finishes.
+  const [latestSwap, setLatestSwap] = useState<CardSwapResult | null>(null);
   const dragSessionRef = useRef<DragSession | null>(null);
   const suppressNextClickRef = useRef(false);
   const suppressNextAppearanceAttentionRef = useRef(false);
@@ -259,6 +270,11 @@ export function CardGamePrototype({
     dragActive ||
     selectedBrainCardId !== null ||
     selectedHandCardId !== null;
+  const invitationCard = selectionActive
+    ? zones.hand.find(card => card.id === (selectedHandCardId ?? dragState?.cardId))
+    : zones.brain.find(card => card.id === latestSwap?.insertedCardId);
+  const invitation = invitationCard ? cardInvitations[invitationCard.id] : undefined;
+  const firstCard = zones.hand.find(card => card.id === 'secret');
 
   useEffect(() => {
     onSelectionActiveChange?.(selectionActive);
@@ -306,6 +322,7 @@ export function CardGamePrototype({
       const result = swapCards(brainCardId, handCardId);
       if (!result) return false;
       setLastSwap(result);
+      setLatestSwap(result);
       onCardInserted?.(result);
       return true;
     },
@@ -554,12 +571,16 @@ export function CardGamePrototype({
   ]);
 
   const selectionHint =
-    (runtimeConfig.mode === 'exhibition' || runtimeConfig.mode === 'public')
-        ? isSpent
-          ? 'このターンは操作済み'
-          : selectionActive
-          ? '脳内へ一枚'
-          : runtimeConfig.mode === 'public' ? '一枚選んで' : '気になる一枚を選んで'
+    runtimeConfig.mode === 'public'
+      ? isSpent ? 'このターンは操作済み' : selectionActive ? '脳内へ一枚' : '一枚選んで'
+      : runtimeConfig.mode === 'exhibition'
+      ? isSpent
+        ? '交換しました。Vayriaの反応を見てみよう'
+        : selectedHandCardId
+          ? '入れ替える脳内カードを一枚選んで'
+          : selectedBrainCardId
+            ? '入れ替える手札を一枚選んで'
+            : '手札を脳内へドラッグ。または一枚ずつタップして交換'
       : isSpent
         ? zones.forcedCardId
           ? `脳へ干渉しました。「${zones.brain.find((card) => card.id === zones.forcedCardId)?.label ?? zones.forcedCardId}」の返答を待っています`
@@ -657,18 +678,32 @@ export function CardGamePrototype({
 
   return (
     <div className="card-prototype" aria-label="Brain and hand cards">
-      <section className="card-zone card-zone--brain" aria-label="脳内">
+      <section
+        className="card-zone card-zone--brain"
+        aria-label="脳内"
+        data-selection-target={runtimeConfig.mode === 'exhibition' && !isSpent && Boolean(selectedHandCardId || dragActive)}
+      >
         <header className="card-zone__header">
           <h2>脳内</h2>
+          {runtimeConfig.mode === 'exhibition' && !isSpent && (selectedHandCardId || dragActive) && (
+            <span className="card-zone__target-label">ここから交換する一枚を選ぶ</span>
+          )}
         </header>
         <div className="card-zone__cards" ref={brainCardsRef}>
           {renderCards('brain')}
         </div>
       </section>
 
-      <section className="card-zone card-zone--hand" aria-label="手札">
+      <section
+        className="card-zone card-zone--hand"
+        aria-label="手札"
+        data-selection-target={runtimeConfig.mode === 'exhibition' && !isSpent && Boolean(selectedBrainCardId)}
+      >
         <header className="card-zone__header card-zone__header--hand" hidden={runtimeConfig.mode === 'public'}>
           <h2>手札</h2>
+          {runtimeConfig.mode === 'exhibition' && !isSpent && selectedBrainCardId && (
+            <span className="card-zone__target-label">ここから渡す一枚を選ぶ</span>
+          )}
           <div className="card-zone__turn-status">
             <span
               className={`interference-counter interference-counter--${isSpent ? 'spent' : 'ready'}`}
@@ -717,6 +752,88 @@ export function CardGamePrototype({
           <span>{runtimeConfig.mode === 'public' ? getPublicInteractionHint(publicMicrophoneState, selectionActive, selectionHint) : selectionHint}</span>
         </div>
       </section>
+
+      {runtimeConfig.mode === 'exhibition' && (
+        <aside className="exhibition-participation" aria-label="カード体験の案内">
+          <div className="exhibition-participation__content">
+          <ol className="exhibition-participation__steps" aria-label="遊び方">
+            <li aria-current={!latestSwap && !selectionActive ? 'step' : undefined}>1 選ぶ</li>
+            <li aria-current={selectionActive ? 'step' : undefined}>2 入れ替える</li>
+            <li aria-current={latestSwap && !selectionActive ? 'step' : undefined}>3 反応を見る</li>
+          </ol>
+          <div className="exhibition-participation__receipt" role="status">
+            {selectionActive ? (
+              <>
+                <strong>{invitationCard ? `「${invitationCard.label}」を試す` : '入れ替える手札を選ぼう'}</strong>
+                <p>{invitation?.preview ?? '好きな一枚で、Vayriaの反応を変えてみよう。'}</p>
+              </>
+            ) : latestSwap ? (
+              <>
+                <strong>
+                  「{[...zones.brain, ...zones.hand].find((card) => card.id === latestSwap.insertedCardId)?.label}」を渡しました
+                </strong>
+                <p>{feedbackMessage ?? 'Vayriaの表情や返答を見てみよう。'}</p>
+                {invitation && <p className="exhibition-participation__possibility">{invitation.preview}</p>}
+              </>
+            ) : (
+              <>
+                <strong>声を出さずに、一枚から。</strong>
+                <p>いつもの会話が、二人だけの内緒話になったら？</p>
+              </>
+            )}
+          </div>
+          {!latestSwap && !selectionActive && firstCard && zones.brain[0] && (
+            <>
+              <button
+                className="exhibition-participation__question"
+                type="button"
+                disabled={isSpent || isResetLocked}
+                onClick={() => commitSwap(zones.brain[0].id, firstCard.id)}
+              >
+                まずは「秘密」を渡してみる
+              </button>
+              <p className="exhibition-participation__alternative">「{zones.brain[0].label}」と交換します。自分で選ぶなら、下の手札から。</p>
+            </>
+          )}
+          {latestSwap && !selectionActive && onAskQuestion && (
+            <button
+              className="exhibition-participation__question"
+              type="button"
+              onClick={() => onAskQuestion(invitation?.question ?? '今どんな気分？')}
+              disabled={isQuestionDisabled}
+            >
+              「{invitation?.question ?? '今どんな気分？'}」と聞く
+            </button>
+          )}
+          {latestSwap && !selectionActive && onAskQuestion && (
+            <button
+              className="exhibition-participation__compare"
+              type="button"
+              onClick={() => onAskQuestion('今どんな気分？')}
+              disabled={isQuestionDisabled}
+            >
+              同じ質問で比べる「今どんな気分？」
+            </button>
+          )}
+          {lastReply && (
+            <details className="exhibition-participation__reply">
+              <summary>直前の返答を読む</summary>
+              <p>{lastReply}</p>
+            </details>
+          )}
+          </div>
+          {onSessionReset && (
+            <button
+              className="exhibition-participation__reset"
+              type="button"
+              onClick={onSessionReset}
+              aria-label="会話とカードを最初に戻す"
+            >
+              最初に戻す・次の人へ
+            </button>
+          )}
+        </aside>
+      )}
 
       {dragState?.isDragging && dragCard && (
         <div

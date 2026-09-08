@@ -9,13 +9,14 @@ import {
   type VoiceBackchannelCue
 } from '../voice/voiceInteraction';
 
-export function useListeningBackchannels() {
+export function useListeningBackchannels(enabled = true) {
   const backchannelAudioRef = useRef<ListeningBackchannelAudio[]>([]);
   const backchannelVariantIndexRef = useRef<
     Record<Exclude<VoiceBackchannelCue, 'none'>, number | null>
   >({ un: null, uun: null });
   const backchannelLoadingRef = useRef<Promise<void> | null>(null);
   const preloadBackchannel = useCallback(() => {
+    if (!enabled) return;
     if (backchannelAudioRef.current.length > 0 || backchannelLoadingRef.current) {
       return;
     }
@@ -31,7 +32,7 @@ export function useListeningBackchannels() {
         backchannelLoadingRef.current = null;
       });
     backchannelLoadingRef.current = loading;
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     preloadBackchannel();

@@ -1,0 +1,21 @@
+/** Visitor-facing possibilities, not promised model output or internal prompts. */
+export const cardInvitations: Record<string, { preview: string; question: string }> = {
+  chicken: { preview: '会話に鶏が紛れ込んだら？', question: '朝の挨拶をしてみて' },
+  suspicious: { preview: 'いつもの一言を、ちょっと疑ってみたら？', question: '私、怪しく見える？' },
+  gigantic: { preview: '小さな話が、とんでもない大きさになったら？', question: 'どんなお家に住んでみたい？' },
+  tiny: { preview: '普段は見逃す、小さなものが気になったら？', question: 'この部屋の小さな秘密を想像して' },
+  sleepy: { preview: 'もう眠いのに、おしゃべりしたくなったら？', question: '寝る前にひとこと聞かせて' },
+  curious: { preview: '気になることが、次々に浮かんできたら？', question: '私について何か気になる？' },
+  hungry: { preview: '何を見ても、ごはんを思い出したら？', question: '一緒に何を食べようか？' },
+  rain: { preview: '会話の向こうに雨音が聞こえたら？', question: '雨の日は何をして過ごす？' },
+  secret: { preview: 'いつもの会話が、二人だけの内緒話になったら？', question: '小さな秘密をひとつ教えて' },
+  panic: { preview: 'ちょっとしたことにも慌ててしまったら？', question: 'あと一分で出発だよ、準備できた？' },
+  sparkle: { preview: 'なんでも少し、きらめいて見えたら？', question: '今日の私にひとこと贈って' },
+  underwater: { preview: '水の中でおしゃべりしている気分になったら？', question: '海の中のお散歩に誘って' },
+  lonely: { preview: 'にぎやかな場所で、少し寂しくなったら？', question: '少しだけ隣にいてもいい？' },
+  confident: { preview: 'いつもより自信たっぷりに話したら？', question: 'あなたの得意なことを教えて' },
+  strange: { preview: '見慣れた景色が、ちょっと不思議になったら？', question: 'ここで不思議なことが起きたら？' },
+  'deja-vu': { preview: '初めてなのに、前にも会った気がしたら？', question: '私たち、どこかで会った？' },
+  'distant-thunder': { preview: '遠くから、何かが近づく予感がしたら？', question: 'これから何が起きそう？' },
+  'upside-down': { preview: '当たり前が逆さまになったら？', question: '空へ落ちる雨って、どんな雨？' },
+};

@@ -4,10 +4,16 @@ import { usePanelVisibility } from './usePanelVisibility';
 import { microphoneStateLabels, normalizeMicrophoneLevel, type MicrophoneState } from './microphoneState';
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { activatePublic, pausePublic, publicActive, publicSessionId, registerPublicSessionRequest, subscribePublic, type PublicStatus } from './session';
+import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicSessionId, registerPublicSessionRequest, subscribePublic, type PublicStatus } from './session';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, onMicrophoneToggle }: {
+export default function PublicControls({ cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, onMicrophoneToggle }: {
+  cardsOpen: boolean;
+  textOpen: boolean;
+  onCardsToggle: () => void;
+  greetingComplete: boolean;
+  greetingBusy: boolean;
+  onGreeting: () => void;
   themePreference: ThemePreference;
   resolvedTheme: ResolvedTheme;
   onThemeChange: (theme: ThemePreference) => void;
@@ -20,9 +26,11 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
 }) {
   const active = useSyncExternalStore(subscribePublic, publicActive);
   const [status, setStatus] = useState<PublicStatus | null>(null);
+  const [statusRefresh, setStatusRefresh] = useState(0);
   const [message, setMessage] = useState('接続を確認しています。');
   const [token, setToken] = useState(''); const [pending, setPending] = useState(false);
   const [requested, setRequested] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(false);
   const microphoneLabel = microphoneStateLabels[microphoneState];
   const microphoneAction = microphoneOn ? 'マイクを止める' : 'マイクで話す';
   const microphonePending = microphoneState === 'starting' || microphoneState === 'stopping';
@@ -30,26 +38,19 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
   const request = useRef<{ promise: Promise<boolean>; resolve: (value: boolean) => void } | null>(null);
   const startAbort = useRef<AbortController | null>(null);
   const finishRequest = useCallback((success: boolean) => { request.current?.resolve(success); request.current = null; setRequested(false); }, []);
-  const cancelRequest = useCallback(() => { startAbort.current?.abort(); startAbort.current = null; setPending(false); finishRequest(false); }, [finishRequest]);
+  const cancelRequest = useCallback(() => { cancelPublicAction(); startAbort.current?.abort(); startAbort.current = null; setPending(false); setToken(''); finishRequest(false); }, [finishRequest]);
   const [manual, setManual] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const automaticMessageRef = useRef(false);
-  const messageRef = useRef<HTMLParagraphElement>(null);
   const panelRef = usePanelVisibility<HTMLDivElement>(expanded, '.public-controls__disclosure');
-  useEffect(() => {
-    if (expanded && automaticMessageRef.current && panelRef.current && messageRef.current) {
-      panelRef.current.scrollTop = messageRef.current.offsetTop - 16;
-    }
-  }, [expanded, message, requested, pending, panelRef]);
   const challenge = useRef<HTMLDivElement>(null); const widget = useRef<string | null>(null);
   useEffect(() => registerPublicSessionRequest(() => {
     if (request.current) return request.current.promise;
     let resolve!: (value: boolean) => void;
     const promise = new Promise<boolean>(done => { resolve = done; });
     request.current = { promise, resolve };
-    setMessage('確認が終わると、そのまま返答を始めます。マイクの許可は音声入力を選んだときだけ求めます。');
-    automaticMessageRef.current = true;
-    setRequested(true); setExpanded(true);
+    setMessage('確認が終わると、選んだ操作を続けます。マイクの許可は音声入力を選んだときだけ求めます。');
+    setStatus(null); setToken(''); setStatusRefresh(value => value + 1);
+    setRequested(true); setExpanded(false); setNoticeOpen(true);
     return promise;
   }), []);
   useEffect(() => () => { startAbort.current?.abort(); request.current?.resolve(false); }, []);
@@ -63,25 +64,24 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
       setStatus(value); if (!request.current) setMessage(!value.enabled ? '会話機能は準備中です。カード操作を試せます。' : value.cookieReady ? 'カード交換や文字送信から始められます。' : '会話には匿名Cookieを有効にしてください。');
     })().catch(() => { if (!disposed) { setMessage('接続できませんでした。再読み込みしてください。'); finishRequest(false); } });
     return () => { disposed = true; };
-  }, [finishRequest]);
+  }, [finishRequest, statusRefresh]);
   useEffect(() => {
-    if (!expanded || active || !status?.enabled || !status.siteKey || !challenge.current) return;
+    if (!noticeOpen || active || !status?.enabled || !status.siteKey || !challenge.current) return;
     let disposed = false;
     const render = () => { if (!disposed && challenge.current && window.turnstile) widget.current = window.turnstile.render(challenge.current, {
-      sitekey: status.siteKey, action: 'session', callback: setToken, 'expired-callback': () => setToken(''), 'error-callback': () => { setToken(''); setMessage('確認を完了できませんでした。閉じてからもう一度操作してください。'); finishRequest(false); },
+      sitekey: status.siteKey, action: 'session', callback: (value: string) => { if (!disposed) setToken(value); }, 'expired-callback': () => { if (!disposed) setToken(''); }, 'error-callback': () => { if (disposed) return; setToken(''); setMessage('確認を完了できませんでした。閉じてからもう一度操作してください。'); finishRequest(false); },
     }); };
     const script = document.createElement('script'); script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; script.onload = render;
     script.onerror = () => { if (!disposed) { setMessage('確認画面を読み込めませんでした。閉じてからもう一度操作してください。'); finishRequest(false); } };
     if (window.turnstile) render(); else document.head.append(script);
     return () => { disposed = true; if (widget.current) window.turnstile?.remove(widget.current); widget.current = null; script.remove(); };
-  }, [status?.siteKey, status?.enabled, expanded, active, finishRequest]);
+  }, [status?.siteKey, status?.enabled, noticeOpen, active, finishRequest]);
   useEffect(() => {
     const hidden = () => { if (document.hidden) { cancelRequest(); pausePublic(); setMessage('カード交換・文字送信・マイク操作から再開できます。'); } };
     const timer = window.setInterval(() => { if (active && status?.session && status.session.expires <= Date.now()) { pausePublic(); setMessage('体験が終了しました。'); } }, 500);
     const error = (event: Event) => {
       const reason = (event as CustomEvent).detail;
-      automaticMessageRef.current = true;
-      finishRequest(false); setExpanded(true);
+      finishRequest(false); setExpanded(false); setNoticeOpen(true);
       setMessage(publicErrorMessage(reason));
     };
     document.addEventListener('visibilitychange', hidden); window.addEventListener('vayria-public-error', error);
@@ -102,14 +102,14 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
         const value = await response.json();
         if (controller.signal.aborted || document.hidden) return;
         if (!response.ok) { window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: value })); return; }
-        setStatus(s => ({ ...s, ...value })); activatePublic(value.session); finishRequest(true); setExpanded(false);
+        setStatus(s => ({ ...s, ...value })); activatePublic(value.session); finishRequest(true); setNoticeOpen(false);
         setMessage('会話中です。マイクは「マイクで話す」を押したときだけ使います。');
       } catch { if (!controller.signal.aborted) { setMessage('接続できませんでした。もう一度操作してください。'); finishRequest(false); }
       } finally { if (startAbort.current === controller) { startAbort.current = null; setPending(false); setToken(''); if (widget.current) window.turnstile?.reset(widget.current); } }
     })();
   }, [requested, pending, status, token, finishRequest]);
   const end = async () => {
-    const id = publicSessionId(); cancelRequest(); pausePublic();
+    const id = publicSessionId(); cancelRequest(); pausePublic(); setExpanded(false); setNoticeOpen(true);
     try {
       const response = await fetch('/api/session', { method: 'DELETE', headers: { 'X-Vayria-Session': id } });
       if (!response.ok) throw new Error('Session end failed');
@@ -118,8 +118,24 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
     } catch { setMessage('再生と録音を停止しました。終了の通信を確認できませんでした。'); }
   };
   return <aside className="public-controls" aria-label="会話の操作">
+    {!noticeOpen && !cardsOpen && !textOpen && !expanded && <div className="public-entry" aria-label="Vayriaとの会話を始める">
+      {!greetingComplete ? <>
+        <p className="public-entry__title">Vayriaに、ひとこと。</p>
+        <button className="public-entry__greeting" disabled={greetingBusy} onClick={onGreeting}>{greetingBusy ? '返答を待っています…' : '挨拶してみる'}</button>
+        <p>{isMuted ? '字幕で返事します' : '声と字幕で返事します'}</p>
+      </> : <p className="public-entry__continue">文字・マイク・カードから続けられます</p>}
+    </div>}
+    {noticeOpen && <section className="public-entry public-entry--notice" aria-label="会話の接続と案内">
+      <p role="status">{message}</p>
+      {requested && <p>{pending ? '接続しています…' : '確認が終わると、選んだ操作を続けます。'}</p>}
+      <div ref={challenge} hidden={active} />
+      <button onClick={() => { cancelRequest(); setNoticeOpen(false); }}>{requested ? 'キャンセル' : '操作を選び直す'}</button>
+    </section>}
     <div className="public-controls__actions">
-      <button className="public-controls__text" aria-label="文字で話す" title="文字で話す" onClick={() => { window.dispatchEvent(new Event('vayria-public-prepare')); window.dispatchEvent(new Event('vayria-public-text-input')); }}>
+      <button className="public-controls__cards" aria-label="カードで遊ぶ" title="カードで遊ぶ" aria-expanded={cardsOpen} aria-controls="public-card-panel" onClick={onCardsToggle}>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="3" width="13" height="18" rx="2" /><path d="m4 6-2 1 3 14M13.5 8l3 4-3 4-3-4Z" /></svg>
+      </button>
+      <button className="public-controls__text" aria-expanded={textOpen} aria-controls="public-text-panel" aria-label="文字で話す" title="文字で話す" onClick={() => { window.dispatchEvent(new Event('vayria-public-prepare')); window.dispatchEvent(new Event('vayria-public-text-input')); }}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z" /><path d="M7 9h10M7 13h6" /></svg>
       </button>
       <button className="public-controls__microphone" data-state={microphoneState} aria-label={`${microphoneAction}。${microphoneLabel || 'オフ'}`} title={`${microphoneAction}。${microphoneLabel || 'オフ'}`} aria-pressed={microphoneOn} disabled={microphonePending} onClick={onMicrophoneToggle}>
@@ -131,7 +147,7 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
       <button aria-label={isMuted ? '音声をオンにする' : '音声をミュートする'} title={isMuted ? '音声をオンにする' : '音声をミュートする'} aria-pressed={isMuted} onClick={onMuteToggle}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 4 6 8H3v8h3l5 4Z" />{isMuted ? <path d="m16 9 5 6m0-6-5 6" /> : <><path d="M15 8a6 6 0 0 1 0 8M18 4a11 11 0 0 1 0 16" /></>}</svg>
       </button>
-      <button className="public-controls__disclosure" aria-label="設定" title="設定" aria-expanded={expanded} aria-controls="public-session-panel" onClick={() => { automaticMessageRef.current = false; if (expanded) cancelRequest(); else if (panelRef.current) panelRef.current.scrollTop = 0; setExpanded(value => !value); }}>
+      <button className="public-controls__disclosure" aria-label="設定" title="設定" aria-expanded={expanded} aria-controls="public-session-panel" onClick={() => { if (expanded) cancelRequest(); else if (panelRef.current) panelRef.current.scrollTop = 0; setExpanded(value => !value); }}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polygon points="21.95,11.02 21.95,12.98 19.66,14.32 19.06,15.77 19.73,18.34 18.34,19.73 15.77,19.06 14.32,19.66 12.98,21.95 11.02,21.95 9.68,19.66 8.23,19.06 5.66,19.73 4.27,18.34 4.94,15.77 4.34,14.32 2.05,12.98 2.05,11.02 4.34,9.68 4.94,8.23 4.27,5.66 5.66,4.27 8.23,4.94 9.68,4.34 11.02,2.05 12.98,2.05 14.32,4.34 15.77,4.94 18.34,4.27 19.73,5.66 19.06,8.23 19.66,9.68" /><circle cx="12" cy="12" r="3.2" /></svg>
       </button>
     </div>
@@ -151,14 +167,12 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
       </label>)}
     </fieldset>
     <h3>利用状況</h3>
-    <p ref={messageRef} aria-live="polite">{message} {status && `残り: 本日${status.remainingDay}回・今月${status.remainingMonth}回`}</p>
-    {requested && <p>{pending ? '接続しています…' : '確認を完了すると、操作した内容への返答を始めます。'}</p>}
+    <p aria-live="polite">{active ? '会話中です。' : status?.enabled === false || status?.stopped ? '現在は会話を休止しています。' : '会話は開始していません。'} {status && `残り: 本日${status.remainingDay}回・今月${status.remainingMonth}回`}</p>
     {active && <button onClick={() => void end()}>会話を終了</button>}
     {microphoneOn && <>
     <label><input type="checkbox" checked={manual} onChange={event => { setManual(event.target.checked); window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: event.target.checked, pressed: false } })); }} />押して話す（オフで自動検出）</label>
     {manual && <button disabled={!active} onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: true, pressed: true } })); }} onPointerUp={() => window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: true, pressed: false } }))} onPointerCancel={() => window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: true, pressed: false } }))}>押している間に話す</button>}
     </>}
-    <div ref={challenge} hidden={active} />
     <details><summary>送信先・利用条件</summary>音声認識と文章生成はOpenAI、音声合成はAivis Cloudへ送信します。匿名Cookieを90日間保存し、利用回数を管理します。会話本文と音声はアプリの永続ログへ保存しません。<br />アバター作者: わかどり。このアプリでの表示を許可しています。第三者への再利用許諾ではありません。<br />音声: zonoko / zgock（配布元の表示: CC0）。<a href="https://hub.aivis-project.com/aivm-models/7fc08a41-b64d-456d-8b22-8e1284674775" target="_blank" rel="noreferrer">モデル情報</a></details>
     </div>
   </aside>;
