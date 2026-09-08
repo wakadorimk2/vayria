@@ -93,6 +93,36 @@ test('text-only response is retained without starting playback', async () => {
   assert.deepEqual(f.requests[1].body.history, [{ role: 'user', content: 'こんにちは' }, { role: 'assistant', content: response.text }]);
 });
 
+test('greeting purpose is separate from visible input and never leaks into the next turn', async () => {
+  const f = fixture({ isMuted: true });
+  await f.runtime.sendManual('こんにちは', cards, () => {}, plan('greeting'), undefined, undefined, undefined, true);
+  assert.equal(f.requests[0].body.greeting, true);
+  assert.equal(f.requests[0].body.message, 'こんにちは');
+  await f.send('ordinary');
+  assert.equal(f.requests[1].body.greeting, undefined);
+  assert.deepEqual(f.requests[1].body.history, [
+    { role: 'user', content: 'こんにちは' }, { role: 'assistant', content: response.text },
+  ]);
+});
+
+test('reset discards late TTS failures after speech audio completed', async () => {
+  const f = fixture();
+  const pending = f.send('previous-visitor');
+  await flush();
+  f.plays[0].callbacks?.onAudioComplete?.(2);
+  f.runtime.resetConversation();
+  f.plays[0].pending.reject(new Error('late TTS failure'));
+  assert.equal(await pending, false);
+  assert.equal(f.runtime.getSnapshot().error, '');
+  assert.equal(f.runtime.getSnapshot().status, 'idle');
+  assert.equal(f.runtime.getSnapshot().reply, '');
+  const next = f.send('next-visitor');
+  await flush();
+  assert.deepEqual(f.requests.filter(r => r.url.endsWith('/chat'))[1].body.history, []);
+  f.plays[1].pending.resolve(result);
+  assert.equal(await next, true);
+});
+
 test('mute during playback does not promote generated text to delivered history', async () => {
   const f = fixture(); const old = f.send('old'); await flush();
   f.runtime.updateOptions({ isMuted: true });

@@ -20,6 +20,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
   }
   const {
     mode,
+    greeting,
     message,
     characterIdentity,
     history,
@@ -164,6 +165,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
         streamingCallbacks,
         earlySpeechLead,
         recentExpressionLevels,
+        greeting,
       );
     } else {
       const generatedResponse = await generateReply(
