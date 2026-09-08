@@ -545,11 +545,13 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     activeDeliveredTextRef.current = "";
     const textOnlyTurn = isMutedRef.current;
     let deliveredText = "";
+    let releaseAudioCapture: (() => void) | undefined;
     const guard = <T extends unknown[]>(callback: ((...args: T) => void) | undefined) => (...args: T) => {
       if (generation === generationRef.current) callback?.(...args);
     };
     const playOwned: PerformancePlayback['play'] = (ownedPlan, audio, callbacks = {}) => {
       if (generation !== generationRef.current) return Promise.resolve(null);
+      releaseAudioCapture ??= playback.holdAudioCapture?.();
       return playback.play(ownedPlan, audio, {
         ...callbacks,
         onAudioComplete: guard(callbacks.onAudioComplete),
@@ -1414,6 +1416,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       return { completed: false, decision: null };
     }
     finally {
+      releaseAudioCapture?.();
       if (activePresentationPlanIdRef.current === executionPlan.planId) {
         activePresentationPlanIdRef.current = null;
         onReplyPresentationEndRef.current?.(executionPlan.planId);

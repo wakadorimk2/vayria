@@ -1,10 +1,15 @@
 import type { VoiceInputAdapter, VoiceInputAdapterOptions } from './voiceAdapter';
 import { publicActive, publicFetch } from '../public/session';
+import { getIosAudioSession } from '../audio/iosAudioSession';
+import { resumeAudioContext } from '../audio/persistentStreamingAudio';
 export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): VoiceInputAdapter {
   let context: AudioContext | null = null; let media: MediaStream | null = null; let node: AudioWorkletNode | null = null;
   let enabled = false; let playing = false; let busy = false; let manual = false; let pressed = false;
   let chunks: Int16Array[] = []; let samples = 0; let silent = 0; let segmentId = ''; let generation = 0;
   let transcription: AbortController | null = null;
+  const audioSession = getIosAudioSession();
+  let wanted = false;
+  let opening: Promise<boolean> | null = null;
   const emit = options.onEvent;
   const reset = () => { chunks = []; samples = 0; silent = 0; segmentId = ''; };
   const flush = async () => {
@@ -35,15 +40,23 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
       if (transcription === request) { transcription = null; busy = false; }
     }
   };
-  const stop = async () => {
-    enabled = false; const stoppedGeneration = ++generation; reset(); busy = false;
+  const releaseCapture = async () => {
+    ++generation; opening = null; reset(); busy = false;
     transcription?.abort(); transcription = null;
     if (node) { node.port.onmessage = null; node.disconnect(); node = null; }
     media?.getTracks().forEach(track => track.stop()); media = null;
     const previous = context; context = null;
     try { if (previous && previous.state !== 'closed') await previous.close(); }
     catch { /* Tracks and nodes are already released even if the context cannot close. */ }
-    finally { if (generation === stoppedGeneration) emit({ type: 'recognition_stopped', at: Date.now() }); }
+  };
+  const stop = async () => {
+    wanted = false; enabled = false;
+    const released = releaseCapture(); const stoppedGeneration = generation;
+    await released;
+    if (generation === stoppedGeneration) {
+      audioSession?.playback();
+      emit({ type: 'recognition_stopped', at: Date.now() });
+    }
   };
   const pause = () => { void stop(); };
   const control = (event: Event) => {
@@ -52,20 +65,29 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
     if (manual && !pressed) void flush();
   };
   window.addEventListener('vayria-public-stop', pause); window.addEventListener('vayria-public-microphone', control);
-  return {
+  const adapter: VoiceInputAdapter = {
     isSupported: !!navigator.mediaDevices?.getUserMedia && typeof AudioWorkletNode !== 'undefined', supportErrorCode: null,
-    async start() {
-      if (!publicActive()) return false;
-      if (enabled) return true;
+    start() {
+      if (!publicActive()) return Promise.resolve(false);
+      wanted = true;
+      if (audioSession?.playbackHeld) {
+        enabled = true; emit({ type: 'listening_started', at: Date.now() });
+        return Promise.resolve(true);
+      }
+      if (enabled && context) return Promise.resolve(true);
+      if (opening) return opening;
       const current = ++generation;
+      const attempt = (async () => {
       try {
+        audioSession?.recording();
         const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }, video: false });
-        if (current !== generation || !publicActive()) { stream.getTracks().forEach(track => track.stop()); return false; }
+        if (current !== generation || !wanted || !publicActive() || document.hidden || audioSession?.playbackHeld) { stream.getTracks().forEach(track => track.stop()); return false; }
         media = stream; context = new AudioContext(); await context.audioWorklet.addModule(new URL('./pcmCaptureWorklet.js', import.meta.url));
         if (current !== generation) return false;
         if (!publicActive()) { await stop(); return false; }
         node = new AudioWorkletNode(context, 'vayria-pcm-capture', { processorOptions: { inputSampleRate: context.sampleRate, targetSampleRate: 16000, chunkSamples: 320 } });
-        context.createMediaStreamSource(media).connect(node); node.connect(context.destination); await context.resume();
+        context.createMediaStreamSource(media).connect(node); node.connect(context.destination);
+        if (!(await resumeAudioContext(context))) throw new Error('Capture context did not start');
         if (current !== generation) return false;
         if (!publicActive()) { await stop(); return false; }
         enabled = true;
@@ -86,7 +108,15 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
         if (generation === failedGeneration) emit({ type: 'recognition_failed', code: 'audio-capture', at: Date.now() });
         return false;
       }
+      })().finally(() => { if (opening === attempt) opening = null; });
+      opening = attempt;
+      return attempt;
     }, stop, setTtsPlaying(value) { playing = value; if (value) reset(); },
-    dispose() { window.removeEventListener('vayria-public-stop', pause); window.removeEventListener('vayria-public-microphone', control); void stop(); },
+    dispose() { window.removeEventListener('vayria-public-stop', pause); window.removeEventListener('vayria-public-microphone', control); void stop(); unregister?.(); },
   };
+  const unregister = audioSession?.register({
+    pause: releaseCapture,
+    resume: () => wanted && publicActive() && !document.hidden ? adapter.start() : Promise.resolve(false),
+  });
+  return adapter;
 }
