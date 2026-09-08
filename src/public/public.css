@@ -37,6 +37,23 @@
 .public-controls__level { position: absolute; bottom: 3px; display: flex; height: 7px; align-items: center; gap: 2px; }
 .public-controls__level i { display: block; width: 2px; height: calc(2px + var(--input-level) * 5px); background: currentColor; border-radius: 1px; }
 @keyframes public-microphone-progress { to { transform: rotate(360deg); } }
+.public-layout .public-card-panel { display: contents; }
+.public-layout .public-card-panel[data-open="false"] .card-prototype { visibility: hidden; pointer-events: none; }
+.public-layout .public-entry {
+ position: absolute; bottom: calc(100% + 22px); left: 50%; transform: translateX(-50%);
+ width: min(340px, calc(100vw - 32px)); box-sizing: border-box; text-align: center;
+ color: var(--public-ink); pointer-events: auto; padding: 12px 16px;
+ border-radius: 20px; background: var(--public-capsule); backdrop-filter: blur(16px);
+ max-height: min(45dvh, 360px); overflow-y: auto;
+}
+.public-layout .public-entry p { margin: 6px 0; font-size: 13px; line-height: 1.55; }
+.public-layout .public-entry .public-entry__title { font-size: 17px; font-weight: 600; }
+.public-layout .public-entry button { color: var(--public-ink); background: var(--public-button); border-color: var(--public-button-border); margin: 6px 0; }
+.public-layout .public-entry .public-entry__greeting { min-height: 48px; padding: 10px 30px; font-size: 16px; }
+.public-layout .public-entry--notice { background: var(--public-surface); text-align: left; }
+.public-layout .public-entry--notice iframe { max-width: 100%; }
+.public-layout .public-controls__actions button[aria-expanded="true"] { background: var(--public-on); }
+@media (max-height: 500px) { .public-layout .public-entry { max-height: 32dvh; padding: 6px 12px; } }
 .public-controls { position: absolute; z-index: 30; inset: auto 0 var(--public-controls-bottom); display: flex; justify-content: center; color: #f4efe6; font-size: 13px; background: none; pointer-events: none; }
 .public-controls__actions { display: flex; justify-content: center; gap: 4px; padding: 6px; border: 0; border-radius: 999px; background: rgb(38 31 53 / 88%); box-shadow: 0 6px 20px rgb(10 7 20 / 18%); pointer-events: auto; }
 .public-controls .public-controls__actions button { display: inline-flex; align-items: center; justify-content: center; width: 48px; min-width: 48px; height: 48px; padding: 12px; margin: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; transition: background-color 300ms ease, transform 300ms ease; }

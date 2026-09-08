@@ -9,7 +9,7 @@ import {
   type FormEvent,
 } from 'react';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
-import { publicActive, publicExhibition, requestPublicSession, subscribePublic } from './public/session';
+import { publicActive, publicExhibition, runPublicAction, subscribePublic } from './public/session';
 import { allowExhibitionAutonomy } from './public/exhibitionHandoff';
 import { useBargeInControl } from './app/useBargeInControl';
 import { useCardAttention } from './app/useCardAttention';
@@ -426,11 +426,15 @@ export default function App() {
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public';
   const [publicTextInputOpen, setPublicTextInputOpen] = useState(false);
+  const [publicCardsOpen, setPublicCardsOpen] = useState(false);
+  const [publicGreetingComplete, setPublicGreetingComplete] = useState(false);
+  const publicCardsRef = usePanelVisibility<HTMLDivElement>(runtimeConfig.mode !== 'public' || publicCardsOpen, '.public-controls__cards');
+  const togglePublicCards = () => { setPublicTextInputOpen(false); setPublicCardsOpen(value => !value); };
   const publicTextPanelRef = usePanelVisibility<HTMLFormElement>(runtimeConfig.mode !== 'public' || publicTextInputOpen, '.public-controls__text');
   const [publicSubmitPending, setPublicSubmitPending] = useState(false);
   const publicSubmitPendingRef = useRef(false);
   useEffect(() => {
-    const toggle = () => setPublicTextInputOpen(value => !value);
+    const toggle = () => { setPublicCardsOpen(false); setPublicTextInputOpen(value => !value); };
     window.addEventListener('vayria-public-text-input', toggle);
     return () => window.removeEventListener('vayria-public-text-input', toggle);
   }, []);
@@ -445,6 +449,7 @@ export default function App() {
     beginReply,
     clearReplyPresentation,
     presentReply,
+    resetCards,
     resetTurn,
     zones,
   } = cardGame;
@@ -822,7 +827,12 @@ export default function App() {
     [],
   );
 
-  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, pendingActivatedCardIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, resetTurn, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
+  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, pendingActivatedCardIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted: acceptReplyPresentation, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, resetTurn, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
+
+  const handleReplyAccepted = useCallback((ids: string[]) => {
+    acceptReplyPresentation(ids);
+    if (runtimeConfig.mode === 'public' && ids.length > 0) setPublicGreetingComplete(true);
+  }, [acceptReplyPresentation]);
 
   const {
     cancelAutonomous,
@@ -1269,8 +1279,9 @@ export default function App() {
     setCardAttentionPhase(null);
 
     resetConversation();
+    setVoiceValidationError('');
     resetRuntime();
-    resetTurn();
+    resetCards();
     cardDropReactionControllerRef.current.reset();
     cardDropReactionPlanIdsRef.current.clear();
     cardReactionPlanIdsRef.current.clear();
@@ -1287,7 +1298,7 @@ export default function App() {
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
-  }, [stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetTurn, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, pendingActivatedCardIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
+  }, [stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetCards, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, pendingActivatedCardIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
 
   useEffect(() => {
     routerResetSessionRef.current = resetSession;
@@ -1902,7 +1913,7 @@ export default function App() {
     (result: CardSwapResult) => {
       if (runtimeConfig.mode === 'public') {
         if (!isMuted) void prepare();
-        void requestPublicSession();
+        void runPublicAction(() => true);
       }
       setProgramPhase('after_card_change');
       const contribution = activateCardSwap(result);
@@ -1989,7 +2000,13 @@ export default function App() {
 
       if (runtimeConfig.mode === 'public') {
         void prepare();
-        if (!(await requestPublicSession())) return;
+        await runPublicAction(async () => {
+          if (!(await startVoiceInput())) return false;
+          if (!publicActive() || document.hidden) { await stopVoiceInput(); return false; }
+          void prepare(); preloadBackchannel();
+          return true;
+        });
+        return;
       }
       if (!(await startVoiceInput())) return;
       void prepare();
@@ -2026,23 +2043,23 @@ export default function App() {
     timingMode: runtimeConfig.autonomyTimingMode,
   });
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!trimmedInput || isManualBusy || publicSubmitPendingRef.current) return;
-    if (runtimeConfig.mode === 'public') {
+  const submitMessage = async (message: string, greeting?: true, admitted = false): Promise<boolean> => {
+    const text = message.trim();
+    if (!text || isManualBusy || (!admitted && publicSubmitPendingRef.current)) return false;
+    if (runtimeConfig.mode === 'public' && !admitted) {
       if (!isMuted) void prepare();
       publicSubmitPendingRef.current = true;
       setPublicSubmitPending(true);
-      try { if (!(await requestPublicSession())) return; }
+      try { return await runPublicAction(() => submitMessage(text, greeting, true)); }
       finally { publicSubmitPendingRef.current = false; setPublicSubmitPending(false); }
-      setPublicTextInputOpen(false);
     }
+    if (admitted) setPublicSubmitPending(false);
     if (
       runtimeConfig.routerEnabled &&
       routerSnapshot.vayriaOutputGate === 'closed' &&
       routerSnapshot.controlState !== 'human_override'
     ) {
-      return;
+      return false;
     }
     if (
       !runtimeConfig.routerEnabled ||
@@ -2061,12 +2078,12 @@ export default function App() {
     cancelActiveCardReactionPlan();
     const trigger: PerformerTrigger = {
       kind: 'viewer_message',
-      text: trimmedInput,
+      text: text,
     };
-    const identityForRequest = rememberExplicitAlias(trimmedInput);
+    const identityForRequest = rememberExplicitAlias(text);
     let manualAutonomyEvidenceContext: AutonomyEvidenceContext | undefined;
-    if (isContentBearingVoiceMessage(trimmedInput)) {
-      const semanticKey = `conversation:${trimmedInput
+    if (isContentBearingVoiceMessage(text)) {
+      const semanticKey = `conversation:${text
         .normalize('NFKC')
         .replace(/\s+/gu, ' ')
         .trim()
@@ -2077,14 +2094,14 @@ export default function App() {
         kind: 'conversation_input',
         at: Date.now(),
         semanticKey,
-        content: trimmedInput,
+        content: text,
         wakeConditions: ['new_evidence', 'floor_available'],
         reasonProposals: [
           {
             kind: 'conversation_continuation',
-            content: trimmedInput,
+            content: text,
             semanticKey,
-            salience: /[?？]/u.test(trimmedInput) ? 0.9 : 0.68,
+            salience: /[?？]/u.test(text) ? 0.9 : 0.68,
           },
         ],
       });
@@ -2093,7 +2110,7 @@ export default function App() {
         readAutonomyEvidenceContext(nextAutonomyState, evidenceId) ?? undefined;
     }
     setAutonomousContext((current) =>
-      recordViewerIntent(current, trimmedInput, identityForRequest),
+      recordViewerIntent(current, text, identityForRequest),
     );
     const plan = createPlanForTrigger(trigger);
     cardDropReactionControllerRef.current.handoffToReply(
@@ -2105,15 +2122,22 @@ export default function App() {
     }
     if (!isMuted) void prepare();
     setInput('');
-    void sendManual(
-      trimmedInput,
+    if (runtimeConfig.mode === 'public') setPublicTextInputOpen(false);
+    return await sendManual(
+      text,
       manualCardContext,
       handleReplyAccepted,
       plan,
       identityForRequest,
       undefined,
       manualAutonomyEvidenceContext,
+      greeting,
     );
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    submitMessage(input);
   };
 
   const handleMuteToggle = () => {
@@ -2480,15 +2504,33 @@ export default function App() {
         />
         {isExhibitionMode && (
           <aside className="exhibition-copy" aria-label="展示案内">
-            <p className="exhibition-copy__title">Vayriaに一枚、どうぞ。</p>
+            <p className="exhibition-copy__title">一枚替えると、どんな反応？</p>
             <p className="exhibition-copy__hint">
-              気になるカードを一枚、Vayriaの脳内へ。
+              カードでVayriaの話し方や連想が変わります。声を出さずに試せます。
             </p>
           </aside>
         )}
+        <div ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}>
         <CardGamePrototype
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
+          key={sessionGeneration}
           game={cardGame}
+          onAskQuestion={message => { void submitMessage(message); }}
+          lastReply={!conversationError ? reply : undefined}
+          isQuestionDisabled={isManualBusy || (runtimeConfig.routerEnabled && routerSnapshot.vayriaOutputGate === 'closed' && routerSnapshot.controlState !== 'human_override')}
+          feedbackMessage={
+            conversationError
+              ? '返答を続けられませんでした。もう一度聞くか、最初からやり直せます。'
+              : needsPlaybackGesture
+                ? '音声の再生許可が必要です。下の「音声を再開」を押してください。'
+                : isMuted
+                  ? '音声はオフです。「今どんな気分？」と聞くと、字幕で返答を読めます。'
+                  : status === 'idle'
+                    ? zones.forcedCardId
+                      ? 'カードを受け取りました。まだ返答がなければ、下のボタンで聞けます。'
+                      : 'もう一枚替えても、ここで終えても大丈夫。'
+                    : conversationStatusLabel
+          }
           isResetLocked={isPerformerBusy}
           onCardAttentionInput={handleCardAttentionInput}
           onCardDragPositionChange={handleCardDragPositionChange}
@@ -2496,9 +2538,10 @@ export default function App() {
           onCardInteraction={handleCardInteraction}
           onCardInserted={handleCardInserted}
           onSessionReset={handleSessionReset}
-          onSelectionActiveChange={setIsCardSelectionActive}
+          onSelectionActiveChange={active => setIsCardSelectionActive(active && (runtimeConfig.mode !== 'public' || publicCardsOpen))}
           spatialTargetRegistry={spatialTargetRegistry}
         />
+        </div>
       </section>
 
       <section
@@ -2542,7 +2585,7 @@ export default function App() {
           )}
         </div>
 
-        <form ref={runtimeConfig.mode === 'public' ? publicTextPanelRef : undefined} className="message-form" onSubmit={handleSubmit}>
+        <form id="public-text-panel" ref={runtimeConfig.mode === 'public' ? publicTextPanelRef : undefined} className="message-form" onSubmit={handleSubmit}>
           <label className="visually-hidden" htmlFor="message-input">
             キャラクターへ送るメッセージ
           </label>
@@ -2619,6 +2662,12 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
+          cardsOpen={publicCardsOpen}
+          textOpen={publicTextInputOpen}
+          onCardsToggle={togglePublicCards}
+          greetingComplete={publicGreetingComplete}
+          greetingBusy={isManualBusy || publicSubmitPending}
+          onGreeting={() => { void submitMessage('こんにちは', true); }}
           themePreference={themePreference}
           resolvedTheme={resolvedTheme}
           onThemeChange={setThemePreference}

@@ -136,21 +136,25 @@ export function createBrowserSpeechRecognitionAdapter(
   recognition.interimResults = true;
   recognition.maxAlternatives = 1;
   recognition.onstart = () => {
+    if (!enabled || disposed) return;
     running = true;
     segmentId = null;
     finalized = false;
     options.onEvent({ type: 'listening_started', at: now() });
   };
   recognition.onspeechstart = () => {
+    if (!enabled || disposed) return;
     createSegment();
   };
   recognition.onspeechend = () => {
+    if (!enabled || disposed) return;
     if (segmentId !== null && !speechEnded) {
       options.onEvent({ type: 'speech_ended', segmentId, at: now() });
       speechEnded = true;
     }
   };
   recognition.onresult = (event) => {
+    if (!enabled || disposed) return;
     const activeSegmentId = createSegment();
     let interimText = '';
 
@@ -188,6 +192,7 @@ export function createBrowserSpeechRecognitionAdapter(
     }
   };
   recognition.onerror = (event) => {
+    if (!enabled || disposed) return;
     const code = event.error || 'unknown';
     if (code === 'no-speech') {
       scheduleRestart();

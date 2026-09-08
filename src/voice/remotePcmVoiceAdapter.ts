@@ -866,6 +866,9 @@ export function createRemotePcmVoiceAdapter(
     nextSocket.binaryType = 'arraybuffer';
     socket = nextSocket;
     nextSocket.onmessage = (event) => {
+      // stop() can leave the socket open briefly while the server flushes STT.
+      // Those results belong to the ended capture, not the next visitor.
+      if (!enabled || disposed || socket !== nextSocket) return;
       let parsed: unknown;
       try {
         parsed = JSON.parse(String(event.data));
@@ -983,6 +986,7 @@ export function createRemotePcmVoiceAdapter(
   };
 
   const start = async (): Promise<boolean> => {
+    if (stopPromise) await stopPromise;
     if (disposed || supportErrorCode !== null || !AudioContextConstructor) {
       if (supportErrorCode) {
         emit({ type: 'recognition_failed', code: supportErrorCode, at: now() });

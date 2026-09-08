@@ -34,7 +34,23 @@ export function activatePublic(value: PublicStatus['session']) {
   for (const listener of listeners) listener();
   window.dispatchEvent(new Event(active ? 'vayria-public-start' : 'vayria-public-stop'));
 }
-export function pausePublic() { activatePublic(null); }
+let pendingAction: object | null = null;
+let actionGeneration = 0;
+// One explicit operation owns admission. A later cancel invalidates its continuation.
+export async function runPublicAction(action: () => void | boolean | Promise<void | boolean>): Promise<boolean> {
+  if (pendingAction || document.hidden) return false;
+  const owner = {};
+  const generation = actionGeneration;
+  pendingAction = owner;
+  try {
+    if (!(await requestPublicSession()) || generation !== actionGeneration || document.hidden || !publicActive()) return false;
+    return (await action()) !== false;
+  } finally {
+    if (pendingAction === owner) pendingAction = null;
+  }
+}
+export function cancelPublicAction() { actionGeneration += 1; pendingAction = null; }
+export function pausePublic() { cancelPublicAction(); activatePublic(null); }
 export const publicSessionId = () => session?.id ?? '';
 let ttsQueue = Promise.resolve();
 export async function publicFetch(path: string, init: RequestInit = {}): Promise<Response> {

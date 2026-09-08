@@ -24,6 +24,9 @@
 
 ## Next
 
+- → 公開版の参加導線: 挨拶ボタン、ガラスパネルのカード開閉、独立した接続案内をローカル実装した。関連テスト371件と展示・公開ビルドが成功。docs/evaluation/public-greeting-entry.md に沿って実AI・iOS・初見利用者を確認する。未公開
+- → 9/9同期完了: この作業へorigin/mainのc0c26fbを取り込んだ。参加導線と停止後通知修正を保持し、公開セッション確認・マイク表示との競合を解消した。関連テスト368件と展示・公開ビルドが成功。改善自体は未コミット・未公開。docs/evaluation/exhibition-participation-research.md の統合記録を参照する
+- → Selectionの参加導線: 一操作での初回交換、18枚の変化予告と話題、同じ質問での比較、返答の振り返り、交代リセットを候補実装した。停止後の音声通知を無視する修正を回帰テストで確認した。docs/evaluation/exhibition-participation-research.md に沿って実AI・実音声と参加率を確認する。模擬応答でのブラウザー操作は確認済み、参加率の改善は未検証
 - → 9/8〜12: [Issue #29](https://github.com/wakadorimk2/vayria/issues/29) で4候補をSmoke Testし、[Issue #30](https://github.com/wakadorimk2/vayria/issues/30) で候補ごとにKeep/Dropを決める。採用数に上限は設けない
 - → 9/13〜17: [Issue #31](https://github.com/wakadorimk2/vayria/issues/31) でKeepした体験を磨き、Go/No-Goを確定する
 - → 9/17まで: [Issue #27](https://github.com/wakadorimk2/vayria/issues/27) と [Issue #28](https://github.com/wakadorimk2/vayria/issues/28) へ運用手順と搬入準備を反映する
@@ -32,7 +35,7 @@
 
 ## Recently Done
 
-- 9/9 展示モードをローカル実装。型検査・lint・通常/公開ビルド・既存テスト・公開版47件を確認した。iPad相当サイズの模擬ブラウザー試験も成功した。展示モードの配信・本番枠作成・有料生成・実機確認は未実施。
+- 9/9 展示モードをローカル実装。型検査・lint・通常/公開ビルド・既存テスト・公開版49件を確認した。iPad相当サイズの模擬ブラウザー試験も成功した。展示モードの配信・本番枠作成・有料生成・実機確認は未実施。
 
 - [PR #86](https://github.com/wakadorimk2/vayria/pull/86) LLM provider単位のレイテンシ計測を追加した
 - [PR #85](https://github.com/wakadorimk2/vayria/pull/85) viewer activityへ適応する自律発話タイミング候補を追加した

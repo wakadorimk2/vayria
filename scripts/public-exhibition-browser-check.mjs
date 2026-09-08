@@ -98,6 +98,11 @@ try {
     const box = await page.locator(selector).first().boundingBox(); assert.ok(box);
     await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
   };
+  await page.getByRole('button', { name: 'カードで遊ぶ', exact: true }).click();
+  await page.screenshot({ path: resolve(output, 'cards-landscape.png') });
+  await page.setViewportSize({ width: 1024, height: 1366 });
+  await page.screenshot({ path: resolve(output, 'cards-portrait.png') });
+  await page.setViewportSize({ width: 1366, height: 1024 });
   await tapCard('.card-zone--hand [data-card-id]');
   await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/chat')), tapCard('.card-zone--brain [data-card-id]')]);
   assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).mode === 'autonomous' && JSON.parse(g.body).forcedCardId));
@@ -142,6 +147,12 @@ try {
   await page.getByRole('button', { name: '体験を終える', exact: true }).click();
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.exhibitTracks.every(t => t.readyState === 'ended')), true);
+  await page.getByRole('button', { name: '挨拶してみる', exact: true }).click();
+  await page.getByText('文字・マイク・カードから続けられます', { exact: true }).waitFor();
+  assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).greeting === true));
+  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.getByRole('button', { name: '挨拶してみる', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'カードで遊ぶ', exact: true }).getAttribute('aria-expanded'), 'false');
   usedYen = 8000;
   await page.waitForTimeout(16000);
   await page.getByRole('button', { name: '設定：展示予算の通知あり', exact: true }).click();
@@ -152,7 +163,7 @@ try {
   await page.waitForTimeout(16000);
   await page.getByText('利用状況を更新できていません。表示は最後に確認できた値です。', { exact: true }).waitFor();
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, screenshots: output, checks: ['idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'budget-notice', 'stale-status'], generations: generations.length }));
+  console.log(JSON.stringify({ passed: true, screenshots: output, checks: ['idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
 } catch (error) {
   console.error(JSON.stringify({ generations, errors, ui: await page.locator('body').innerText(), sources: await page.evaluate(() => window.exhibitSources) }));
   await page.screenshot({ path: resolve(output, 'failure.png') });
