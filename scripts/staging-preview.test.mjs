@@ -115,6 +115,7 @@ test('Worker package cannot read runner files through imports or execute build c
 test('workflow separates PR execution from write tokens and deploy credentials; main drains previews', async () => {
   const workflow = load(await readFile('.github/workflows/staging-preview.yml', 'utf8'));
   assert.deepEqual(workflow.permissions, {});
+  assert.equal(workflow.jobs.select.permissions['pull-requests'], 'write');
   assert.deepEqual(workflow.jobs.build.permissions, { contents: 'read' });
   assert.doesNotMatch(JSON.stringify(workflow.jobs.build), /secrets\.|GH_TOKEN|environment|cache:/);
   assert.equal(workflow.jobs.deploy.environment.name, 'staging');
@@ -122,6 +123,8 @@ test('workflow separates PR execution from write tokens and deploy credentials; 
   assert.doesNotMatch(JSON.stringify(workflow), /production-cd|wrangler.production|Deploy production/);
   assert.ok(workflow.jobs.deploy.steps.some(s => s.run === 'npm ci --ignore-scripts'));
   const ci = load(await readFile('.github/workflows/ci.yml', 'utf8'));
+  assert.equal(ci.jobs['preview-reset'].permissions['pull-requests'], 'write');
+  assert.equal(ci.jobs['deploy-staging'].permissions['pull-requests'], 'write');
   assert.ok(ci.jobs['deploy-staging'].needs.includes('preview-reset'));
   const steps = ci.jobs['deploy-staging'].steps;
   assert.ok(steps.findIndex(s => s.run?.includes('main-wait')) < steps.findIndex(s => s.run === 'node scripts/staging-cd.mjs deploy'));

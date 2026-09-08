@@ -25,7 +25,7 @@ jobs:
       contents: read
       actions: read
       issues: write
-      pull-requests: read
+      pull-requests: write
     outputs:
       selected: ${{ steps.select.outputs.selected }}
       sha: ${{ steps.select.outputs.sha }}
