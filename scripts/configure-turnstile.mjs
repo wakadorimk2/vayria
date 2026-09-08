@@ -17,7 +17,7 @@ async function api(path, method = 'GET', body) {
 const widgets = await api('challenges/widgets');
 for (const target of [
   { name: 'Vayria staging', domain: 'staging.vayria.me', worker: 'vayria-public-staging', config: 'wrangler.public.jsonc' },
-  { name: 'Vayria production', domain: 'vayria.me', worker: 'vayria-web', config: 'wrangler.production.example.jsonc' },
+  { name: 'Vayria production', domain: 'vayria.me', worker: 'vayria-web', config: 'wrangler.production.jsonc' },
 ]) {
   let widget = widgets.find(w => w.name === target.name);
   if (widget) {

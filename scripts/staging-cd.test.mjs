@@ -10,11 +10,14 @@ test('staging target guard rejects production and extra routes', () => {
     { routes: [...config.routes, { pattern: 'vayria.me' }] }, { workers_dev: true }, { vars: { ...config.vars, REQUIRE_PREVIEW_ACCESS: 'false' } }])
     assert.throws(() => validateTarget({ ...config, ...patch }));
 });
-test('only the current successful main push revision can pass', () => {
+test('only the current main push or manual revision can pass', () => {
   const sha = 'a'.repeat(40); const other = 'b'.repeat(40);
   validateRevision('push', 'refs/heads/main', sha, sha, sha);
+  validateRevision('workflow_dispatch', 'refs/heads/main', sha, sha, sha);
   for (const args of [['pull_request', 'refs/heads/main', sha, sha, sha], ['push', 'refs/heads/topic', sha, sha, sha],
-    ['push', 'refs/heads/main', sha, other, sha], ['push', 'refs/heads/main', sha, sha, other]]) assert.throws(() => validateRevision(...args));
+    ['push', 'refs/heads/main', sha, other, sha], ['push', 'refs/heads/main', sha, sha, other],
+    ['workflow_dispatch', 'refs/heads/topic', sha, sha, sha],
+    ['workflow_dispatch', 'refs/heads/main', sha, sha, other]]) assert.throws(() => validateRevision(...args));
 });
 test('VRM guard refuses substitutions, missing bytes and the CI fixture', () => {
   const bytes = Buffer.from('pinned original');
