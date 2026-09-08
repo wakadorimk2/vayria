@@ -29,6 +29,14 @@ export const STAGE_PRESET = {
   },
 } as const;
 
+// A neutral front fill keeps the face readable against the public pastel UI.
+export const PUBLIC_STAGE_LIGHTING = {
+  hemisphere: { skyColor: '#fff7f6', groundColor: '#afa2b5', intensity: 0.7 },
+  key: { color: '#fff5ef', intensity: 0.8, position: [0.8, 1.8, 3] },
+  fill: { color: '#f4eeff', intensity: 0.55, position: [-1.2, 1.5, 2.5] },
+  back: { color: '#eed5f0', intensity: 0.16, position: [0.5, 2, -2] },
+} as const;
+
 export const CARD_PREVIEW_LIGHTING = {
   hemisphere: {
     skyColor: '#fff4ea',

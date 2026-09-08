@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { WildcardCard } from './WildcardCard';
 import { runtimeConfig } from '../runtimeConfig';
+import { getPublicInteractionHint, type MicrophoneState } from '../public/microphoneState';
 import type { CardMotion } from './cardTypes';
 import type {
   SpatialTargetRegistry,
@@ -50,6 +51,7 @@ export interface CardDragPositionUpdate {
 }
 
 interface CardGamePrototypeProps {
+  publicMicrophoneState?: MicrophoneState;
   game: CardGamePrototypeController;
   isResetLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
@@ -222,6 +224,7 @@ function resolveDragDropPreview(
 }
 
 export function CardGamePrototype({
+  publicMicrophoneState = 'off',
   game,
   isResetLocked = false,
   onCardInserted,
@@ -556,7 +559,7 @@ export function CardGamePrototype({
           ? 'このターンは操作済み'
           : selectionActive
           ? '脳内へ一枚'
-          : '気になる一枚を選んで'
+          : runtimeConfig.mode === 'public' ? '一枚選んで' : '気になる一枚を選んで'
       : isSpent
         ? zones.forcedCardId
           ? `脳へ干渉しました。「${zones.brain.find((card) => card.id === zones.forcedCardId)?.label ?? zones.forcedCardId}」の返答を待っています`
@@ -664,7 +667,7 @@ export function CardGamePrototype({
       </section>
 
       <section className="card-zone card-zone--hand" aria-label="手札">
-        <header className="card-zone__header card-zone__header--hand">
+        <header className="card-zone__header card-zone__header--hand" hidden={runtimeConfig.mode === 'public'}>
           <h2>手札</h2>
           <div className="card-zone__turn-status">
             <span
@@ -710,8 +713,8 @@ export function CardGamePrototype({
 
         <div className="card-zone__cards">{renderCards('hand')}</div>
 
-        <div className="card-zone__action" aria-live="polite">
-          <span>{selectionHint}</span>
+        <div className="card-zone__action" aria-live="polite" aria-atomic="true">
+          <span>{runtimeConfig.mode === 'public' ? getPublicInteractionHint(publicMicrophoneState, selectionActive, selectionHint) : selectionHint}</span>
         </div>
       </section>
 

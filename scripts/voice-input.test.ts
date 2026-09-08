@@ -1867,3 +1867,36 @@ test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifie
     await rm(root, { recursive: true, force: true });
   }
 });
+import { getMicrophoneState, getPublicInteractionHint, microphoneStateLabels, normalizeMicrophoneLevel } from '../src/public/microphoneState.js';
+
+test('public shared hint prioritizes errors, card selection, microphone status and card fallback', () => {
+  for (const state of ['off', 'starting', 'stopping', 'error', 'recognizing', 'speaking', 'listening'] as const) {
+    assert.equal(getPublicInteractionHint(state, true, '一枚選んで'), state === 'error' ? 'マイクを確認' : '脳内へ一枚');
+    for (const fallback of ['一枚選んで', 'このターンは操作済み']) {
+      assert.equal(getPublicInteractionHint(state, false, fallback), microphoneStateLabels[state] || fallback);
+    }
+  }
+  assert.deepEqual(['error', 'starting', 'listening', 'off'].map(state => getPublicInteractionHint(state as keyof typeof microphoneStateLabels, false, '一枚選んで')), ['マイクを確認', '開始中', '入力受付中', '一枚選んで']);
+});
+
+test('public microphone state prioritizes transitions, failures and disabled input', () => {
+  const input = { transition: null, error: null, enabled: true, recognizing: false, speaking: false } as const;
+  assert.equal(getMicrophoneState(input), 'listening');
+  assert.equal(getMicrophoneState({ ...input, speaking: true }), 'speaking');
+  assert.equal(getMicrophoneState({ ...input, speaking: true, recognizing: true }), 'recognizing');
+  assert.equal(getMicrophoneState({ ...input, enabled: false, recognizing: true, speaking: true }), 'off');
+  assert.equal(getMicrophoneState({ ...input, enabled: false, error: 'Permission denied' }), 'error');
+  for (const transition of ['starting', 'stopping'] as const) {
+    assert.equal(getMicrophoneState({ ...input, transition, error: 'Permission denied', recognizing: true }), transition);
+  }
+  assert.equal(getMicrophoneState({ ...input, enabled: false }), 'off');
+});
+
+test('public microphone meter preserves missing samples and clamps measured input', () => {
+  assert.equal(normalizeMicrophoneLevel(null), null);
+  assert.equal(normalizeMicrophoneLevel(NaN), null);
+  assert.equal(normalizeMicrophoneLevel(Infinity), null);
+  assert.equal(normalizeMicrophoneLevel(-1), 0);
+  assert.equal(normalizeMicrophoneLevel(.4), .4);
+  assert.equal(normalizeMicrophoneLevel(2), 1);
+});

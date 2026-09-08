@@ -44,7 +44,7 @@
     "public:check": "wrangler deploy --config wrangler.public.jsonc --env-file deploy/placeholder.env --dry-run",
     "public:dev": "wrangler dev --config wrangler.public.jsonc --env-file deploy/placeholder.env --ip 127.0.0.1 --port 8789",
     "test:cd": "node --test scripts/staging-cd.test.mjs",
-    "test:public": "tsc -p tsconfig.worker.json && node --test scripts/public-ledger.test.mjs scripts/public-worker.test.mjs scripts/public-errors.test.mjs",
+    "test:public": "tsc -p tsconfig.worker.json && node --test scripts/public-ledger.test.mjs scripts/public-worker.test.mjs scripts/public-errors.test.mjs scripts/cloud-voice.test.mjs scripts/public-theme.test.mjs",
     "public:admin": "node scripts/public-admin.mjs"
   },
   "dependencies": {

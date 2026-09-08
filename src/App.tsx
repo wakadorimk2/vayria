@@ -125,6 +125,11 @@ import {
   LISTENING_THINKING_MOTION_ASSET_ID
 } from './voice/voiceInteraction';
 
+import PublicControls from './public/PublicControls';
+import { getMicrophoneState } from './public/microphoneState';
+import { readThemePreference, readResolvedTheme, setThemePreference, subscribeTheme } from './public/theme';
+import { usePanelVisibility } from './public/usePanelVisibility';
+
 const STATUS_LABELS = {
   idle: '話しかけてください。',
   thinking: '考えています…',
@@ -390,6 +395,8 @@ function readRouterAudioInputDeviceId(): string {
 }
 
 export default function App() {
+  const themePreference = useSyncExternalStore(subscribeTheme, readThemePreference);
+  const resolvedTheme = useSyncExternalStore(subscribeTheme, readResolvedTheme);
   const publicSessionActive = useSyncExternalStore(subscribePublic, publicActive);
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
@@ -416,6 +423,7 @@ export default function App() {
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public';
   const [publicTextInputOpen, setPublicTextInputOpen] = useState(false);
+  const publicTextPanelRef = usePanelVisibility<HTMLFormElement>(runtimeConfig.mode !== 'public' || publicTextInputOpen, '.public-controls__text');
   const [publicSubmitPending, setPublicSubmitPending] = useState(false);
   const publicSubmitPendingRef = useRef(false);
   useEffect(() => {
@@ -1011,7 +1019,20 @@ export default function App() {
   const shouldShowReply =
     Boolean(reply) && (!isExhibitionMode || isSubtitleVisible);
   const voiceError = getVoiceErrorMessage(voiceInputErrorCode);
+  const publicMicrophoneState = getMicrophoneState({
+    transition: microphoneInputTransition,
+    error: voiceError,
+    enabled: isVoiceInputEnabled,
+    recognizing: isSttProcessing,
+    speaking: isVadSpeech || voiceInputPhase === 'speech_detected',
+  });
   const conversationError = error || voiceValidationError || voiceError;
+  const shouldShowStatus =
+    (!usesExhibitionUi || !shouldShowReply) &&
+    !(runtimeConfig.mode === 'public' && (
+      (status === 'idle' && !isMuted) ||
+      (status === 'error' && Boolean(conversationError))
+    ));
   const displayedAudioLevel = isVoiceInputEnabled ? audioLevel : null;
   const browserGateAvailable =
     audioLabMode === 'processed-vad' ||
@@ -1979,17 +2000,6 @@ export default function App() {
     stopVoiceInput,
   ]);
 
-  useEffect(() => {
-    if (runtimeConfig.mode !== 'public') return;
-    const toggle = () => { void handleVoiceToggle(); };
-    window.addEventListener('vayria-public-voice-toggle', toggle);
-    return () => window.removeEventListener('vayria-public-voice-toggle', toggle);
-  }, [handleVoiceToggle]);
-  useEffect(() => {
-    if (runtimeConfig.mode === 'public') window.dispatchEvent(new CustomEvent('vayria-public-voice-state', {
-      detail: { enabled: isVoiceInputEnabled, error: voiceError },
-    }));
-  }, [isVoiceInputEnabled, voiceError]);
 
   useAutonomousTalk({
     cancelAutonomous,
@@ -2210,7 +2220,7 @@ export default function App() {
       data-public-text-input={publicTextInputOpen}
       data-exhibition-state={exhibitionPresentationState}
     >
-      {(shouldShowAudioUnlockControl || isExhibitionMode) && (
+      {runtimeConfig.mode !== 'public' && (shouldShowAudioUnlockControl || isExhibitionMode) && (
         <header className="app-title">
           {!usesExhibitionUi && <span>Vayria</span>}
           {isExhibitionMode && (
@@ -2450,6 +2460,7 @@ export default function App() {
 
       <section className="avatar-area" aria-label="VRM character">
         <VrmStage
+          stageVariant={runtimeConfig.mode === 'public' ? 'public' : 'default'}
           attentionReader={readAttention}
           emotion={displayEmotion}
           isExhibitionMode={usesExhibitionUi}
@@ -2461,7 +2472,7 @@ export default function App() {
           sessionGeneration={sessionGeneration}
           spatialTargetRegistry={spatialTargetRegistry}
         />
-        {usesExhibitionUi && (
+        {isExhibitionMode && (
           <aside className="exhibition-copy" aria-label="展示案内">
             <p className="exhibition-copy__title">Vayriaに一枚、どうぞ。</p>
             <p className="exhibition-copy__hint">
@@ -2470,6 +2481,7 @@ export default function App() {
           </aside>
         )}
         <CardGamePrototype
+          publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
           game={cardGame}
           isResetLocked={isPerformerBusy}
           onCardAttentionInput={handleCardAttentionInput}
@@ -2490,7 +2502,7 @@ export default function App() {
       >
         <div className="conversation-copy" aria-live="polite">
           {shouldShowReply && <p className="reply">{reply}</p>}
-          {(!usesExhibitionUi || !shouldShowReply) && (
+          {shouldShowStatus && (
             <p className="status">
               {isMuted && status === 'idle'
                 ? 'ミュート中です。テキスト会話は利用できます。'
@@ -2524,7 +2536,7 @@ export default function App() {
           )}
         </div>
 
-        <form className="message-form" onSubmit={handleSubmit}>
+        <form ref={runtimeConfig.mode === 'public' ? publicTextPanelRef : undefined} className="message-form" onSubmit={handleSubmit}>
           <label className="visually-hidden" htmlFor="message-input">
             キャラクターへ送るメッセージ
           </label>
@@ -2597,6 +2609,19 @@ export default function App() {
           vadScore={voiceInput.vadScore}
           vadThreshold={vadThreshold}
           noiseFloor={voiceInput.noiseFloor}
+        />
+      )}
+      {runtimeConfig.mode === 'public' && (
+        <PublicControls
+          themePreference={themePreference}
+          resolvedTheme={resolvedTheme}
+          onThemeChange={setThemePreference}
+          isMuted={isMuted}
+          onMuteToggle={handleMuteToggle}
+          microphoneOn={isVoiceInputEnabled}
+          microphoneState={publicMicrophoneState}
+          microphoneLevel={displayedAudioLevel === null ? null : microphoneInputStrength}
+          onMicrophoneToggle={() => { void handleVoiceToggle(); }}
         />
       )}
     </main>
