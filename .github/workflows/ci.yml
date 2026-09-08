@@ -20,6 +20,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -114,6 +115,7 @@ jobs:
       contents: read
       actions: read
       issues: write
+      pull-requests: write
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: windows-2025
     timeout-minutes: 20
