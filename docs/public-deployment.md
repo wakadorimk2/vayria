@@ -67,7 +67,7 @@ URL: `https://staging.vayria.me/`。
 アクセスチケットを入力する。未承認では画面とVRMも取得できない。
 管理APIは別の署名付き管理資格情報を検証する。
 `workers.dev` とpreview URLsは無効。
-検証環境の台帳は日額10円・月額100円に設定した。
+検証環境の台帳は2026-09-08 13:58 JSTに日額100円・月額1,000円へ緩和した。時間・回数と復元値は以下の「検証環境の利用枠緩和」を参照する。
 本番の外部API枠は日額70円・月額3500円。自動的に拡大しない。
 
 ローカル実行:
@@ -95,7 +95,7 @@ Turnstileは検証用と本番用を分離して設定済み（2026-09-08）。
 | 本番 | `vayria.me` | `0x4AAAAAAErpgvhBvYpnRm71` |
 
 `node scripts/configure-turnstile.mjs` で同名ウィジェットを再利用し、各WorkerのSecretと設定ファイルを揃える。
-本番用のサイトキーは `wrangler.production.example.jsonc` に設定した。本番アプリへの切り替えは実施していない。
+本番用のサイトキーは `wrangler.production.jsonc` に設定した。本番アプリへの切り替えは実施していない。
 検証環境では無効なトークンをHTTP 403 `challenge_failed`で拒否した。
 ユーザー提供のiPhone画面でTurnstile成功、セッション開始、マイク許可、認識文字と返答文字を確認した。音声の聴感と連続会話の安定性は未確認。
 
@@ -160,7 +160,7 @@ Workerの `GENERATION_ENABLED=false` と台帳の `stopped=true` は独立した
 両方が生成を許可した場合だけ生成する。
 Cloudflare側の課金アラートはダッシュボードで別途設定する。設定完了は未確認。
 
-## 手動公開と切り戻し
+## 初回公開・自動更新と切り戻し
 
 検証環境の更新:
 
@@ -171,14 +171,14 @@ npm run public:check
 npx wrangler deploy --config wrangler.public.jsonc --env-file deploy/placeholder.env
 ```
 
-本番切り替えはOwner Playcheck完了後に行う。
-`wrangler.production.example.jsonc` を基に本番用設定を作る。
-本番用Turnstileはホスト `vayria.me`、action `session`。
-Secrets登録、dry-run、台帳確認後に手動デプロイする。
-`www` は追加しない。本番への自動デプロイは行わない。検証環境のCDは以下の手順に従う。
+本番切り替えはOwner Playcheckと公開承認の後に行う。
+本番設定・Secrets確認表・実機確認・初回の生成停止配信は[本番公開手順](production-launch.md)に従う。
+本番CDは `PRODUCTION_DEPLOY_ENABLED=true` の場合だけ実行する。未設定またはfalseでは公開しない。
+初回の台帳確認後にCDを有効化する。以後は同じmainのCIとstaging反映・スモーク確認が成功すると本番へ自動反映する。
+`www` は追加しない。検証環境のCDは以下の手順に従う。
 本番へ一般公開版を初回配信した後は、既存のplaceholderコマンドを切り戻しに使わない。
 
-障害時は管理CLIで停止する。
+障害時は本番CDを無効化し、開始済みの配信を確認する。管理CLIで生成を停止する。
 画面も戻す場合は、同じWorker・DOクラス・台帳を保持した回復用設定を使う。
 
 ```powershell
@@ -187,7 +187,7 @@ npx wrangler deploy --config wrangler.recovery.jsonc --env-file deploy/placehold
 
 回復用設定は準備中ページを配信し、全APIを停止する。
 Durable Objectを削除しない。migrationの削除・リネームで台帳を初期化しない。
-再開時は一般公開版設定へ戻し、管理CLIで使用量を確認してから停止を解除する。
+再開時は本番CDを無効のまま生成停止状態の一般公開版へ戻し、管理CLIで使用量を確認してから停止を解除する。その後CDを有効にする。
 
 ## 検証記録と残る公開ゲート
 
@@ -205,6 +205,8 @@ Durable Objectを削除しない。migrationの削除・リネームで台帳を
 上記の未確認項目を通過するまで、本番の準備中ページを維持する。
 
 ## カード検証のエラー表示と処理時間
+
+この節のcard=20、日額10円・月額100円は以前の変更記録。現在値は「検証環境の利用枠緩和」を参照する。
 
 HTTPとNDJSON内のエラーは同じコード対応表から表示する。カード回数、会話回数、音声枠、日額・月額枠、セッション終了、混雑、生成失敗を区別する。再開時刻は有効な retryAt がある場合だけ日本時間で表示する。再開時刻は受付の目安であり、予算や音声枠の保証ではない。
 
@@ -231,9 +233,49 @@ op run -- node scripts/public-admin.mjs report
 
 2026-09-08にOwner承認を受けて検証環境へ反映した。Worker Version: 38b2c407-d85b-4282-a02c-e8475ea943dc。op経由でcardだけを2から20へ変更した。管理APIの再取得でcard=20、日額10円、月額100円、TTS20回・600文字、使用量8.300009円の維持を確認した。recentByKindの応答も確認した。未認証のrootは401、api/sessionは403で検証用チケットを要求する。実APIへの生成要求は送っていない。iPhone Chromeの実測と新しい処理時間の採取は、反映後の操作で確認する。
 
+## 検証環境の利用枠緩和
+
+2026-09-08 13:58 JST、Owner承認済みの動作確認用設定を `https://staging.vayria.me` の管理APIへ反映した。
+13:58:03 JSTに変更前のreportを取得した。configure後、13:58:51 JSTのreport再取得で全設定の一致を確認した。
+
+| 項目 | 変更前 | 変更後 |
+| --- | ---: | ---: |
+| 日額予算 | 10円 | 100円 |
+| 月額予算 | 100円 | 1,000円 |
+| visitor開始回数／日 | 20 | 100 |
+| visitor開始回数／月 | 100 | 1,000 |
+| セッション時間 | 180秒 | 900秒（15分） |
+| ユーザー生成 | 6回 | 100回 |
+| 自律生成 | 2回 | 20回 |
+| カード生成 | 20回 | 100回 |
+| 音声認識 | 8回・合計120秒 | 100回・合計900秒 |
+| 音声合成 | 20回・合計600文字 | 200回・合計10,000文字 |
+| IP開始成功／時 | 30回 | 100回 |
+| IP開始成功／日 | 100回 | 300回 |
+
+生成・音声の枠はセッション単位。音声入力1回20秒、IP開始試行分10回、同時生成5セッションは維持した。
+日額使用量と月額API使用量は、変更前後とも9.859838円。停止状態はstopped=false、実行中ジョブは0件だった。
+対象外の台帳設定も一致した。本番設定、コード内の標準値、Worker配信版は変更していない。
+管理鍵は1Passwordからプロセス環境へ注入した。鍵の値は記録へ含めていない。
+有料生成は実行していない。実機での会話・音声確認は別途行う。
+
+15分の期限は新しいセッションに適用される。既存セッションの期限は延長しない。
+検証中はこの設定を維持する。自動期限は設けない。回数が残っていても予算到達時は停止する。
+ローカルの復元用記録は `.wrangler/staging-limits-before-20260908.json`。反映後記録は `.wrangler/staging-limits-verified-20260908.json`。
+
+復元時はstaging管理資格情報をプロセス環境へ注入し、接続先を `https://staging.vayria.me` に固定する。
+reportで現在値を確認した後、今回変更した項目だけを次の値へ戻す。dayBudgetとmonthBudgetはmicro-yen単位。
+
+```powershell
+op run -- node scripts/public-admin.mjs configure '{"dayBudget":10000000,"monthBudget":100000000,"visitorDay":20,"visitorMonth":100,"sessionSeconds":180,"user":6,"autonomous":2,"card":20,"transcribe":8,"audioSeconds":120,"tts":20,"ttsChars":600,"ipHour":30,"ipDay":100}'
+op run -- node scripts/public-admin.mjs report
+```
+
+復元は今回実施していない。復元時も使用量を初期化せず、停止状態を変えない。現在の使用量が復元後の予算以上なら、有料処理は拒否される。
+
 ## 検証環境のCD
 
-GitHub ActionsのCIがmainのpushに対して成功すると、Deploy stagingジョブが実行される。CI、Python STT、Public checksの3ジョブを必須とする。PRでは公開用ビルド専用の代替ファイルを使い、認証情報は渡さない。mainのデプロイでは実VRMを取得してビルドし直す。
+GitHub ActionsのCIがmainのpushまたはmainを指定した手動実行で成功すると、Deploy stagingジョブが実行される。CI、Python STT、Public checksの3ジョブを必須とする。PRでは公開用ビルド専用の代替ファイルを使い、認証情報は渡さない。mainのデプロイでは実VRMを取得してビルドし直す。
 
 素材は非公開リポジトリ wakadorimk2/vayria-assets のReleaseで管理する。deploy/public-vrm.jsonにタグ・ファイル名・SHA-256・サイズを固定する。モデル更新時は新しいReleaseを作り、マニフェスト変更をレビューする。既存Releaseのファイルを上書きしない。
 

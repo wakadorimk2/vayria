@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - main
@@ -76,7 +77,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:public
-      - run: node --test scripts/staging-cd.test.mjs
+      - run: npm run test:cd
       - name: Public build with a non-deployable fixture
         shell: pwsh
         run: |
@@ -85,11 +86,13 @@ jobs:
           $env:VAYRIA_PUBLIC_VRM = Join-Path $PWD '.wrangler/ci-model.vrm'
           npm run public:build
       - run: npm run public:check
+      - run: npm run production:check
+      - run: npm run production:recovery:check
 
   deploy-staging:
     name: Deploy staging
     needs: [ci, stt, public]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: windows-2025
     timeout-minutes: 20
     environment:
@@ -123,6 +126,56 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Verify staging access gate
         run: node scripts/staging-cd.mjs smoke
+      - name: Remove private files from runner
+        if: always()
+        shell: pwsh
+        run: |
+          $workspaceRoot = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+          foreach ($relative in @('.wrangler/public-vrm', '.public-assets', 'dist-public')) {
+            $target = [IO.Path]::GetFullPath((Join-Path $workspaceRoot $relative))
+            if (-not $target.StartsWith($workspaceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid cleanup target' }
+            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+          }
+
+  deploy-production:
+    name: Deploy production
+    needs: [ci, stt, public, deploy-staging]
+    if: vars.PRODUCTION_DEPLOY_ENABLED == 'true' && needs['deploy-staging'].result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://vayria.me
+    concurrency:
+      group: vayria-production-deployment
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.x'
+          cache: npm
+      - run: npm ci
+      - name: Fetch and verify pinned private VRM
+        run: node scripts/production-cd.mjs download
+        env:
+          GH_TOKEN: ${{ secrets.VAYRIA_ASSETS_READ_TOKEN }}
+      - name: Build deployable public assets
+        run: npm run public:build
+        env:
+          VAYRIA_PUBLIC_VRM: .wrangler/public-vrm/model.vrm
+      - run: npm run production:check
+      - name: Verify current main and deploy production
+        run: node scripts/production-cd.mjs deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PRODUCTION_DEPLOY_ENABLED: ${{ vars.PRODUCTION_DEPLOY_ENABLED }}
+          STAGING_RESULT: ${{ needs['deploy-staging'].result }}
+      - name: Verify production without paid generation
+        run: node scripts/production-cd.mjs smoke
       - name: Remove private files from runner
         if: always()
         shell: pwsh
