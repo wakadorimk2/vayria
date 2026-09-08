@@ -9,7 +9,7 @@ import {
   type FormEvent,
 } from 'react';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
-import { publicActive, subscribePublic } from './public/session';
+import { publicActive, requestPublicSession, subscribePublic } from './public/session';
 import { useBargeInControl } from './app/useBargeInControl';
 import { useCardAttention } from './app/useCardAttention';
 import { useListeningBackchannels } from './app/useListeningBackchannels';
@@ -416,6 +416,8 @@ export default function App() {
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public';
   const [publicTextInputOpen, setPublicTextInputOpen] = useState(false);
+  const [publicSubmitPending, setPublicSubmitPending] = useState(false);
+  const publicSubmitPendingRef = useRef(false);
   useEffect(() => {
     const toggle = () => setPublicTextInputOpen(value => !value);
     window.addEventListener('vayria-public-text-input', toggle);
@@ -847,7 +849,7 @@ export default function App() {
     if (runtimeConfig.mode !== 'public') return;
     const stop = () => { void stopVoiceInput(); interruptCurrentTurn('router_control'); stopReaction(); playbackCoordinator.stop(); };
     const unlock = () => { void prepare(); };
-    const start = () => { void prepare(); void startVoiceInput(); };
+    const start = () => { void prepare(); };
     window.addEventListener('vayria-public-stop', stop);
     window.addEventListener('vayria-public-start', start);
     window.addEventListener('vayria-public-prepare', unlock);
@@ -1871,6 +1873,10 @@ export default function App() {
 
   const handleCardInserted = useCallback(
     (result: CardSwapResult) => {
+      if (runtimeConfig.mode === 'public') {
+        if (!isMuted) void prepare();
+        void requestPublicSession();
+      }
       setProgramPhase('after_card_change');
       const contribution = activateCardSwap(result);
       recordAutonomyEvidence({
@@ -1939,7 +1945,7 @@ export default function App() {
         },
       };
     },
-    [activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
+    [activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
 
   const handleVoiceToggle = useCallback(async () => {
@@ -1954,6 +1960,10 @@ export default function App() {
         return;
       }
 
+      if (runtimeConfig.mode === 'public') {
+        void prepare();
+        if (!(await requestPublicSession())) return;
+      }
       if (!(await startVoiceInput())) return;
       void prepare();
       preloadBackchannel();
@@ -1968,6 +1978,18 @@ export default function App() {
     startVoiceInput,
     stopVoiceInput,
   ]);
+
+  useEffect(() => {
+    if (runtimeConfig.mode !== 'public') return;
+    const toggle = () => { void handleVoiceToggle(); };
+    window.addEventListener('vayria-public-voice-toggle', toggle);
+    return () => window.removeEventListener('vayria-public-voice-toggle', toggle);
+  }, [handleVoiceToggle]);
+  useEffect(() => {
+    if (runtimeConfig.mode === 'public') window.dispatchEvent(new CustomEvent('vayria-public-voice-state', {
+      detail: { enabled: isVoiceInputEnabled, error: voiceError },
+    }));
+  }, [isVoiceInputEnabled, voiceError]);
 
   useAutonomousTalk({
     cancelAutonomous,
@@ -1988,9 +2010,17 @@ export default function App() {
     timingMode: runtimeConfig.autonomyTimingMode,
   });
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!trimmedInput || isManualBusy) return;
+    if (!trimmedInput || isManualBusy || publicSubmitPendingRef.current) return;
+    if (runtimeConfig.mode === 'public') {
+      if (!isMuted) void prepare();
+      publicSubmitPendingRef.current = true;
+      setPublicSubmitPending(true);
+      try { if (!(await requestPublicSession())) return; }
+      finally { publicSubmitPendingRef.current = false; setPublicSubmitPending(false); }
+      setPublicTextInputOpen(false);
+    }
     if (
       runtimeConfig.routerEnabled &&
       routerSnapshot.vayriaOutputGate === 'closed' &&
@@ -2500,7 +2530,7 @@ export default function App() {
           </label>
           <input
             autoComplete="off"
-            disabled={isManualBusy}
+            disabled={isManualBusy || publicSubmitPending}
             id="message-input"
             maxLength={1000}
             onChange={(event) => setInput(event.target.value)}
@@ -2525,8 +2555,8 @@ export default function App() {
           >
             {isVoiceInputEnabled ? '🛑 聞くのを止める' : '🎙 聞く'}
           </button>
-          <button disabled={!trimmedInput || isManualBusy} type="submit">
-            Send
+          <button disabled={!trimmedInput || isManualBusy || publicSubmitPending} type="submit">
+            {publicSubmitPending ? '確認中…' : '送信'}
           </button>
         </form>
       </section>

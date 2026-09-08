@@ -17,7 +17,8 @@
 - `server/llmExecutionScope.ts` は各LLM呼び出しと内部再試行の前に費用を予約する。通常のlocal/exhibition実行では予約処理を挿入しない。
 - `worker/usage.ts` はSQLite Durable Objectで台帳を原子的に更新する。初期規模向けに1つの台帳へ集約する。台帳障害では有料処理を拒否する。
 - `src/voice/cloudVoiceAdapter.ts` は発話区間を16 kHz・mono・PCM16 WAVへ変換する。自動検出と押して話す方式を使う。音声再生中は送信しない。
-- 開始ボタンで音声再生を準備する。セッション取得後にマイクを開始する。終了、期限切れ、タブ非表示で停止する。復帰後は開始ボタンを押す。
+- 文字送信・カード交換の操作中に音声再生を準備する。セッションがなければTurnstile確認後に取得し、その操作を続ける。ページ表示だけでは開始しない。
+- マイクは「マイクで話す」を押したときだけ開始する。文字とカードではマイク許可を求めない。終了、期限切れ、タブ非表示で停止する。復帰後は文字送信・カード交換・マイク操作から再開する。
 - マイクを使わずテキスト入力も利用できる。ページ表示だけでは有料生成を開始しない。
 - 公開版ではカードの入れ替え回数を制限しない。独立した生成反応は別の利用枠で制限する。
 
@@ -25,7 +26,10 @@
 
 公開版は展示用UIのアバター配置・カード配置・字幕スタイルを共有する。
 `data-ui-mode` で表示を切り替え、公開APIの実行モードは `public` を維持する。
-開始案内・利用枠・Turnstileは開閉式のパネルに配置する。文字入力は専用ボタンから開く。
+下部に「文字で話す」「マイクで話す」「利用状況」をまとめる。文字入力は専用ボタンから開く。
+利用枠とTurnstileは下部の開閉式パネルに配置する。初回の文字送信・カード交換では必要な確認を開き、完了後に操作を続ける。確認を閉じた場合は送信せず、入力文を残す。
+スマートフォンの脳内カードは顔より上に配置する。PC・タブレットでもカード幅を抑え、顔への重なりを避ける。
+2026-09-08ローカル確認: 模擬認証・模擬APIで文字送信とカード交換の各1要求、マイク取得0回を確認。明示的なマイク操作のみ取得1回。認証キャンセル時は入力文を保持した。実API音声とiPhone Chromeの実機確認は別途必要。
 390×844と820×1180のブラウザー表示を確認した。変更後の実機操作は追加確認が必要。
 精度とUIの細部調整は後続作業とする。
 
@@ -171,7 +175,7 @@ npx wrangler deploy --config wrangler.public.jsonc --env-file deploy/placeholder
 `wrangler.production.example.jsonc` を基に本番用設定を作る。
 本番用Turnstileはホスト `vayria.me`、action `session`。
 Secrets登録、dry-run、台帳確認後に手動デプロイする。
-`www` は追加しない。Gitマージと自動デプロイは行わない。
+`www` は追加しない。本番への自動デプロイは行わない。検証環境のCDは以下の手順に従う。
 本番へ一般公開版を初回配信した後は、既存のplaceholderコマンドを切り戻しに使わない。
 
 障害時は管理CLIで停止する。
@@ -188,7 +192,7 @@ Durable Objectを削除しない。migrationの削除・リネームで台帳を
 ## 検証記録と残る公開ゲート
 
 - 確認済み: 公開/Worker型検査、公開ビルド、Wrangler dry-run。
-- 確認済み: 台帳と署名の単体テスト11件、workerd/SQLiteでの統合テスト1件。
+- 確認済み: 公開環境用テスト20件（台帳・計測15件、エラー表示2件、Worker統合3件）。
 - 統合テストは外部APIをモックする。並列開始、並列カード生成、TTS再利用、STT、予算拒否時の外部呼び出しゼロを確認する。
 - 確認済み: local/exhibition共通のperformer、voice、playback関連テスト。
 - 確認済み: 検証URLのHTTPS、未承認時の画面/VRM拒否、Cookie bootstrap、台帳の低額枠。
@@ -199,3 +203,53 @@ Durable Objectを削除しない。migrationの削除・リネームで台帳を
 - 未確認: 声と会話体験のOwner Playcheck、モーション出典の最終表示、Cloudflare課金アラート。
 
 上記の未確認項目を通過するまで、本番の準備中ページを維持する。
+
+## カード検証のエラー表示と処理時間
+
+HTTPとNDJSON内のエラーは同じコード対応表から表示する。カード回数、会話回数、音声枠、日額・月額枠、セッション終了、混雑、生成失敗を区別する。再開時刻は有効な retryAt がある場合だけ日本時間で表示する。再開時刻は受付の目安であり、予算や音声枠の保証ではない。
+
+検証環境へ反映する際は、管理CLIを op run 経由で実行し、card だけを20に変更する。変更前後の report で差分を確認する。標準設定は2回のままとする。日額10円、月額100円、音声20回・600文字を変更しない。20回すべての発声を保証しない。使用量もリセットしない。
+
+```powershell
+# VAYRIA_ADMIN_URL は staging.vayria.me、VAYRIA_ADMIN_SECRET は1Password参照を設定済みとする。
+op run -- node scripts/public-admin.mjs report
+op run -- node scripts/public-admin.mjs configure '{"card":20}'
+op run -- node scripts/public-admin.mjs report
+```
+
+管理API report の recentByKind は user / autonomous / card / transcribe / tts 別に次を返す。
+
+- requests / started / rejected: 全件数、開始済み件数、begin時点で拒否した件数。認証・入力検証より前の拒否は含まない。
+- failures: 終了コード別の失敗・拒否件数。失敗本文は保存しない。
+- duration: 開始済み処理の samples / medianMs / p95Ms。拒否は0秒として混ぜない。
+- timings: generationMs（生成全体）、firstSpeechUnitMs（生成開始から最初の発話単位まで）、ttsFirstByteMs（音声生成開始から最初の非空データまで）、ttsTotalMs（音声生成開始から受信終了まで）。失敗時は終了までの時間を含む。未観測は集計対象外とし、samples=0 の中央値・95パーセンタイルは null。
+- llmCalls / llmRetries: 外部LLM呼び出し件数と、そのうち再試行に属する件数。actualModels は実モデルごとの要求件数。プロバイダーがモデルを返さない場合は推測しない。
+
+中央値は昇順の中央要素（偶数は上側）、95パーセンタイルは nearest-rank。既存の recentRequests / recentFailures / recentDurationMedianMs は開始済み処理の集計として維持する。旧記録は新しい時間項目を持たない。
+
+記録は24時間・最大2,000件。時間、回数、コード、モデルのみを許可する。会話本文、音声、APIキー、Cookie、利用者識別子は含めない。記録保存の失敗は返答を失敗させない。モデル選択・再試行・音声転送方式は変更しない。端末で声が聞こえるまでの時間は別途実機確認する。
+
+2026-09-08にOwner承認を受けて検証環境へ反映した。Worker Version: 38b2c407-d85b-4282-a02c-e8475ea943dc。op経由でcardだけを2から20へ変更した。管理APIの再取得でcard=20、日額10円、月額100円、TTS20回・600文字、使用量8.300009円の維持を確認した。recentByKindの応答も確認した。未認証のrootは401、api/sessionは403で検証用チケットを要求する。実APIへの生成要求は送っていない。iPhone Chromeの実測と新しい処理時間の採取は、反映後の操作で確認する。
+
+## 検証環境のCD
+
+GitHub ActionsのCIがmainのpushに対して成功すると、Deploy stagingジョブが実行される。CI、Python STT、Public checksの3ジョブを必須とする。PRでは公開用ビルド専用の代替ファイルを使い、認証情報は渡さない。mainのデプロイでは実VRMを取得してビルドし直す。
+
+素材は非公開リポジトリ wakadorimk2/vayria-assets のReleaseで管理する。deploy/public-vrm.jsonにタグ・ファイル名・SHA-256・サイズを固定する。モデル更新時は新しいReleaseを作り、マニフェスト変更をレビューする。既存Releaseのファイルを上書きしない。
+
+GitHub Environment stagingには、次のSecretsを登録する。Deployment branchesはmainだけのcustom policyとし、手動承認者は設定しない。
+
+| Secret | 用途 | 権限 |
+| --- | --- | --- |
+| VAYRIA_ASSETS_READ_TOKEN | 非公開Releaseのダウンロード | vayria-assetsだけ。Contents: Read-only |
+| CLOUDFLARE_API_TOKEN | staging Workerのデプロイ | 対象CloudflareアカウントのWorkers Scripts編集、および既存カスタムドメイン反映に必要な権限 |
+
+初期設定用GitHub認証はローカルのop経由で注入する。初期設定用PATを上記Secretsへ転用しない。生成APIキー、ADMIN_SECRET、COOKIE_SECRET等は既存Worker側に残す。CDはSecrets登録・台帳設定変更・Turnstile作成スクリプトを実行しない。
+
+デプロイ直前に現在のmain SHA、checkout SHA、実VRMのハッシュ、Worker名、アカウント、単一のstagingルート、プレビュー認証を検査する。古いSHAと対象不一致は失敗終了する。デプロイは同時実行しない。開始済みデプロイは新しいpushで中断しない。
+
+実VRM、.public-assets、dist-publicはActions artifactやキャッシュへ保存しない。runnerの終了処理で削除する。npmのキャッシュだけを使う。
+
+成功時のActions summaryにコミットSHA、Worker Version ID、検証URLを記録する。反映後は未認証rootの401とapi/sessionの403を最大5回確認する。会話生成APIを呼ばない。スモーク確認に失敗した場合、デプロイ自体は完了している可能性があるためVersion IDを確認する。
+
+復旧はmainへの修正またはrevertのマージで行う。自動ロールバックはしない。WorkerとDurable Objectの削除、台帳の初期化は行わない。初回導入ではPRマージ前にSecrets・非公開Releaseを用意し、マージ後のActions実行結果を確認する。

@@ -1,3 +1,4 @@
+import type { Measurements } from './diagnostics';
 import { DurableObject } from 'cloudflare:workers';
 import { Ledger, LimitError, initialState, type LedgerState, type Limits, type Kind } from './ledger';
 
@@ -20,7 +21,7 @@ export class PublicUsage extends DurableObject {
   async fetch(request: Request) {
     try {
       const b = await request.json() as { op: string; visitor: string; ip: string; id: string; kind: Kind;
-        job: string; amount: number; ticket: string; charge: string; patch: Partial<Limits>; stopped?: boolean; code: string };
+        job: string; amount: number; ticket: string; charge: string; patch: Partial<Limits>; stopped?: boolean; code: string; measurements?: Measurements };
       const result = this.run(l => {
         switch (b.op) {
           case 'status': return l.status(b.visitor);
@@ -30,7 +31,8 @@ export class PublicUsage extends DurableObject {
           case 'begin': return l.begin(b.visitor, b.id, b.kind, b.job, b.amount, b.ticket);
           case 'reserve': return l.reserve(b.visitor, b.id, b.job, b.charge, b.amount);
           case 'settle': return l.settle(b.charge, b.amount);
-          case 'finish': return l.finish(b.job, b.code);
+          case 'finish': return l.finish(b.job, b.code, b.measurements);
+          case 'reject': return l.reject(b.kind, b.code);
           case 'report': return l.report();
           case 'configure': return l.configure(b.patch ?? {}, b.stopped);
           default: throw new LimitError('invalid_operation', 0, 400);
