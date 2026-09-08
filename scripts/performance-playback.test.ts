@@ -18,6 +18,7 @@ import {
   monitorPlaybackStart,
   PlaybackGestureGate,
   PersistentStreamingAudio,
+  resumeAudioContext,
 } from '../src/audio/persistentStreamingAudio.js';
 import {
   readTtsFallback,
@@ -280,6 +281,49 @@ test('pending unlock returns false at its deadline and keeps no silent source', 
 
   assert.equal(await carrier.prepare(context, false, 5), false);
   assert.equal(audio.src, '');
+});
+
+test('late preparation completion cannot erase a newer TTS source', async () => {
+  for (const failure of [false, true]) {
+    const audio = new FakeStreamingAudioElement([]);
+    let complete!: () => void;
+    audio.playImplementation = () => new Promise<void>((resolve, reject) => {
+      complete = failure ? () => reject(new Error('late rejection')) : resolve;
+    });
+    const context = { state: 'running', createMediaElementSource: () => ({ disconnect() {} }) } as unknown as AudioContext;
+    const carrier = new PersistentStreamingAudio(() => audio as unknown as HTMLAudioElement);
+    assert.equal(await carrier.prepare(context, false, 5), false);
+    carrier.setSource('blob:new-tts');
+    complete();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(audio.src, 'blob:new-tts');
+  }
+});
+
+test('duplicate preparation shares one attempt; source change and disposal invalidate it', async () => {
+  for (const change of ['source', 'dispose'] as const) {
+    const audio = new FakeStreamingAudioElement([]);
+    let complete!: () => void;
+    audio.playImplementation = () => new Promise<void>(resolve => { complete = resolve; });
+    const context = { state: 'running', createMediaElementSource: () => ({ disconnect() {} }) } as unknown as AudioContext;
+    const carrier = new PersistentStreamingAudio(() => audio as unknown as HTMLAudioElement);
+    const first = carrier.prepare(context, false, 50);
+    assert.equal(carrier.prepare(context, false, 50), first);
+    assert.equal(audio.playCalls, 1);
+    if (change === 'source') carrier.setSource('blob:new'); else carrier.dispose();
+    complete();
+    assert.equal(await first, false);
+    assert.equal(audio.src, change === 'source' ? 'blob:new' : '');
+  }
+});
+
+test('suspended context has a bounded wait and can resume on a later gesture', async () => {
+  const context = { state: 'suspended', resume: () => new Promise<void>(() => {}) } as unknown as AudioContext;
+  assert.equal(await resumeAudioContext(context, 5), false);
+  Object.assign(context, { resume: async () => { Object.assign(context, { state: 'running' }); } });
+  assert.equal(await resumeAudioContext(context, 5), true);
+  Object.assign(context, { state: 'suspended', resume: () => { throw new Error('closed'); } });
+  assert.equal(await resumeAudioContext(context, 5), false);
 });
 
 test('persistent streaming audio reuses one element and one source node', () => {

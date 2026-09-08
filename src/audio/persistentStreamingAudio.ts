@@ -2,6 +2,18 @@ const SILENT_WAV_DURATION_MS = 100;
 const SILENT_WAV_SAMPLE_RATE = 8_000;
 export const STREAMING_PLAYBACK_START_TIMEOUT_MS = 1_000;
 
+export async function resumeAudioContext(context: AudioContext, timeoutMs = STREAMING_PLAYBACK_START_TIMEOUT_MS): Promise<boolean> {
+  if (context.state === 'running') return true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      context.resume().then(() => context.state === 'running', () => false),
+      new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+    ]);
+  } catch { return false; }
+  finally { if (timer !== undefined) clearTimeout(timer); }
+}
+
 export function createSilentWavBytes(): Uint8Array {
   const sampleCount = Math.round(
     (SILENT_WAV_SAMPLE_RATE * SILENT_WAV_DURATION_MS) / 1_000,
@@ -153,6 +165,9 @@ export class PersistentStreamingAudio {
   private elementSource: MediaElementAudioSourceNode | null = null;
   private sourceContext: AudioContext | null = null;
   private unlocked = false;
+  private preparationGeneration = 0;
+  private pendingPreparation: Promise<boolean> | null = null;
+  private hasPlaybackSource = false;
 
   constructor(
     private readonly createAudioElement: StreamingAudioElementFactory = () =>
@@ -188,8 +203,11 @@ export class PersistentStreamingAudio {
     timeoutMs = STREAMING_PLAYBACK_START_TIMEOUT_MS,
   ): Promise<boolean> {
     const { audio } = this.ensure(context);
-    const contextReady =
-      context.state === 'running' ? Promise.resolve() : context.resume();
+    if (this.pendingPreparation) return this.pendingPreparation;
+    resumeActiveSource = resumeActiveSource || this.hasPlaybackSource;
+    const generation = ++this.preparationGeneration;
+    const current = () => generation === this.preparationGeneration;
+    const contextReady = resumeAudioContext(context, timeoutMs);
 
     let readiness: Promise<boolean>;
     if (!resumeActiveSource && this.unlocked) {
@@ -205,15 +223,18 @@ export class PersistentStreamingAudio {
       }
 
       // Both operations must start before the first await to preserve user activation.
-      const audioReady = audio.play();
+      let audioReady: Promise<void>;
+      try { audioReady = audio.play(); }
+      catch { audioReady = Promise.reject(new Error('Audio preparation failed.')); }
       readiness = Promise.all([contextReady, audioReady])
-        .then(() => {
+        .then(([contextRunning]) => {
+          if (!current() || !contextRunning) return false;
           this.unlocked = true;
-          if (usesSilentSource) this.clearSource();
+          if (usesSilentSource) this.clearElementSource();
           return context.state === 'running';
         })
         .catch(() => {
-          if (usesSilentSource) this.clearSource();
+          if (current() && usesSilentSource) this.clearElementSource();
           return false;
         });
     }
@@ -224,10 +245,16 @@ export class PersistentStreamingAudio {
         timeoutMs,
       );
     });
-    return Promise.race([readiness, timeout]).finally(() => {
+    const pending = Promise.race([readiness, timeout]).then(ready => current() && ready).finally(() => {
       if (timeoutHandle !== null) clearTimeout(timeoutHandle);
-      if (!resumeActiveSource && !this.unlocked) this.clearSource();
+      if (current()) {
+        if (!resumeActiveSource && !this.unlocked) this.clearElementSource();
+        this.preparationGeneration += 1;
+      }
+      if (this.pendingPreparation === pending) this.pendingPreparation = null;
     });
+    this.pendingPreparation = pending;
+    return pending;
   }
 
   setSource(url: string): HTMLAudioElement {
@@ -236,10 +263,18 @@ export class PersistentStreamingAudio {
     }
     this.clearSource();
     this.audioElement.src = url;
+    this.hasPlaybackSource = true;
     return this.audioElement;
   }
 
   clearSource(): void {
+    this.preparationGeneration += 1;
+    this.pendingPreparation = null;
+    this.hasPlaybackSource = false;
+    this.clearElementSource();
+  }
+
+  private clearElementSource(): void {
     if (!this.audioElement) return;
     this.audioElement.pause();
     this.audioElement.removeAttribute('src');

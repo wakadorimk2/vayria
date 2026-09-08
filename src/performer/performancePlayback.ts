@@ -50,6 +50,7 @@ export interface PerformancePlaybackResult {
 }
 
 export interface PerformancePlayback {
+  holdAudioCapture?(): () => void;
   prepare(plan: PerformancePlan): void;
   play(
     plan: PerformancePlan,
@@ -60,6 +61,7 @@ export interface PerformancePlayback {
 }
 
 interface PerformancePlaybackOptions {
+  holdAudioCapture?: () => () => void;
   getMotionPort: () => PerformanceMotionPort | null;
   playAudio: PlayAudio;
   stopAudio: () => void;
@@ -82,6 +84,7 @@ class PlaybackCancelledError extends Error {
 }
 
 export class PerformancePlaybackCoordinator implements PerformancePlayback {
+  readonly holdAudioCapture?: () => () => void;
   private readonly getMotionPort: PerformancePlaybackOptions['getMotionPort'];
   private readonly playAudio: PlayAudio;
   private readonly stopAudio: () => void;
@@ -92,6 +95,7 @@ export class PerformancePlaybackCoordinator implements PerformancePlayback {
   private playbackController: AbortController | null = null;
 
   constructor(options: PerformancePlaybackOptions) {
+    this.holdAudioCapture = options.holdAudioCapture;
     this.getMotionPort = options.getMotionPort;
     this.playAudio = options.playAudio;
     this.stopAudio = options.stopAudio;

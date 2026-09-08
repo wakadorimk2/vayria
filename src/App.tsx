@@ -17,6 +17,7 @@ import { usePerformancePresentation } from './app/usePerformancePresentation';
 import { SpatialTargetRegistry } from './attention/spatialTargetRegistry';
 import { useCameraAttention } from './attention/useCameraAttention';
 import { useAudioLipSync } from './audio/useAudioLipSync';
+import { getIosAudioSession } from './audio/iosAudioSession';
 import { VrmStage, type VrmStageHandle } from './avatar/VrmStage';
 import {
   CardGamePrototype,
@@ -496,6 +497,7 @@ export default function App() {
     useState<VrmStageHandle | null>(null);
 
   const sessionGenerationRef = useRef(0);
+  const iosAudioSession = runtimeConfig.mode === 'public' ? getIosAudioSession() : null;
   const {
     getPrimaryPlaybackAgeMs,
     isAudioUnlocked,
@@ -509,7 +511,7 @@ export default function App() {
     setDucked,
     stop,
     stopReaction,
-  } = useAudioLipSync(volume);
+  } = useAudioLipSync(volume, iosAudioSession);
   const [listeningReaction, setListeningReaction] =
     useState<ListeningReactionCue | undefined>();
   const { cardAttentionPhase, setCardAttentionPhase, cardAttentionStartedAtRef, dragAttentionLastTickAtRef, dragAttentionSpeedRef, dragAttentionControllerRef, cardAttentionEnergyControllerRef, clearCardAttentionTimers, scheduleDragAttentionTick, scheduleCardAttentionSequence, scheduleCardDefaultAttention, finishDragAttention } = useCardAttention({ spatialTargetRegistry });
@@ -666,8 +668,9 @@ export default function App() {
         getMotionPort: () => stageMotionPort,
         playAudio: play,
         stopAudio: stop,
+        holdAudioCapture: iosAudioSession ? () => iosAudioSession.holdPlayback().release : undefined,
       }),
-    [play, stageMotionPort, stop],
+    [play, stageMotionPort, stop, iosAudioSession],
   );
 
   const handleReplyPresentationStart = useCallback(
