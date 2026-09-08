@@ -294,3 +294,19 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-theme label { position: relative; height: 48px; }
 .public-theme label:has(input:focus-visible) { outline: 2px solid var(--public-focus); outline-offset: 3px; }
 .public-theme input:focus-visible { outline: none; }
+
+.public-layout[data-exhibition="true"] { --public-controls-height: 116px; }
+.public-layout[data-exhibition="true"] .public-controls { flex-direction: column; align-items: center; }
+.public-layout .public-exhibition-handoff { display: flex; justify-content: center; margin-bottom: 8px; pointer-events: auto; }
+.public-controls__disclosure { position: relative; }
+.public-exhibition-paused { align-self: center; max-width: 150px; padding: 4px 8px; border-radius: 12px; background: var(--public-surface); color: var(--public-ink); }
+.public-layout .public-exhibition-handoff button { min-height: 44px; padding: 8px 18px; border-radius: 24px; background: var(--public-surface); color: var(--public-ink); border: 1px solid currentColor; font: inherit; }
+.public-exhibition-notification { position: absolute; top: 0; right: 0; min-width: 18px; border-radius: 50%; background: var(--public-ink); color: var(--public-paper); font-size: 13px; text-align: center; }
+.public-exhibition-settings { margin: 16px 0; }
+.public-exhibition-settings summary { cursor: pointer; min-height: 44px; align-content: center; }
+.public-exhibition-settings input { display: block; width: 100%; box-sizing: border-box; min-height: 44px; margin: 8px 0; font: inherit; }
+.public-controls .public-exhibition-settings label { display: block; }
+.public-handoff { box-sizing: border-box; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px; text-align: center; }
+.public-handoff h1 { font-size: clamp(20px, 3vw, 28px); }
+.public-handoff button { min-height: 48px; padding: 12px 24px; font: inherit; }
+.public-exhibition-welcome { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 90vw; padding: 8px 16px; border-radius: 20px; background: var(--public-surface); color: var(--public-ink); pointer-events: none; }

@@ -14,6 +14,8 @@
 
 ## Now
 
+- 公開版と同じURL・ビルドに展示モードを追加する。端末登録、参加者交代、展示枠全体の推計API予算10,000円を使う。手順: docs/public-exhibition.md
+
 - 🔥 [Experience Push Tracker #80](https://github.com/wakadorimk2/vayria/issues/80) — Speed、Conversation、Cardを実装済み。残るEmbodimentをSelectionへ渡せる状態にする
 - ⚡ Speed — [LLM #83](https://github.com/wakadorimk2/vayria/issues/83)は現状十分として完了。[TTS #78](https://github.com/wakadorimk2/vayria/issues/78)で展示用PC、本番予定network、failure recoveryを確認する
 - 💬 Conversation — [Issue #23](https://github.com/wakadorimk2/vayria/issues/23)の実機・復帰条件を確認し、[Issue #87](https://github.com/wakadorimk2/vayria/issues/87)でセッション内記憶が会話の自然さへ与える効果を検証する
@@ -29,6 +31,8 @@
 - → 9/19〜22: [Issue #26](https://github.com/wakadorimk2/vayria/issues/26) で最終Owner Playcheckを行う
 
 ## Recently Done
+
+- 9/9 展示モードをローカル実装。型検査・lint・通常/公開ビルド・既存テスト・公開版47件を確認した。iPad相当サイズの模擬ブラウザー試験も成功した。展示モードの配信・本番枠作成・有料生成・実機確認は未実施。
 
 - [PR #86](https://github.com/wakadorimk2/vayria/pull/86) LLM provider単位のレイテンシ計測を追加した
 - [PR #85](https://github.com/wakadorimk2/vayria/pull/85) viewer activityへ適応する自律発話タイミング候補を追加した

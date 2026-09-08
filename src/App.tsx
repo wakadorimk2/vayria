@@ -9,7 +9,8 @@ import {
   type FormEvent,
 } from 'react';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
-import { publicActive, requestPublicSession, subscribePublic } from './public/session';
+import { publicActive, publicExhibition, requestPublicSession, subscribePublic } from './public/session';
+import { allowExhibitionAutonomy } from './public/exhibitionHandoff';
 import { useBargeInControl } from './app/useBargeInControl';
 import { useCardAttention } from './app/useCardAttention';
 import { useListeningBackchannels } from './app/useListeningBackchannels';
@@ -399,6 +400,7 @@ export default function App() {
   const themePreference = useSyncExternalStore(subscribeTheme, readThemePreference);
   const resolvedTheme = useSyncExternalStore(subscribeTheme, readResolvedTheme);
   const publicSessionActive = useSyncExternalStore(subscribePublic, publicActive);
+  const exhibitionRegistration = useSyncExternalStore(subscribePublic, publicExhibition);
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
@@ -566,7 +568,7 @@ export default function App() {
   const voiceReactionIdRef = useRef(0);
 
   const routerBlockedSegmentRef = useRef<string | null>(null);
-  const { backchannelAudioRef, backchannelVariantIndexRef, backchannelLoadingRef, preloadBackchannel } = useListeningBackchannels();
+  const { backchannelAudioRef, backchannelVariantIndexRef, backchannelLoadingRef, preloadBackchannel } = useListeningBackchannels(runtimeConfig.mode !== 'public');
 
   const [audioLabMode, setAudioLabMode] = useState<AudioLabMode>(
     () =>
@@ -1764,6 +1766,7 @@ export default function App() {
       const candidate = options.candidate ?? autonomyCandidate;
       if (!candidate) return 'aborted' as AutonomousTurnOutcome;
       const stimulus = pendingCardStimulusRef.current;
+      if (!allowExhibitionAutonomy(!!exhibitionRegistration, !!stimulus)) return 'aborted' as AutonomousTurnOutcome;
       pendingCardStimulusRef.current = null;
       const cardContextOverride =
         options.cardContextOverride ?? stimulus?.cardContext;
@@ -1892,7 +1895,7 @@ export default function App() {
       setAutonomyState(nextState);
       return decision.externalAction === 'speak' ? 'speak' : 'none';
     },
-    [sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleReplyAccepted, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, pendingActivatedCardIdsRef, prepare, executeNonSpeechPlan],
+    [exhibitionRegistration, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleReplyAccepted, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, pendingActivatedCardIdsRef, prepare, executeNonSpeechPlan],
   );
 
   const handleCardInserted = useCallback(

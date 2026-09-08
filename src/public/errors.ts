@@ -1,5 +1,12 @@
 // Shared by the conversation response and the public controls.
 const messages: Record<string, string> = {
+  exhibition_code_invalid: '端末登録コードが無効か、有効期限が切れています。新しいコードを発行してください。',
+  exhibition_already_registered: 'この端末は別の展示枠に登録されています。登録先を確認してください。',
+  exhibition_required: '展示端末の登録を確認できませんでした。運営者にお知らせください。',
+  exhibition_unavailable: '展示枠は現在利用できません。運営設定で期間・停止状態・端末登録を確認してください。',
+  exhibition_stale: '参加者交代の状態が変わりました。再読み込みして状態を確認してください。',
+  exhibition_budget: '展示の利用枠に達しました。運営者にお知らせください。',
+  exhibition_idle: '展示ではカード・文字・マイク操作から会話を始めてください。',
   card_limit: 'この体験のカード返答回数に達しました。次の体験でお試しください。',
   user_limit: 'この体験の会話回数に達しました。次の体験でお試しください。',
   autonomous_limit: 'この体験の自発的な返答回数に達しました。',
