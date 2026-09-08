@@ -358,6 +358,7 @@ export interface PerformanceContextPayload {
 }
 
 export interface ChatRequestPayload {
+  greeting?: true;
   mode: ChatMode;
   message: string | null;
   characterIdentity: CharacterIdentity;

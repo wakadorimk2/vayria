@@ -484,7 +484,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     }
     return decision;
   };
-  const processTurn = async (turnSource: ConversationSource, message: string | null, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, autonomousContext: AutonomousContext | null, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyCandidate: AutonomyCandidate | null = null, autonomyEvidenceContext: AutonomyEvidenceContext | null = null): Promise<ProcessTurnResult> => {
+  const processTurn = async (turnSource: ConversationSource, message: string | null, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, autonomousContext: AutonomousContext | null, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyCandidate: AutonomyCandidate | null = null, autonomyEvidenceContext: AutonomyEvidenceContext | null = null, greeting?: true): Promise<ProcessTurnResult> => {
     const eventEmitter = createConversationEventEmitter(turnSource);
     const messageForRequest = message;
     const programContextForRequest = programContextOverride ?? programContextRef.current;
@@ -808,6 +808,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
             : {}),
         },
         body: JSON.stringify({
+          ...(greeting ? { greeting } : {}),
           mode: turnSource === 'autonomous'
             ? 'autonomous'
             : turnSource === 'voice'
@@ -1429,7 +1430,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       }
     }
   };
-  const sendManual = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext) => (await processTurn('manual', message, cardContext, onReplyAccepted, null, plan, undefined, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null)).completed;
+  const sendManual = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext, greeting?: true) => (await processTurn('manual', message, cardContext, onReplyAccepted, null, plan, undefined, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null, greeting)).completed;
   const sendVoice = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext) => (await processTurn('voice', message, cardContext, onReplyAccepted, null, plan, voiceMetadata, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null)).completed;
   const sendAutonomous = async (cardContext: ChatCardContext, autonomousContext: AutonomousContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, programContextOverride?: ProgramContext, autonomyCandidate?: AutonomyCandidate) => {
     const result = await processTurn('autonomous', null, cardContext, onReplyAccepted, autonomousContext, plan, undefined, undefined, programContextOverride, autonomyCandidate ?? null, null);
