@@ -1,14 +1,54 @@
-.public-layout { height: 100dvh; position: fixed; inset: 0; overflow: hidden; }
+/* Theme tokens are public-only; light retains the deployed palette. */
+.public-layout {
+ --public-bg: #cbbacb; --public-input: #fff;
+ --public-glow-one: rgb(244 218 227 / 65%); --public-glow-two: rgb(191 186 218 / 60%);
+ --public-bg-one: #d6c5d3; --public-bg-two: #c6b7ce; --public-bg-three: #cebacb;
+ --public-pending: #d4c7e1;
+ --public-active: #cebedc;
+ --public-supporting: #ded3e8;
+ --public-focus: #695477;
+ --public-surface: #eee2eb;
+ --public-border: #ded5e4;
+ --public-input-border: #c6bacf;
+ --public-muted: #746b79;
+ --public-button: #e7e0ef;
+ --public-button-border: #b9aac5;
+ --public-link: #654875;
+ --public-error-bg: #fbe6e6;
+ --public-error-ink: #842f3a;
+ --public-error-border: #e4b6bd;
+ --public-opaque: #fffcf7;
+ --public-pip: #94719c;
+ --public-target: #ead5e8;
+ --public-hint: rgb(239 222 234 / 65%);
+ --public-capsule: rgb(235 216 232 / 66%);
+ --public-pressed: rgb(251 232 248 / 70%);
+ --public-ornament: rgb(139 107 152 / 38%);
+ --public-progress: #cfc3d8;
+ --public-on: rgb(222 155 187 / 35%);
+}
+.public-layout { --public-controls-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); --public-controls-height: 60px; --public-controls-clearance: calc(var(--public-controls-bottom) + var(--public-controls-height) + 48px); height: 100dvh; position: fixed; inset: 0; overflow: hidden; }
 .public-layout .app-shell { height: 100%; min-height: 0; }
-.public-controls { position: absolute; z-index: 30; inset: auto 0 0; padding: .5rem 1rem max(.75rem, env(safe-area-inset-bottom)); color: #f4efe6; font-size: 13px; background: linear-gradient(transparent, #201c30 28%); }
-.public-controls__hint { text-align: center; font-size: .75rem; color: #ddd3e4; }
-.public-controls__actions { display: flex; justify-content: center; gap: .4rem; }
-.public-controls .public-controls__actions button { margin: 0; }
-.public-controls .public-controls__disclosure { background: transparent; border-color: #bca06a66; }
+.public-layout .app-shell::before, .public-layout .app-shell::after { display: none; }
+.public-controls__microphone { position: relative; }
+.public-controls__progress, .public-controls__error { position: absolute; right: 3px; top: 3px; width: 12px; height: 12px; }
+.public-controls__progress { border: 2px solid rgb(255 255 255 / 25%); border-top-color: white; border-radius: 50%; animation: public-microphone-progress 1s linear infinite; }
+.public-controls__error { border-radius: 50%; background: #f3c3cd; color: #341725; font-size: 11px; font-weight: bold; line-height: 12px; }
+.public-controls__level { position: absolute; bottom: 3px; display: flex; height: 7px; align-items: center; gap: 2px; }
+.public-controls__level i { display: block; width: 2px; height: calc(2px + var(--input-level) * 5px); background: currentColor; border-radius: 1px; }
+@keyframes public-microphone-progress { to { transform: rotate(360deg); } }
+.public-controls { position: absolute; z-index: 30; inset: auto 0 var(--public-controls-bottom); display: flex; justify-content: center; color: #f4efe6; font-size: 13px; background: none; pointer-events: none; }
+.public-controls__actions { display: flex; justify-content: center; gap: 4px; padding: 6px; border: 0; border-radius: 999px; background: rgb(38 31 53 / 88%); box-shadow: 0 6px 20px rgb(10 7 20 / 18%); pointer-events: auto; }
+.public-controls .public-controls__actions button { display: inline-flex; align-items: center; justify-content: center; width: 48px; min-width: 48px; height: 48px; padding: 12px; margin: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; transition: background-color 300ms ease, transform 300ms ease; }
+.public-controls .public-controls__actions button:active { transform: scale(.94); background: rgb(255 255 255 / 16%); }
+.public-controls__actions svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 2px rgb(12 8 22 / 65%)); }
+.public-controls button:focus-visible { outline: 2px solid #f4efe6; outline-offset: 3px; }
+.public-controls .public-controls__actions button[aria-pressed="true"] { background: var(--public-on); }
+.public-layout .card-zone__header--hand[hidden] { display: none; }
 .public-controls .public-controls__close { display: block; margin-left: auto; }
 .public-controls button { padding: 8px 12px; margin: 0 6px 4px 0; min-height: 44px; border: 1px solid #bca06a; border-radius: 16px; color: #f4efe6; background: #453957; cursor: pointer; }
 .public-controls button:disabled { opacity: .5; cursor: default; }
-.public-controls__panel { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); width: min(380px, calc(100vw - 2rem)); max-height: min(55dvh, 440px); overflow: auto; padding: 16px; border: 1px solid #bca06a; border-radius: 16px; background: #201c30; box-shadow: 0 12px 32px #0008; }
+.public-controls__panel { position: absolute; bottom: calc(100% + 16px); left: 50%; transform: translateX(-50%); width: min(380px, calc(100vw - 2rem)); max-height: min(55dvh, 440px, calc(100dvh - var(--public-controls-clearance) - 16px)); overflow: auto; padding: 16px; border: 1px solid #bca06a; border-radius: 16px; background: #201c30; box-shadow: 0 12px 32px #0008; pointer-events: auto; }
 .public-controls__panel[hidden] { display: none; }
 .public-controls p { margin: 0 0 12px; line-height: 1.6; }
 .public-controls label { display: flex; align-items: center; gap: 6px; min-height: 44px; }
@@ -16,8 +56,7 @@
 .public-controls details { line-height: 1.6; }
 .public-controls a { color: #e5c98c; }
 .public-layout input, .public-layout textarea { font-size: 16px; }
-.public-layout .app-shell .exhibition-copy { top: 1rem; }
-.public-layout .app-shell { --exhibition-hand-zone-offset: 6rem; }
+.public-layout .app-shell { --exhibition-hand-zone-offset: calc(var(--public-controls-bottom) + var(--public-controls-height) + 16px); }
 .public-layout .app-shell .card-zone--hand { bottom: var(--exhibition-hand-zone-offset); }
 .public-layout .app-shell .card-zone--brain { --exhibition-brain-card-width: clamp(48px, 6vw, 72px); }
 @media (min-width: 600px) {
@@ -26,17 +65,32 @@
 }
 .public-layout .app-shell .app-title { top: .75rem; }
 .public-layout .app-shell .volume-slider, .public-layout .app-shell .volume-value { display: none; }
-.public-layout .app-shell[data-public-text-input="true"] .message-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; pointer-events: auto; position: fixed; z-index: 25; bottom: 6rem; left: 1rem; right: 1rem; width: auto; padding: 12px; background: #201c30; border: 1px solid #bca06a; border-radius: 16px; }
+.public-layout .app-shell[data-app-mode="public"] .message-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; pointer-events: auto; position: fixed; z-index: 25; bottom: var(--public-controls-clearance); left: 1rem; right: 1rem; width: auto; padding: 12px; background: #201c30; border: 1px solid #bca06a; border-radius: 16px; }
 .public-layout .message-form .voice-input-button { display: none; }
 .public-layout .message-form input { min-width: 0; }
+@supports ((backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))) {
+  .public-controls__actions { background: rgb(48 42 60 / 32%); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .public-controls__actions { background: rgb(38 31 53 / 94%); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .public-controls__progress { animation: none; }
+  .public-controls__level i { height: 5px; }
+  .public-controls .public-controls__actions button { transition: none; }
+  .public-controls .public-controls__actions button:active { transform: none; }
+}
+@media (forced-colors: active) {
+  .public-controls__actions { background: Canvas; border-color: ButtonText; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .public-controls .public-controls__actions button { color: ButtonText; }
+  .public-controls .public-controls__actions button[aria-pressed="true"] { outline: 2px solid Highlight; }
+  .public-controls__actions svg { filter: none; }
+}
 @media (max-width: 599px) {
   .public-layout .app-shell { display: block; }
   .public-layout .avatar-area { position: absolute; inset: 0; height: 100%; }
   .public-layout .vrm-stage { height: 100%; min-height: 0; }
   .public-layout .app-shell { --exhibition-hand-card-width: clamp(56px, 18vw, 100px); }
-  .public-layout .app-shell .exhibition-copy { top: .75rem; left: 1rem; }
-  .public-layout .exhibition-copy__title { font-size: 1rem; }
-  .public-layout .exhibition-copy__hint { font-size: .7rem; }
   .public-layout .app-shell .card-zone--brain { --exhibition-brain-card-width: clamp(42px, 12vw, 64px); top: 3.3rem; left: 50%; right: auto; transform: translateX(-50%); transform-origin: top center; }
   .public-layout .app-shell[data-exhibition-state="selecting"] .card-zone--brain { transform: translateX(-50%); }
   .public-layout .app-shell .card-zone--brain .card-zone__header { margin-bottom: .15rem; }
@@ -46,3 +100,197 @@
   .public-layout .app-shell .conversation-copy { max-width: 92vw; }
   .public-layout .playback-permission { pointer-events: auto; }
 }
+@media (min-width: 600px) and (max-height: 500px) {
+  .public-layout .app-shell { --exhibition-hand-card-width: clamp(48px, 14dvh, 64px); }
+  .public-layout .app-shell .card-zone--brain { --exhibition-brain-card-width: clamp(36px, 10dvh, 48px); }
+}
+/* Public pastel stationery palette. Shared exhibition styles remain unchanged. */
+.public-layout { --public-ink: #514456; --public-paper: rgb(241 222 233 / 86%); --public-lavender: rgb(225 210 232 / 86%); --public-accent: #876b90; background: var(--public-bg); color: var(--public-ink); }
+.public-layout .app-shell[data-app-mode="public"],
+.public-layout .app-shell[data-app-mode="public"] .vrm-stage { background: radial-gradient(ellipse at 30% 25%, var(--public-glow-one), transparent 58%), radial-gradient(ellipse at 80% 65%, var(--public-glow-two), transparent 60%), linear-gradient(155deg, var(--public-bg-one), var(--public-bg-two) 72%, var(--public-bg-three)); color: var(--public-ink); }
+.public-layout .app-shell[data-app-mode="public"] .vrm-stage::after { background: none; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain,
+.public-layout .app-shell[data-app-mode="public"] .card-zone__header { opacity: 1; color: var(--public-ink); text-shadow: none; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone__header h2 { font-family: inherit; font-weight: 600; letter-spacing: .04em; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .card-zone__cards { padding: 4px; border: 0; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; gap: 6px; }
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card { container-type: inline-size; background: var(--public-paper); border: 0; border-radius: 9px; color: var(--public-ink); opacity: 1; filter: none; box-shadow: 0 5px 18px rgb(78 51 83 / 10%); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card { background: var(--public-lavender); opacity: 1; }
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card::before,
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card__motif,
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card__pip--bottom { display: none; }
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card__pip--top { top: 8px; left: 8px; font-size: 10px; color: var(--public-accent); opacity: 1; }
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card__label { width: 84%; margin: 0; padding: 0; color: var(--public-ink); font-family: 'Hiragino Maru Gothic ProN', 'Yu Gothic', system-ui, sans-serif; font-size: clamp(10px, 18cqw, 18px); font-weight: 600; line-height: 1.35; letter-spacing: 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; text-align: center; text-shadow: none; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--hand .wildcard-card { margin-left: -3px; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--hand .wildcard-card:first-child { margin-left: 0; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--hand .wildcard-card--selected,
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card:focus-visible { outline: 2px solid var(--public-accent); outline-offset: 3px; box-shadow: 0 8px 18px rgb(57 51 61 / 20%); }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--hand .wildcard-card--selected { --card-lift: -10px; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--selected,
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--drop-target,
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--pending-insertion { background: var(--public-pending); outline: 2px solid var(--public-accent); outline-offset: 2px; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--active { background: var(--public-active); }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--supporting { background: var(--public-supporting); }
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card--disabled { box-shadow: 0 2px 5px rgb(57 51 61 / 9%); }
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card__status-mark { display: block; position: absolute; bottom: 6px; right: 8px; color: var(--public-focus); font-size: 11px; line-height: 1; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone__action { background: var(--public-hint); border: 0; box-shadow: none; color: var(--public-ink); text-shadow: none; }
+.public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: var(--public-capsule); box-shadow: 0 5px 18px rgb(57 51 61 / 10%); }
+.public-layout .app-shell[data-app-mode="public"] .public-controls__actions button { color: var(--public-ink); }
+.public-layout .app-shell[data-app-mode="public"] .public-controls__actions svg { filter: none; }
+.public-layout .app-shell[data-app-mode="public"] .public-controls__actions button:active { background: rgb(231 224 239 / 80%); }
+.public-layout .app-shell[data-app-mode="public"] .public-controls__progress { border-color: var(--public-progress); border-top-color: var(--public-focus); }
+.public-layout .app-shell[data-app-mode="public"] .public-controls button:focus-visible { outline-color: var(--public-focus); }
+.public-layout .app-shell[data-app-mode="public"] .reply,
+.public-layout .app-shell[data-app-mode="public"] .status,
+.public-layout .app-shell[data-app-mode="public"] .public-controls__panel,
+.public-layout .app-shell[data-app-mode="public"] .message-form,
+.public-layout .app-shell[data-app-mode="public"] .playback-permission { background: var(--public-surface); color: var(--public-ink); border-color: var(--public-border); text-shadow: none; }
+.public-layout .app-shell[data-app-mode="public"] .message-form input { background: var(--public-input); color: var(--public-ink); border-color: var(--public-input-border); }
+.public-layout .app-shell[data-app-mode="public"] .message-form input::placeholder { color: var(--public-muted); }
+.public-layout .app-shell[data-app-mode="public"] .message-form button,
+.public-layout .app-shell[data-app-mode="public"] .public-controls__panel button,
+.public-layout .app-shell[data-app-mode="public"] .playback-permission button { background: var(--public-button); color: var(--public-ink); border-color: var(--public-button-border); }
+.public-layout .app-shell[data-app-mode="public"] .public-controls__panel a { color: var(--public-link); }
+.public-layout .app-shell[data-app-mode="public"] .conversation-error { background: var(--public-error-bg); color: var(--public-error-ink); border-color: var(--public-error-border); text-shadow: none; }
+@media (prefers-reduced-transparency: reduce) {
+  .public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: var(--public-opaque); }
+}
+@media (forced-colors: active) {
+  .public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: Canvas; outline: 1px solid ButtonText; }
+  .public-layout .app-shell[data-app-mode="public"] .public-controls__actions button { color: ButtonText; }
+}
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card__label { max-width: 84%; transform: none; }
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card__label::before { display: none; }
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card__pip--top { font-size: 11px; color: var(--public-pip); }
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card::after { content: '✧'; position: absolute; bottom: 9px; left: 9px; font-size: 14px; color: var(--public-ornament); pointer-events: none; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone__header h2 { font-family: ui-monospace, 'MS Gothic', monospace; font-size: 12px; letter-spacing: .12em; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--selected,
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--drop-target { background: var(--public-target); box-shadow: 0 0 14px rgb(248 217 239 / 48%); }
+.public-layout .app-shell[data-app-mode="public"] .public-controls__actions button:active { background: var(--public-pressed); box-shadow: 0 0 10px rgb(255 231 250 / 40%); }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain {
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: 12px;
+  right: 12px;
+  width: auto;
+  max-width: none;
+  transform: none;
+}
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .card-zone__header { margin: 0 0 4px; padding: 0; justify-content: flex-start; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .card-zone__header h2 { margin: 0; font-size: 12px; line-height: 16px; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .card-zone__cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 0; width: 100%; }
+.public-layout .app-shell[data-app-mode="public"] .brain-card-float { width: 100%; min-width: 0; max-width: none; }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card { width: 100%; max-width: none; height: auto; aspect-ratio: var(--wildcard-card-ratio); }
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card__label { font-size: clamp(12px, 18cqw, 16px); }
+@media (min-width: 600px) {
+  .public-layout .app-shell[data-app-mode="public"] .card-zone--brain {
+    width: calc(var(--public-card-width) * 5 + 24px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+  }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .public-layout .app-shell[data-app-mode="public"] .card-zone--brain {
+    width: calc(var(--public-card-width) * 5 + 24px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+  }
+}
+.public-layout .app-shell[data-app-mode="public"] {
+  --public-card-width: calc((100vw - 48px) / 5);
+  --exhibition-hand-card-width: var(--public-card-width);
+  --exhibition-hand-card-height: calc(var(--public-card-width) * 1.4);
+}
+.public-layout .app-shell[data-app-mode="public"] .card-zone--brain {
+  --exhibition-brain-card-width: var(--public-card-width);
+}
+@media (min-width: 600px) {
+  .public-layout .app-shell[data-app-mode="public"] { --public-card-width: clamp(80px, 10vw, 112px); }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .public-layout .app-shell[data-app-mode="public"] { --public-card-width: 48px; }
+}
+
+/* Public panels remain mounted so reversing an open/close transition is immediate. */
+.public-controls__panel,
+.public-layout .app-shell[data-app-mode="public"] .message-form {
+  opacity: 0; visibility: hidden; translate: 0 4px; pointer-events: none;
+  transition: opacity 300ms ease, translate 300ms ease, visibility 0s linear 300ms;
+}
+.public-controls__panel[data-open="true"],
+.public-layout .app-shell[data-app-mode="public"][data-public-text-input="true"] .message-form {
+  opacity: 1; visibility: visible; translate: 0 0; pointer-events: auto;
+  transition-delay: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .public-controls__panel,
+  .public-layout .app-shell[data-app-mode="public"] .message-form { transition: none; translate: none; }
+}
+
+.public-layout .app-shell[data-app-mode="public"] .card-zone__action { height: 30px; min-height: 30px; white-space: nowrap; }
+
+html[data-public-theme="dark"] .public-layout {
+ --public-bg: #292331; --public-ink: #F1E8F2; --public-paper: rgb(73 64 82 / 94%); --public-lavender: rgb(84 70 95 / 94%); --public-accent: #CFADD9;
+ --public-glow-one: rgb(82 61 85 / 35%); --public-glow-two: rgb(67 58 91 / 35%);
+ --public-bg-one: #292331; --public-bg-two: #302837; --public-bg-three: #352a3b;
+ --public-pending: #685274; --public-active: #6d537a; --public-supporting: #5c4d68; --public-target: #705578;
+ --public-focus: #CFADD9; --public-surface: #352d3f; --public-border: #706078;
+ --public-input: #292331; --public-input-border: #82708d; --public-muted: #c5b5cc;
+ --public-button: #54465F; --public-button-border: #8e759b; --public-link: #e1b8ef;
+ --public-error-bg: #582e3e; --public-error-ink: #ffe0e6; --public-error-border: #ad7286;
+ --public-opaque: #352d3f; --public-pip: #CFADD9; --public-ornament: rgb(207 173 217 / 60%);
+ --public-hint: rgb(73 64 82 / 90%); --public-capsule: rgb(62 51 72 / 78%); --public-pressed: rgb(132 99 145 / 60%);
+ --public-progress: #82708d; --public-on: rgb(180 120 162 / 38%);
+}
+html[data-public-theme] { background: #cbbacb; }
+html[data-public-theme="dark"] { background: #292331; }
+.public-controls__panel h2 { margin: 0 0 16px; font-size: 18px; }
+.public-controls__panel h3 { margin: 18px 0 10px; font-size: 14px; }
+.public-theme { display: flex; gap: 4px; padding: 0; margin: 0; border: 0; min-width: 0; }
+.public-theme legend { margin-bottom: 8px; }
+.public-theme label { flex: 1; min-width: 0; min-height: 44px; justify-content: center; border-radius: 12px; cursor: pointer; }
+.public-theme label:has(:checked) { background: var(--public-button); }
+.public-theme input { accent-color: var(--public-accent); }
+.public-theme input:focus-visible { outline: 2px solid var(--public-focus); outline-offset: 3px; }
+.public-layout .public-controls__error { background: var(--public-error-bg); color: var(--public-error-ink); }
+.public-layout :is(.reply,.status,.playback-permission,.card-zone__action,.public-controls__actions,.public-theme label) { transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease; }
+.public-layout .public-controls .public-controls__actions button { transition: background-color 300ms ease, color 300ms ease, transform 300ms ease; }
+.public-layout .public-controls__panel,
+.public-layout .app-shell[data-app-mode="public"] .message-form { transition: opacity 300ms ease, translate 300ms ease, visibility 0s linear 300ms, background-color 300ms ease, color 300ms ease, border-color 300ms ease; }
+.public-layout .public-controls__panel[data-open="true"],
+.public-layout .app-shell[data-app-mode="public"][data-public-text-input="true"] .message-form { transition-delay: 0s; }
+.public-layout .message-form :is(input,button), .public-layout .public-controls__panel button { transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease; }
+@supports not ((backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))) {
+ .public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: var(--public-opaque); }
+}
+@media (prefers-reduced-motion: reduce) {
+ .public-layout *, .public-layout *::before, .public-layout *::after { transition: none !important; }
+}
+@media (forced-colors: active) {
+ .public-layout { --public-ink: CanvasText; --public-paper: Canvas; --public-lavender: Canvas; --public-surface: Canvas; --public-input: Canvas; --public-button: ButtonFace; --public-focus: Highlight; --public-accent: Highlight; }
+ .public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: Canvas; outline: 1px solid ButtonText; }
+ .public-layout .public-theme label:has(:checked) { outline: 1px solid Highlight; }
+}
+@property --public-glow-one { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --public-glow-two { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --public-bg-one { syntax: "<color>"; inherits: true; initial-value: #d6c5d3; }
+@property --public-bg-two { syntax: "<color>"; inherits: true; initial-value: #c6b7ce; }
+@property --public-bg-three { syntax: "<color>"; inherits: true; initial-value: #cebacb; }
+ .public-layout { transition: background-color 300ms ease, color 300ms ease, --public-glow-one 300ms ease, --public-glow-two 300ms ease, --public-bg-one 300ms ease, --public-bg-two 300ms ease, --public-bg-three 300ms ease; }
+@media (prefers-reduced-motion: reduce) { .public-layout { transition: none; } }
+
+.public-layout .app-shell[data-app-mode="public"] .wildcard-card {
+ transition: transform 150ms ease, box-shadow 150ms ease, border-color 300ms ease, background-color 300ms ease, color 300ms ease;
+}
+.public-layout .wildcard-card :is(.wildcard-card__label,.wildcard-card__pip,.wildcard-card__status-mark) { transition: color 300ms ease; }
+@media (forced-colors: active) {
+ html[data-public-theme] .public-layout { --public-ink: CanvasText; --public-paper: Canvas; --public-lavender: Canvas; --public-surface: Canvas; --public-input: Canvas; --public-button: ButtonFace; --public-focus: Highlight; --public-accent: Highlight; }
+}
+
+.public-controls__panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.public-controls__panel-header h2 { margin: 0; }
+.public-layout .public-controls .public-controls__close { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-width: 44px; padding: 10px; margin: 0; border: 0; border-radius: 50%; background: transparent; }
+.public-controls__close svg, .public-theme svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.public-theme label { position: relative; height: 48px; }
+.public-theme label:has(input:focus-visible) { outline: 2px solid var(--public-focus); outline-offset: 3px; }
+.public-theme input:focus-visible { outline: none; }

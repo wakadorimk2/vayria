@@ -1753,3 +1753,4 @@
     transition: none;
   }
 }
+.wildcard-card__status-mark { display: none; }

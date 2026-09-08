@@ -114,6 +114,9 @@ export function WildcardCard({
       <h2 className="wildcard-card__label" data-label={card.label}>
         {card.label}
       </h2>
+      <span className="wildcard-card__status-mark" aria-hidden="true">
+        {state === 'active' ? '◆' : state === 'supporting' ? '●' : motion === 'pending-insertion' ? '◷' : state === 'disabled' ? '−' : ''}
+      </span>
 
       <span
         className="wildcard-card__pip wildcard-card__pip--bottom"

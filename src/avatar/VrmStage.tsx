@@ -85,6 +85,7 @@ import type {
 } from '../attention/spatialTargetRegistry';
 import { frameAvatar } from './cameraPreset';
 import { setupStageLighting } from './stageLighting';
+import { PUBLIC_STAGE_LIGHTING } from './stagePreset';
 import { SavedMotionCatalog } from './motion/motionCatalog';
 import { MotionPlayer } from './motion/motionPlayer';
 import {
@@ -237,7 +238,7 @@ interface VrmStageProps {
   performancePlan?: PerformancePlan;
   sessionGeneration?: number;
   spatialTargetRegistry?: SpatialTargetRegistry;
-  stageVariant?: 'default' | 'card-preview';
+  stageVariant?: 'default' | 'card-preview' | 'public';
 }
 
 export interface VrmStageHandle {
@@ -972,7 +973,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         scene,
         stageVariant === 'card-preview'
           ? CARD_PREVIEW_LIGHTING
-          : STAGE_PRESET.lighting,
+          : stageVariant === 'public' ? PUBLIC_STAGE_LIGHTING : STAGE_PRESET.lighting,
       );
 
       let renderer: WebGLRenderer;
