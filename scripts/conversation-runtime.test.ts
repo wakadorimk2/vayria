@@ -25,10 +25,12 @@ function fixture(options: ConversationOptions = {}) {
   const plays: { pending: ReturnType<typeof deferred<PerformancePlaybackResult | null>>; callbacks?: PerformancePlaybackCallbacks }[] = [];
   const results: PerformanceResult[] = [];
   const timeline: InteractionTimelineEvent[] = [];
+  const captureEvents: string[] = [];
   let turn = 0;
   let tts: () => Promise<Response> = async () => new Response(new Uint8Array([1]), { headers: { 'content-type': 'audio/wav' } });
   let chat: () => Promise<Response> = async () => Response.json(response);
   const playback: PerformancePlayback = {
+    holdAudioCapture() { captureEvents.push('hold'); return () => { captureEvents.push('release'); }; },
     prepare() { }, stop() { },
     play(_plan, _source, callbacks) {
       const pending = deferred<PerformancePlaybackResult | null>();
@@ -47,7 +49,7 @@ function fixture(options: ConversationOptions = {}) {
     setTimeout: () => 1, clearTimeout() { }, prefersReducedMotion: () => true,
   };
   const runtime = createConversationRuntime(playback, { ...options, onPerformanceResult: r => results.push(r), onInteractionTimelineEvent: event => timeline.push(event) }, dependencies);
-  return { runtime, requests, plays, results, timeline, setTts(value: typeof tts) { tts = value; }, setChat(value: typeof chat) { chat = value; }, send(id: string) { return runtime.sendManual('こんにちは', cards, () => { }, plan(id)); } };
+  return { runtime, requests, plays, results, timeline, captureEvents, setTts(value: typeof tts) { tts = value; }, setChat(value: typeof chat) { chat = value; }, send(id: string) { return runtime.sendManual('こんにちは', cards, () => { }, plan(id)); } };
 }
 
 test('delivery history keeps user-only turns and deduplicates completed units', () => {
@@ -134,6 +136,7 @@ test('streaming failure retains only completed units and reports partial spoken 
   assert.equal(await pending, false);
   assert.equal(f.results.at(-1)?.outcome, 'failed');
   assert.equal(f.results.at(-1)?.spokenText, '前半。');
+  assert.deepEqual(f.captureEvents, ['hold', 'release']);
   f.setChat(async () => Response.json(response));
   const next = f.send('next'); await flush();
   assert.deepEqual(f.requests.filter(r => r.url.endsWith('/chat'))[1].body.history, [{ role: 'user', content: 'こんにちは' }, { role: 'assistant', content: '前半。' }]);
@@ -143,9 +146,12 @@ test('streaming failure retains only completed units and reports partial spoken 
 test('streaming success commits each unit once and retains the full delivered reply', async () => {
   const f = fixture(); f.setChat(async () => streamingResponse());
   const pending = f.send('stream'); await flush();
+  assert.deepEqual(f.captureEvents, ['hold']);
   f.plays[0].callbacks?.onAudioComplete?.(1); f.plays[0].pending.resolve(result); await flush();
+  assert.deepEqual(f.captureEvents, ['hold']);
   f.plays[1].callbacks?.onAudioComplete?.(2); f.plays[1].pending.resolve(result);
   assert.equal(await pending, true);
+  assert.deepEqual(f.captureEvents, ['hold', 'release']);
   assert.equal(f.results.at(-1)?.spokenText, '前半。後半。');
 });
 

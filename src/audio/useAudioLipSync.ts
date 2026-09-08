@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { IosAudioSession } from './iosAudioSession.js';
 import {
   BARGE_IN_DUCK_GAIN,
   BARGE_IN_GAIN_RAMP_MS,
@@ -21,6 +22,7 @@ import {
   monitorPlaybackStart,
   PlaybackGestureGate,
   PersistentStreamingAudio,
+  resumeAudioContext,
   type PlaybackGestureReason,
 } from './persistentStreamingAudio.js';
 
@@ -112,7 +114,7 @@ async function collectAudioStream(
   return combined.buffer;
 }
 
-export function useAudioLipSync(volume = 1) {
+export function useAudioLipSync(volume = 1, audioSession: IosAudioSession | null = null) {
   const normalizedVolume = clampVolume(volume);
   const [mouthOpen, setMouthOpen] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -149,9 +151,12 @@ export function useAudioLipSync(volume = 1) {
   const reactionMouthOpenRef = useRef(0);
   const volumeRef = useRef(normalizedVolume);
   const deferredCleanupTimerRef = useRef<number | null>(null);
+  const primaryCaptureReleaseRef = useRef<(() => void) | null>(null);
+  const reactionCaptureReleaseRef = useRef<(() => void) | null>(null);
   const playbackGestureWaitRef = useRef<{
     gate: PlaybackGestureGate;
     generation: number;
+    resumeActiveSource: boolean;
   } | null>(null);
 
   const ensureAudioContext = useCallback(() => {
@@ -202,7 +207,7 @@ export function useAudioLipSync(volume = 1) {
 
     const gestureWait = playbackGestureWaitRef.current;
     const prepareAttempt = () =>
-      persistentStreamingAudioRef.current!.prepare(context, Boolean(gestureWait));
+      persistentStreamingAudioRef.current!.prepare(context, gestureWait?.resumeActiveSource ?? false);
     const preparePromise = (
       gestureWait ? gestureWait.gate.resume(prepareAttempt) : prepareAttempt()
     )
@@ -223,6 +228,8 @@ export function useAudioLipSync(volume = 1) {
   }, [ensureAudioContext, ensurePersistentStreamingAudio]);
 
   const clearPlayback = useCallback(() => {
+    primaryCaptureReleaseRef.current?.();
+    primaryCaptureReleaseRef.current = null;
     if (startTimerRef.current !== null) {
       window.clearTimeout(startTimerRef.current);
       startTimerRef.current = null;
@@ -290,6 +297,8 @@ export function useAudioLipSync(volume = 1) {
   }, []);
 
   const clearReactionPlayback = useCallback(() => {
+    reactionCaptureReleaseRef.current?.();
+    reactionCaptureReleaseRef.current = null;
     if (reactionSourceRef.current) {
       try {
         reactionSourceRef.current.stop();
@@ -350,6 +359,19 @@ export function useAudioLipSync(volume = 1) {
     return startedAt === null ? null : Math.max(0, performance.now() - startedAt);
   }, []);
 
+  const waitForAudioContext = useCallback(async (context: AudioContext, generation: number, options?: PlayAudioOptions) => {
+    const ready = await resumeAudioContext(context);
+    if (generation !== generationRef.current) throw new DOMException('Playback aborted.', 'AbortError');
+    if (ready) return;
+    const gate = new PlaybackGestureGate();
+    const waiting = gate.wait();
+    playbackGestureWaitRef.current = { gate, generation, resumeActiveSource: false };
+    setNeedsPlaybackGesture(true);
+    options?.onPlaybackGestureRequired?.('start_timeout');
+    await waiting;
+    if (generation !== generationRef.current || context.state !== 'running') throw new DOMException('Playback aborted.', 'AbortError');
+  }, []);
+
   const play = useCallback<PlayAudio>(
     async (requestedSource, options) => {
       const generation = generationRef.current + 1;
@@ -360,13 +382,15 @@ export function useAudioLipSync(volume = 1) {
       primaryPlaybackActiveRef.current = true;
 
       try {
+        if (audioSession) {
+          const hold = audioSession.holdPlayback();
+          primaryCaptureReleaseRef.current = hold.release;
+          await hold.ready;
+          if (generation !== generationRef.current) return;
+          setDucked(false);
+        }
         const context = ensureAudioContext();
-        if (context.state !== 'running') {
-          await context.resume();
-        }
-        if (context.state !== 'running') {
-          throw new Error('AudioContext is not running');
-        }
+        await waitForAudioContext(context, generation, options);
         setIsAudioUnlocked(true);
 
         let audioSource = requestedSource;
@@ -526,7 +550,7 @@ export function useAudioLipSync(volume = 1) {
           ) {
             return;
           }
-          if (context.state !== 'running') await context.resume();
+          await waitForAudioContext(context, generation, options);
           if (context.state !== 'running') {
             throw new Error('AudioContext is not running');
           }
@@ -614,7 +638,7 @@ export function useAudioLipSync(volume = 1) {
               interrupted,
             ]);
           }
-          if (context.state !== 'running') await context.resume();
+          await waitForAudioContext(context, generation, options);
           if (context.state !== 'running') {
             throw new Error('AudioContext is not running');
           }
@@ -647,7 +671,7 @@ export function useAudioLipSync(volume = 1) {
           if (startOutcome !== 'started') {
             if (generation !== generationRef.current) return;
             const gate = new PlaybackGestureGate();
-            playbackGestureWaitRef.current = { gate, generation };
+            playbackGestureWaitRef.current = { gate, generation, resumeActiveSource: true };
             setNeedsPlaybackGesture(true);
             options?.onPlaybackGestureRequired?.(startOutcome);
             const eventualStart = Promise.race([
@@ -720,7 +744,7 @@ export function useAudioLipSync(volume = 1) {
           animationFrameRef.current = requestAnimationFrame(updateMouth);
         };
 
-        if (context.state !== 'running') await context.resume();
+        await waitForAudioContext(context, generation, options);
         if (context.state !== 'running') {
           throw new Error('AudioContext is not running');
         }
@@ -778,6 +802,9 @@ export function useAudioLipSync(volume = 1) {
       clearReactionPlayback,
       ensureAudioContext,
       ensurePersistentStreamingAudio,
+      waitForAudioContext,
+      audioSession,
+      setDucked,
     ],
   );
 
@@ -790,12 +817,17 @@ export function useAudioLipSync(volume = 1) {
       clearReactionPlayback();
 
       try {
-        const context = ensureAudioContext();
-        if (context.state !== 'running') {
-          await context.resume();
+        if (audioSession) {
+          const hold = audioSession.holdPlayback();
+          reactionCaptureReleaseRef.current = hold.release;
+          await hold.ready;
+          if (generation !== reactionGenerationRef.current) return false;
+          setDucked(false);
         }
+        const context = ensureAudioContext();
+        const ready = await resumeAudioContext(context);
         if (
-          context.state !== 'running' ||
+          !ready ||
           primaryPlaybackActiveRef.current ||
           generation !== reactionGenerationRef.current
         ) {
@@ -863,9 +895,14 @@ export function useAudioLipSync(volume = 1) {
           clearReactionPlayback();
         }
         return false;
+      } finally {
+        if (generation === reactionGenerationRef.current) {
+          reactionCaptureReleaseRef.current?.();
+          reactionCaptureReleaseRef.current = null;
+        }
       }
     },
-    [clearReactionPlayback, ensureAudioContext],
+    [clearReactionPlayback, ensureAudioContext, audioSession, setDucked],
   );
 
   useEffect(() => {
