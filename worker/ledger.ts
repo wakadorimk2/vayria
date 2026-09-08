@@ -1,3 +1,4 @@
+import { distribution, sanitizeMeasurements, safeMetricCode, timingFields, type Measurements } from './diagnostics';
 // All monetary values are integer micro-yen. No conversation content belongs here.
 export const DEFAULT_LIMITS = {
   visitorDay: 2, visitorMonth: 10, ipMinute: 10, ipHour: 30, ipDay: 100,
@@ -19,7 +20,7 @@ type Charge = { amount: number; day: string; month: string; settled: boolean; ex
 export type LedgerState = {
   limits: Limits; stopped: boolean; sessions: Record<string, Session>; counters: Record<string, Counter>;
   jobs: Record<string, Job>; charges: Record<string, Charge>; usedTickets: Record<string, number>;
-  metrics?: { at: number; kind: Kind; durationMs: number; code: string }[];
+  metrics?: { at: number; kind: Kind; durationMs: number; code: string; rejected?: boolean; measurements?: Measurements }[];
 };
 export function initialState(): LedgerState {
   return { limits: { ...DEFAULT_LIMITS }, stopped: false, sessions: {}, counters: {}, jobs: {}, charges: {}, usedTickets: {} };
@@ -169,11 +170,17 @@ export class Ledger {
     }
     c.amount = actual; c.settled = true;
   }
-  finish(jobId: string, code = 'complete') {
+  finish(jobId: string, code = 'complete', measurements?: Measurements) {
     const job = this.state.jobs[jobId];
     if (job) this.state.metrics!.push({ at: this.now, kind: job.kind, durationMs: Math.max(0, this.now - (job.expires - 120_000)),
-      code: ['complete', 'provider_failure', 'cancelled', 'limit'].includes(code) ? code : 'provider_failure' });
+      code: safeMetricCode(code), measurements: sanitizeMeasurements(measurements) });
+    this.state.metrics = this.state.metrics!.slice(-2000);
     delete this.state.jobs[jobId];
+  }
+  reject(kind: Kind, code: string) {
+    if (!['user', 'autonomous', 'card', 'transcribe', 'tts'].includes(kind)) return;
+    this.state.metrics!.push({ at: this.now, kind, durationMs: 0, code: safeMetricCode(code), rejected: true });
+    this.state.metrics = this.state.metrics!.slice(-2000);
   }
   report() {
     const p = periods(this.now); const l = this.state.limits;
@@ -182,9 +189,25 @@ export class Ledger {
       monthApiYen: this.count(`bm:${p.month}`) / 1e6, estimatedYen,
       warning: estimatedYen >= l.targetYen ? 'target_exceeded' : estimatedYen >= l.warningYen ? 'warning' : null,
       activeJobs: Object.keys(this.state.jobs).length,
-      recentRequests: this.state.metrics?.length ?? 0,
-      recentFailures: this.state.metrics?.filter(m => m.code !== 'complete').length ?? 0,
-      recentDurationMedianMs: [...(this.state.metrics ?? [])].sort((a, b) => a.durationMs - b.durationMs)[Math.floor((this.state.metrics?.length ?? 0) / 2)]?.durationMs ?? null };
+      recentByKind: Object.fromEntries((['user', 'autonomous', 'card', 'transcribe', 'tts'] as Kind[]).map(kind => {
+        const rows = (this.state.metrics ?? []).filter(m => m.kind === kind);
+        const started = rows.filter(m => !m.rejected);
+        const failures: Record<string, number> = {};
+        const models: Record<string, number> = {};
+        for (const row of rows) {
+          if (row.code !== 'complete') { const code = safeMetricCode(row.code); failures[code] = (failures[code] ?? 0) + 1; }
+          for (const model of sanitizeMeasurements(row.measurements).actualModels ?? []) models[model] = (models[model] ?? 0) + 1;
+        }
+        return [kind, { requests: rows.length, started: started.length, rejected: rows.length - started.length,
+          failures, actualModels: models, duration: distribution(started.map(m => m.durationMs)),
+          timings: Object.fromEntries(timingFields.map(field => [field, distribution(started.flatMap(m =>
+            m.measurements?.[field] === undefined ? [] : [m.measurements[field]!]))])),
+          llmCalls: started.reduce((n,m) => n + (m.measurements?.llmCalls ?? 0), 0),
+          llmRetries: started.reduce((n,m) => n + (m.measurements?.llmRetries ?? 0), 0) }];
+      })),
+      recentRequests: this.state.metrics?.filter(m => !m.rejected).length ?? 0,
+      recentFailures: this.state.metrics?.filter(m => !m.rejected && m.code !== 'complete').length ?? 0,
+      recentDurationMedianMs: [...(this.state.metrics ?? [])].filter(m => !m.rejected).sort((a, b) => a.durationMs - b.durationMs)[Math.floor((this.state.metrics?.filter(m => !m.rejected).length ?? 0) / 2)]?.durationMs ?? null };
   }
   configure(patch: Partial<Limits>, stopped?: boolean) {
     for (const [key, value] of Object.entries(patch)) {

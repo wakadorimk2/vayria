@@ -1,14 +1,15 @@
+import type { createGenerationMeasurements } from './diagnostics';
 import { generateReply, generateInteractiveResponse, generateCardPreviewReply } from '../server/chatGeneration';
 import { readChatRequest, readCardPreviewRequest } from '../server/chatValidation';
 import { createLlmProviderCallTracker } from '../server/llmProviderTelemetry';
 import type { StreamingReplyCallbacks, LlmRequestContext } from '../server/localApiSupport';
 
-export async function generate(payload: unknown, preview: boolean, apiKey: string, signal: AbortSignal, callbacks: StreamingReplyCallbacks | null) {
+export async function generate(payload: unknown, preview: boolean, apiKey: string, signal: AbortSignal, callbacks: StreamingReplyCallbacks | null, measurements?: ReturnType<typeof createGenerationMeasurements>) {
   const llm: LlmRequestContext = { apiKey, signal, warmup: false, onFallback: () => {}, runtime: {
     profile: 'nano-implicit', serviceTier: 'standard', fallbackEnabled: false, cacheWarmupEnabled: false,
   } };
   const telemetry = createLlmProviderCallTracker({ turnId: crypto.randomUUID(), provider: 'openai', model: 'gpt-5-nano',
-    source: preview ? 'card_change' : 'manual', signal, record: () => {} });
+    source: preview ? 'card_change' : 'manual', signal, record: () => {}, recordExternal: event => { measurements?.record(event); } });
   if (preview) {
     const p = readCardPreviewRequest(payload);
     return generateCardPreviewReply(llm, p.cardId, p.performanceContext, telemetry);

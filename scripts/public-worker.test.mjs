@@ -4,6 +4,44 @@ import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { createHmac } from 'node:crypto';
 const bundle = await build({ entryPoints: ['worker/index.ts'], bundle: true, write: false, format: 'esm', platform: 'node', target: 'es2023', external: ['cloudflare:workers'] });
+
+test('Preview admission and repeated visits redirect to the app without serving a file', async () => {
+  const secret = 'preview-test-secret-'.repeat(3);
+  const base = 'https://test.example';
+  const assetRequests = [];
+  const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: 'preview', modules: true,
+    script: bundle.outputFiles[0].text, compatibilityDate: '2026-09-07', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { USAGE: { className: 'PublicUsage', useSQLite: true } },
+    bindings: { REQUIRE_PREVIEW_ACCESS: 'true', PREVIEW_SECRET: secret },
+    serviceBindings: { ASSETS: request => { assetRequests.push(new URL(request.url).pathname); return new Response('app', { headers: { 'Content-Type': 'text/html' } }); } },
+  }] }));
+  const payload = Buffer.from(JSON.stringify({ purpose: 'preview', exp: Date.now() + 60000 })).toString('base64url');
+  const ticket = payload + '.' + createHmac('sha256', secret).update(payload).digest('base64url');
+  try {
+    const submit = (value, cookie = '', origin = base) => mf.dispatchFetch(base + '/preview', {
+      method: 'POST', redirect: 'manual', headers: { Origin: origin, Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ ticket: value }).toString(),
+    });
+    assert.equal((await submit('invalid')).status, 401);
+    assert.equal((await submit(ticket, '', 'https://other.example')).status, 401);
+    const first = await submit(ticket);
+    assert.equal(first.status, 303);
+    assert.equal(first.headers.get('location'), '/');
+    assert.match(first.headers.get('content-type'), /^text\/html/);
+    assert.equal(first.headers.get('content-disposition'), null);
+    const cookie = first.headers.get('set-cookie').split(';')[0];
+    const repeated = await submit(ticket, cookie);
+    assert.equal(repeated.status, 303);
+    assert.equal(repeated.headers.get('location'), '/');
+    const visit = await mf.dispatchFetch(base + '/preview', { headers: { Cookie: cookie }, redirect: 'manual' });
+    assert.equal(visit.status, 303);
+    assert.equal((await submit(ticket, cookie, 'https://other.example')).status, 403);
+    assert.deepEqual(assetRequests, []);
+    const app = await mf.dispatchFetch(base + '/', { headers: { Cookie: cookie } });
+    assert.equal(await app.text(), 'app');
+    assert.deepEqual(assetRequests, ['/']);
+  } finally { await mf.dispose(); }
+});
 test('Worker admission, SQLite serialization, tickets and budget reject before provider calls', async () => {
   const calls = []; const challengeTokens = new Set(); const secret = 'local-test-secret-'.repeat(3);
   const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: 'public', modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-09-07', compatibilityFlags: ['nodejs_compat'],
@@ -72,8 +110,56 @@ test('Worker admission, SQLite serialization, tickets and budget reject before p
     const auth = payload + '.' + createHmac('sha256', secret).update(payload).digest('base64url');
     assert.equal((await post('/api/admin', { op: 'configure', patch: { dayBudget: 1 } }, { Authorization: 'Bearer ' + auth })).status, 200);
     assert.equal((await post('/api/card-preview', card)).status, 429); assert.equal(calls.length, paidCount);
+    const report = await (await post('/api/admin', { op: 'report' }, { Authorization: 'Bearer ' + auth })).json();
+    assert.equal(report.recentByKind.card.started, 1);
+    assert.equal(report.recentByKind.card.rejected, 2);
+    assert.deepEqual(report.recentByKind.card.failures, { busy: 1, daily_budget: 1 });
+    assert.equal(report.recentByKind.card.timings.generationMs.samples, 1);
+    assert.equal(report.recentByKind.card.llmCalls, 1);
+    assert.equal(report.recentByKind.card.actualModels['gpt-5-nano'], 1);
+    assert.equal(report.recentByKind.tts.timings.ttsFirstByteMs.samples, 1);
+    assert.equal(report.recentByKind.tts.timings.ttsTotalMs.samples, 1);
+    assert.equal(report.recentByKind.tts.failures.ticket_used, 1);
+    assert.equal(JSON.stringify(report).includes('慎重'), false);
     assert.equal((await mf.dispatchFetch(base + '/api/unknown')).status, 404);
     await mf.dispatchFetch(base + '/api/session', { method: 'DELETE', headers });
     assert.equal((await post('/api/session', { token: 'challenge0' })).status, 403);
   } finally { await mf.dispose(); }
+});
+
+test('measurement persistence failures do not fail successful generation or replace a rejection', async () => {
+  const isolated = await build({ entryPoints: ['worker/index.ts'], bundle: true, write: false, format: 'esm', platform: 'node', target: 'es2023',
+    plugins: [{ name: 'ledger-stub', setup(b) { b.onLoad({ filter: /worker[\\/]usage\.ts$/ }, () => ({ contents: 'export class PublicUsage {}', loader: 'ts' })); } }] });
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  await mkdir('node_modules/.tmp/public-isolated', { recursive: true });
+  await writeFile('node_modules/.tmp/public-isolated/worker.mjs', isolated.outputFiles[0].text);
+  const { default: worker } = await import('../node_modules/.tmp/public-isolated/worker.mjs');
+  const secret = 'mock-secret-'.repeat(4); const calls = []; let reject = false;
+  const token = Buffer.from(JSON.stringify({ purpose: 'visitor', id: 'v', exp: Date.now() + 60000 })).toString('base64url');
+  const signed = token + '.' + createHmac('sha256', secret).update(token).digest('base64url');
+  const env = { COOKIE_SECRET: secret, GENERATION_ENABLED: 'true', OPENAI_API_KEY: 'mock', AIVIS_API_KEY: 'mock', AIVIS_MODEL_UUID: 'mock',
+    USAGE: { idFromName: () => 'test', get: () => ({ fetch: async (_url, init) => {
+      const input = JSON.parse(init.body); calls.push(input);
+      if (['finish', 'reject'].includes(input.op)) throw new Error('storage failed');
+      if (input.op === 'begin') return reject ? Response.json({ code: 'card_limit', retryAt: 123 }, { status: 429 }) : Response.json({ limits: { usdJpy: 150 }, expires: Date.now() + 60000 });
+      return Response.json({});
+    } }) } };
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response([
+    { type: 'response.output_text.delta', delta: JSON.stringify({ text: '少し慎重に進みたいな。', emotion: 'neutral' }) },
+    { type: 'response.completed', response: { model: 'gpt-5-nano', usage: { input_tokens: 10, output_tokens: 10 }, service_tier: 'default' } },
+  ].map(value => 'data: ' + JSON.stringify(value) + '\n\n').join(''), { headers: { 'Content-Type': 'text/event-stream' } });
+  const request = () => new Request('https://test/api/card-preview', { method: 'POST', headers: { Origin: 'https://test', Cookie: '__Host-vayria=' + signed, 'X-Vayria-Session': 's' },
+    body: JSON.stringify({ cardId: 'chicken', performanceContext: { callbackTendency: 0, fragmentation: 0, semanticBiases: [] } }) });
+  try {
+    const response = await worker.fetch(request(), env);
+    assert.equal(response.status, 200); assert.ok((await response.json()).ttsTicket);
+    assert.equal(calls.filter(c => c.op === 'finish').length, 1);
+    assert.equal(calls.find(c => c.op === 'finish').measurements.llmCalls, 1);
+    reject = true;
+    const refused = await worker.fetch(request(), env);
+    assert.equal(refused.status, 429); assert.equal((await refused.json()).code, 'card_limit');
+    assert.equal(calls.filter(c => c.op === 'finish').length, 1);
+    assert.equal(calls.filter(c => c.op === 'reject').length, 1);
+  } finally { globalThis.fetch = previousFetch; }
 });

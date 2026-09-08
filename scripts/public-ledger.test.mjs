@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import ts from 'typescript';
 await mkdir('node_modules/.tmp/public-tests', { recursive: true });
-for (const name of ['ledger', 'security']) {
-  const source = (await readFile(`worker/${name}.ts`, 'utf8')).replace("'./ledger'", "'./ledger.mjs'");
+for (const name of ['diagnostics', 'ledger', 'security']) {
+  const source = (await readFile(`worker/${name}.ts`, 'utf8')).replace("'./ledger'", "'./ledger.mjs'").replace("'./diagnostics'", "'./diagnostics.mjs'");
   await writeFile(`node_modules/.tmp/public-tests/${name}.mjs`, ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.ESNext } }).outputText);
 }
 const { Ledger, initialState, periods } = await import('../node_modules/.tmp/public-tests/ledger.mjs');
@@ -76,4 +76,55 @@ test('signed cookies reject tampering, expiration and another secret', async () 
 test('invalid WAV and oversized payloads are refused', async () => {
   assert.throws(() => wavSeconds(new Uint8Array(44)), /invalid_audio/);
   await assert.rejects(() => boundedBody(new Request('https://test', { method: 'POST', body: '12345' }), 4), /request_too_large/);
+});
+
+const { createGenerationMeasurements, sanitizeMeasurements } = await import('../node_modules/.tmp/public-tests/diagnostics.mjs');
+test('staging card configuration permits 20, rejects 21, preserves budgets and voice limits', () => {
+  const l = fresh(); const before = { ...l.state.limits }; l.configure({ card: 20 }); l.start('v', 'ip', 's');
+  for (let i = 0; i < 20; i++) { l.begin('v', 's', 'card', 'j'); l.finish('j'); }
+  assert.throws(() => l.begin('v', 's', 'card', 'j'), /card_limit/);
+  assert.equal(l.state.limits.dayBudget, before.dayBudget);
+  assert.equal(l.state.limits.tts, before.tts); assert.equal(l.state.limits.ttsChars, before.ttsChars);
+  assert.equal(fresh().state.limits.card, 2);
+  assert.throws(() => l.begin('v', 's', 'tts', 'audio', 601, 'ticket'), /tts_limit/);
+  l.configure({ dayBudget: 1000 }); l.begin('v', 's', 'user', 'budget');
+  assert.throws(() => l.reserve('v', 's', 'budget', 'charge', 1000), /daily_budget/);
+});
+test('metrics distinguish rejected requests, real failures, old records and missing timings', () => {
+  const l = fresh(); l.start('v', 'ip', 's');
+  l.state.metrics.push({ at: now, kind: 'card', durationMs: 5, code: 'complete' });
+  l.begin('v', 's', 'card', 'j');
+  l.finish('j', 'complete', { generationMs: 100, firstSpeechUnitMs: 40, llmCalls: 2, llmRetries: 1, actualModels: ['gpt-5-nano'] });
+  l.finish('j', 'complete'); // no duplicate completion
+  l.reject('card', 'card_limit');
+  l.begin('v', 's', 'card', 'k'); l.finish('k', 'daily_budget', { generationMs: 200 });
+  const report = l.report().recentByKind.card;
+  assert.equal(report.requests, 4); assert.equal(report.started, 3); assert.equal(report.rejected, 1);
+  assert.deepEqual(report.failures, { card_limit: 1, daily_budget: 1 });
+  assert.deepEqual(report.timings.generationMs, { samples: 2, medianMs: 200, p95Ms: 200 });
+  assert.deepEqual(report.timings.ttsFirstByteMs, { samples: 0, medianMs: null, p95Ms: null });
+  assert.equal(report.duration.samples, 3); assert.equal(report.llmRetries, 1);
+  assert.deepEqual(report.actualModels, { 'gpt-5-nano': 1 });
+  l.begin('v', 's', 'user', 'cancel'); l.finish('cancel', 'cancelled');
+  assert.equal(l.report().recentByKind.user.failures.cancelled, 1);
+});
+test('metrics retain only bounded metadata and expire after 24 hours', () => {
+  const l = fresh(); l.start('v', 'ip', 's'); l.begin('v', 's', 'card', 'j');
+  const sanitized = sanitizeMeasurements({ generationMs: NaN, firstSpeechUnitMs: -1, ttsTotalMs: 50.4,
+    actualModels: ['gpt-5-nano', 'gpt-5-nano', 'private text'], prompt: 'secret', visitor: 'secret' });
+  assert.deepEqual(sanitized, { ttsTotalMs: 50, actualModels: ['gpt-5-nano'] });
+  l.finish('j', 'private text', sanitized);
+  assert.equal(JSON.stringify(l.state.metrics).includes('secret'), false);
+  for (let i = 0; i < 2010; i++) l.reject('card', 'card_limit');
+  assert.equal(l.state.metrics.length, 2000);
+  assert.equal(new Ledger(l.state, now + 86400001).report().recentRequests, 0);
+});
+test('generation observer captures retry calls and actual models without text', () => {
+  let clock = 0; const m = createGenerationMeasurements(() => clock);
+  m.record({ event: 'llm_external_request_start', callIndex: 1, externalRequestIndex: 1, retry: 0 });
+  clock = 20; m.firstSpeechUnit(); clock = 30; m.firstSpeechUnit();
+  m.record({ event: 'llm_external_request_start', callIndex: 2, externalRequestIndex: 2, retry: 1 });
+  m.record({ event: 'llm_external_request_done', callIndex: 2, externalRequestIndex: 2, retry: 1, actualModel: 'gpt-5-nano', text: 'not stored' });
+  clock = 40; m.finish();
+  assert.deepEqual(m.values, { llmCalls: 2, llmRetries: 1, firstSpeechUnitMs: 20, generationMs: 40, actualModels: ['gpt-5-nano'] });
 });

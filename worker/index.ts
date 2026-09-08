@@ -1,3 +1,4 @@
+import { createGenerationMeasurements, type Measurements } from './diagnostics';
 import { PublicUsage } from './usage';
 import { LimitError, type Kind, type Limits } from './ledger';
 import { boundedBody, cookie, ipKey, sign, verify, wavSeconds } from './security';
@@ -22,6 +23,11 @@ interface Env {
 type Visitor = { id: string; exp: number; purpose: 'visitor' };
 type Ticket = { exp: number; purpose: 'tts'; visitor: string; session: string; nonce: string; text: string; emotion: string };
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
+const previewRedirect = (ticket?: string) => new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><title>Vayria</title><a href="/">Vayriaを開く</a></html>', {
+  status: 303,
+  headers: { Location: '/', 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+    ...(ticket ? { 'Set-Cookie': `__Host-vayria-preview=${ticket}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400` } : {}) },
+});
 async function ledger<T>(env: Env, op: string, args: object = {}): Promise<T> {
   const response = await env.USAGE.get(env.USAGE.idFromName('public-ledger-v1')).fetch('https://ledger/', {
     method: 'POST', body: JSON.stringify({ op, ...args }),
@@ -39,16 +45,20 @@ async function handle(request: Request, env: Env): Promise<Response> {
   if (env.SERVE_PLACEHOLDER === 'true') return url.pathname.startsWith('/api/') ? json({ code: 'generation_stopped' }, 503) : env.ASSETS.fetch(request);
   if (env.REQUIRE_PREVIEW_ACCESS === 'true' && url.pathname !== '/api/admin') {
     const access = await verify<{ exp: number; purpose: string }>(cookie(request, '__Host-vayria-preview'), env.PREVIEW_SECRET);
+    // Never pass the form endpoint to Static Assets, including on repeated submissions.
+    if (url.pathname === '/preview' && access?.purpose === 'preview') {
+      if (request.method !== 'GET' && request.headers.get('Origin') !== url.origin) return json({ code: 'invalid_origin' }, 403);
+      return previewRedirect();
+    }
     if (access?.purpose !== 'preview') {
       if (url.pathname === '/preview' && request.method === 'POST' && request.headers.get('Origin') === url.origin) {
         const form = new URLSearchParams(new TextDecoder().decode(await boundedBody(request, 1024)));
         // The preview credential is a random signed ticket, never an API credential.
         const provided = await verify<{ exp: number; purpose: string }>(form.get('ticket') ?? '', env.PREVIEW_SECRET);
-        if (provided?.purpose === 'preview') return new Response(null, { status: 303, headers: { Location: '/',
-          'Set-Cookie': `__Host-vayria-preview=${form.get('ticket')}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400`, 'Cache-Control': 'no-store' } });
+        if (provided?.purpose === 'preview') return previewRedirect(form.get('ticket')!);
       }
       if (url.pathname.startsWith('/api/')) return json({ code: 'preview_access_required' }, 403);
-      return new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><h1>Vayria 検証環境</h1><form method="post" action="/preview"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off"></label><button>開く</button></form></html>', { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+      return new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#201c30;color:#f4efe6}form{max-width:360px}input,button{box-sizing:border-box;font:inherit;min-height:44px}input{display:block;width:100%;margin:12px 0}button{padding:8px 24px}</style><h1>Vayria 検証環境</h1><form method="post" action="/preview"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"></label><button>開く</button></form></html>', { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
   }
   if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
@@ -111,9 +121,16 @@ async function handle(request: Request, env: Env): Promise<Response> {
   const kind: Kind = audio ? 'transcribe' : ticket ? 'tts' : preview || cardReaction ? 'card' : input.mode === 'autonomous' ? 'autonomous' : 'user';
   const job = crypto.randomUUID();
   const amount = audio ? wavSeconds(audio) : ticket ? Array.from(ticket.text).length : 0;
-  const { limits, expires } = await ledger<{ limits: Limits; expires: number }>(env, 'begin', { ...who, kind, job, amount, ticket: ticket?.nonce });
+  let admission: { limits: Limits; expires: number };
+  try { admission = await ledger(env, 'begin', { ...who, kind, job, amount, ticket: ticket?.nonce }); }
+  catch (error) {
+    if (error instanceof LimitError) await ledger(env, 'reject', { kind, code: error.code }).catch(() => {});
+    throw error;
+  }
+  const { limits, expires } = admission;
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(Math.max(1, Math.min(90000, expires - Date.now())))]);
   const reserve = async (amount: number) => { const charge = crypto.randomUUID(); await ledger(env, 'reserve', { ...who, job, charge, amount: Math.ceil(amount) }); return charge; };
+  const measurements: Measurements = {};
   let streaming = false;
   let outcome = 'provider_failure';
   try {
@@ -133,14 +150,17 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (ticket) {
       // Keep the conservative reservation when the provider does not report billable usage.
       await reserve(ticket.text.length * 440 / 10000 * 1e6);
-      const speech = await synthesizeAivisCloudSpeech({ apiKey: env.AIVIS_API_KEY, modelUuid: env.AIVIS_MODEL_UUID, speakerUuid: env.AIVIS_SPEAKER_UUID,
-        text: ticket.text, styleName: VOICE_STYLE_BY_EMOTION[normalizeEmotion(ticket.emotion)], speakingRate: 1.15, pitch: 0, emotionalIntensity: 1, tempoDynamics: 1, signal });
+      const ttsStarted = performance.now();
       try {
-        const reader = speech.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
-        while (true) { const part = await reader.read(); if (part.done) break; speech.markFirstAudioReceived(); size += part.value.length;
-          if (size > 8 * 1024 * 1024) { await reader.cancel(); throw new LimitError('provider_unavailable', 0, 502); } chunks.push(part.value); }
-        outcome = 'complete'; return new Response(new Blob(chunks as Uint8Array<ArrayBuffer>[], { type: speech.contentType }), { headers: { 'Content-Type': speech.contentType, 'Cache-Control': 'no-store' } });
-      } finally { speech.dispose(); }
+        const speech = await synthesizeAivisCloudSpeech({ apiKey: env.AIVIS_API_KEY, modelUuid: env.AIVIS_MODEL_UUID, speakerUuid: env.AIVIS_SPEAKER_UUID,
+          text: ticket.text, styleName: VOICE_STYLE_BY_EMOTION[normalizeEmotion(ticket.emotion)], speakingRate: 1.15, pitch: 0, emotionalIntensity: 1, tempoDynamics: 1, signal });
+        try {
+          const reader = speech.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
+          while (true) { const part = await reader.read(); if (part.done) break; if (part.value.length) measurements.ttsFirstByteMs ??= performance.now() - ttsStarted; speech.markFirstAudioReceived(); size += part.value.length;
+            if (size > 8 * 1024 * 1024) { await reader.cancel(); throw new LimitError('provider_unavailable', 0, 502); } chunks.push(part.value); }
+          outcome = 'complete'; return new Response(new Blob(chunks as Uint8Array<ArrayBuffer>[], { type: speech.contentType }), { headers: { 'Content-Type': speech.contentType, 'Cache-Control': 'no-store' } });
+        } finally { speech.dispose(); }
+      } finally { measurements.ttsTotalMs = performance.now() - ttsStarted; }
     }
     const execution: NonNullable<ReturnType<typeof llmExecutionScope.getStore>> = { execute: async (llmRequest, run) => {
       // UTF-8 bytes plus framing safely overestimate token count for this fixed text-only request.
@@ -155,6 +175,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (input.streamSpeech === true && !preview) {
       streaming = true;
       const abort = new AbortController();
+      const generation = createGenerationMeasurements();
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           const send = (value: object) => controller.enqueue(new TextEncoder().encode(JSON.stringify(value) + '\n'));
@@ -163,31 +184,35 @@ async function handle(request: Request, env: Env): Promise<Response> {
             try {
               const response = await llmExecutionScope.run(execution, () => generate(input, false, env.OPENAI_API_KEY,
                 AbortSignal.any([signal, abort.signal]), { onStateRejected() { rejected = true; }, onDeliveryMetadataRejected() { rejected = true; }, onSpeechUnit(index, text, candidate) {
+                  generation.firstSpeechUnit();
                   queue = queue.then(async () => { send({ type: 'speech_unit', index, text, ttsTicket: await issue(text, candidate.emotion),
                     response: input.mode === 'voice' ? { ...candidate, interactionAction: candidate.voiceAction } : candidate }); });
                   void queue.catch(() => abort.abort());
-                } }));
+                } }, generation));
               await queue;
               send({ type: 'state', internalDelta: 'internalDelta' in response ? response.internalDelta : { reasonUpdates: [] }, rejected });
               send({ type: 'done', response });
               outcome = 'complete';
             } catch (error) {
-              if (error instanceof LimitError) outcome = 'limit';
+              if (error instanceof LimitError) outcome = error.code;
               if (!abort.signal.aborted) send({ type: 'error', error: '会話を完了できませんでした。',
                 code: error instanceof LimitError ? error.code : 'generation_failed', retryAt: error instanceof LimitError ? error.retryAt : 0 });
             }
-            finally { await ledger(env, 'finish', { job, code: abort.signal.aborted ? 'cancelled' : outcome }).catch(() => {}); if (!abort.signal.aborted) controller.close(); }
+            finally { generation.finish(); Object.assign(measurements, generation.values); await ledger(env, 'finish', { job, measurements, code: abort.signal.aborted || request.signal.aborted ? 'cancelled' : signal.aborted ? 'timeout' : outcome }).catch(() => {}); if (!abort.signal.aborted) controller.close(); }
           })();
         }, cancel() { abort.abort(); },
       });
       return new Response(stream, { headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' } });
     }
-    const response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null));
+    const generation = createGenerationMeasurements();
+    let response: Awaited<ReturnType<typeof generate>>;
+    try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation)); }
+    finally { generation.finish(); Object.assign(measurements, generation.values); }
     const text = 'text' in response && typeof response.text === 'string' ? response.text : '';
     const result = json({ ...response, ttsTicket: text ? await issue(text, response.emotion) : undefined });
     outcome = 'complete'; return result;
-  } catch (error) { if (error instanceof LimitError) outcome = 'limit'; throw error;
-  } finally { if (!streaming) await ledger(env, 'finish', { job, code: signal.aborted ? 'cancelled' : outcome }); }
+  } catch (error) { if (error instanceof LimitError) outcome = error.code; throw error;
+  } finally { if (!streaming) await ledger(env, 'finish', { job, measurements, code: request.signal.aborted ? 'cancelled' : signal.aborted ? 'timeout' : outcome }).catch(() => {}); }
 }
 export default { async fetch(request: Request, env: Env) {
   try { return await handle(request, env); }
