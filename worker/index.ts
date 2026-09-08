@@ -40,6 +40,10 @@ async function body(request: Request) {
   try { return JSON.parse(new TextDecoder().decode(await boundedBody(request, 65536))) as Record<string, unknown>; }
   catch (error) { if (error instanceof LimitError) throw error; throw new LimitError('invalid_request', 0, 400); }
 }
+async function codeHash(code: string) {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
+  return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
+}
 async function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (env.SERVE_PLACEHOLDER === 'true') return url.pathname.startsWith('/api/') ? json({ code: 'generation_stopped' }, 503) : env.ASSETS.fetch(request);
@@ -69,10 +73,20 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (auth?.purpose !== 'admin') throw new LimitError('unauthorized', 0, 401);
     const input = await body(request);
     if (input.op === 'report') return json(await ledger(env, 'report'));
+    if (input.op === 'exhibition-create') return json(await ledger(env, 'exhibition-create', {
+      event: input.event, starts: input.starts, expires: input.expires, budget: input.budget,
+    }));
+    if (input.op === 'exhibition-code') {
+      const code = crypto.randomUUID().replaceAll('-', '');
+      const result = await ledger<object>(env, 'exhibition-code', { event: input.event, hash: await codeHash(code) });
+      return json({ ...result, code });
+    }
+    if (input.op === 'exhibition-revoke' && typeof input.visitor === 'string') return json(await ledger(env, 'exhibition-revoke', { visitor: input.visitor }));
+    if (input.op === 'exhibition-stop' && typeof input.event === 'string') return json(await ledger(env, 'exhibition-stop', { event: input.event }));
     if (input.op !== 'configure' || (input.stopped !== undefined && typeof input.stopped !== 'boolean')) throw new LimitError('invalid_request', 0, 400);
     return json(await ledger(env, 'configure', { patch: input.patch, stopped: input.stopped }));
   }
-  const known = ['/api/session', '/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts'];
+  const known = ['/api/session', '/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts', '/api/exhibition/enroll', '/api/exhibition/next'];
   if (!known.includes(url.pathname)) return json({ code: 'not_found' }, 404);
   let visitor = await verify<Visitor>(cookie(request, '__Host-vayria'), env.COOKIE_SECRET);
   if (visitor?.purpose !== 'visitor') visitor = null;
@@ -87,13 +101,27 @@ async function handle(request: Request, env: Env): Promise<Response> {
   if (!visitor) throw new LimitError('cookie_required', 0, 403);
   const id = request.headers.get('X-Vayria-Session') ?? '';
   const who = { visitor: visitor.id, id };
+  if (url.pathname === '/api/exhibition/next' && request.method === 'POST') {
+    const input = await body(request);
+    return json(await ledger(env, 'exhibition-next', { visitor: visitor.id, requestId: input.requestId, epoch: input.epoch }));
+  }
+  if (url.pathname === '/api/exhibition/enroll' && request.method === 'POST') {
+    await ledger(env, 'attempt', { ip: `enroll:${await ipKey(request, env.IP_SECRET)}` });
+    const input = await body(request);
+    if (typeof input.code !== 'string' || !/^[a-f0-9]{32}$/.test(input.code)) throw new LimitError('exhibition_code_invalid', 0, 403);
+    return json(await ledger(env, 'exhibition-enroll', { visitor: visitor.id, hash: await codeHash(input.code) }));
+  }
   if (url.pathname === '/api/session' && request.method === 'DELETE') return json(await ledger(env, 'end', who));
   if (request.method !== 'POST') return json({ code: 'method_not_allowed' }, 405);
   if (env.GENERATION_ENABLED !== 'true') throw new LimitError('generation_stopped', 0, 503);
   if (url.pathname === '/api/session') {
     const ip = await ipKey(request, env.IP_SECRET);
-    await ledger(env, 'attempt', { ip });
-    const status = await ledger<{ session: unknown }>(env, 'status', { visitor: visitor.id });
+    const status = await ledger<{ session: unknown; exhibition: unknown }>(env, 'status', { visitor: visitor.id });
+    await ledger(env, 'attempt', { ip: status.exhibition ? `exhibition:${visitor.id}` : ip });
+    if (status.exhibition) {
+      const input = await body(request);
+      return json(await ledger(env, 'start', { visitor: visitor.id, ip, id: crypto.randomUUID(), epoch: input.epoch }));
+    }
     if (status.session) return json(status);
     const input = await body(request);
     if (typeof input.token !== 'string' || input.token.length > 2048) throw new LimitError('challenge_required', 0, 403);

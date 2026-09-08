@@ -1,7 +1,15 @@
 import { publicErrorMessage } from './errors';
 import { runtimeConfig } from '../runtimeConfig';
 export type PublicStatus = { session: { id: string; expires: number } | null; remainingDay: number; remainingMonth: number;
-  enabled?: boolean; siteKey?: string; cookieReady?: boolean; stopped?: boolean };
+  enabled?: boolean; siteKey?: string; cookieReady?: boolean; stopped?: boolean; exhibition?: ExhibitionStatus | null };
+export type ExhibitionStatus = { id: string; starts: number; expires: number; epoch: number; budgetYen: number; usedYen: number;
+  available: boolean; revoked: boolean; stopped: boolean; warning: '50' | '80' | null };
+let exhibition: ExhibitionStatus | null = null;
+export const publicExhibition = () => exhibition;
+export function updatePublicStatus(value: Pick<PublicStatus, 'exhibition'>) {
+  exhibition = value.exhibition ?? null;
+  for (const listener of listeners) listener();
+}
 let session: PublicStatus['session'] = null;
 let active = false;
 let cancellation = new AbortController();
@@ -75,6 +83,7 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
     if (signal.aborted) throw error;
     response = Response.json({ code: 'network_error' }, { status: 503 });
   }
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   if (response.ok && /\/api\/(chat|card-preview)$/.test(path)) {
     if (response.headers.get('Content-Type')?.startsWith('application/x-ndjson') && response.body) {
       let pending = '';
@@ -83,10 +92,11 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
         return JSON.stringify(value); };
       const reader = response.body.pipeThrough(new TextDecoderStream()).pipeThrough(new TransformStream<string, Uint8Array>({
         transform(chunk, controller) {
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
           pending += chunk; let index: number;
           while ((index = pending.indexOf('\n')) >= 0) { const line = pending.slice(0, index); pending = pending.slice(index + 1);
             controller.enqueue(new TextEncoder().encode((line.trim() ? inspect(line) : line) + '\n')); }
-        }, flush(controller) { if (pending.trim()) { controller.enqueue(new TextEncoder().encode(inspect(pending))); } },
+        }, flush(controller) { if (signal.aborted) throw new DOMException('Aborted', 'AbortError'); if (pending.trim()) { controller.enqueue(new TextEncoder().encode(inspect(pending))); } },
       })).getReader();
       const stream = new ReadableStream<Uint8Array>({
         async pull(controller) {
@@ -109,6 +119,7 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
       return new Response(stream, { status: response.status, headers: streamHeaders });
     }
     const result = await response.clone().json();
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
     if (result.ttsTicket && result.text) tickets.set(result.text.trim(), result.ttsTicket);
   }
   if (!response.ok) {
