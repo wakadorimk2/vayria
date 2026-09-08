@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeEmotion, type Emotion } from '../character/emotion';
 import { apiUrl, runtimeConfig } from '../runtimeConfig';
+import { publicFetch } from '../public/session';
 import { readAudioPlaybackSource } from '../audio/audioPlaybackSource.js';
 import type { PerformancePlayback } from '../performer/performancePlayback';
 import type {
@@ -152,7 +153,7 @@ export function useCardPreviewConversation(
         }
         if (generation !== generationRef.current) return;
 
-        const response = await fetch(apiUrl('/api/card-preview'), {
+        const response = await publicFetch(apiUrl('/api/card-preview'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -187,7 +188,7 @@ export function useCardPreviewConversation(
         if (generation !== generationRef.current) return;
 
         setStatus('synthesizing');
-        const ttsResponse = await fetch(apiUrl('/api/tts'), {
+        const ttsResponse = await publicFetch(apiUrl('/api/tts'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

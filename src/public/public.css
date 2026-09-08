@@ -1,0 +1,30 @@
+.public-layout { height: 100dvh; position: relative; overflow: hidden; }
+.public-layout .app-shell { height: 100%; min-height: 0; }
+.public-controls { position: absolute; z-index: 30; left: 1rem; top: max(.75rem, env(safe-area-inset-top)); color: #f4efe6; font-size: 13px; }
+.public-controls button { padding: 8px 12px; margin: 0 6px 4px 0; min-height: 44px; border: 1px solid #bca06a; border-radius: 16px; color: #f4efe6; background: #453957; cursor: pointer; }
+.public-controls button:disabled { opacity: .5; cursor: default; }
+.public-controls__panel { width: min(360px, calc(100vw - 2rem)); max-height: calc(100dvh - 6rem); overflow: auto; padding: 16px; border: 1px solid #bca06a; border-radius: 16px; background: #201c30; box-shadow: 0 12px 32px #0008; }
+.public-controls__panel[hidden] { display: none; }
+.public-controls p { margin: 0 0 12px; line-height: 1.6; }
+.public-controls label { display: flex; align-items: center; gap: 6px; min-height: 44px; }
+.public-controls summary { cursor: pointer; padding: 10px 0; }
+.public-controls details { line-height: 1.6; }
+.public-controls a { color: #e5c98c; }
+.public-layout .app-shell .exhibition-copy { top: 5rem; }
+.public-layout .app-shell .app-title { top: .75rem; }
+.public-layout .app-shell .volume-slider, .public-layout .app-shell .volume-value { display: none; }
+.public-layout .app-shell[data-public-text-input="true"] .message-form { display: grid; pointer-events: auto; position: fixed; z-index: 25; bottom: 1rem; left: 1rem; right: 1rem; width: auto; padding: 12px; background: #201c30; border-radius: 16px; }
+@media (max-width: 599px) {
+  .public-layout .app-shell { display: block; }
+  .public-layout .avatar-area { position: absolute; inset: 0; height: 100%; }
+  .public-layout .vrm-stage { height: 100%; min-height: 0; }
+  .public-layout .app-shell .exhibition-copy { top: 4.5rem; left: 1rem; }
+  .public-layout .exhibition-copy__title { font-size: 1rem; }
+  .public-layout .exhibition-copy__hint { font-size: .7rem; }
+  .public-layout .app-shell .card-zone--brain { top: 7.5rem; left: auto; right: 1rem; transform: scale(.64); transform-origin: top right; }
+  .public-layout .app-shell[data-exhibition-state="selecting"] .card-zone--brain { transform: scale(.95); }
+  .public-layout .app-shell .card-zone--hand { bottom: 1rem; }
+  .public-layout .app-shell .conversation { position: absolute; z-index: 3; bottom: var(--exhibition-hand-reserved-height); left: 0; right: 0; background: transparent; pointer-events: none; }
+  .public-layout .app-shell .conversation-copy { max-width: 92vw; }
+  .public-layout .playback-permission { pointer-events: auto; }
+}

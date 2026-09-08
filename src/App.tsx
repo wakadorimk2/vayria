@@ -4,10 +4,12 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type FormEvent,
 } from 'react';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
+import { publicActive, subscribePublic } from './public/session';
 import { useBargeInControl } from './app/useBargeInControl';
 import { useCardAttention } from './app/useCardAttention';
 import { useListeningBackchannels } from './app/useListeningBackchannels';
@@ -388,6 +390,7 @@ function readRouterAudioInputDeviceId(): string {
 }
 
 export default function App() {
+  const publicSessionActive = useSyncExternalStore(subscribePublic, publicActive);
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
@@ -411,12 +414,19 @@ export default function App() {
   const [sessionGeneration, setSessionGeneration] = useState(0);
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
+  const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public';
+  const [publicTextInputOpen, setPublicTextInputOpen] = useState(false);
+  useEffect(() => {
+    const toggle = () => setPublicTextInputOpen(value => !value);
+    window.addEventListener('vayria-public-text-input', toggle);
+    return () => window.removeEventListener('vayria-public-text-input', toggle);
+  }, []);
   const networkState = useNetworkState(isExhibitionMode);
   const [spatialTargetRegistry] = useState(
     () => new SpatialTargetRegistry(),
   );
 
-  const cardGame = useCardGamePrototype();
+  const cardGame = useCardGamePrototype(runtimeConfig.mode === 'public');
   const {
     acceptReply,
     beginReply,
@@ -833,6 +843,16 @@ export default function App() {
   });
 
   const routerResetSessionRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (runtimeConfig.mode !== 'public') return;
+    const stop = () => { void stopVoiceInput(); interruptCurrentTurn('router_control'); stopReaction(); playbackCoordinator.stop(); };
+    const unlock = () => { void prepare(); };
+    const start = () => { void prepare(); void startVoiceInput(); };
+    window.addEventListener('vayria-public-stop', stop);
+    window.addEventListener('vayria-public-start', start);
+    window.addEventListener('vayria-public-prepare', unlock);
+    return () => { window.removeEventListener('vayria-public-stop', stop); window.removeEventListener('vayria-public-start', start); window.removeEventListener('vayria-public-prepare', unlock); };
+  }, [stopVoiceInput, startVoiceInput, interruptCurrentTurn, prepare, stopReaction, playbackCoordinator]);
   const handleRouterEffects = useCallback((effects: RouterEffect[]) => {
     for (const effect of effects) {
       switch (effect.type) {
@@ -1957,7 +1977,7 @@ export default function App() {
     hasCandidate: autonomyCandidate !== null,
     isBusy: isPerformerBusy,
     isVoiceActivityActive: isVadSpeech || isSttProcessing,
-    isLoopEnabled: isAutonomousLoopEnabled,
+    isLoopEnabled: isAutonomousLoopEnabled && (runtimeConfig.mode !== 'public' || publicSessionActive),
     isMuted,
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
@@ -2156,11 +2176,13 @@ export default function App() {
     <main
       className="app-shell"
       data-app-mode={runtimeConfig.mode}
+      data-ui-mode={usesExhibitionUi ? 'exhibition' : 'local'}
+      data-public-text-input={publicTextInputOpen}
       data-exhibition-state={exhibitionPresentationState}
     >
       {(shouldShowAudioUnlockControl || isExhibitionMode) && (
         <header className="app-title">
-          {!isExhibitionMode && <span>Vayria</span>}
+          {!usesExhibitionUi && <span>Vayria</span>}
           {isExhibitionMode && (
             <div
               aria-label={`展示ネットワーク状態。${localNetworkLabel}。${internetLabel}。`}
@@ -2400,7 +2422,7 @@ export default function App() {
         <VrmStage
           attentionReader={readAttention}
           emotion={displayEmotion}
-          isExhibitionMode={isExhibitionMode}
+          isExhibitionMode={usesExhibitionUi}
           listeningReaction={listeningReaction}
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
@@ -2409,7 +2431,7 @@ export default function App() {
           sessionGeneration={sessionGeneration}
           spatialTargetRegistry={spatialTargetRegistry}
         />
-        {isExhibitionMode && (
+        {usesExhibitionUi && (
           <aside className="exhibition-copy" aria-label="展示案内">
             <p className="exhibition-copy__title">Vayriaに一枚、どうぞ。</p>
             <p className="exhibition-copy__hint">
@@ -2438,7 +2460,7 @@ export default function App() {
       >
         <div className="conversation-copy" aria-live="polite">
           {shouldShowReply && <p className="reply">{reply}</p>}
-          {(!isExhibitionMode || !shouldShowReply) && (
+          {(!usesExhibitionUi || !shouldShowReply) && (
             <p className="status">
               {isMuted && status === 'idle'
                 ? 'ミュート中です。テキスト会話は利用できます。'
@@ -2463,7 +2485,7 @@ export default function App() {
               {conversationError}
             </p>
           )}
-          {isVoiceInputEnabled && !isExhibitionMode && (
+          {isVoiceInputEnabled && !usesExhibitionUi && (
             <p className="voice-input-hint">
               {runtimeConfig.voiceTransport === 'remote'
                 ? 'PCM音声サービスを使用中です。ヘッドセットを推奨します。'

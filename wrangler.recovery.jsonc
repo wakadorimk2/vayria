@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vayria-web",
+  "account_id": "7414797104d7aca62f03fbd4faf7e5df",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "vayria.me", "custom_domain": true }],
+  "assets": { "directory": "deploy/placeholder", "binding": "ASSETS", "run_worker_first": true, "not_found_handling": "none" },
+  "durable_objects": { "bindings": [{ "name": "USAGE", "class_name": "PublicUsage" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PublicUsage"] }],
+  "vars": { "GENERATION_ENABLED": "false", "SERVE_PLACEHOLDER": "true" },
+  "observability": { "enabled": false }
+}

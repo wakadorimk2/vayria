@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vayria-web",
+  "account_id": "7414797104d7aca62f03fbd4faf7e5df",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "vayria.me",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "dist-public",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "none"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USAGE",
+        "class_name": "PublicUsage"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "PublicUsage"
+      ]
+    }
+  ],
+  "vars": {
+    "GENERATION_ENABLED": "false",
+    "REQUIRE_PREVIEW_ACCESS": "false",
+    "PUBLIC_HOSTNAME": "vayria.me",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAErpgvhBvYpnRm71",
+    "AIVIS_MODEL_UUID": "7fc08a41-b64d-456d-8b22-8e1284674775",
+    "AIVIS_SPEAKER_UUID": "8e2dfde9-a155-4bd8-b451-80832ad5e8ac"
+  },
+  "observability": {
+    "enabled": false
+  }
+}

@@ -201,7 +201,7 @@ input {
   pointer-events: none;
 }
 
-.app-shell[data-app-mode="exhibition"] {
+.app-shell[data-ui-mode="exhibition"] {
   --exhibition-hand-card-width: clamp(108px, 11vw, 140px);
   --exhibition-brain-card-width: clamp(82px, 7.6vw, 104px);
   --exhibition-hand-card-height: calc(
@@ -220,7 +220,7 @@ input {
   );
 }
 
-.app-shell[data-app-mode="exhibition"] .exhibition-copy {
+.app-shell[data-ui-mode="exhibition"] .exhibition-copy {
   position: absolute;
   z-index: 2;
   top: clamp(1rem, 5vh, 2.5rem);
@@ -331,7 +331,7 @@ input {
   opacity: 0;
 }
 
-.app-shell[data-app-mode="exhibition"] .card-zone--hand {
+.app-shell[data-ui-mode="exhibition"] .card-zone--hand {
   --wildcard-card-width: var(--exhibition-hand-card-width);
   opacity: 1;
   transform-origin: bottom center;
@@ -340,25 +340,25 @@ input {
     opacity 180ms ease;
 }
 
-.app-shell[data-app-mode="exhibition"] .card-zone--brain {
+.app-shell[data-ui-mode="exhibition"] .card-zone--brain {
   --wildcard-card-width: var(--exhibition-brain-card-width);
 }
 
-.app-shell[data-app-mode="exhibition"] .card-zone--hand .card-zone__cards {
+.app-shell[data-ui-mode="exhibition"] .card-zone--hand .card-zone__cards {
   gap: 0;
 }
 
-.app-shell[data-app-mode="exhibition"] .card-zone--hand .wildcard-card {
+.app-shell[data-ui-mode="exhibition"] .card-zone--hand .wildcard-card {
   margin-left: calc(-1 * clamp(12px, 2vw, 22px));
 }
 
-.app-shell[data-app-mode="exhibition"]
+.app-shell[data-ui-mode="exhibition"]
   .card-zone--hand
   .wildcard-card:first-child {
   margin-left: 0;
 }
 
-.app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+.app-shell[data-ui-mode="exhibition"][data-exhibition-state="selecting"]
   .card-zone--hand {
   transform: translateX(-50%) translateY(-8px);
 }
@@ -857,7 +857,7 @@ input {
 }
 
 @media (max-width: 720px) {
-  .app-shell[data-app-mode="exhibition"] {
+  .app-shell[data-ui-mode="exhibition"] {
     --exhibition-hand-card-width: clamp(68px, 20vw, 104px);
     --exhibition-brain-card-width: clamp(60px, 16.5vw, 76px);
   }
@@ -892,7 +892,7 @@ input {
     bottom: 0.35rem;
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone--hand {
+  .app-shell[data-ui-mode="exhibition"] .card-zone--hand {
     --wildcard-card-width: var(--exhibition-hand-card-width);
   }
 
@@ -948,7 +948,7 @@ input {
 }
 
 @media (orientation: portrait) and (min-width: 600px) {
-  .app-shell[data-app-mode="exhibition"] {
+  .app-shell[data-ui-mode="exhibition"] {
     position: relative;
     display: block;
     overflow: hidden;
@@ -956,51 +956,51 @@ input {
     --exhibition-brain-card-width: clamp(92px, 11vw, 120px);
   }
 
-  .app-shell[data-app-mode="exhibition"] .app-title {
+  .app-shell[data-ui-mode="exhibition"] .app-title {
     top: 1rem;
     right: 1rem;
     left: auto;
   }
 
-  .app-shell[data-app-mode="exhibition"] .app-title > span {
+  .app-shell[data-ui-mode="exhibition"] .app-title > span {
     display: none;
   }
 
-  .app-shell[data-app-mode="exhibition"] .audio-controls {
+  .app-shell[data-ui-mode="exhibition"] .audio-controls {
     gap: 0;
   }
 
-  .app-shell[data-app-mode="exhibition"] .attention-controls {
+  .app-shell[data-ui-mode="exhibition"] .attention-controls {
     align-items: flex-end;
   }
 
-  .app-shell[data-app-mode="exhibition"] .audio-unlock-button {
+  .app-shell[data-ui-mode="exhibition"] .audio-unlock-button {
     min-height: 2.75rem;
     padding: 0.6rem 1rem;
     box-shadow: 0 6px 16px rgb(0 0 0 / 24%);
     font-size: clamp(0.8rem, 2vw, 1rem);
   }
 
-  .app-shell[data-app-mode="exhibition"] .attention-button {
+  .app-shell[data-ui-mode="exhibition"] .attention-button {
     min-height: 2.75rem;
     padding: 0.6rem 1rem;
     box-shadow: 0 6px 16px rgb(0 0 0 / 24%);
     font-size: clamp(0.8rem, 2vw, 1rem);
   }
 
-  .app-shell[data-app-mode="exhibition"] .avatar-area {
+  .app-shell[data-ui-mode="exhibition"] .avatar-area {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
   }
 
-  .app-shell[data-app-mode="exhibition"] .vrm-stage {
+  .app-shell[data-ui-mode="exhibition"] .vrm-stage {
     height: 100%;
     min-height: 0;
   }
 
-  .app-shell[data-app-mode="exhibition"] .vrm-stage::after {
+  .app-shell[data-ui-mode="exhibition"] .vrm-stage::after {
     position: absolute;
     z-index: 1;
     inset: 0;
@@ -1015,25 +1015,25 @@ input {
     pointer-events: none;
   }
 
-  .app-shell[data-app-mode="exhibition"] .vrm-canvas {
+  .app-shell[data-ui-mode="exhibition"] .vrm-canvas {
     position: relative;
     z-index: 0;
   }
 
-  .app-shell[data-app-mode="exhibition"] .stage-message,
-  .app-shell[data-app-mode="exhibition"] .expression-warning {
+  .app-shell[data-ui-mode="exhibition"] .stage-message,
+  .app-shell[data-ui-mode="exhibition"] .expression-warning {
     z-index: 2;
   }
 
-  .app-shell[data-app-mode="exhibition"] .expression-warning {
+  .app-shell[data-ui-mode="exhibition"] .expression-warning {
     display: none;
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-prototype {
+  .app-shell[data-ui-mode="exhibition"] .card-prototype {
     transition: opacity 220ms ease;
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone--brain {
+  .app-shell[data-ui-mode="exhibition"] .card-zone--brain {
     top: clamp(4.5rem, 7vh, 6rem);
     right: clamp(0.75rem, 4vw, 2.5rem);
     left: auto;
@@ -1041,47 +1041,47 @@ input {
     transform: none;
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone--hand {
+  .app-shell[data-ui-mode="exhibition"] .card-zone--hand {
     bottom: clamp(1rem, 2.8dvh, 2rem);
     --wildcard-card-width: var(--exhibition-hand-card-width);
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone__cards {
+  .app-shell[data-ui-mode="exhibition"] .card-zone__cards {
     gap: clamp(8px, 1.3vw, 14px);
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone--brain .card-zone__cards {
+  .app-shell[data-ui-mode="exhibition"] .card-zone--brain .card-zone__cards {
     gap: clamp(6px, 1vw, 10px);
     padding: 0.4rem;
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone__header h2 {
+  .app-shell[data-ui-mode="exhibition"] .card-zone__header h2 {
     font-size: clamp(1rem, 2.2vw, 1.3rem);
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone__header--hand {
+  .app-shell[data-ui-mode="exhibition"] .card-zone__header--hand {
     justify-content: center;
   }
 
-  .app-shell[data-app-mode="exhibition"] .interference-counter {
+  .app-shell[data-ui-mode="exhibition"] .interference-counter {
     display: none;
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone__action {
+  .app-shell[data-ui-mode="exhibition"] .card-zone__action {
     min-height: 2.25rem;
     margin-top: 0.35rem;
     font-size: clamp(0.85rem, 2.1vw, 1.2rem);
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone--hand .wildcard-card__label {
+  .app-shell[data-ui-mode="exhibition"] .card-zone--hand .wildcard-card__label {
     font-size: clamp(0.8rem, 1.6vw, 1rem);
   }
 
-  .app-shell[data-app-mode="exhibition"] .card-zone--brain .wildcard-card__label {
+  .app-shell[data-ui-mode="exhibition"] .card-zone--brain .wildcard-card__label {
     font-size: clamp(0.9rem, 1.8vw, 1.1rem);
   }
 
-  .app-shell[data-app-mode="exhibition"] .conversation {
+  .app-shell[data-ui-mode="exhibition"] .conversation {
     position: absolute;
     z-index: 3;
     right: clamp(1rem, 5vw, 3rem);
@@ -1094,16 +1094,16 @@ input {
     pointer-events: none;
   }
 
-  .app-shell[data-app-mode="exhibition"] .conversation-copy {
+  .app-shell[data-ui-mode="exhibition"] .conversation-copy {
     display: block;
     min-height: 0;
   }
 
-  .app-shell[data-app-mode="exhibition"] .message-form {
+  .app-shell[data-ui-mode="exhibition"] .message-form {
     display: none;
   }
 
-  .app-shell[data-app-mode="exhibition"] .status {
+  .app-shell[data-ui-mode="exhibition"] .status {
     display: block;
     margin: 0.35rem auto 0;
     color: rgb(244 242 237 / 72%);
@@ -1112,7 +1112,7 @@ input {
     text-shadow: 0 2px 7px rgb(0 0 0 / 80%);
   }
 
-  .app-shell[data-app-mode="exhibition"] .reply {
+  .app-shell[data-ui-mode="exhibition"] .reply {
     display: -webkit-box;
     max-width: 100%;
     margin-inline: auto;
@@ -1133,20 +1133,20 @@ input {
     transition: opacity 220ms ease;
   }
 
-  .app-shell[data-app-mode="exhibition"] .conversation--thinking .reply,
-  .app-shell[data-app-mode="exhibition"] .conversation--synthesizing .reply {
+  .app-shell[data-ui-mode="exhibition"] .conversation--thinking .reply,
+  .app-shell[data-ui-mode="exhibition"] .conversation--synthesizing .reply {
     opacity: 0.78;
   }
 
-  .app-shell[data-app-mode="exhibition"] .conversation--idle .reply {
+  .app-shell[data-ui-mode="exhibition"] .conversation--idle .reply {
     opacity: 0.62;
   }
 
-  .app-shell[data-app-mode="exhibition"] .conversation--speaking .reply {
+  .app-shell[data-ui-mode="exhibition"] .conversation--speaking .reply {
     opacity: 1;
   }
 
-  .app-shell[data-app-mode="exhibition"] .conversation-error {
+  .app-shell[data-ui-mode="exhibition"] .conversation-error {
     width: fit-content;
     max-width: 100%;
     margin-inline: auto;
@@ -1156,25 +1156,25 @@ input {
     pointer-events: auto;
   }
 
-  .app-shell[data-app-mode="exhibition"][data-exhibition-state="idle"]
+  .app-shell[data-ui-mode="exhibition"][data-exhibition-state="idle"]
     .card-zone--brain {
     opacity: 0.18;
     transform: scale(0.78);
     transform-origin: top right;
   }
 
-  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+  .app-shell[data-ui-mode="exhibition"][data-exhibition-state="selecting"]
     .card-zone--brain {
     opacity: 1;
     transform: none;
   }
 
-  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+  .app-shell[data-ui-mode="exhibition"][data-exhibition-state="selecting"]
     .card-zone--brain .wildcard-card__label {
     font-size: clamp(0.95rem, 2.2vw, 1.25rem);
   }
 
-  .app-shell[data-app-mode="exhibition"][data-exhibition-state="selecting"]
+  .app-shell[data-ui-mode="exhibition"][data-exhibition-state="selecting"]
     .card-zone .wildcard-card__pip {
     font-size: 0.85rem;
   }
@@ -1188,10 +1188,10 @@ input {
     transition: none;
   }
 
-  .app-shell[data-app-mode="exhibition"] .vrm-stage,
-  .app-shell[data-app-mode="exhibition"] .card-prototype,
-  .app-shell[data-app-mode="exhibition"] .card-zone--hand,
-  .app-shell[data-app-mode="exhibition"] .reply {
+  .app-shell[data-ui-mode="exhibition"] .vrm-stage,
+  .app-shell[data-ui-mode="exhibition"] .card-prototype,
+  .app-shell[data-ui-mode="exhibition"] .card-zone--hand,
+  .app-shell[data-ui-mode="exhibition"] .reply {
     transition: none;
   }
 }
@@ -1788,17 +1788,17 @@ input {
   z-index: 2;
 }
 
-.app-shell[data-app-mode="exhibition"] .exhibition-copy {
+.app-shell[data-ui-mode="exhibition"] .exhibition-copy {
   z-index: 4;
   color: var(--ivory);
   text-shadow: 0 3px 18px rgb(8 8 21 / 68%);
 }
 
-.app-shell[data-app-mode="exhibition"] .exhibition-copy__title {
+.app-shell[data-ui-mode="exhibition"] .exhibition-copy__title {
   letter-spacing: 0.06em;
 }
 
-.app-shell[data-app-mode="exhibition"] .exhibition-copy__hint {
+.app-shell[data-ui-mode="exhibition"] .exhibition-copy__hint {
   color: rgb(244 239 230 / 68%);
 }
 
@@ -1892,7 +1892,7 @@ input {
   outline-offset: 3px;
 }
 
-.app-shell[data-app-mode="exhibition"] .conversation {
+.app-shell[data-ui-mode="exhibition"] .conversation {
   margin-inline: clamp(1rem, 5vw, 3rem);
   padding: 0.55rem 0 0.75rem;
   border-top: 0;
@@ -1900,18 +1900,18 @@ input {
   box-shadow: none;
 }
 
-.app-shell[data-app-mode="exhibition"] .conversation-copy {
+.app-shell[data-ui-mode="exhibition"] .conversation-copy {
   min-height: 1.8rem;
 }
 
-.app-shell[data-app-mode="exhibition"] .status {
+.app-shell[data-ui-mode="exhibition"] .status {
   margin-top: 0.2rem;
   color: rgb(244 239 230 / 55%);
   font-size: clamp(0.7rem, 1.2vw, 0.82rem);
   text-shadow: 0 2px 9px rgb(8 8 21 / 78%);
 }
 
-.app-shell[data-app-mode="exhibition"] .reply {
+.app-shell[data-ui-mode="exhibition"] .reply {
   padding: 0.35rem 0.7rem;
   border: 1px solid rgb(214 166 184 / 13%);
   border-radius: 0.8rem;
@@ -1936,7 +1936,7 @@ input {
     height: 2.05rem;
   }
 
-  .app-shell[data-app-mode="exhibition"] .conversation {
+  .app-shell[data-ui-mode="exhibition"] .conversation {
     margin-inline: 0.75rem;
   }
 }
@@ -2032,7 +2032,7 @@ input {
   pointer-events: none;
 }
 
-.app-shell[data-app-mode="exhibition"] .conversation {
+.app-shell[data-ui-mode="exhibition"] .conversation {
   position: absolute;
   z-index: 3;
   right: clamp(1rem, 5vw, 3rem);
@@ -2050,11 +2050,11 @@ input {
   pointer-events: none;
 }
 
-.app-shell[data-app-mode="exhibition"] .message-form {
+.app-shell[data-ui-mode="exhibition"] .message-form {
   display: none;
 }
 
-.app-shell[data-app-mode="exhibition"] .conversation-copy {
+.app-shell[data-ui-mode="exhibition"] .conversation-copy {
   display: grid;
   justify-items: center;
   width: 100%;
@@ -2062,7 +2062,7 @@ input {
   text-align: center;
 }
 
-.app-shell[data-app-mode="exhibition"] .reply {
+.app-shell[data-ui-mode="exhibition"] .reply {
   display: -webkit-box;
   width: fit-content;
   max-width: min(72vw, 34rem);
@@ -2087,7 +2087,7 @@ input {
   -webkit-line-clamp: 2;
 }
 
-.app-shell[data-app-mode="exhibition"] .status {
+.app-shell[data-ui-mode="exhibition"] .status {
   margin-top: 0.25rem;
   color: rgb(244 239 230 / 52%);
   font-size: clamp(0.68rem, 1.1vw, 0.78rem);
@@ -2096,7 +2096,7 @@ input {
   text-shadow: 0 2px 8px rgb(8 8 21 / 72%);
 }
 
-.app-shell[data-app-mode="exhibition"] .conversation-error {
+.app-shell[data-ui-mode="exhibition"] .conversation-error {
   border: 1px solid rgb(240 184 183 / 42%);
   box-shadow: 0 6px 18px rgb(31 8 13 / 26%);
 }
@@ -2117,7 +2117,7 @@ input {
     border-radius: 0.55rem;
   }
 
-  .app-shell[data-app-mode="exhibition"] .reply {
+  .app-shell[data-ui-mode="exhibition"] .reply {
     max-width: calc(100vw - 2.5rem);
   }
 }
@@ -2213,7 +2213,7 @@ input {
   -webkit-backdrop-filter: blur(8px);
 }
 
-.app-shell[data-app-mode="exhibition"] .conversation-copy {
+.app-shell[data-ui-mode="exhibition"] .conversation-copy {
   width: fit-content;
   max-width: min(72vw, 34rem);
   padding: 0;
@@ -2224,7 +2224,7 @@ input {
   -webkit-backdrop-filter: none;
 }
 
-.app-shell[data-app-mode="exhibition"] .reply {
+.app-shell[data-ui-mode="exhibition"] .reply {
   border-color: rgb(214 184 117 / 28%);
   background:
     linear-gradient(180deg, rgb(244 239 230 / 8%), rgb(23 23 37 / 24%)),
@@ -2234,17 +2234,17 @@ input {
     inset 0 1px 0 rgb(255 255 255 / 11%);
 }
 
-.app-shell[data-app-mode="exhibition"] .status {
+.app-shell[data-ui-mode="exhibition"] .status {
   color: rgb(244 239 230 / 50%);
   font-size: clamp(0.68rem, 1.1vw, 0.78rem);
 }
 
-.app-shell[data-app-mode="exhibition"] .conversation-error {
+.app-shell[data-ui-mode="exhibition"] .conversation-error {
   border-color: rgb(240 184 183 / 58%);
   background: rgb(82 26 31 / 72%);
 }
 
-.app-shell[data-app-mode="exhibition"] .playback-permission {
+.app-shell[data-ui-mode="exhibition"] .playback-permission {
   box-shadow: 0 6px 18px rgb(31 22 8 / 28%);
 }
 
@@ -2258,7 +2258,7 @@ input {
 }
 
 /* Vayria microphone UX: keep the normal state quiet and expand vertically. */
-.app-shell[data-app-mode="exhibition"] .audio-controls {
+.app-shell[data-ui-mode="exhibition"] .audio-controls {
   position: relative;
   gap: 0.35rem;
   padding: 0;
@@ -2267,23 +2267,23 @@ input {
   box-shadow: none;
 }
 
-.app-shell[data-app-mode="exhibition"] .app-title {
+.app-shell[data-ui-mode="exhibition"] .app-title {
   gap: 0.35rem;
 }
 
-.app-shell[data-app-mode="exhibition"] .exhibition-network-status {
+.app-shell[data-ui-mode="exhibition"] .exhibition-network-status {
   gap: 0.35rem;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-control {
+.app-shell[data-ui-mode="exhibition"] .microphone-control {
   position: relative;
   display: grid;
   place-items: center;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button,
-.app-shell[data-app-mode="exhibition"] .attention-button,
-.app-shell[data-app-mode="exhibition"] .exhibition-network-status__item {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button,
+.app-shell[data-ui-mode="exhibition"] .attention-button,
+.app-shell[data-ui-mode="exhibition"] .exhibition-network-status__item {
   display: inline-grid;
   width: 2.25rem;
   height: 2.25rem;
@@ -2294,7 +2294,7 @@ input {
   white-space: nowrap;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button {
   --microphone-glow-size: 1px;
   --microphone-pulse-scale: 1;
   --microphone-ring-opacity: 0;
@@ -2308,37 +2308,37 @@ input {
     0 4px 12px rgb(5 6 17 / 16%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-state="off"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-state="off"] {
   border-color: rgb(244 239 230 / 23%);
   background: rgb(23 23 37 / 42%);
   color: rgb(244 239 230 / 70%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-state="on"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-state="on"] {
   border-color: rgb(214 184 117 / 68%);
   background: rgb(199 168 107 / 17%);
   color: #f4dfac;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-state="starting"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-state="starting"] {
   border-color: rgb(214 184 117 / 68%);
   background: rgb(199 168 107 / 17%);
   color: #f4dfac;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-state="stopping"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-state="stopping"] {
   border-color: rgb(244 239 230 / 23%);
   background: rgb(23 23 37 / 42%);
   color: rgb(244 239 230 / 70%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-state="error"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-state="error"] {
   border-color: rgb(240 184 183 / 76%);
   background: rgb(82 26 31 / 56%);
   color: #f5c1bb;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button::before {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button::before {
   position: absolute;
   inset: -0.27rem;
   border: 1px solid rgb(214 184 117 / 24%);
@@ -2349,48 +2349,48 @@ input {
   transform: scale(var(--microphone-ring-scale));
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-input-active="true"] .control-icon {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-input-active="true"] .control-icon {
   animation: microphone-input-pulse 1.8s ease-in-out infinite;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"] {
   border-color: var(--soft-gold);
   box-shadow:
     0 0 0 1px rgb(244 239 230 / 24%),
     0 0 var(--microphone-glow-size) rgb(214 184 117 / 48%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before {
+.app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before {
   animation: microphone-threshold-ring 280ms ease-out;
   border-color: var(--soft-gold);
   opacity: 1;
 }
 
-.app-shell[data-app-mode="exhibition"] .attention-button {
+.app-shell[data-ui-mode="exhibition"] .attention-button {
   border-color: rgb(214 166 184 / 34%);
   background: rgb(31 27 49 / 56%);
   color: #efd5df;
 }
 
-.app-shell[data-app-mode="exhibition"] .attention-button[data-state="on"] {
+.app-shell[data-ui-mode="exhibition"] .attention-button[data-state="on"] {
   border-color: rgb(214 184 117 / 66%);
   background: rgb(199 168 107 / 18%);
   color: #f7e7ba;
 }
 
-.app-shell[data-app-mode="exhibition"] .attention-button[data-state="starting"] {
+.app-shell[data-ui-mode="exhibition"] .attention-button[data-state="starting"] {
   border-color: rgb(214 166 184 / 52%);
   background: rgb(214 166 184 / 12%);
   color: rgb(239 213 223 / 74%);
 }
 
-.app-shell[data-app-mode="exhibition"] .attention-button:disabled {
+.app-shell[data-ui-mode="exhibition"] .attention-button:disabled {
   cursor: progress;
   opacity: 0.72;
   transform: none;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster {
   position: absolute;
   z-index: 12;
   top: calc(100% + 0.5rem);
@@ -2416,15 +2416,15 @@ input {
   -webkit-backdrop-filter: blur(12px);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster[hidden] {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster[hidden] {
   display: none;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster[data-state="error"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster[data-state="error"] {
   border-color: rgb(240 184 183 / 60%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster[data-threshold-crossing="true"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster[data-threshold-crossing="true"] {
   border-color: rgb(214 184 117 / 62%);
   box-shadow:
     0 10px 24px rgb(5 6 17 / 24%),
@@ -2432,7 +2432,7 @@ input {
     inset 0 1px 0 rgb(255 255 255 / 10%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter {
   --microphone-meter-height: clamp(7rem, 18vh, 10rem);
   position: relative;
   width: 1.55rem;
@@ -2444,7 +2444,7 @@ input {
   box-shadow: inset 0 1px 4px rgb(5 6 17 / 30%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__fill {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__fill {
   position: absolute;
   right: 0.18rem;
   bottom: 0.18rem;
@@ -2458,7 +2458,7 @@ input {
   transition: height 100ms linear;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__threshold {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__threshold {
   position: absolute;
   right: -0.35rem;
   left: -0.35rem;
@@ -2471,7 +2471,7 @@ input {
   transform: translateY(50%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__input {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -2487,12 +2487,12 @@ input {
   z-index: 2;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-webkit-slider-runnable-track {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__input::-webkit-slider-runnable-track {
   height: 0.22rem;
   background: transparent;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-webkit-slider-thumb {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__input::-webkit-slider-thumb {
   width: 1.1rem;
   height: 1.1rem;
   margin-top: -0.44rem;
@@ -2504,12 +2504,12 @@ input {
   box-shadow: 0 0 0 2px rgb(23 23 37 / 62%), 0 0 7px rgb(214 184 117 / 50%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-moz-range-track {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__input::-moz-range-track {
   height: 0.22rem;
   background: transparent;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input::-moz-range-thumb {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__input::-moz-range-thumb {
   width: 1.1rem;
   height: 1.1rem;
   border: 1px solid #f4efe6;
@@ -2518,18 +2518,18 @@ input {
   box-shadow: 0 0 0 2px rgb(23 23 37 / 62%), 0 0 7px rgb(214 184 117 / 50%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input:disabled {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__input:disabled {
   cursor: not-allowed;
   opacity: 0;
   pointer-events: none;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__input:focus-visible {
+.app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__input:focus-visible {
   outline: 2px solid var(--dusty-pink);
   outline-offset: 3px;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle {
   display: inline-flex;
   width: 3rem;
   height: 3rem;
@@ -2546,15 +2546,15 @@ input {
   transition: transform 80ms ease;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle:active:not(:disabled) {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle:active:not(:disabled) {
   transform: scale(0.96);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle:disabled {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle:disabled {
   cursor: progress;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__switch {
   position: relative;
   display: block;
   width: 2.3rem;
@@ -2570,7 +2570,7 @@ input {
     box-shadow 100ms ease;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch-thumb {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__switch-thumb {
   position: absolute;
   top: 50%;
   left: 0.2rem;
@@ -2588,13 +2588,13 @@ input {
     box-shadow 100ms ease;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"],
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="starting"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"],
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle[data-state="starting"] {
   color: #f4dfac;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] .microphone-adjuster__switch,
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="starting"] .microphone-adjuster__switch {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] .microphone-adjuster__switch,
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle[data-state="starting"] .microphone-adjuster__switch {
   border-color: rgb(214 184 117 / 70%);
   background: rgb(199 168 107 / 34%);
   box-shadow:
@@ -2602,23 +2602,23 @@ input {
     0 0 7px rgb(214 184 117 / 18%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] .microphone-adjuster__switch-thumb,
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="starting"] .microphone-adjuster__switch-thumb {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle[data-state="on"] .microphone-adjuster__switch-thumb,
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle[data-state="starting"] .microphone-adjuster__switch-thumb {
   left: 1.25rem;
   border-color: #f4dfac;
   background: #f4dfac;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="error"] {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle[data-state="error"] {
   color: #f5c1bb;
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle[data-state="error"] .microphone-adjuster__switch {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle[data-state="error"] .microphone-adjuster__switch {
   border-color: rgb(240 184 183 / 76%);
   background: rgb(82 26 31 / 56%);
 }
 
-.app-shell[data-app-mode="exhibition"] .microphone-adjuster__toggle:focus-visible {
+.app-shell[data-ui-mode="exhibition"] .microphone-adjuster__toggle:focus-visible {
   outline: 2px solid var(--dusty-pink);
   outline-offset: 3px;
 }
@@ -2649,33 +2649,33 @@ input {
 }
 
 @media (max-width: 720px) {
-  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button,
-  .app-shell[data-app-mode="exhibition"] .attention-button,
-  .app-shell[data-app-mode="exhibition"] .exhibition-network-status__item {
+  .app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button,
+  .app-shell[data-ui-mode="exhibition"] .attention-button,
+  .app-shell[data-ui-mode="exhibition"] .exhibition-network-status__item {
     width: 2.05rem;
     height: 2.05rem;
   }
 
-  .app-shell[data-app-mode="exhibition"] .microphone-adjuster {
+  .app-shell[data-ui-mode="exhibition"] .microphone-adjuster {
     width: 4.65rem;
     padding-inline: 0.3rem;
   }
 
-  .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter {
+  .app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter {
     --microphone-meter-height: clamp(6.4rem, 18vh, 8.5rem);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-input-active="true"] .control-icon,
-  .app-shell[data-app-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before,
-  .app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch,
-  .app-shell[data-app-mode="exhibition"] .microphone-adjuster__switch-thumb {
+  .app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-input-active="true"] .control-icon,
+  .app-shell[data-ui-mode="exhibition"] .microphone-disclosure-button[data-threshold-crossing="true"]::before,
+  .app-shell[data-ui-mode="exhibition"] .microphone-adjuster__switch,
+  .app-shell[data-ui-mode="exhibition"] .microphone-adjuster__switch-thumb {
     animation: none;
     transition: none;
   }
 
-  .app-shell[data-app-mode="exhibition"] .microphone-vertical-meter__fill {
+  .app-shell[data-ui-mode="exhibition"] .microphone-vertical-meter__fill {
     transition: none;
   }
 }

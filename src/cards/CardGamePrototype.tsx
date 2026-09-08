@@ -551,7 +551,7 @@ export function CardGamePrototype({
   ]);
 
   const selectionHint =
-    runtimeConfig.mode === 'exhibition'
+    (runtimeConfig.mode === 'exhibition' || runtimeConfig.mode === 'public')
         ? isSpent
           ? 'このターンは操作済み'
           : selectionActive
@@ -669,10 +669,10 @@ export function CardGamePrototype({
           <div className="card-zone__turn-status">
             <span
               className={`interference-counter interference-counter--${isSpent ? 'spent' : 'ready'}`}
-              aria-label={`残り干渉回数 ${zones.remainingInterferenceCount} / ${maxInterferenceCount}`}
+              aria-label={runtimeConfig.mode === 'public' ? 'カード操作は無料です' : `残り干渉回数 ${zones.remainingInterferenceCount} / ${maxInterferenceCount}`}
             >
               <span className="interference-counter__label" aria-hidden="true">
-                干渉
+                {runtimeConfig.mode === 'public' ? '操作無料' : '干渉'}
               </span>
               <span className="interference-counter__slots" aria-hidden="true">
                 {Array.from({ length: maxInterferenceCount }, (_, index) => (

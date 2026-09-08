@@ -1,5 +1,84 @@
 # Vayria
 
+一般公開版の検証環境、利用枠、Secrets、手動公開、切り戻しは [一般公開版の運用手順](docs/public-deployment.md) を参照してください。
+本番の `vayria.me` は、公開前の確認が完了するまで準備中ページを維持します。
+
+## vayria.me の準備中ページ
+
+Cloudflare Workers Static Assets で `deploy/placeholder/` だけを公開します。
+アプリ本体、会話 API、音声機能、VRM は配布しません。
+`wrangler.jsonc` を公開設定の正とします。公開先は `vayria.me` のみです。
+`www`、workers.dev、プレビュー URL、自動デプロイは有効にしません。
+
+### ローカル確認
+
+```powershell
+npm ci
+npm run placeholder:dev
+```
+
+`http://127.0.0.1:8788/` を PC とスマートフォン相当の画面幅で確認します。
+「Vayria」「ただいま公開準備中です」が表示されることを確認します。
+別のターミナルで配布設定を検証します。
+
+```powershell
+npm run placeholder:check
+```
+
+配布対象は HTML 1 ファイルです。存在しないパスは 404 を返します。
+公開用コマンドは空の `deploy/placeholder.env` を明示して、アプリの `.env.local` の読み込みを避けます。
+ページは `noindex` を指定します。これはアクセス制限ではありません。
+
+### 認証と手動公開
+
+```powershell
+npx wrangler login
+npx wrangler whoami
+```
+
+ブラウザーで Cloudflare にログインします。`vayria.me` を管理するアカウントを確認します。
+複数のアカウントがある場合は、そのアカウント ID を `CLOUDFLARE_ACCOUNT_ID` 環境変数に設定します。
+認証情報はリポジトリへ保存しません。
+
+公開直前に Cloudflare の管理画面で次を確認します。
+
+- `vayria.me` のゾーンが Active であること。
+- apex の DNS レコード、Workers Routes、Custom Domains に既存の公開先がないこと。
+- `vayria-web` が未使用であること。既存 Worker がある場合は所有用途を確認すること。
+
+既存の公開先がある場合は、その設定を記録してから切り替え方を確認します。
+競合する DNS レコードや Worker を無条件に削除しません。
+
+```powershell
+npm run placeholder:deploy
+```
+
+Custom Domain が DNS と証明書を設定します。
+公開後に `https://vayria.me/` の証明書、HTTP 200、本文を確認します。
+`https://vayria.me/does-not-exist` と `https://vayria.me/api/health` は 404 を返すことを確認します。
+DNS や証明書の反映待ちは、公開成功と分けて報告します。
+公開日時と Wrangler が返した Version ID を作業記録に残します。
+
+初回公開記録: 2026-09-07 23:33 JST、Worker `vayria-web`、
+Version ID `3c82d5ea-4dd3-4dea-bc5c-c6b0fee991d8`。
+HTTPS の `/` は 200、本文と `noindex` を確認済みです。
+`/does-not-exist`、`/api/health`、`/.env.local` は 404 を確認済みです。
+
+### 切り戻し
+
+更新時は `npx wrangler deployments list` で直前の正常な Version ID を確認します。
+`npx wrangler rollback <VERSION_ID>` でその版へ戻し、公開 URL を再確認します。
+バージョンの切り戻しはドメイン設定を元に戻す操作ではありません。
+
+初回公開を取り消す場合は、Cloudflare 管理画面の `vayria-web` の Settings → Domains & Routes で、
+今回追加した `vayria.me` の Custom Domain を削除します。
+対応する DNS レコードとルートが解除されたことを確認します。
+既存設定を変更した場合は、事前に記録した設定へ戻します。
+再公開まで `placeholder:deploy` を実行しません。実行すると設定からドメインが再作成されます。
+
+本体の公開には、Vite 開発サーバーにある API の移行と認証・利用制限の設計が必要です。
+この準備中ページの公開は、本体の production server 対応を意味しません。
+
 Vayria（ヴェイリア）は、VRM キャラクターと一往復会話するための最小ローカル AI Performer アプリです。
 
 テキストを送信すると、OpenAI が短い返答と感情を生成します。返答は音声で再生され、

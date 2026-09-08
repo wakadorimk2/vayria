@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "placeholder:dev": "wrangler dev --config wrangler.jsonc --env-file deploy/placeholder.env --ip 127.0.0.1 --port 8788",
+    "placeholder:check": "wrangler deploy --config wrangler.jsonc --env-file deploy/placeholder.env --dry-run",
+    "placeholder:deploy": "wrangler deploy --config wrangler.jsonc --env-file deploy/placeholder.env",
     "dev": "vite",
     "dev:op": "pwsh -NoProfile -File .\\scripts\\Start-VayriaWithOnePassword.ps1 -CommandPath npm.cmd -CommandArguments \"run dev\"",
     "dev:exhibition": "vite --mode exhibition",
@@ -35,35 +38,45 @@
     "project:view:build": "node scripts/project-view.mjs",
     "test:project-view": "node --test scripts/project-view.test.mjs",
     "typecheck": "tsc -b --pretty false",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "public:assets": "node scripts/prepare-public-assets.mjs",
+    "public:build": "npm run public:assets && tsc -b && tsc -p tsconfig.worker.json && vite build --config vite.public.config.ts",
+    "public:check": "wrangler deploy --config wrangler.public.jsonc --env-file deploy/placeholder.env --dry-run",
+    "public:dev": "wrangler dev --config wrangler.public.jsonc --env-file deploy/placeholder.env --ip 127.0.0.1 --port 8789",
+    "test:public": "tsc -p tsconfig.worker.json && node --test scripts/public-ledger.test.mjs scripts/public-worker.test.mjs",
+    "public:admin": "node scripts/public-admin.mjs"
   },
   "dependencies": {
     "@aituber-onair/chat": "0.52.0",
     "@mediapipe/tasks-vision": "1.0.1",
     "@pixiv/three-vrm": "2.1.3",
     "@pixiv/three-vrm-animation": "2.1.3",
+    "multicast-dns": "^7.2.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "multicast-dns": "^7.2.3",
     "three": "0.164.1",
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260907.1",
     "@eslint/js": "^9.39.1",
+    "@types/multicast-dns": "^7.2.4",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@types/multicast-dns": "^7.2.4",
     "@types/three": "0.164.1",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.1",
+    "esbuild": "0.28.2",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "miniflare": "5.20260903.0-alpha",
     "qrcode": "^1.5.4",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "wrangler": "4.129.0"
   }
 }

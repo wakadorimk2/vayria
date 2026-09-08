@@ -1,0 +1,201 @@
+# 一般公開版の実装と運用
+
+2026-09-08。一般公開前の検証段階。
+本番 `https://vayria.me/` は準備中ページを維持する。
+検証用Workerは `vayria-public-staging`。本番用Workerは `vayria-web`。
+各WorkerのDurable Object名前空間を分離する。
+検証環境の配信版: `629144c2-f478-43c5-8874-d80bb64a37b8`。
+生成はアクセスチケットとTurnstileの両方を通過した場合に有効。
+初回実機試験前の管理CLIでは外部API費用0円を確認した。実機試験後の累積費用は管理CLIで再確認する。
+
+## 構成
+
+- `vite.public.config.ts` はローカル環境ファイルとVite APIプラグインを読み込まない。
+- `scripts/prepare-public-assets.mjs` はユーザー所有VRMと登録済み20モーションを取り込む。モーションのSHA-256を照合する。
+- `worker/index.ts` はセッション、文字起こし、会話ストリーム、カード反応、署名付きTTSを提供する。
+- `worker/generation.ts` は既存の入力検証と会話生成を利用する。
+- `server/llmExecutionScope.ts` は各LLM呼び出しと内部再試行の前に費用を予約する。通常のlocal/exhibition実行では予約処理を挿入しない。
+- `worker/usage.ts` はSQLite Durable Objectで台帳を原子的に更新する。初期規模向けに1つの台帳へ集約する。台帳障害では有料処理を拒否する。
+- `src/voice/cloudVoiceAdapter.ts` は発話区間を16 kHz・mono・PCM16 WAVへ変換する。自動検出と押して話す方式を使う。音声再生中は送信しない。
+- 開始ボタンで音声再生を準備する。セッション取得後にマイクを開始する。終了、期限切れ、タブ非表示で停止する。復帰後は開始ボタンを押す。
+- マイクを使わずテキスト入力も利用できる。ページ表示だけでは有料生成を開始しない。
+- 公開版ではカードの入れ替え回数を制限しない。独立した生成反応は別の利用枠で制限する。
+
+## 公開版の画面
+
+公開版は展示用UIのアバター配置・カード配置・字幕スタイルを共有する。
+`data-ui-mode` で表示を切り替え、公開APIの実行モードは `public` を維持する。
+開始案内・利用枠・Turnstileは開閉式のパネルに配置する。文字入力は専用ボタンから開く。
+390×844と820×1180のブラウザー表示を確認した。変更後の実機操作は追加確認が必要。
+精度とUIの細部調整は後続作業とする。
+
+## 匿名Cookieと利用枠
+
+`__Host-vayria` は暗号学的乱数のvisitor IDを含む署名付きCookie。
+Secure、HttpOnly、SameSite=Strict、Path=/、90日。localStorageへ複製しない。
+GET `/api/session` を再度呼んでCookieの保持を確認する。Cookieがなければ開始を拒否する。
+POSTでTurnstileの成功、ホスト名、action=`session`を検証する。
+既存の有効セッションには同じvisitorから復帰できる。
+DELETEで終了する。未課金の予約は終了・期限切れ時に返す。
+
+初期値は `worker/ledger.ts` の `DEFAULT_LIMITS` を参照する。
+visitorは日2回・月10回。セッションは180秒。
+ユーザー生成6回、自律生成2回、独立カード生成2回。
+STTは8回・各20秒・合計120秒。TTSは20回・合計600文字。
+同時生成は5セッション。同じセッションの会話処理は1件。
+返答ストリームのTTSは会話生成と重なってよい。TTS同士は直列化する。
+
+日・月の境界はJST。設定変更は使用済みカウンターを消さない。
+IPはCloudflareの接続元情報だけを使う。日付付きHMACを保存する。
+IP開始試行は分10回、開始成功は時30回・日100回。時間窓の終了で解除する。
+共有回線を個人とはみなさない。Cookie削除と別ブラウザーの完全な回避防止は行わない。
+
+終了したセッション詳細は終了時刻から24時間を期限とする。
+日次カウンターは期間終了後48時間、月次カウンターは月末後7日を期限とする。
+読み取り・更新・Durable Object alarmで期限を処理する。
+会話本文、音声、生IPを台帳へ保存しない。
+要求種別、処理時間、失敗種別は直近24時間・最大2000件のメタデータとして保存する。
+管理CLIの中央値はAPI処理時間。ユーザーが聞くまでの遅延とは異なる。
+
+## 検証環境
+
+URL: `https://staging.vayria.me/`。
+アクセスチケットを入力する。未承認では画面とVRMも取得できない。
+管理APIは別の署名付き管理資格情報を検証する。
+`workers.dev` とpreview URLsは無効。
+検証環境の台帳は日額10円・月額100円に設定した。
+本番の外部API枠は日額70円・月額3500円。自動的に拡大しない。
+
+ローカル実行:
+
+```powershell
+npm run public:build
+npm run test:public
+npm run public:check
+npm run public:dev
+```
+
+`public:dev` は秘密情報を読み込まないため、標準状態では有料APIを利用できない。
+マイクを含む接続試験では検証環境を使う。
+ローカル専用鍵で試す場合は、無視対象のenvファイルを明示し、`--var REQUIRE_PREVIEW_ACCESS:false`を指定する。
+本物のAPIキーをVite環境変数へ設定しない。
+
+## 資格情報と話者
+
+Turnstileは検証用と本番用を分離して設定済み（2026-09-08）。
+両方ともManagedモード。各Workerへ `TURNSTILE_SECRET` を登録した。
+
+| 用途 | 許可ホスト | サイトキー |
+| --- | --- | --- |
+| 検証 | `staging.vayria.me` | `0x4AAAAAAErno-F0ugJTtA7B` |
+| 本番 | `vayria.me` | `0x4AAAAAAErpgvhBvYpnRm71` |
+
+`node scripts/configure-turnstile.mjs` で同名ウィジェットを再利用し、各WorkerのSecretと設定ファイルを揃える。
+本番用のサイトキーは `wrangler.production.example.jsonc` に設定した。本番アプリへの切り替えは実施していない。
+検証環境では無効なトークンをHTTP 403 `challenge_failed`で拒否した。
+ユーザー提供のiPhone画面でTurnstile成功、セッション開始、マイク許可、認識文字と返答文字を確認した。音声の聴感と連続会話の安定性は未確認。
+
+既存の1Password参照を使って、検証用TurnstileとSecretsファイルを準備した。
+`scripts/prepare-public-cloud.mjs` は同名の検証用ウィジェットを再利用する。
+再実行時は既存の署名鍵を維持する。アクセスチケットは24時間有効。
+
+```powershell
+pwsh -NoProfile -File .\scripts\Start-VayriaWithOnePassword.ps1 -CommandPath node.exe -CommandArguments 'scripts/prepare-public-cloud.mjs'
+npx wrangler secret bulk .wrangler/public-secrets.json --config wrangler.public.jsonc --env-file deploy/placeholder.env
+```
+
+Secrets: `OPENAI_API_KEY`, `AIVIS_API_KEY`, `TURNSTILE_SECRET`, `COOKIE_SECRET`, `IP_SECRET`, `ADMIN_SECRET`, `PREVIEW_SECRET`。
+`.wrangler/public-secrets.json` は機密情報。Gitへ追加しない。削除前に安全な保管先を確保する。
+`.wrangler/public-preview-ticket.txt` を検証画面へ貼り付ける。URLのクエリには入れない。
+本番では検証環境と異なる署名鍵、Turnstile設定、台帳を使用する。
+
+話者のAPIメタデータを2026-09-08に確認した。
+
+| 項目 | 値 |
+| --- | --- |
+| モデル | zonoko / zgock |
+| モデルUUID | `7fc08a41-b64d-456d-8b22-8e1284674775` |
+| ユーザー指定の話者UUID | `8e2dfde9-a155-4bd8-b451-80832ad5e8ac` |
+| スタイル | ノーマル、A、B、C、D |
+| 配布元のライセンス表示 | CC0 |
+| 試聴・採用確定 | Owner Playcheck待ち |
+
+[モデル情報](https://hub.aivis-project.com/aivm-models/7fc08a41-b64d-456d-8b22-8e1284674775)。
+VRM作者はわかどり。今回のアプリ配信はユーザーが指定した範囲。
+第三者への再利用許諾を追加しない。モーションの出典・条件の最終確認も公開ゲートに残す。
+
+## 費用管理
+
+費用は整数のmicro-yenで保持する。1円は1000000。
+LLMはUTF-8入力サイズに余裕を加えたトークン上限と出力上限を予約する。
+成功後にproviderのusageで精算する。usage不明や課金不明の失敗では返却しない。
+STTの毎分0.003ドルは概算であり上限ではない。
+STTではモデルの16000入力・2000出力トークン相当を予約し、usage取得時に精算する。
+150円/ドルではSTTの予約額は4.5円。通常の実使用額とは区別する。
+TTSはUTF-16文字数を使って保守的に予約し、その予約額を維持する。
+予約より実使用額が多ければ生成を停止する。
+
+2026-09-08確認: mini-transcribe入力1.25ドル/M・出力5ドル/M、Aivis従量440円/1万文字。
+[OpenAI料金](https://developers.openai.com/api/docs/pricing)、[STTモデル上限](https://developers.openai.com/api/docs/models/gpt-4o-mini-transcribe)、[Aivis料金](https://aivis-project.com/cloud-api/)。
+会話は既存のgpt-5-nano Standard。モデル自動切り替えと暖機を無効にする。
+基盤費は推計に1000円を加える。警告2000円、目標超過3000円。
+これは基盤従量料金、税、為替、他環境の利用を含む請求額の絶対保証ではない。
+
+```powershell
+$env:VAYRIA_ADMIN_URL = 'https://staging.vayria.me'
+npm run public:admin -- report
+npm run public:admin -- stop
+npm run public:admin -- configure '{"visitorDay":2,"visitorMonth":10}'
+npm run public:admin -- resume
+```
+
+検証ホストだけはローカルSecretsファイルから管理鍵を読む。
+本番では安全な保管先から `VAYRIA_ADMIN_SECRET` をプロセス環境へ渡す。
+`dayBudget`、`monthBudget` はmicro-yenで指定する。
+Workerの `GENERATION_ENABLED=false` と台帳の `stopped=true` は独立した停止手段。
+両方が生成を許可した場合だけ生成する。
+Cloudflare側の課金アラートはダッシュボードで別途設定する。設定完了は未確認。
+
+## 手動公開と切り戻し
+
+検証環境の更新:
+
+```powershell
+npm run public:build
+npm run test:public
+npm run public:check
+npx wrangler deploy --config wrangler.public.jsonc --env-file deploy/placeholder.env
+```
+
+本番切り替えはOwner Playcheck完了後に行う。
+`wrangler.production.example.jsonc` を基に本番用設定を作る。
+本番用Turnstileはホスト `vayria.me`、action `session`。
+Secrets登録、dry-run、台帳確認後に手動デプロイする。
+`www` は追加しない。Gitマージと自動デプロイは行わない。
+本番へ一般公開版を初回配信した後は、既存のplaceholderコマンドを切り戻しに使わない。
+
+障害時は管理CLIで停止する。
+画面も戻す場合は、同じWorker・DOクラス・台帳を保持した回復用設定を使う。
+
+```powershell
+npx wrangler deploy --config wrangler.recovery.jsonc --env-file deploy/placeholder.env
+```
+
+回復用設定は準備中ページを配信し、全APIを停止する。
+Durable Objectを削除しない。migrationの削除・リネームで台帳を初期化しない。
+再開時は一般公開版設定へ戻し、管理CLIで使用量を確認してから停止を解除する。
+
+## 検証記録と残る公開ゲート
+
+- 確認済み: 公開/Worker型検査、公開ビルド、Wrangler dry-run。
+- 確認済み: 台帳と署名の単体テスト11件、workerd/SQLiteでの統合テスト1件。
+- 統合テストは外部APIをモックする。並列開始、並列カード生成、TTS再利用、STT、予算拒否時の外部呼び出しゼロを確認する。
+- 確認済み: local/exhibition共通のperformer、voice、playback関連テスト。
+- 確認済み: 検証URLのHTTPS、未承認時の画面/VRM拒否、Cookie bootstrap、台帳の低額枠。
+- 確認済み: ローカル画面の1280px幅と390px幅で、カード・入力欄・利用案内の配置を確認。実機マイク試験とは区別する。
+- 未確認: 実APIによる会話ストリームと音声の一連動作、途中キャンセル、20セッションの実測。
+- 未確認: PC Chrome/Edge、Android Chrome、iPhone/iPad Safariでのマイク拒否、雑音、自己音声、タブ復帰。
+- 未確認: 初回30秒以内、音声入力終了から最初の音声まで中央値5秒以内。
+- 未確認: 声と会話体験のOwner Playcheck、モーション出典の最終表示、Cloudflare課金アラート。
+
+上記の未確認項目を通過するまで、本番の準備中ページを維持する。
