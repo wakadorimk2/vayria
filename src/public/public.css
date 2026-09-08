@@ -294,3 +294,24 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-theme label { position: relative; height: 48px; }
 .public-theme label:has(input:focus-visible) { outline: 2px solid var(--public-focus); outline-offset: 3px; }
 .public-theme input:focus-visible { outline: none; }
+
+/* Exhibition uses the public transport, theme, and controls. */
+.public-layout .app-shell[data-exhibition-experience="true"] .exhibition-invitation { bottom: 5.5rem; }
+.public-layout .app-shell[data-exhibition-experience="true"][data-exhibition-cards="closed"] .conversation { bottom: 10rem; }
+.public-layout .app-shell[data-exhibition-experience="true"] .exhibition-invitation button,
+.public-layout .app-shell[data-exhibition-experience="true"] .exhibition-operator__body,
+.public-layout .app-shell[data-exhibition-experience="true"] .exhibition-operator summary,
+.public-layout .app-shell[data-exhibition-experience="true"] .exhibition-operator select { background: var(--public-surface); color: var(--public-ink); border-color: var(--public-border); }
+.public-layout .exhibition-operator pre { max-height: 14rem; overflow: auto; font-size: 11px; }
+.public-layout .exhibition-operator select { width: 100%; min-height: 44px; }
+.public-layout .exhibition-operator input[type="file"] { max-width: 100%; }
+.public-layout .exhibition-operator { z-index: 32; }
+
+.public-layout .app-shell[data-exhibition-experience="true"] .message-form { grid-template-columns: auto minmax(0, 1fr) auto; bottom: 9rem; }
+.public-layout .app-shell[data-exhibition-experience="true"] .message-form select { width: 9rem; }
+.public-layout .app-shell[data-exhibition-experience="true"][data-public-text-input="true"] .conversation .status { visibility: hidden; }
+@media (max-width: 600px) {
+  .public-layout .app-shell[data-exhibition-experience="true"] .message-form { grid-template-columns: minmax(0, 1fr) auto; bottom: 12rem; }
+  .public-layout .app-shell[data-exhibition-experience="true"] .message-form select { grid-column: 1 / -1; width: 100%; }
+  .public-layout .app-shell[data-exhibition-experience="true"] .exhibition-invitation { bottom: 6rem; }
+}

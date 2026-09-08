@@ -230,6 +230,7 @@ interface AvatarPerformanceState {
 interface VrmStageProps {
   attentionReader: AttentionReader;
   emotion: Emotion;
+  emotionIntensity?: number;
   isExhibitionMode?: boolean;
   listeningReaction?: ListeningReactionCue;
   motionScale?: number;
@@ -481,6 +482,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     {
       attentionReader,
       emotion,
+      emotionIntensity = 1,
       isExhibitionMode = false,
       listeningReaction,
       motionScale = 1,
@@ -503,6 +505,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const mouthOpenRef = useRef(mouthOpen);
     const emotionRef = useRef(emotion);
+    const emotionIntensityRef = useRef(emotionIntensity);
+    useEffect(() => { emotionIntensityRef.current = emotionIntensity; }, [emotionIntensity]);
     const attentionReaderRef = useRef(attentionReader);
     const listeningReactionRef = useRef(listeningReaction);
     const listeningReactionIdRef = useRef<number | null>(
@@ -1045,6 +1049,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       let blinkController: BlinkController | null = null;
       let emotionController: EmotionExpressionController | null = null;
       let appliedEmotion: Emotion | null = null;
+      let appliedEmotionIntensity = 1;
       let stageRect: SpatialTargetRect = readStageRect(container);
       const usesExhibitionPortraitCamera = () =>
         isExhibitionMode &&
@@ -2319,12 +2324,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           } else {
             gazeProjectionFeedback.reset();
           }
-          if (emotionController && appliedEmotion !== emotionRef.current) {
+          if (emotionController && (appliedEmotion !== emotionRef.current || appliedEmotionIntensity !== emotionIntensityRef.current)) {
             emotionController.setEmotion(
               emotionRef.current,
               avatarProfile?.expressionHoldMs ?? 0,
+              emotionIntensityRef.current,
             );
             appliedEmotion = emotionRef.current;
+            appliedEmotionIntensity = emotionIntensityRef.current;
           }
           emotionController?.update(delta);
           if (!lifeDynamicsEnabled) {

@@ -22,6 +22,7 @@ interface WildcardDirectionController {
   direction: LiveDirection;
   activateCardSwap: (result: CardSwapResult) => DirectionContribution;
   updateZones: (nextZones: CardZoneState) => void;
+  reset: (nextZones: CardZoneState) => void;
   getContribution: (
     trigger: PerformerTrigger,
     now?: number,
@@ -124,6 +125,11 @@ function createController(zones: CardZoneState): WildcardDirectionController {
     updateZones: (nextZones) => {
       currentBrainCardIds = new Set(nextZones.brain.map((card) => card.id));
     },
+    reset: (nextZones) => {
+      currentBrainCardIds = new Set(nextZones.brain.map((card) => card.id));
+      backgroundEntries.clear();
+      forcedEffects.length = 0;
+    },
     activateCardSwap: (result) => {
       const now = Date.now();
       currentBrainCardIds = new Set(result.brainCardIds);
@@ -176,6 +182,7 @@ export function useWildcardDirection(
   return {
     direction: controller.direction,
     updateZones: controller.updateZones,
+    reset: controller.reset,
     activateCardSwap,
     getContribution,
   };

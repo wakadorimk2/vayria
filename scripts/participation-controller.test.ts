@@ -2,9 +2,40 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createParticipationController,
+  EXHIBITION_CONVERSATION_CONTEXT,
   type ConversationContext,
   type Participant,
 } from '../src/conversation/participationController.js';
+
+test('shared microphone keeps both humans anonymous and supports a three-party exchange', () => {
+  const controller = createParticipationController({ context: EXHIBITION_CONVERSATION_CONTEXT });
+  const say = (text: string, at: number) => controller.evaluateFinalized({ segmentId: String(at), text, at });
+  assert.equal(say('これはVayriaっていうキャラクターです', 100).decision, 'SILENT');
+  const humanQuestion = say('普段ゲームとかやります？', 200);
+  assert.equal(humanQuestion.mode, 'multi_party');
+  assert.equal(humanQuestion.decision, 'SILENT');
+  assert.equal(humanQuestion.speakerId, null);
+  assert.equal(humanQuestion.participantCount, 3);
+  assert.equal(say('Vayria、どう思う？', 300).decision, 'SPEAK');
+  controller.observeVayriaUtterance('お二人はゲームが好き？', 400);
+  assert.equal(say('うん、よく遊ぶよ', 500).category, 'follow_up_reply');
+  assert.equal(say('じゃあこのカード替えてみます？', 600).decision, 'SILENT');
+  assert.equal(say('Vayriaはどう思う？', 700).decision, 'SPEAK');
+  assert.equal(say('Vayria', 800).decision, 'SPEAK');
+  assert.equal(say('みんなはどう思う？', 900).decision, 'SPEAK');
+  assert.ok(controller.getState().recentSpeakerIds.every((id) => id === null));
+});
+
+test('shared microphone reply window expires, resets, and yields to explicit overlap', () => {
+  const controller = createParticipationController({ context: EXHIBITION_CONVERSATION_CONTEXT });
+  controller.observeVayriaUtterance('好き？', 100);
+  assert.equal(controller.evaluateFinalized({ segmentId: 'late', text: 'うん', at: 8100 }).decision, 'SILENT');
+  controller.observeVayriaUtterance('好き？', 9000);
+  controller.reset();
+  assert.equal(controller.evaluateFinalized({ segmentId: 'reset', text: 'うん', at: 9100 }).decision, 'SILENT');
+  assert.equal(controller.evaluateFinalized({ segmentId: 'overlap', text: 'Vayria、どう思う？',
+    at: 9200, overlapState: 'overlap' }).decision, 'SILENT');
+});
 import { createInteractionTimeline } from '../src/conversation/interactionTimeline.js';
 
 const vayria: Participant = { id: 'vayria', role: 'vayria' };

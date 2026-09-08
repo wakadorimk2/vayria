@@ -1,3 +1,4 @@
+import type { PublicExperience } from './exhibition';
 import { publicErrorMessage } from './errors';
 import type { ThemePreference, ResolvedTheme } from './theme';
 import { usePanelVisibility } from './usePanelVisibility';
@@ -7,7 +8,10 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { activatePublic, pausePublic, publicActive, publicSessionId, registerPublicSessionRequest, subscribePublic, type PublicStatus } from './session';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, onMicrophoneToggle }: {
+export default function PublicControls({ experience, onExperienceChange, experiencePending, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, onMicrophoneToggle }: {
+  experience: PublicExperience;
+  onExperienceChange: (value: PublicExperience) => void;
+  experiencePending: boolean;
   themePreference: ThemePreference;
   resolvedTheme: ResolvedTheme;
   onThemeChange: (theme: ThemePreference) => void;
@@ -31,6 +35,10 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
   const startAbort = useRef<AbortController | null>(null);
   const finishRequest = useCallback((success: boolean) => { request.current?.resolve(success); request.current = null; setRequested(false); }, []);
   const cancelRequest = useCallback(() => { startAbort.current?.abort(); startAbort.current = null; setPending(false); finishRequest(false); }, [finishRequest]);
+  useEffect(() => {
+    window.addEventListener('vayria-exhibition-reset', cancelRequest);
+    return () => window.removeEventListener('vayria-exhibition-reset', cancelRequest);
+  }, [cancelRequest]);
   const [manual, setManual] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const automaticMessageRef = useRef(false);
@@ -150,6 +158,9 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
         </svg>
       </label>)}
     </fieldset>
+    <label>体験モード <select value={experience} disabled={experiencePending} onChange={event => onExperienceChange(event.target.value as PublicExperience)}>
+      <option value="normal">通常</option><option value="exhibition">展示・三者会話（試作）</option>
+    </select></label>
     <h3>利用状況</h3>
     <p ref={messageRef} aria-live="polite">{message} {status && `残り: 本日${status.remainingDay}回・今月${status.remainingMonth}回`}</p>
     {requested && <p>{pending ? '接続しています…' : '確認を完了すると、操作した内容への返答を始めます。'}</p>}

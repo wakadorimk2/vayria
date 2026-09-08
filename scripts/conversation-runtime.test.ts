@@ -3,6 +3,43 @@ import { INITIAL_AUTONOMOUS_CONTEXT } from '../src/conversation/autonomousContex
 import type { InteractionTimelineEvent } from '../src/conversation/interactionTimeline.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { EXHIBITION_CONVERSATION_CONTEXT } from '../src/conversation/participationController.js';
+import { DEFAULT_PROGRAM_CONTEXT } from '../src/conversation/programContext.js';
+
+test('shared room judgement retains human dialogue, ignores local phatic shortcut, and waits for complete decisions', async () => {
+  const programContext = { ...DEFAULT_PROGRAM_CONTEXT, participantRole: 'shared_microphone_group' as const,
+    format: 'live_conversation' as const, objective: 'converse_freely' as const };
+  const f = fixture({ isMuted: true, programContext });
+  f.setChat(async () => Response.json({ ...response, interactionAction: 'listen', text: '', activatedCards: [], speechAct: null, expressionLevel: null }));
+  const localSilence = { ...plan('listen'), actionDecision: { action: 'silence', backchannelCue: 'none' } } as PerformancePlan;
+  await f.runtime.sendVoice('うん', cards, () => {}, localSilence);
+  const request = f.requests[0].body;
+  assert.equal(request.streamSpeech, false); assert.equal(request.earlySpeechLead, false);
+  assert.equal(f.requests.length, 1); assert.equal(f.plays.length, 0);
+  f.setChat(async () => Response.json(response));
+  await f.runtime.sendVoice('それでどう思う？', cards, () => {}, plan('join'));
+  assert.deepEqual(f.requests[1].body.history, [{ role: 'user', content: 'うん' }]);
+  f.runtime.resetConversation();
+  await f.runtime.sendVoice('次の参加者', cards, () => {}, plan('reset'));
+  assert.deepEqual(f.requests[2].body.history, []);
+});
+
+test('overheard shared speech is context for a later invitation without an immediate request', async () => {
+  const f = fixture({ isMuted: true, conversationContext: EXHIBITION_CONVERSATION_CONTEXT });
+  const input = { segmentId: 'human-exchange', text: '雨の日のゲームが好きなんです', at: 50 };
+  assert.equal(f.runtime.evaluateVoiceParticipation(input).decision, 'SILENT');
+  f.runtime.evaluateVoiceParticipation(input);
+  assert.equal(f.requests.length, 0);
+  await f.send('invitation');
+  const history = f.requests.find(r => r.url.endsWith('/chat'))?.body.history;
+  assert.ok(Array.isArray(history));
+  assert.equal(history.length, 1);
+  assert.match(history[0].content, /雨の日のゲームが好きなんです/);
+  assert.equal(history[0].role, 'user');
+  f.runtime.resetConversation();
+  await f.send('new-visitor');
+  assert.deepEqual(f.requests.filter(r => r.url.endsWith('/chat')).at(-1)?.body.history, []);
+});
 import { createConversationRuntime, type ConversationDependencies, type ConversationOptions } from '../src/conversation/conversationRuntime.js';
 import type { PerformancePlayback, PerformancePlaybackCallbacks, PerformancePlaybackResult } from '../src/performer/performancePlayback.js';
 import type { PerformancePlan, PerformanceResult } from '../src/performer/types.js';

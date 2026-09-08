@@ -1,3 +1,4 @@
+import { observeExhibitionAudio } from '../public/exhibition.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IosAudioSession } from './iosAudioSession.js';
 import {
@@ -335,6 +336,7 @@ export function useAudioLipSync(volume = 1, audioSession: IosAudioSession | null
 
   const setDucked = useCallback((ducked: boolean) => {
     duckedRef.current = ducked;
+    observeExhibitionAudio({ event: 'duck', ducked });
     const context = contextRef.current;
     if (!context || context.state === 'closed') return;
 

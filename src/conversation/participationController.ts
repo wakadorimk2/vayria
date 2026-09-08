@@ -20,6 +20,7 @@ export const PARTICIPATION_CATEGORIES = [
   'no_reference',
   'overlap',
   'fallback',
+  'follow_up_reply',
 ] as const;
 export type ParticipationCategory =
   (typeof PARTICIPATION_CATEGORIES)[number];
@@ -35,6 +36,7 @@ export const PARTICIPATION_REASONS = [
   'participants_unavailable',
   'participants_not_multi_party',
   'speaker_identity_unavailable',
+  'reply_to_vayria_question',
 ] as const;
 export type ParticipationReason = (typeof PARTICIPATION_REASONS)[number];
 
@@ -48,7 +50,17 @@ export interface Participant {
 
 export interface ConversationContext {
   participants: readonly Participant[];
+  inputMode?: 'identified_speakers' | 'shared_microphone';
 }
+
+export const EXHIBITION_CONVERSATION_CONTEXT: ConversationContext = {
+  inputMode: 'shared_microphone',
+  participants: [
+    { id: 'host', role: 'human', displayName: '出展者' },
+    { id: 'guest', role: 'human', displayName: '参加者' },
+    { id: 'vayria', role: 'vayria', displayName: 'Vayria' },
+  ],
+};
 
 export type FloorState =
   | { kind: 'held'; participantId: string }
@@ -181,14 +193,14 @@ function normalizeContext(
     });
   }
 
-  return { participants };
+  return { participants, ...(context.inputMode === 'shared_microphone' ? { inputMode: 'shared_microphone' as const } : {}) };
 }
 
 function cloneContext(
   context: ConversationContext | null,
 ): ConversationContext | null {
   if (!context) return null;
-  return { participants: context.participants.map(cloneParticipant) };
+  return { ...context, participants: context.participants.map(cloneParticipant) };
 }
 
 function contextsEqual(
@@ -196,7 +208,7 @@ function contextsEqual(
   right: ConversationContext | null,
 ): boolean {
   if (left === right) return true;
-  if (!left || !right || left.participants.length !== right.participants.length) {
+  if (!left || !right || left.inputMode !== right.inputMode || left.participants.length !== right.participants.length) {
     return false;
   }
   return left.participants.every((participant, index) => {
@@ -322,9 +334,17 @@ function classifyText(
   identity: CharacterIdentity,
 ): TextClassification {
   const selfNameResolution = resolveSelfName(text, identity);
+  const afterName = selfNameResolution.matchedText
+    ? text.slice(text.indexOf(selfNameResolution.matchedText) + selfNameResolution.matchedText.length).trim()
+    : '';
+  if (context?.inputMode === 'shared_microphone' && selfNameResolution.role === 'self_reference' &&
+    /^(?:さん|ちゃん)?(?:は|も|なら|的には)?[、,\s]*(?:どう思う|どうかな|どうする|どう感じる|[?？])/u.test(afterName)) {
+    return { category: 'explicit_address', reason: 'explicit_address', confidence: 0.85,
+      addressivity: createAddressivity(context, 'vayria', 0.85) };
+  }
   if (
     selfNameResolution.role === 'direct_address' &&
-    hasAddressContent(text, selfNameResolution.matchedText)
+    (hasAddressContent(text, selfNameResolution.matchedText) || context?.inputMode === 'shared_microphone')
   ) {
     return {
       category: 'explicit_address',
@@ -386,6 +406,12 @@ export class ParticipationController {
   private readonly activeSpeakerCounts = new Map<string, number>();
   private activeUnknownSpeakerCount = 0;
   private overlapDetectedForUtterance = false;
+  private replyToVayriaUntil = 0;
+
+  /** A short, single-use reply window follows an actually delivered question. */
+  observeVayriaUtterance(text: string, at: number): void {
+    this.replyToVayriaUntil = /[?？]\s*[」』”"]?\s*$/u.test(text.trim()) ? at + 8_000 : 0;
+  }
 
   constructor(options: ParticipationControllerOptions = {}) {
     this.context = normalizeContext(options.context);
@@ -505,7 +531,7 @@ export class ParticipationController {
             : 'participants_unavailable'
           : 'participants_unavailable';
       confidence = 0;
-    } else if (!knownHumanSpeaker) {
+    } else if (!knownHumanSpeaker && this.context?.inputMode !== 'shared_microphone') {
       decision = 'SPEAK';
       mode = 'dyadic_fallback';
       category = 'fallback';
@@ -520,7 +546,17 @@ export class ParticipationController {
       decision = 'SPEAK';
     } else if (classification.category === 'contextual_intervention') {
       decision = 'SPEAK';
+    } else if (this.context?.inputMode === 'shared_microphone' && classification.category === 'group_address') {
+      decision = 'SPEAK';
+    } else if (this.context?.inputMode === 'shared_microphone' &&
+      classification.category === 'no_reference' && at < this.replyToVayriaUntil &&
+      /^(?:うん|はい|いいえ|いや|そう|私は|僕は|俺は|わたしは|それ|たしかに|確かに|どちらかというと)/u.test(text)) {
+      decision = 'SPEAK';
+      category = 'follow_up_reply';
+      reason = 'reply_to_vayria_question';
+      confidence = 0.55;
     }
+    this.replyToVayriaUntil = 0;
 
     const recentHumanIds = new Set(
       this.state.recentUtterances
@@ -603,6 +639,7 @@ export class ParticipationController {
   }
 
   private resetState(): void {
+    this.replyToVayriaUntil = 0;
     this.activeSpeakerCounts.clear();
     this.activeUnknownSpeakerCount = 0;
     this.overlapDetectedForUtterance = false;

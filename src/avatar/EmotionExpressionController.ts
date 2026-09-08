@@ -4,7 +4,7 @@ import {
   VOICE_STYLE_BY_EMOTION,
   VRM_EXPRESSION_BY_EMOTION,
   type Emotion,
-} from '../character/emotion';
+} from '../character/emotion.js';
 
 const TRANSITION_SECONDS = 0.3;
 
@@ -18,6 +18,7 @@ export class EmotionExpressionController {
   private startWeights = new Map<string, number>();
   private targetExpression: string | null = null;
   private targetEmotion: Emotion | null = null;
+  private targetIntensity = 1;
   private holdRemainingSeconds = 0;
   private elapsedSeconds = TRANSITION_SECONDS;
 
@@ -53,10 +54,12 @@ export class EmotionExpressionController {
     return this.expressionByEmotion.get(emotion) ?? null;
   }
 
-  setEmotion(emotion: Emotion, holdMs = 0): void {
-    if (emotion === this.targetEmotion && this.holdRemainingSeconds > 0) {
+  setEmotion(emotion: Emotion, holdMs = 0, intensity = 1): void {
+    const boundedIntensity = Number.isFinite(intensity) ? Math.max(0, Math.min(1, intensity)) : 0;
+    if (emotion === this.targetEmotion && boundedIntensity === this.targetIntensity && this.holdRemainingSeconds > 0) {
       return;
     }
+    this.targetIntensity = boundedIntensity;
     this.applyEmotion(emotion, holdMs);
   }
 
@@ -86,7 +89,7 @@ export class EmotionExpressionController {
 
     for (const expression of this.controlledExpressions) {
       const startWeight = this.startWeights.get(expression) ?? 0;
-      const targetWeight = expression === this.targetExpression ? 1 : 0;
+      const targetWeight = expression === this.targetExpression ? this.targetIntensity : 0;
       const weight = startWeight + (targetWeight - startWeight) * progress;
       this.currentWeights.set(expression, weight);
       this.expressionManager?.setValue(expression, weight);

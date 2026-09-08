@@ -481,6 +481,9 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     if (decision.mode === 'multi_party' &&
       decision.decision === 'SILENT') {
       floorController.release('participation_silent', input.at ?? dependencies.now());
+      semanticHistory.beginTurn(`overheard:${input.segmentId}`,
+        `[共用の会話／Vayriaは聞き手・話者を断定しない] ${input.text.slice(0, 1000)}`,
+        input.at ?? dependencies.now());
     }
     return decision;
   };
@@ -568,11 +571,12 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       if (generation !== generationRef.current) return;
       semanticHistory.beginTurn(eventEmitter.turnId, message, dependencies.now());
       const delivered = semanticHistory.appendDeliveredUnit(eventEmitter.turnId, index, text);
+      if (delivered) participationController.observeVayriaUtterance(delivered, dependencies.now());
       if (delivered !== null) { deliveredText = delivered; activeDeliveredTextRef.current = delivered; lastSelfUtteranceRef.current = delivered; }
     };
     setError('');
     setConversationState('thinking', turnSource);
-    const localInteractionDecision = INTERACTIVE_SOURCES.includes(turnSource) &&
+    const localInteractionDecision = programContextForRequest.participantRole !== 'shared_microphone_group' && INTERACTIVE_SOURCES.includes(turnSource) &&
       plan.actionDecision &&
       plan.actionDecision.action !== 'take_floor'
       ? plan.actionDecision
@@ -838,9 +842,9 @@ export function createConversationRuntime(playback: PerformancePlayback, options
               autonomyCandidate: serializeAutonomyCandidate(autonomyCandidate!),
             }
             : {}),
-          streamSpeech: runtimeConfig.streamingSpeechEnabled &&
+          streamSpeech: programContextForRequest.participantRole !== 'shared_microphone_group' && runtimeConfig.streamingSpeechEnabled &&
             (INTERACTIVE_SOURCES.includes(turnSource) || isCardChangeTurn),
-          earlySpeechLead: runtimeConfig.earlySpeechLeadEnabled,
+          earlySpeechLead: programContextForRequest.participantRole !== 'shared_microphone_group' && runtimeConfig.earlySpeechLeadEnabled,
         }),
         signal: chatController.signal,
       });

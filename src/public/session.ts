@@ -1,3 +1,4 @@
+import { isSharedPublicConversation } from './exhibition';
 import { publicErrorMessage } from './errors';
 import { runtimeConfig } from '../runtimeConfig';
 export type PublicStatus = { session: { id: string; expires: number } | null; remainingDay: number; remainingMonth: number;
@@ -29,7 +30,21 @@ export function activatePublic(value: PublicStatus['session']) {
 export function pausePublic() { activatePublic(null); }
 export const publicSessionId = () => session?.id ?? '';
 let ttsQueue = Promise.resolve();
+let exhibitionRequestQueue = Promise.resolve();
 export async function publicFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  if (runtimeConfig.mode === 'public' && isSharedPublicConversation() && /\/api\/(chat|card-preview|transcribe)$/.test(path)) {
+    const sessionId = publicSessionId();
+    const response = exhibitionRequestQueue.then(async () => {
+      if (publicSessionId() !== sessionId || init.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      const result = await performFetch(path, init);
+      // Complete the response before another non-TTS request enters the public ledger.
+      const bytes = await result.arrayBuffer();
+      const headers = new Headers(result.headers); headers.delete('content-length'); headers.delete('content-encoding');
+      return new Response(bytes, { status: result.status, headers });
+    });
+    exhibitionRequestQueue = response.then(() => {}, () => {});
+    return response;
+  }
   if (runtimeConfig.mode !== 'public' || !path.endsWith('/api/tts')) return performFetch(path, init);
   const sessionId = publicSessionId();
   const response = ttsQueue.then(() => {
