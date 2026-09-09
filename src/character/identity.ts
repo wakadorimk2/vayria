@@ -1,5 +1,6 @@
+import { environmentStorageKey } from '../storageKey.js';
 export const CHARACTER_IDENTITY_STORAGE_KEY =
-  'vayria.character-identity.v1';
+  environmentStorageKey('vayria.character-identity.v1');
 
 export const MAX_CHARACTER_ALIAS_COUNT = 16;
 export const MAX_CHARACTER_ALIAS_LENGTH = 32;

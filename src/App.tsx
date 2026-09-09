@@ -1,3 +1,4 @@
+import { environmentStorageKey } from './storageKey';
 import { calculateSettingsLayout, type AvatarScreenBounds } from './public/settingsLayout';
 import {
   useCallback,
@@ -379,7 +380,7 @@ function readAudioControlState(): AudioControlState {
       AUDIO_SETTINGS_STORAGE_KEY,
       LEGACY_AUDIO_SETTINGS_STORAGE_KEY,
     ]) {
-      const state = parseAudioControlState(localStorage.getItem(storageKey));
+      const state = parseAudioControlState(localStorage.getItem(environmentStorageKey(storageKey)));
       if (state !== null) return state;
     }
   } catch {
@@ -391,7 +392,7 @@ function readAudioControlState(): AudioControlState {
 
 function readRouterAudioInputDeviceId(): string {
   try {
-    return localStorage.getItem(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY)?.trim() ?? '';
+    return localStorage.getItem(environmentStorageKey(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY))?.trim() ?? '';
   } catch {
     return '';
   }
@@ -1410,7 +1411,7 @@ export default function App() {
       LEGACY_AUDIO_SETTINGS_STORAGE_KEY,
     ]) {
       try {
-        localStorage.setItem(storageKey, serialized);
+        localStorage.setItem(environmentStorageKey(storageKey), serialized);
       } catch {
         // Playback remains usable when storage is unavailable.
       }
@@ -1422,11 +1423,11 @@ export default function App() {
     try {
       if (routerAudioInputDeviceId) {
         localStorage.setItem(
-          ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY,
+          environmentStorageKey(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY),
           routerAudioInputDeviceId,
         );
       } else {
-        localStorage.removeItem(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY);
+        localStorage.removeItem(environmentStorageKey(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY));
       }
     } catch {
       // Remote PCM remains usable when local settings storage is unavailable.

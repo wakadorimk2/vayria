@@ -136,7 +136,7 @@ async function cli() {
       await writeFile('selection.json', JSON.stringify(selected));
       await appendFile(process.env.GITHUB_OUTPUT, `selected=true\nsha=${selected.sha}\nmain=${selected.main}\npr=${selected.pr}\nlabelId=${selected.labelId}\n`);
       if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY,
-        `Selected staging build\n\nPR: ${selected.pr || 'main'}\nCommit: ${selected.sha}\nControl revision: ${selected.main}\nURL: https://staging.vayria.me\n`);
+        `Selected staging build\n\nPR: ${selected.pr || 'main'}\nCommit: ${selected.sha}\nControl revision: ${selected.main}\nURL: https://vayria.me/staging/\n`);
     } else await appendFile(process.env.GITHUB_OUTPUT, 'selected=false\n');
     return;
   }

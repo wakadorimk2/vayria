@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { transform } from 'esbuild';
-const { code } = await transform(await readFile('src/public/theme.ts', 'utf8'), { loader: 'ts', format: 'esm' });
+import { build } from 'esbuild';
+const bundled = await build({ entryPoints: ['src/public/theme.ts'], bundle: true, write: false, format: 'esm' });
+const code = bundled.outputFiles[0].text;
 let fixtureId = 0;
 async function fixture(saved = null, dark = false, unavailable = false) {
   const media = new EventTarget(); media.matches = dark;

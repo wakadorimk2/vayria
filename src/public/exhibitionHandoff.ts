@@ -1,5 +1,6 @@
+import { environmentStorageKey } from '../storageKey';
 export type HandoffRequest = { requestId: string; epoch: number };
-const pendingKey = 'vayria-exhibition-handoff';
+const pendingKey = environmentStorageKey('vayria-exhibition-handoff');
 export const hasPendingHandoff = (storage: Pick<Storage, 'getItem'>) => storage.getItem(pendingKey) !== null;
 export function readHandoff(storage: Pick<Storage, 'getItem'>): HandoffRequest | null {
   const raw = storage.getItem(pendingKey);

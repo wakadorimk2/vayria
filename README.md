@@ -49,6 +49,7 @@
 
 - [開発・運用ガイド](docs/development-guide.md) — セットアップ、音声、モーション、検証の手順
 - [Performer Runtimeの設計](docs/architecture/performer-runtime.md) — キャラクターの振る舞いを支える構成
+- [検証URLの移行](docs/staging-url-migration.md) — `/staging/` への移行手順（未配信）
 - [一般公開版の運用](docs/public-deployment.md) — 公開版の構成と管理
 - [展示当日の案内](docs/exhibition-quickstart.md) — 展示での起動、参加者交代、復旧
 - [展示準備台帳](docs/exhibition-readiness.md) — 比較・検証と準備の記録

@@ -1,3 +1,4 @@
+import { publicUrl } from './paths';
 import { useEffect, useRef, useState } from 'react';
 import ExhibitionControls from './ExhibitionControls';
 import { publicErrorMessage } from './errors';
@@ -33,7 +34,7 @@ export default function ExhibitionRegistrationPage() {
     setNeedsReset(true); setMessage('体験画面へ戻る準備をしています…');
     try {
       await finishRegistration(value.exhibition?.epoch ?? -1, signal);
-      if (!signal.aborted) window.location.replace('/');
+      if (!signal.aborted) window.location.replace(publicUrl('/'));
     } catch {
       if (!signal.aborted) setMessage('参加者の初期化を完了できませんでした。接続を確認して再試行してください。');
     }
@@ -56,7 +57,7 @@ export default function ExhibitionRegistrationPage() {
   const enroll = () => run(async signal => {
     setMessage('登録しています…');
     try {
-      const response = await fetch('/api/exhibition/enroll', {
+      const response = await fetch(publicUrl('/api/exhibition/enroll'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.trim() }),
         signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
       });
@@ -97,6 +98,6 @@ export default function ExhibitionRegistrationPage() {
     <p role="status">{message}</p>
     {needsReset && status && <button disabled={pending} onClick={() => void run(signal => reset(status, signal))}>初期化を再試行</button>}
     <button disabled={pending} onClick={() => void check()}>登録状態を確認</button>
-    {!needsReset && !status?.exhibition && <a href="/">体験画面へ戻る</a>}
+    {!needsReset && !status?.exhibition && <a href={publicUrl('/')}>体験画面へ戻る</a>}
   </main></div>;
 }

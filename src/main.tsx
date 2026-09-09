@@ -1,3 +1,4 @@
+import { publicPagePath } from './public/paths';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
@@ -12,7 +13,7 @@ import ExhibitionRegistrationPage from './public/ExhibitionRegistrationPage';
 if (runtimeConfig.mode === 'public') initializePublicTheme();
 
 const RootPage = window.location.pathname === '/cards' ? CardsPreviewPage : App;
-const PublicPage = /^\/exhibition\/?$/.test(window.location.pathname) ? ExhibitionRegistrationPage : PublicApp;
+const PublicPage = /^\/exhibition\/?$/.test(publicPagePath(window.location.pathname)) ? ExhibitionRegistrationPage : PublicApp;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

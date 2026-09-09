@@ -104,9 +104,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:VAYRIA_PUBLIC_VRM = Join-Path $PWD '.wrangler/ci-model.vrm'
           npm run public:build
-      - run: npm run public:check
       - run: npm run production:check
       - run: npm run production:recovery:check
+      - name: Staging build with a non-deployable fixture
+        shell: pwsh
+        run: |
+          $env:VAYRIA_PUBLIC_VRM = Join-Path $PWD '.wrangler/ci-model.vrm'
+          npm run staging:build
+      - run: npm run public:check
 
   deploy-staging:
     name: Deploy staging
@@ -121,7 +126,7 @@ jobs:
     timeout-minutes: 20
     environment:
       name: staging
-      url: https://staging.vayria.me
+      url: https://vayria.me/staging/
     concurrency:
       group: vayria-staging-deployment
       cancel-in-progress: false
@@ -139,7 +144,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.VAYRIA_ASSETS_READ_TOKEN }}
       - name: Build deployable public assets
-        run: npm run public:build
+        run: npm run staging:build
         env:
           VAYRIA_PUBLIC_VRM: .wrangler/public-vrm/model.vrm
       - run: npm run public:check

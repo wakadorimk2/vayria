@@ -3,12 +3,17 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-export const STAGING_URL = 'https://staging.vayria.me';
+export const STAGING_URL = 'https://vayria.me/staging';
 export const PRODUCTION_URL = 'https://vayria.me';
+export function validateBuildBase(html, environment) {
+  const prefix = environment === 'staging' ? '/staging/assets/' : '/assets/';
+  const scripts = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map(match => match[1]);
+  if (!scripts.length || scripts.some(path => !path.startsWith(prefix))) throw new Error('Public build base does not match deployment environment.');
+}
 export function validateTarget(config) {
   if (config.name !== 'vayria-public-staging' || config.account_id !== '7414797104d7aca62f03fbd4faf7e5df' ||
-      config.routes?.length !== 1 || config.routes[0].pattern !== 'staging.vayria.me' || config.routes[0].custom_domain !== true ||
-      config.vars?.PUBLIC_HOSTNAME !== 'staging.vayria.me' || config.vars?.REQUIRE_PREVIEW_ACCESS !== 'true' ||
+      JSON.stringify(config.routes) !== JSON.stringify([{ pattern: 'staging.vayria.me', custom_domain: true }, { pattern: 'vayria.me/staging*', zone_name: 'vayria.me' }]) ||
+      config.vars?.PUBLIC_HOSTNAME !== 'vayria.me' || config.vars?.PUBLIC_BASE_PATH !== '/staging' || config.vars?.REQUIRE_PREVIEW_ACCESS !== 'true' ||
       config.workers_dev !== false || config.preview_urls !== false) throw new Error('Deployment target must be the protected staging Worker.');
 }
 export function validateVrm(bytes, manifest) {
@@ -24,7 +29,7 @@ export function validateProductionTarget(config) {
       config.main !== 'worker/index.ts' || config.routes?.length !== 1 ||
       config.routes[0].pattern !== 'vayria.me' || config.routes[0].custom_domain !== true ||
       config.vars?.PUBLIC_HOSTNAME !== 'vayria.me' || config.vars?.REQUIRE_PREVIEW_ACCESS !== 'false' ||
-      config.vars?.GENERATION_ENABLED !== 'true' || config.vars?.SERVE_PLACEHOLDER === 'true' ||
+      !!config.vars?.PUBLIC_BASE_PATH || config.vars?.GENERATION_ENABLED !== 'true' || config.vars?.SERVE_PLACEHOLDER === 'true' ||
       config.vars?.TURNSTILE_SITE_KEY !== '0x4AAAAAAErpgvhBvYpnRm71' ||
       config.workers_dev !== false || config.preview_urls !== false ||
       config.assets?.directory !== 'dist-public' || config.assets?.binding !== 'ASSETS' ||
@@ -105,6 +110,7 @@ export async function runCd(action, environment = 'staging') {
     return;
   }
   if (action === 'guard') {
+    validateBuildBase(await readFile('dist-public/index.html', 'utf8'), environment);
     if (production) validateProductionActivation(process.env.PRODUCTION_DEPLOY_ENABLED, process.env.STAGING_RESULT);
     validateVrm(await readFile('dist-public/avatar/model.vrm'), pinned);
     const latest = run('gh', ['api', 'repos/wakadorimk2/vayria/git/ref/heads/main', '--jq', '.object.sha'], true);
@@ -134,11 +140,14 @@ export async function runCd(action, environment = 'staging') {
           console.log('Production smoke passed: page, script, avatar, Cookie and generation status. No generation requests.');
           return;
         }
-        const page = await fetch(STAGING_URL, { signal: AbortSignal.timeout(10000) });
-        const api = await fetch(STAGING_URL + '/api/session', { signal: AbortSignal.timeout(10000) });
-        if (page.status !== 401 || !(await page.text()).includes('検証用アクセスチケット') ||
+        const page = await fetch(STAGING_URL + '/', { redirect: 'error', signal: AbortSignal.timeout(10000) });
+        const api = await fetch(STAGING_URL + '/api/session', { redirect: 'error', signal: AbortSignal.timeout(10000) });
+        const html = await page.text();
+        const legacy = await fetch('https://staging.vayria.me/', { redirect: 'manual', signal: AbortSignal.timeout(10000) });
+        if (legacy.status !== 302 || legacy.headers.get('location') !== STAGING_URL + '/') throw new Error('Legacy staging redirect check failed.');
+        if (page.status !== 401 || !html.includes('検証用アクセスチケット') || !html.includes('action="/staging/preview"') ||
             api.status !== 403 || (await api.json()).code !== 'preview_access_required') throw new Error('Staging access gate check failed.');
-        console.log('Staging smoke passed: root 401; session 403. No generation requests.');
+        console.log('Staging smoke passed: mounted root 401; session 403; legacy 302. No generation requests.');
         return;
       } catch (error) {
         if (attempt === 4) {

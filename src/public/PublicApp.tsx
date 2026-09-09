@@ -1,3 +1,4 @@
+import { publicUrl } from './paths';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import App from '../App';
 import { pausePublic, publicExhibition, subscribePublic, updatePublicStatus } from './session';
@@ -23,7 +24,7 @@ export default function PublicApp() {
       pausePublic(); setHandoff(true); setError(false);
       try {
         const request = prepareHandoff(sessionStorage, publicExhibition()?.epoch ?? -1);
-        const response = await fetch('/api/exhibition/next', { method: 'POST',
+        const response = await fetch(publicUrl('/api/exhibition/next'), { method: 'POST',
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
         if (!response.ok) throw new Error('Handoff not confirmed');

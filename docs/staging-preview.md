@@ -13,7 +13,7 @@
 1. 対象PRへ `staging-preview` を付ける。同じリポジトリからmainへ向けた、未マージのPRが対象。
 2. 最新コミットのCI、Python STT、Public checksが成功すると、自動でビルドと配信が進む。CIを重複起動しない。
 3. GitHub Actionsの「Staging preview」でPR番号・コミットを確認する。配信後はWorker VersionとGitHub Deploymentの状態も確認する。
-4. `https://staging.vayria.me` をiPad縦向きで開く。既存の検証用アクセス認証を通す。
+4. `https://vayria.me/staging/` をiPad縦向きで開く。既存の検証用アクセス認証を通す。
 
 新しいPRへラベルを付けると、以前のPRのラベルを外す。対象PRの更新後もCI成功を待って配信する。古いCI結果、別PRのCI結果、失敗したCIでは配信しない。
 

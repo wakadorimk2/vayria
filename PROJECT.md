@@ -26,6 +26,8 @@
 
 ## Next
 
+- → 検証URLを https://vayria.me/staging/ へ移す変更を実装。旧サブドメインは転送する。移行手順: docs/staging-url-migration.md。配信版・台帳を記録し、検証Turnstileへvayria.meを追加済み。未マージ・未配信。本番CD有効のためマージ後は本番更新も動く。記録: docs/staging-url-preflight-2026-09-09.md。
+
 - → 公開版の参加導線: 挨拶ボタン、ガラスパネルのカード開閉、独立した接続案内をローカル実装した。関連テスト371件と展示・公開ビルドが成功。docs/evaluation/public-greeting-entry.md に沿って実AI・iOS・初見利用者を確認する。未公開
 - → 9/9同期完了: この作業へorigin/mainのc0c26fbを取り込んだ。参加導線と停止後通知修正を保持し、公開セッション確認・マイク表示との競合を解消した。関連テスト368件と展示・公開ビルドが成功。改善自体は未コミット・未公開。docs/evaluation/exhibition-participation-research.md の統合記録を参照する
 - → Selectionの参加導線: 一操作での初回交換、18枚の変化予告と話題、同じ質問での比較、返答の振り返り、交代リセットを候補実装した。停止後の音声通知を無視する修正を回帰テストで確認した。docs/evaluation/exhibition-participation-research.md に沿って実AI・実音声と参加率を確認する。模擬応答でのブラウザー操作は確認済み、参加率の改善は未検証

@@ -19,14 +19,15 @@ interface Env {
   GENERATION_ENABLED: string; PUBLIC_HOSTNAME: string;
   REQUIRE_PREVIEW_ACCESS: string; PREVIEW_SECRET: string;
   SERVE_PLACEHOLDER?: string;
+  PUBLIC_BASE_PATH?: string;
 }
 type Visitor = { id: string; exp: number; purpose: 'visitor' };
 type Ticket = { exp: number; purpose: 'tts'; visitor: string; session: string; nonce: string; text: string; emotion: string };
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
-const previewRedirect = (ticket?: string) => new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><title>Vayria</title><a href="/">Vayriaを開く</a></html>', {
+const previewRedirect = (base: string, ticket?: string) => new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><title>Vayria</title><a href="${base}/">Vayriaを開く</a></html>`, {
   status: 303,
-  headers: { Location: '/', 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
-    ...(ticket ? { 'Set-Cookie': `__Host-vayria-preview=${ticket}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400` } : {}) },
+  headers: { Location: `${base}/`, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+    ...(ticket ? { 'Set-Cookie': `${base ? '__Host-vayria-staging-preview' : '__Host-vayria-preview'}=${ticket}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400` } : {}) },
 });
 async function ledger<T>(env: Env, op: string, args: object = {}): Promise<T> {
   const response = await env.USAGE.get(env.USAGE.idFromName('public-ledger-v1')).fetch('https://ledger/', {
@@ -46,23 +47,38 @@ async function codeHash(code: string) {
 }
 async function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
+  const base = env.PUBLIC_BASE_PATH ?? '';
+  if (base !== '' && base !== '/staging') return json({ code: 'configuration_unavailable' }, 503);
+  if (base) {
+    if (url.hostname === 'staging.vayria.me') {
+      const destination = `https://vayria.me/staging${url.pathname}${url.search}`;
+      if (!['GET', 'HEAD'].includes(request.method)) return json({ code: 'staging_url_moved', url: destination }, 409);
+      return new Response(null, { status: 302, headers: { Location: destination, 'Cache-Control': 'no-store' } });
+    }
+    if (url.pathname === base) return new Response(null, { status: 308, headers: { Location: `${base}/${url.search}`, 'Cache-Control': 'no-store' } });
+    if (!url.pathname.startsWith(base + '/')) return json({ code: 'not_found' }, 404);
+    url.pathname = url.pathname.slice(base.length);
+    request = new Request(url, request);
+  }
+  const visitorCookie = base ? '__Host-vayria-staging' : '__Host-vayria';
+  const previewCookie = base ? '__Host-vayria-staging-preview' : '__Host-vayria-preview';
   if (env.SERVE_PLACEHOLDER === 'true') return url.pathname.startsWith('/api/') ? json({ code: 'generation_stopped' }, 503) : env.ASSETS.fetch(request);
   if (env.REQUIRE_PREVIEW_ACCESS === 'true' && url.pathname !== '/api/admin') {
-    const access = await verify<{ exp: number; purpose: string }>(cookie(request, '__Host-vayria-preview'), env.PREVIEW_SECRET);
+    const access = await verify<{ exp: number; purpose: string }>(cookie(request, previewCookie), env.PREVIEW_SECRET);
     // Never pass the form endpoint to Static Assets, including on repeated submissions.
     if (url.pathname === '/preview' && access?.purpose === 'preview') {
       if (request.method !== 'GET' && request.headers.get('Origin') !== url.origin) return json({ code: 'invalid_origin' }, 403);
-      return previewRedirect();
+      return previewRedirect(base);
     }
     if (access?.purpose !== 'preview') {
       if (url.pathname === '/preview' && request.method === 'POST' && request.headers.get('Origin') === url.origin) {
         const form = new URLSearchParams(new TextDecoder().decode(await boundedBody(request, 1024)));
         // The preview credential is a random signed ticket, never an API credential.
         const provided = await verify<{ exp: number; purpose: string }>(form.get('ticket') ?? '', env.PREVIEW_SECRET);
-        if (provided?.purpose === 'preview') return previewRedirect(form.get('ticket')!);
+        if (provided?.purpose === 'preview') return previewRedirect(base, form.get('ticket')!);
       }
       if (url.pathname.startsWith('/api/')) return json({ code: 'preview_access_required' }, 403);
-      return new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#201c30;color:#f4efe6}form{max-width:360px}input,button{box-sizing:border-box;font:inherit;min-height:44px}input{display:block;width:100%;margin:12px 0}button{padding:8px 24px}</style><h1>Vayria 検証環境</h1><form method="post" action="/preview"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"></label><button>開く</button></form></html>', { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+      return new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#201c30;color:#f4efe6}form{max-width:360px}input,button{box-sizing:border-box;font:inherit;min-height:44px}input{display:block;width:100%;margin:12px 0}button{padding:8px 24px}</style><h1>Vayria 検証環境</h1><form method="post" action="/preview"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"></label><button>開く</button></form></html>'.replace('action="/preview"', `action="${base}/preview"`), { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
   }
   if (!url.pathname.startsWith('/api/')) {
@@ -98,14 +114,14 @@ async function handle(request: Request, env: Env): Promise<Response> {
   }
   const known = ['/api/session', '/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts', '/api/exhibition/enroll', '/api/exhibition/next'];
   if (!known.includes(url.pathname)) return json({ code: 'not_found' }, 404);
-  let visitor = await verify<Visitor>(cookie(request, '__Host-vayria'), env.COOKIE_SECRET);
+  let visitor = await verify<Visitor>(cookie(request, visitorCookie), env.COOKIE_SECRET);
   if (visitor?.purpose !== 'visitor') visitor = null;
   if (url.pathname === '/api/session' && request.method === 'GET') {
     const fresh = !visitor;
     visitor ??= { id: crypto.randomUUID(), exp: Date.now() + 90 * 86400000, purpose: 'visitor' };
     const response = json({ ...await ledger<object>(env, 'status', { visitor: visitor.id }), cookieReady: !fresh,
       enabled: env.GENERATION_ENABLED === 'true', siteKey: env.TURNSTILE_SITE_KEY });
-    if (fresh) response.headers.set('Set-Cookie', `__Host-vayria=${await sign(visitor, env.COOKIE_SECRET)}; Path=/; Max-Age=7776000; Secure; HttpOnly; SameSite=Strict`);
+    if (fresh) response.headers.set('Set-Cookie', `${visitorCookie}=${await sign(visitor, env.COOKIE_SECRET)}; Path=/; Max-Age=7776000; Secure; HttpOnly; SameSite=Strict`);
     return response;
   }
   if (!visitor) throw new LimitError('cookie_required', 0, 403);
@@ -253,7 +269,16 @@ async function handle(request: Request, env: Env): Promise<Response> {
   } finally { if (!streaming) await ledger(env, 'finish', { job, measurements, code: request.signal.aborted ? 'cancelled' : signal.aborted ? 'timeout' : outcome }).catch(() => {}); }
 }
 export default { async fetch(request: Request, env: Env) {
-  try { return await handle(request, env); }
+  try {
+    const response = await handle(request, env);
+    const location = response.headers.get('Location');
+    const base = env.PUBLIC_BASE_PATH;
+    if (base === '/staging' && location?.startsWith('/') && !location.startsWith('//') && location !== base && !location.startsWith(base + '/')) {
+      const headers = new Headers(response.headers); headers.set('Location', base + location);
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    }
+    return response;
+  }
   catch (error) {
     if (error instanceof RequestError) return json({ code: 'invalid_request' }, 400);
     const known = error instanceof LimitError;
