@@ -134,6 +134,7 @@ const browserSearch =
   typeof window === 'undefined' ? '' : window.location.search;
 
 export const runtimeConfig = Object.freeze({
+  worldMutationEnabled: mode === 'local' && import.meta.env.VITE_WORLD_MUTATION_ENABLED === 'true',
   apiBaseUrl: readApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
   audioLabEnabled: readAudioLabEnabled(browserSearch),
   sttCaptureEnabled: readSttCaptureEnabled(browserSearch),

@@ -1,0 +1,34 @@
+<!doctype html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>World mutation — SIMULATED QA</title></head><body><div id="root"></div>
+<div style="position:fixed;top:0;left:0;z-index:100;background:#fff0a6;color:#242424;font:12px sans-serif;padding:3px">SIMULATED QA — 画像・会話・音声はテスト用</div>
+<script type="module">
+import {applyMutation} from '/src/world/worldState.ts';
+let attempts = 0;
+const realFetch = window.fetch.bind(window);
+const image = document.createElement('canvas'); image.width = 900; image.height = 900;
+const ctx = image.getContext('2d');
+const background = () => {
+  const gradient = ctx.createLinearGradient(0,0,0,900); gradient.addColorStop(0, '#147591'); gradient.addColorStop(1, '#071c46'); ctx.fillStyle = gradient; ctx.fillRect(0,0,900,900);
+  ctx.strokeStyle='#56bbcc'; for(let x=20;x<900;x+=100){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x-150,900);ctx.stroke();}
+  ctx.fillStyle='#acf2ff'; ctx.font='30px sans-serif';ctx.fillText('SIMULATED UNDERWATER',30,340);return image.toDataURL('image/png');
+};
+const wav = new Uint8Array(44 + 16000);const view = new DataView(wav.buffer);
+const ascii=(offset,text)=>[...text].forEach((c,i)=>wav[offset+i]=c.charCodeAt(0));ascii(0,'RIFF');view.setUint32(4,wav.length-8,true);ascii(8,'WAVEfmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,8000,true);view.setUint32(28,16000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);ascii(36,'data');view.setUint32(40,16000,true);
+window.fetch = async (url, init) => {
+  const path = String(url);
+  if(path.endsWith('/api/world/experiments')) return Response.json({experimentId:crypto.randomUUID(),attempts:0});
+  if(path.endsWith('/api/world/mutate')) {
+    const req=JSON.parse(init.body); const receivedAt=Date.now();
+    await new Promise((resolve,reject)=>{const timer=setTimeout(resolve,2500);init.signal?.addEventListener('abort',()=>{clearTimeout(timer);reject(new DOMException('Aborted','AbortError'));},{once:true});});
+    const mutation={decision:'act',type:'full_scene',interpretation:'テスト用の解釈',action:req.source==='card'?'カードを受けて世界が変わった':'鶏を助け舟にしようとした',sideEffect:'鶏が増えた',nextInterest:'鶏の背中',location:'海底',environment:['水中'],props:[],creatures:req.cardId==='underwater'?[]:[{id:'chicken',label:'鶏',count:req.world.revision+1,scale:req.cardId==='gigantic'?2:1,placement:'right_hand',asset:'chicken'}],removeEntityIds:[],mood:'愉快',absurdityLevel:Math.min(5,req.world.revision+1)};
+    return Response.json({eventId:req.eventId,sessionGeneration:req.sessionGeneration,baseRevision:req.world.revision,mutation,world:applyMutation(req.world,mutation),media:{kind:'image',url:background()},observation:{visible:['テスト用の青い背景'],uncertain:[],differences:[],available:true},attempts:++attempts,timing:{receivedAt,plannedAt:receivedAt+1,generatedAt:Date.now(),observedAt:Date.now()}});
+  }
+  if(path.endsWith('/api/chat')) {
+    const req=JSON.parse(init.body); const context=JSON.parse(req.programContext?.worldContext??'{}');
+    return Response.json({interactionAction:'take_floor',backchannelCue:'none',text:context.phase==='pending'?'何が起きるかな。まだいつもの部屋だね。':`テスト反応：世界${context.displayedWorld?.revision??0}。海底に鶏までいるね。`,emotion:'happy',activatedCards:[req.forcedCardId??req.brainCardIds[0]],speechAct:'react',expressionLevel:'low',externalAction:'speak',usedReasonIds:req.autonomyCandidate?.reasons?.map(r=>r.id)??[],internalDelta:{reasonUpdates:[]}});
+  }
+  if(path.endsWith('/api/tts')) return new Response(wav,{headers:{'Content-Type':'audio/wav'}});
+  if(path.endsWith('/api/events')) return new Response(null,{status:204});
+  return realFetch(url,init);
+};
+await import('/src/main.tsx');
+</script></body></html>

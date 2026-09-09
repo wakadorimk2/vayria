@@ -65,7 +65,7 @@
 }
 .public-layout .app-shell .app-title { top: .75rem; }
 .public-layout .app-shell .volume-slider, .public-layout .app-shell .volume-value { display: none; }
-.public-layout .app-shell[data-app-mode="public"] .message-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; pointer-events: auto; position: fixed; z-index: 25; bottom: var(--public-controls-clearance); left: 1rem; right: 1rem; width: auto; padding: 12px; background: #201c30; border: 1px solid #bca06a; border-radius: 16px; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .message-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; pointer-events: auto; position: fixed; z-index: 25; bottom: var(--public-controls-clearance); left: 1rem; right: 1rem; width: auto; padding: 12px; background: #201c30; border: 1px solid #bca06a; border-radius: 16px; }
 .public-layout .message-form .voice-input-button { display: none; }
 .public-layout .message-form input { min-width: 0; }
 @supports ((backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))) {
@@ -106,67 +106,67 @@
 }
 /* Public pastel stationery palette. Shared exhibition styles remain unchanged. */
 .public-layout { --public-ink: #514456; --public-paper: rgb(241 222 233 / 86%); --public-lavender: rgb(225 210 232 / 86%); --public-accent: #876b90; background: var(--public-bg); color: var(--public-ink); }
-.public-layout .app-shell[data-app-mode="public"],
-.public-layout .app-shell[data-app-mode="public"] .vrm-stage { background: radial-gradient(ellipse at 30% 25%, var(--public-glow-one), transparent 58%), radial-gradient(ellipse at 80% 65%, var(--public-glow-two), transparent 60%), linear-gradient(155deg, var(--public-bg-one), var(--public-bg-two) 72%, var(--public-bg-three)); color: var(--public-ink); }
-.public-layout .app-shell[data-app-mode="public"] .vrm-stage::after { background: none; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain,
-.public-layout .app-shell[data-app-mode="public"] .card-zone__header { opacity: 1; color: var(--public-ink); text-shadow: none; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone__header h2 { font-family: inherit; font-weight: 600; letter-spacing: .04em; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .card-zone__cards { padding: 4px; border: 0; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; gap: 6px; }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card { container-type: inline-size; background: var(--public-paper); border: 0; border-radius: 9px; color: var(--public-ink); opacity: 1; filter: none; box-shadow: 0 5px 18px rgb(78 51 83 / 10%); backdrop-filter: none; -webkit-backdrop-filter: none; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card { background: var(--public-lavender); opacity: 1; }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card::before,
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card__motif,
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card__pip--bottom { display: none; }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card__pip--top { top: 8px; left: 8px; font-size: 10px; color: var(--public-accent); opacity: 1; }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card__label { width: 84%; margin: 0; padding: 0; color: var(--public-ink); font-family: 'Hiragino Maru Gothic ProN', 'Yu Gothic', system-ui, sans-serif; font-size: clamp(10px, 18cqw, 18px); font-weight: 600; line-height: 1.35; letter-spacing: 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; text-align: center; text-shadow: none; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--hand .wildcard-card { margin-left: -3px; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--hand .wildcard-card:first-child { margin-left: 0; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--hand .wildcard-card--selected,
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card:focus-visible { outline: 2px solid var(--public-accent); outline-offset: 3px; box-shadow: 0 8px 18px rgb(57 51 61 / 20%); }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--hand .wildcard-card--selected { --card-lift: -10px; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--selected,
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--drop-target,
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--pending-insertion { background: var(--public-pending); outline: 2px solid var(--public-accent); outline-offset: 2px; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--active { background: var(--public-active); }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--supporting { background: var(--public-supporting); }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card--disabled { box-shadow: 0 2px 5px rgb(57 51 61 / 9%); }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card__status-mark { display: block; position: absolute; bottom: 6px; right: 8px; color: var(--public-focus); font-size: 11px; line-height: 1; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone__action { background: var(--public-hint); border: 0; box-shadow: none; color: var(--public-ink); text-shadow: none; }
-.public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: var(--public-capsule); box-shadow: 0 5px 18px rgb(57 51 61 / 10%); }
-.public-layout .app-shell[data-app-mode="public"] .public-controls__actions button { color: var(--public-ink); }
-.public-layout .app-shell[data-app-mode="public"] .public-controls__actions svg { filter: none; }
-.public-layout .app-shell[data-app-mode="public"] .public-controls__actions button:active { background: rgb(231 224 239 / 80%); }
-.public-layout .app-shell[data-app-mode="public"] .public-controls__progress { border-color: var(--public-progress); border-top-color: var(--public-focus); }
-.public-layout .app-shell[data-app-mode="public"] .public-controls button:focus-visible { outline-color: var(--public-focus); }
-.public-layout .app-shell[data-app-mode="public"] .reply,
-.public-layout .app-shell[data-app-mode="public"] .status,
-.public-layout .app-shell[data-app-mode="public"] .public-controls__panel,
-.public-layout .app-shell[data-app-mode="public"] .message-form,
-.public-layout .app-shell[data-app-mode="public"] .playback-permission { background: var(--public-surface); color: var(--public-ink); border-color: var(--public-border); text-shadow: none; }
-.public-layout .app-shell[data-app-mode="public"] .message-form input { background: var(--public-input); color: var(--public-ink); border-color: var(--public-input-border); }
-.public-layout .app-shell[data-app-mode="public"] .message-form input::placeholder { color: var(--public-muted); }
-.public-layout .app-shell[data-app-mode="public"] .message-form button,
-.public-layout .app-shell[data-app-mode="public"] .public-controls__panel button,
-.public-layout .app-shell[data-app-mode="public"] .playback-permission button { background: var(--public-button); color: var(--public-ink); border-color: var(--public-button-border); }
-.public-layout .app-shell[data-app-mode="public"] .public-controls__panel a { color: var(--public-link); }
-.public-layout .app-shell[data-app-mode="public"] .conversation-error { background: var(--public-error-bg); color: var(--public-error-ink); border-color: var(--public-error-border); text-shadow: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]),
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .vrm-stage { background: radial-gradient(ellipse at 30% 25%, var(--public-glow-one), transparent 58%), radial-gradient(ellipse at 80% 65%, var(--public-glow-two), transparent 60%), linear-gradient(155deg, var(--public-bg-one), var(--public-bg-two) 72%, var(--public-bg-three)); color: var(--public-ink); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .vrm-stage::after { background: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone__header { opacity: 1; color: var(--public-ink); text-shadow: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone__header h2 { font-family: inherit; font-weight: 600; letter-spacing: .04em; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .card-zone__cards { padding: 4px; border: 0; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; gap: 6px; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card { container-type: inline-size; background: var(--public-paper); border: 0; border-radius: 9px; color: var(--public-ink); opacity: 1; filter: none; box-shadow: 0 5px 18px rgb(78 51 83 / 10%); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card { background: var(--public-lavender); opacity: 1; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card::before,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card__motif,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card__pip--bottom { display: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card__pip--top { top: 8px; left: 8px; font-size: 10px; color: var(--public-accent); opacity: 1; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card__label { width: 84%; margin: 0; padding: 0; color: var(--public-ink); font-family: 'Hiragino Maru Gothic ProN', 'Yu Gothic', system-ui, sans-serif; font-size: clamp(10px, 18cqw, 18px); font-weight: 600; line-height: 1.35; letter-spacing: 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; text-align: center; text-shadow: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--hand .wildcard-card { margin-left: -3px; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--hand .wildcard-card:first-child { margin-left: 0; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--hand .wildcard-card--selected,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card:focus-visible { outline: 2px solid var(--public-accent); outline-offset: 3px; box-shadow: 0 8px 18px rgb(57 51 61 / 20%); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--hand .wildcard-card--selected { --card-lift: -10px; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card--selected,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card--drop-target,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card--pending-insertion { background: var(--public-pending); outline: 2px solid var(--public-accent); outline-offset: 2px; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card--active { background: var(--public-active); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card--supporting { background: var(--public-supporting); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card--disabled { box-shadow: 0 2px 5px rgb(57 51 61 / 9%); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card__status-mark { display: block; position: absolute; bottom: 6px; right: 8px; color: var(--public-focus); font-size: 11px; line-height: 1; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone__action { background: var(--public-hint); border: 0; box-shadow: none; color: var(--public-ink); text-shadow: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions { background: var(--public-capsule); box-shadow: 0 5px 18px rgb(57 51 61 / 10%); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions button { color: var(--public-ink); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions svg { filter: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions button:active { background: rgb(231 224 239 / 80%); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__progress { border-color: var(--public-progress); border-top-color: var(--public-focus); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls button:focus-visible { outline-color: var(--public-focus); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .reply,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .status,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__panel,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .message-form,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .playback-permission { background: var(--public-surface); color: var(--public-ink); border-color: var(--public-border); text-shadow: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .message-form input { background: var(--public-input); color: var(--public-ink); border-color: var(--public-input-border); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .message-form input::placeholder { color: var(--public-muted); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .message-form button,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__panel button,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .playback-permission button { background: var(--public-button); color: var(--public-ink); border-color: var(--public-button-border); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__panel a { color: var(--public-link); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .conversation-error { background: var(--public-error-bg); color: var(--public-error-ink); border-color: var(--public-error-border); text-shadow: none; }
 @media (prefers-reduced-transparency: reduce) {
-  .public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: var(--public-opaque); }
+  .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions { background: var(--public-opaque); }
 }
 @media (forced-colors: active) {
-  .public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: Canvas; outline: 1px solid ButtonText; }
-  .public-layout .app-shell[data-app-mode="public"] .public-controls__actions button { color: ButtonText; }
+  .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions { background: Canvas; outline: 1px solid ButtonText; }
+  .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions button { color: ButtonText; }
 }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card__label { max-width: 84%; transform: none; }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card__label::before { display: none; }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card__pip--top { font-size: 11px; color: var(--public-pip); }
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card::after { content: '✧'; position: absolute; bottom: 9px; left: 9px; font-size: 14px; color: var(--public-ornament); pointer-events: none; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone__header h2 { font-family: ui-monospace, 'MS Gothic', monospace; font-size: 12px; letter-spacing: .12em; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--selected,
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card--drop-target { background: var(--public-target); box-shadow: 0 0 14px rgb(248 217 239 / 48%); }
-.public-layout .app-shell[data-app-mode="public"] .public-controls__actions button:active { background: var(--public-pressed); box-shadow: 0 0 10px rgb(255 231 250 / 40%); }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain {
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card__label { max-width: 84%; transform: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card__label::before { display: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card__pip--top { font-size: 11px; color: var(--public-pip); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card::after { content: '✧'; position: absolute; bottom: 9px; left: 9px; font-size: 14px; color: var(--public-ornament); pointer-events: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone__header h2 { font-family: ui-monospace, 'MS Gothic', monospace; font-size: 12px; letter-spacing: .12em; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card--selected,
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card--drop-target { background: var(--public-target); box-shadow: 0 0 14px rgb(248 217 239 / 48%); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions button:active { background: var(--public-pressed); box-shadow: 0 0 10px rgb(255 231 250 / 40%); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain {
   top: calc(env(safe-area-inset-top, 0px) + 12px);
   left: 12px;
   right: 12px;
@@ -174,14 +174,14 @@
   max-width: none;
   transform: none;
 }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .card-zone__header { margin: 0 0 4px; padding: 0; justify-content: flex-start; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .card-zone__header h2 { margin: 0; font-size: 12px; line-height: 16px; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .card-zone__cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 0; width: 100%; }
-.public-layout .app-shell[data-app-mode="public"] .brain-card-float { width: 100%; min-width: 0; max-width: none; }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card { width: 100%; max-width: none; height: auto; aspect-ratio: var(--wildcard-card-ratio); }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain .wildcard-card__label { font-size: clamp(12px, 18cqw, 16px); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .card-zone__header { margin: 0 0 4px; padding: 0; justify-content: flex-start; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .card-zone__header h2 { margin: 0; font-size: 12px; line-height: 16px; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .card-zone__cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 0; width: 100%; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .brain-card-float { width: 100%; min-width: 0; max-width: none; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card { width: 100%; max-width: none; height: auto; aspect-ratio: var(--wildcard-card-ratio); }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain .wildcard-card__label { font-size: clamp(12px, 18cqw, 16px); }
 @media (min-width: 600px) {
-  .public-layout .app-shell[data-app-mode="public"] .card-zone--brain {
+  .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain {
     width: calc(var(--public-card-width) * 5 + 24px);
     left: 50%;
     right: auto;
@@ -189,45 +189,45 @@
   }
 }
 @media (orientation: landscape) and (max-height: 500px) {
-  .public-layout .app-shell[data-app-mode="public"] .card-zone--brain {
+  .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain {
     width: calc(var(--public-card-width) * 5 + 24px);
     left: 50%;
     right: auto;
     transform: translateX(-50%);
   }
 }
-.public-layout .app-shell[data-app-mode="public"] {
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) {
   --public-card-width: calc((100vw - 48px) / 5);
   --exhibition-hand-card-width: var(--public-card-width);
   --exhibition-hand-card-height: calc(var(--public-card-width) * 1.4);
 }
-.public-layout .app-shell[data-app-mode="public"] .card-zone--brain {
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone--brain {
   --exhibition-brain-card-width: var(--public-card-width);
 }
 @media (min-width: 600px) {
-  .public-layout .app-shell[data-app-mode="public"] { --public-card-width: clamp(80px, 10vw, 112px); }
+  .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) { --public-card-width: clamp(80px, 10vw, 112px); }
 }
 @media (orientation: landscape) and (max-height: 500px) {
-  .public-layout .app-shell[data-app-mode="public"] { --public-card-width: 48px; }
+  .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) { --public-card-width: 48px; }
 }
 
 /* Public panels remain mounted so reversing an open/close transition is immediate. */
 .public-controls__panel,
-.public-layout .app-shell[data-app-mode="public"] .message-form {
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .message-form {
   opacity: 0; visibility: hidden; translate: 0 4px; pointer-events: none;
   transition: opacity 300ms ease, translate 300ms ease, visibility 0s linear 300ms;
 }
 .public-controls__panel[data-open="true"],
-.public-layout .app-shell[data-app-mode="public"][data-public-text-input="true"] .message-form {
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"])[data-public-text-input="true"] .message-form {
   opacity: 1; visibility: visible; translate: 0 0; pointer-events: auto;
   transition-delay: 0s;
 }
 @media (prefers-reduced-motion: reduce) {
   .public-controls__panel,
-  .public-layout .app-shell[data-app-mode="public"] .message-form { transition: none; translate: none; }
+  .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .message-form { transition: none; translate: none; }
 }
 
-.public-layout .app-shell[data-app-mode="public"] .card-zone__action { height: 30px; min-height: 30px; white-space: nowrap; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .card-zone__action { height: 30px; min-height: 30px; white-space: nowrap; }
 
 html[data-public-theme="dark"] .public-layout {
  --public-bg: #292331; --public-ink: #F1E8F2; --public-paper: rgb(73 64 82 / 94%); --public-lavender: rgb(84 70 95 / 94%); --public-accent: #CFADD9;
@@ -256,19 +256,19 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-layout :is(.reply,.status,.playback-permission,.card-zone__action,.public-controls__actions,.public-theme label) { transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease; }
 .public-layout .public-controls .public-controls__actions button { transition: background-color 300ms ease, color 300ms ease, transform 300ms ease; }
 .public-layout .public-controls__panel,
-.public-layout .app-shell[data-app-mode="public"] .message-form { transition: opacity 300ms ease, translate 300ms ease, visibility 0s linear 300ms, background-color 300ms ease, color 300ms ease, border-color 300ms ease; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .message-form { transition: opacity 300ms ease, translate 300ms ease, visibility 0s linear 300ms, background-color 300ms ease, color 300ms ease, border-color 300ms ease; }
 .public-layout .public-controls__panel[data-open="true"],
-.public-layout .app-shell[data-app-mode="public"][data-public-text-input="true"] .message-form { transition-delay: 0s; }
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"])[data-public-text-input="true"] .message-form { transition-delay: 0s; }
 .public-layout .message-form :is(input,button), .public-layout .public-controls__panel button { transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease; }
 @supports not ((backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))) {
- .public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: var(--public-opaque); }
+ .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions { background: var(--public-opaque); }
 }
 @media (prefers-reduced-motion: reduce) {
  .public-layout *, .public-layout *::before, .public-layout *::after { transition: none !important; }
 }
 @media (forced-colors: active) {
  .public-layout { --public-ink: CanvasText; --public-paper: Canvas; --public-lavender: Canvas; --public-surface: Canvas; --public-input: Canvas; --public-button: ButtonFace; --public-focus: Highlight; --public-accent: Highlight; }
- .public-layout .app-shell[data-app-mode="public"] .public-controls__actions { background: Canvas; outline: 1px solid ButtonText; }
+ .public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .public-controls__actions { background: Canvas; outline: 1px solid ButtonText; }
  .public-layout .public-theme label:has(:checked) { outline: 1px solid Highlight; }
 }
 @property --public-glow-one { syntax: "<color>"; inherits: true; initial-value: transparent; }
@@ -279,7 +279,7 @@ html[data-public-theme="dark"] { background: #292331; }
  .public-layout { transition: background-color 300ms ease, color 300ms ease, --public-glow-one 300ms ease, --public-glow-two 300ms ease, --public-bg-one 300ms ease, --public-bg-two 300ms ease, --public-bg-three 300ms ease; }
 @media (prefers-reduced-motion: reduce) { .public-layout { transition: none; } }
 
-.public-layout .app-shell[data-app-mode="public"] .wildcard-card {
+.public-layout .app-shell:is([data-app-mode="public"], [data-world-ui="true"]) .wildcard-card {
  transition: transform 150ms ease, box-shadow 150ms ease, border-color 300ms ease, background-color 300ms ease, color 300ms ease;
 }
 .public-layout .wildcard-card :is(.wildcard-card__label,.wildcard-card__pip,.wildcard-card__status-mark) { transition: color 300ms ease; }

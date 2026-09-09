@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.performer-test.json",
+  "compilerOptions": { "outDir": "./node_modules/.tmp/world-test", "tsBuildInfoFile": "./node_modules/.tmp/world-test.tsbuildinfo" },
+  "include": ["src/world/worldState.ts", "src/world/worldDrive.ts", "src/world/worldRuntime.ts", "server/worldProvider.ts", "server/worldService.ts", "scripts/world-mutation.test.ts", "scripts/world-api.test.ts", "scripts/world-presentation.test.ts", "src/vite-env.d.ts"]
+}

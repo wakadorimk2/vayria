@@ -7,6 +7,7 @@ import { createConversationRuntime, type ConversationDependencies, type Conversa
 import type { PerformancePlayback, PerformancePlaybackCallbacks, PerformancePlaybackResult } from '../src/performer/performancePlayback.js';
 import type { PerformancePlan, PerformanceResult } from '../src/performer/types.js';
 import { createSemanticDialogueHistory } from '../src/conversation/semanticDialogueHistory.js';
+import { DEFAULT_PROGRAM_CONTEXT } from '../src/conversation/programContext.js';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -91,6 +92,14 @@ test('text-only response is retained without starting playback', async () => {
   const f = fixture({ isMuted: true }); await f.send('text'); await f.send('next');
   assert.equal(f.plays.length, 0);
   assert.deepEqual(f.requests[1].body.history, [{ role: 'user', content: 'こんにちは' }, { role: 'assistant', content: response.text }]);
+});
+
+test('displayed world supersedes a stale per-turn world context after reset', async () => {
+  const f = fixture({ isMuted: true, programContext: { ...DEFAULT_PROGRAM_CONTEXT, worldContext: 'world 3' } });
+  f.runtime.resetConversation();
+  f.runtime.updateOptions({ isMuted: true, programContext: { ...DEFAULT_PROGRAM_CONTEXT, worldContext: 'world 0' } });
+  await f.runtime.sendManual('こんにちは', cards, () => {}, plan('new'), undefined, { ...DEFAULT_PROGRAM_CONTEXT, worldContext: 'world 3' });
+  assert.equal((f.requests[0].body.programContext as { worldContext: string }).worldContext, 'world 0');
 });
 
 test('mute during playback does not promote generated text to delivered history', async () => {

@@ -487,7 +487,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
   const processTurn = async (turnSource: ConversationSource, message: string | null, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, autonomousContext: AutonomousContext | null, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyCandidate: AutonomyCandidate | null = null, autonomyEvidenceContext: AutonomyEvidenceContext | null = null): Promise<ProcessTurnResult> => {
     const eventEmitter = createConversationEventEmitter(turnSource);
     const messageForRequest = message;
-    const programContextForRequest = programContextOverride ?? programContextRef.current;
+    const programContextForRequest = { ...(programContextOverride ?? programContextRef.current), ...(programContextRef.current.worldContext ? { worldContext: programContextRef.current.worldContext } : {}) };
     const isCardChangeTurn = turnSource === 'autonomous' &&
       cardContext.forcedCardId !== null &&
       programContextForRequest.phase === 'after_card_change';

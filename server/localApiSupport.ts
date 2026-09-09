@@ -199,6 +199,7 @@ export const ALL_CARD_IDS = cardPool.map((card) => card.id);
 export const providerRequestCounts = { active: 0 };
 
 export interface LocalApiConfig {
+  worldMutationEnabled?: boolean;
   openAiApiKey?: string;
   aivisBaseUrl?: string;
   aivisSpeedScale?: string;

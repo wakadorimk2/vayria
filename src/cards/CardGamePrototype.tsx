@@ -54,6 +54,7 @@ interface CardGamePrototypeProps {
   publicMicrophoneState?: MicrophoneState;
   game: CardGamePrototypeController;
   isResetLocked?: boolean;
+  isExchangeLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
   onCardInteraction?: (target: CardInteractionTarget) => void;
   onCardAttentionInput?: (input: CardAttentionInput) => void;
@@ -227,6 +228,7 @@ export function CardGamePrototype({
   publicMicrophoneState = 'off',
   game,
   isResetLocked = false,
+  isExchangeLocked = false,
   onCardInserted,
   onCardInteraction,
   onCardAttentionInput,
@@ -251,7 +253,7 @@ export function CardGamePrototype({
   const suppressNextClickRef = useRef(false);
   const suppressNextAppearanceAttentionRef = useRef(false);
   const brainCardsRef = useRef<HTMLDivElement>(null);
-  const isSpent = zones.remainingInterferenceCount === 0;
+  const isSpent = isExchangeLocked || zones.remainingInterferenceCount === 0;
   const interactionLocked = isSpent;
   const dragActive = dragState?.isDragging === true;
   const visualInteractionLocked = interactionLocked && !dragActive;
@@ -554,7 +556,7 @@ export function CardGamePrototype({
   ]);
 
   const selectionHint =
-    (runtimeConfig.mode === 'exhibition' || runtimeConfig.mode === 'public')
+    (runtimeConfig.mode === 'exhibition' || runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled)
         ? isSpent
           ? 'このターンは操作済み'
           : selectionActive
@@ -667,7 +669,7 @@ export function CardGamePrototype({
       </section>
 
       <section className="card-zone card-zone--hand" aria-label="手札">
-        <header className="card-zone__header card-zone__header--hand" hidden={runtimeConfig.mode === 'public'}>
+        <header className="card-zone__header card-zone__header--hand" hidden={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled}>
           <h2>手札</h2>
           <div className="card-zone__turn-status">
             <span

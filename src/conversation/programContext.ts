@@ -15,6 +15,7 @@ export const PROGRAM_PHASES = [
 export type ProgramPhase = (typeof PROGRAM_PHASES)[number];
 
 export interface ProgramContext {
+  worldContext?: string;
   format: ProgramFormat;
   participantRole: ProgramParticipantRole;
   objective: ProgramObjective;
@@ -42,7 +43,8 @@ export function isProgramContext(value: unknown): value is ProgramContext {
 
   const record = value as Record<string, unknown>;
   return (
-    Object.keys(record).length === 4 &&
+    Object.keys(record).every(key => ['format', 'participantRole', 'objective', 'phase', 'worldContext'].includes(key)) &&
+    (record.worldContext === undefined || (typeof record.worldContext === 'string' && record.worldContext.length <= 12000)) &&
     record.format === DEFAULT_PROGRAM_CONTEXT.format &&
     record.participantRole === DEFAULT_PROGRAM_CONTEXT.participantRole &&
     record.objective === DEFAULT_PROGRAM_CONTEXT.objective &&

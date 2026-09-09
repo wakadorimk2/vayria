@@ -102,6 +102,7 @@ export default defineConfig(({ mode }) => {
     react(),
     localApiPlugin({
       openAiApiKey: resolveOpenAiApiKey(),
+      worldMutationEnabled: appMode === 'local' && serverEnvironment.VITE_WORLD_MUTATION_ENABLED === 'true',
       aivisBaseUrl: serverEnvironment.AIVIS_BASE_URL,
       aivisSpeedScale: serverEnvironment.AIVIS_SPEED_SCALE,
       aivisPitchScale: serverEnvironment.AIVIS_PITCH_SCALE,

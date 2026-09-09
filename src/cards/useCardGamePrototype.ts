@@ -39,18 +39,18 @@ function selectCards(ids: readonly string[]): WildcardCardData[] {
   });
 }
 
-function createInitialState(): CardZoneState {
+function createInitialState(worldEnabled = false): CardZoneState {
   return {
     brain: selectCards(M1_INITIAL_BRAIN_CARD_IDS),
-    hand: selectCards(INITIAL_HAND_IDS),
+    hand: selectCards(INITIAL_HAND_IDS.map(id => worldEnabled && id === 'panic' ? 'underwater' : id)),
     remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
     activatedCardIds: [],
     forcedCardId: null,
   };
 }
 
-export function useCardGamePrototype(unlimitedInterference = false) {
-  const [zones, setZones] = useState<CardZoneState>(createInitialState);
+export function useCardGamePrototype(unlimitedInterference = false, worldEnabled = false) {
+  const [zones, setZones] = useState<CardZoneState>(() => createInitialState(worldEnabled));
   const swapSequenceRef = useRef(0);
   const [selectedBrainCardId, setSelectedBrainCardId] = useState<
     string | null
@@ -124,6 +124,12 @@ export function useCardGamePrototype(unlimitedInterference = false) {
     setSelectedHandCardId(null);
   }, []);
 
+  const resetGame = useCallback(() => {
+    setZones(createInitialState(worldEnabled));
+    setSelectedBrainCardId(null);
+    setSelectedHandCardId(null);
+  }, [worldEnabled]);
+
   const beginReply = useCallback(() => {
     setZones((current) => ({ ...current, activatedCardIds: [] }));
   }, []);
@@ -164,6 +170,7 @@ export function useCardGamePrototype(unlimitedInterference = false) {
     clearReplyPresentation,
     presentReply,
     resetTurn,
+    resetGame,
     selectCard,
     selectedBrainCardId,
     selectedHandCardId,

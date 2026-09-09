@@ -29,3 +29,4 @@ tools/stt/benchmarks/local/
 *.npy
 .public-assets/
 dist-public/
+.world-experiments/
