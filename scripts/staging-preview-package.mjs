@@ -3,7 +3,7 @@ import { resolve, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
-import { validateVrm, validateTarget, STAGING_URL, runCd } from './public-cd.mjs';
+import { validateVrm, validateTarget, validateBuildBase, STAGING_URL, runCd } from './public-cd.mjs';
 import { github, verifySelection, REPOSITORY } from './staging-preview.mjs';
 
 export async function files(root) {
@@ -33,6 +33,7 @@ export async function validatePackage(root, pinned) {
   if (entries.some(name => !name.startsWith('assets/') && name !== 'worker/index.js'))
     throw new Error('Unexpected preview package file');
   validateWorker(await readFile(join(root, 'worker/index.js'), 'utf8'));
+  validateBuildBase(await readFile(join(root, 'assets/index.html'), 'utf8'), 'staging');
   await validateVrm(await readFile(join(root, 'assets/avatar/model.vrm')), pinned);
 }
 export function validateWorker(code) {

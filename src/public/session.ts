@@ -1,3 +1,4 @@
+import { publicUrl } from './paths';
 import { publicErrorMessage } from './errors';
 import { runtimeConfig } from '../runtimeConfig';
 export type PublicStatus = { session: { id: string; expires: number } | null; remainingDay: number; remainingMonth: number;
@@ -65,6 +66,7 @@ export async function publicFetch(path: string, init: RequestInit = {}): Promise
 }
 async function performFetch(path: string, init: RequestInit = {}): Promise<Response> {
   if (runtimeConfig.mode !== 'public') return fetch(path, init);
+  path = publicUrl(path);
   if (!active || !session || session.expires <= Date.now() || document.hidden) {
     pausePublic(); return Response.json({ code: 'session_required', error: publicErrorMessage({ code: 'session_required' }) }, { status: 401 });
   }

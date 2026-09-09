@@ -63,7 +63,7 @@ IP開始試行は分10回、開始成功は時30回・日100回。時間窓の�
 
 ## 検証環境
 
-URL: `https://staging.vayria.me/`。
+移行後のURL: `https://vayria.me/staging/`。パス移行は未配信。切り替え手順は [検証URLの移行](staging-url-migration.md) を参照する。
 アクセスチケットを入力する。未承認では画面とVRMも取得できない。
 管理APIは別の署名付き管理資格情報を検証する。
 `workers.dev` とpreview URLsは無効。
@@ -73,7 +73,7 @@ URL: `https://staging.vayria.me/`。
 ローカル実行:
 
 ```powershell
-npm run public:build
+npm run staging:build
 npm run test:public
 npm run public:check
 npm run public:dev
@@ -91,7 +91,7 @@ Turnstileは検証用と本番用を分離して設定済み（2026-09-08）。
 
 | 用途 | 許可ホスト | サイトキー |
 | --- | --- | --- |
-| 検証 | `staging.vayria.me` | `0x4AAAAAAErno-F0ugJTtA7B` |
+| 検証（移行後） | `vayria.me` | `0x4AAAAAAErno-F0ugJTtA7B` |
 | 本番 | `vayria.me` | `0x4AAAAAAErpgvhBvYpnRm71` |
 
 `node scripts/configure-turnstile.mjs` で同名ウィジェットを再利用し、各WorkerのSecretと設定ファイルを揃える。
@@ -146,7 +146,7 @@ TTSはUTF-16文字数を使って保守的に予約し、その予約額を維�
 これは基盤従量料金、税、為替、他環境の利用を含む請求額の絶対保証ではない。
 
 ```powershell
-$env:VAYRIA_ADMIN_URL = 'https://staging.vayria.me'
+$env:VAYRIA_ADMIN_URL = 'https://vayria.me/staging'
 npm run public:admin -- report
 npm run public:admin -- stop
 npm run public:admin -- configure '{"visitorDay":2,"visitorMonth":10}'
@@ -165,7 +165,7 @@ Cloudflare側の課金アラートはダッシュボードで別途設定する�
 検証環境の更新:
 
 ```powershell
-npm run public:build
+npm run staging:build
 npm run test:public
 npm run public:check
 npx wrangler deploy --config wrangler.public.jsonc --env-file deploy/placeholder.env
@@ -213,7 +213,7 @@ HTTPとNDJSON内のエラーは同じコード対応表から表示する。カ�
 検証環境へ反映する際は、管理CLIを op run 経由で実行し、card だけを20に変更する。変更前後の report で差分を確認する。標準設定は2回のままとする。日額10円、月額100円、音声20回・600文字を変更しない。20回すべての発声を保証しない。使用量もリセットしない。
 
 ```powershell
-# VAYRIA_ADMIN_URL は staging.vayria.me、VAYRIA_ADMIN_SECRET は1Password参照を設定済みとする。
+# VAYRIA_ADMIN_URL は https://vayria.me/staging、VAYRIA_ADMIN_SECRET は1Password参照を設定済みとする。
 op run -- node scripts/public-admin.mjs report
 op run -- node scripts/public-admin.mjs configure '{"card":20}'
 op run -- node scripts/public-admin.mjs report
@@ -263,7 +263,7 @@ op run -- node scripts/public-admin.mjs report
 検証中はこの設定を維持する。自動期限は設けない。回数が残っていても予算到達時は停止する。
 ローカルの復元用記録は `.wrangler/staging-limits-before-20260908.json`。反映後記録は `.wrangler/staging-limits-verified-20260908.json`。
 
-復元時はstaging管理資格情報をプロセス環境へ注入し、接続先を `https://staging.vayria.me` に固定する。
+復元時はstaging管理資格情報をプロセス環境へ注入し、接続先を `https://vayria.me/staging` に固定する。
 reportで現在値を確認した後、今回変更した項目だけを次の値へ戻す。dayBudgetとmonthBudgetはmicro-yen単位。
 
 ```powershell

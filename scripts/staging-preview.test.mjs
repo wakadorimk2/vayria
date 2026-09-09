@@ -105,7 +105,7 @@ test('Worker package cannot read runner files through imports or execute build c
   try {
     await mkdir(join(root, 'worker')); await mkdir(join(root, 'assets/avatar'), { recursive: true });
     await writeFile(join(root, 'worker/index.js'), 'export default {};');
-    await writeFile(join(root, 'assets/index.html'), '<div id="root"></div>');
+    await writeFile(join(root, 'assets/index.html'), '<div id="root"></div><script type="module" src="/staging/assets/app.js"></script>');
     await writeFile(join(root, 'assets/avatar/model.vrm'), avatar);
     await validatePackage(root, pinned);
     await writeFile(join(root, 'wrangler.json'), '{"build":{"command":"malicious"}}');

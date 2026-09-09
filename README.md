@@ -1,5 +1,7 @@
 # Vayria
 
+検証URLの `/staging/` 移行は [移行手順](docs/staging-url-migration.md) を参照してください。実装済み・未配信です。
+
 一般公開版の検証環境、利用枠、Secretsは [一般公開版の運用手順](docs/public-deployment.md) を参照してください。
 本番CDの準備、実機確認表、初回公開、自動更新、切り戻しは [本番公開手順](docs/production-launch.md) を参照してください。本番CDは明示的に有効化するまで実行しません。
 本番の `vayria.me` は、公開前の確認が完了するまで準備中ページを維持します。

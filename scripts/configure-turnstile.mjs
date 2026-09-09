@@ -16,20 +16,28 @@ async function api(path, method = 'GET', body) {
 }
 const widgets = await api('challenges/widgets');
 for (const target of [
-  { name: 'Vayria staging', domain: 'staging.vayria.me', worker: 'vayria-public-staging', config: 'wrangler.public.jsonc' },
+  { name: 'Vayria staging', domain: 'vayria.me', worker: 'vayria-public-staging', config: 'wrangler.public.jsonc' },
   { name: 'Vayria production', domain: 'vayria.me', worker: 'vayria-web', config: 'wrangler.production.jsonc' },
 ]) {
+  if (process.argv.includes('--staging') && target.worker !== 'vayria-public-staging') continue;
+  const config = JSON.parse(await readFile(target.config, 'utf8'));
   let widget = widgets.find(w => w.name === target.name);
+  if (config.vars.TURNSTILE_SITE_KEY && widget?.sitekey !== config.vars.TURNSTILE_SITE_KEY) throw new Error(`Configured widget mismatch for ${target.name}`);
   if (widget) {
     widget = await api(`challenges/widgets/${widget.sitekey}`);
-    if (widget.domains.length !== 1 || widget.domains[0] !== target.domain || widget.mode !== 'managed') {
+    if (target.worker === 'vayria-public-staging' && !widget.domains.includes(target.domain) && widget.mode === 'managed') {
+      widget = await api(`challenges/widgets/${widget.sitekey}`, 'PUT', {
+        name: widget.name, domains: [...widget.domains, target.domain], mode: widget.mode,
+      });
+    }
+    if (!widget.domains.includes(target.domain) || widget.mode !== 'managed' ||
+        (target.worker === 'vayria-web' && widget.domains.length !== 1)) {
       throw new Error(`Review existing widget settings for ${target.name}`);
     }
   } else {
     widget = await api('challenges/widgets', 'POST', { name: target.name, domains: [target.domain], mode: 'managed' });
   }
   await api(`workers/scripts/${target.worker}/secrets`, 'PUT', { name: 'TURNSTILE_SECRET', text: widget.secret, type: 'secret_text' });
-  const config = JSON.parse(await readFile(target.config, 'utf8'));
   config.vars.TURNSTILE_SITE_KEY = widget.sitekey;
   await writeFile(target.config, JSON.stringify(config, null, 2) + '\n');
   const verified = await api(`challenges/widgets/${widget.sitekey}`);

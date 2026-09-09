@@ -77,7 +77,7 @@ jobs:
           node scripts/staging-cd.mjs fixture
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:VAYRIA_PUBLIC_VRM = Join-Path $PWD '.wrangler/ci-model.vrm'
-          npm run public:build
+          npm run staging:build
           exit $LASTEXITCODE
       - run: node scripts/staging-preview-package.mjs pack ../source ../package
         working-directory: control
@@ -94,7 +94,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: staging
-      url: https://staging.vayria.me
+      url: https://vayria.me/staging/
     permissions:
       contents: read
       actions: read

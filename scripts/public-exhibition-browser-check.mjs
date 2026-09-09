@@ -6,14 +6,19 @@ import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
-const root = resolve('dist-public'), output = resolve('.project-view/exhibition-check');
+const mount = process.env.VAYRIA_CHECK_BASE_PATH ?? '';
+if (!['', '/staging'].includes(mount)) throw new Error('Invalid browser check base');
+const root = resolve('dist-public'), output = resolve(mount ? '.project-view/staging-check' : '.project-view/exhibition-check');
 await mkdir(output, { recursive: true });
 const server = createServer(async (req, res) => {
-  const file = resolve(root, '.' + new URL(req.url, 'http://localhost').pathname);
-  if (file !== root && !file.startsWith(root + sep)) { res.writeHead(403); res.end(); return; }
+  const pathname = new URL(req.url, 'http://localhost').pathname;
+  const selectedRoot = mount && !pathname.startsWith(mount + '/') ? resolve('.wrangler/root-build') : root;
+  const relative = mount && pathname.startsWith(mount + '/') ? pathname.slice(mount.length) : pathname;
+  const file = resolve(selectedRoot, '.' + (/^\/exhibition\/?$/.test(relative) ? '/' : relative));
+  if (file !== selectedRoot && !file.startsWith(selectedRoot + sep)) { res.writeHead(403); res.end(); return; }
   try {
-    const content = await readFile(file === root ? resolve(root, 'index.html') : file);
-    res.setHeader('Content-Type', ({ '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' })[extname(file)] || (file === root ? 'text/html' : 'application/octet-stream'));
+    const content = await readFile(file === selectedRoot ? resolve(selectedRoot, 'index.html') : file);
+    res.setHeader('Content-Type', ({ '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' })[extname(file)] || (file === selectedRoot ? 'text/html' : 'application/octet-stream'));
     res.end(content);
   } catch { res.writeHead(404); res.end(); }
 });
@@ -22,6 +27,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge', headless: true,
   args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
 const context = await browser.newContext({ viewport: { width: 1024, height: 1366 }, hasTouch: true, permissions: ['microphone'] });
+let enrolled = true;
 let epoch = 1, session = null, failHandoff = false, failStatus = false, usedYen = 0, handoffs = [], generations = [], microphoneAcquisitions = 0;
 let delayedReply;
 let delayManual = true;
@@ -32,7 +38,7 @@ wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(16000, 24)
 wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(wav.length - 44, 40);
 const exhibition = () => ({ id: 'test', epoch, starts: Date.now() - 10000, expires: Date.now() + 3600000,
   budgetYen: 10000, usedYen, warning: usedYen >= 8000 ? '80' : usedYen >= 5000 ? '50' : null, available: true, revoked: false, stopped: false });
-const status = () => ({ cookieReady: true, enabled: true, siteKey: 'mock', stopped: false, remainingDay: 2, remainingMonth: 10, exhibition: exhibition(), session });
+const status = () => ({ cookieReady: true, enabled: true, siteKey: 'mock', stopped: false, remainingDay: 2, remainingMonth: 10, exhibition: enrolled ? exhibition() : null, session });
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', error => errors.push(String(error)));
@@ -59,6 +65,8 @@ await page.addInitScript(() => {
 await page.route('**/*', async route => {
   const request = route.request(), url = new URL(request.url());
   if (url.origin !== base && !['data:', 'blob:'].includes(url.protocol)) { await route.abort(); return; }
+  if (mount && url.pathname.startsWith('/api/')) throw new Error('Staging requested production API: ' + url.pathname);
+  if (mount && url.pathname.startsWith(mount + '/')) url.pathname = url.pathname.slice(mount.length);
   if (!url.pathname.startsWith('/api/')) { await route.continue(); return; }
   const json = (body, code = 200) => route.fulfill({ status: code, contentType: 'application/json', body: JSON.stringify(body) });
   if (url.pathname === '/api/session') {
@@ -66,6 +74,7 @@ await page.route('**/*', async route => {
     if (failStatus) return json({ code: 'service_unavailable' }, 503);
     return json(status());
   }
+  if (url.pathname === '/api/exhibition/enroll') { enrolled = true; return json(status()); }
   if (url.pathname === '/api/exhibition/next') {
     const input = request.postDataJSON(); handoffs.push(input);
     if (failHandoff) return json({ code: 'network_error' }, 503);
@@ -86,7 +95,7 @@ await page.route('**/*', async route => {
   return json({ code: 'not_found' }, 404);
 });
 try {
-  await page.goto(base);
+  await page.goto(base + mount + '/');
   await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor();
   await page.waitForTimeout(5000);
   assert.equal(generations.length, 0, JSON.stringify(generations)); assert.equal(microphoneAcquisitions, 0);
@@ -162,8 +171,42 @@ try {
   failStatus = true;
   await page.waitForTimeout(16000);
   await page.getByText('利用状況を更新できていません。表示は最後に確認できた値です。', { exact: true }).waitFor();
+  if (mount) {
+    failStatus = false;
+    // The root build shares this browser context but has an independent application state.
+    const rootPage = await context.newPage();
+    await rootPage.route('**/*', async route => {
+      const url = new URL(route.request().url());
+      if (url.origin !== base) return route.abort();
+      if (url.pathname.startsWith('/api/')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ cookieReady: true, enabled: false, session: null, exhibition: null }) });
+      return route.continue();
+    });
+    await rootPage.goto(base + '/');
+    await rootPage.getByRole('button', { name: '設定', exact: true }).click();
+    await rootPage.getByRole('radio', { name: 'ダーク', exact: true }).check({ force: true });
+    assert.equal(await rootPage.evaluate(() => localStorage.getItem('vayria-public-theme')), 'dark');
+    await page.reload();
+    await page.getByRole('button', { name: '設定：展示予算の通知あり', exact: true }).click();
+    await page.getByRole('radio', { name: 'ライト', exact: true }).check({ force: true });
+    assert.equal(await page.evaluate(() => localStorage.getItem('staging:vayria-public-theme')), 'light');
+    assert.equal(await rootPage.evaluate(() => localStorage.getItem('vayria-public-theme')), 'dark');
+    await page.evaluate(() => sessionStorage.setItem('vayria-exhibition-handoff', JSON.stringify({ requestId: 'production-only', epoch: 9 })));
+    await page.reload();
+    await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('staging:vayria-exhibition-handoff')), null);
+    enrolled = false;
+    await page.goto(base + mount + '/exhibition');
+    await page.getByRole('button', { name: 'この端末を登録', exact: true }).waitFor();
+    assert.equal(await page.getByRole('link', { name: '体験画面へ戻る' }).getAttribute('href'), mount + '/');
+    await page.locator('input').fill('a'.repeat(32));
+    await page.getByRole('button', { name: 'この端末を登録', exact: true }).click();
+    await page.waitForURL(base + mount + '/');
+    await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('vayria-exhibition-handoff')).requestId), 'production-only');
+    await rootPage.close();
+  }
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, screenshots: output, checks: ['idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
+  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
 } catch (error) {
   console.error(JSON.stringify({ generations, errors, ui: await page.locator('body').innerText(), sources: await page.evaluate(() => window.exhibitSources) }));
   await page.screenshot({ path: resolve(output, 'failure.png') });
