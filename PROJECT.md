@@ -14,6 +14,8 @@
 
 ## Now
 
+- 🚧 展示準備: 公開版の起動・復旧手順をdocs/exhibition-quickstart.mdへ整理した。9/10までの合計電力と会場回線の確認はdocs/exhibition-power-network-check.md。5候補の比較と期限はdocs/exhibition-readiness.md。実測・実機・Owner評価は未確認
+
 - 公開版と同じURL・ビルドに展示モードを追加する。端末登録、参加者交代、展示枠全体の推計API予算10,000円を使う。手順: docs/public-exhibition.md
 
 - 🔥 [Experience Push Tracker #80](https://github.com/wakadorimk2/vayria/issues/80) — Speed、Conversation、Cardを実装済み。残るEmbodimentをSelectionへ渡せる状態にする
