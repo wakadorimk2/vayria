@@ -1,5 +1,6 @@
 import { createInitialAutonomyState, observeAutonomyEvidence, selectAutonomyCandidate } from '../src/conversation/autonomyState.js';
 import { INITIAL_AUTONOMOUS_CONTEXT } from '../src/conversation/autonomousContext.js';
+import { DEFAULT_PROGRAM_CONTEXT } from '../src/conversation/programContext.js';
 import type { InteractionTimelineEvent } from '../src/conversation/interactionTimeline.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -26,6 +27,7 @@ function fixture(options: ConversationOptions = {}) {
   const results: PerformanceResult[] = [];
   const timeline: InteractionTimelineEvent[] = [];
   const captureEvents: string[] = [];
+  const events: string[] = [];
   let turn = 0;
   let tts: () => Promise<Response> = async () => new Response(new Uint8Array([1]), { headers: { 'content-type': 'audio/wav' } });
   let chat: () => Promise<Response> = async () => Response.json(response);
@@ -44,12 +46,13 @@ function fixture(options: ConversationOptions = {}) {
       requests.push({ url: String(url), body: JSON.parse(String(init?.body)), signal: init?.signal });
       return String(url).endsWith('/chat') ? chat() : tts();
     },
-    createEventEmitter: () => ({ turnId: `turn-${++turn}`, runId: undefined, emit() { } }),
+    createEventEmitter: () => ({ turnId: `turn-${++turn}`, runId: undefined, emit(event) { events.push(event); } }),
     now: () => 100, monotonicNow: () => 100,
     setTimeout: () => 1, clearTimeout() { }, prefersReducedMotion: () => true,
   };
-  const runtime = createConversationRuntime(playback, { ...options, onPerformanceResult: r => results.push(r), onInteractionTimelineEvent: event => timeline.push(event) }, dependencies);
-  return { runtime, requests, plays, results, timeline, captureEvents, setTts(value: typeof tts) { tts = value; }, setChat(value: typeof chat) { chat = value; }, send(id: string) { return runtime.sendManual('こんにちは', cards, () => { }, plan(id)); } };
+  const runtimeOptions = { ...options, onPerformanceResult: (r: PerformanceResult) => results.push(r), onInteractionTimelineEvent: (event: InteractionTimelineEvent) => timeline.push(event) };
+  const runtime = createConversationRuntime(playback, runtimeOptions, dependencies);
+  return { runtime, requests, plays, results, timeline, captureEvents, events, updateOptions(next: ConversationOptions) { Object.assign(runtimeOptions, next); runtime.updateOptions(runtimeOptions); }, setTts(value: typeof tts) { tts = value; }, setChat(value: typeof chat) { chat = value; }, send(id: string) { return runtime.sendManual('こんにちは', cards, () => { }, plan(id)); } };
 }
 
 test('delivery history keeps user-only turns and deduplicates completed units', () => {
@@ -155,6 +158,67 @@ function streamingResponse() {
   ].map(event => JSON.stringify(event)).join('\n') + '\n', { headers: { 'content-type': 'application/x-ndjson' } });
 }
 
+for (const source of ['manual', 'voice'] as const) {
+  for (const streaming of [false, true]) {
+    for (const isExhibitionMode of [false, true]) {
+      test(`muted ${source}, streaming=${streaming}, exhibition=${isExhibitionMode} completes with visible text and no audio`, async () => {
+        const f = fixture({ isMuted: true, isExhibitionMode });
+        f.setChat(async () => streaming ? streamingResponse() : Response.json(response));
+        const send = (id: string) => source === 'manual' ? f.send(id) : f.runtime.sendVoice('こんにちは', cards, () => {}, plan(id));
+        const text = streaming ? '前半。後半。' : response.text;
+        assert.equal(await send('first'), true);
+        assert.equal(f.runtime.getSnapshot().reply, text);
+        assert.equal(f.runtime.getSnapshot().isSubtitleVisible, isExhibitionMode);
+        assert.equal(f.runtime.getSnapshot().status, 'idle');
+        assert.equal(f.runtime.getSnapshot().isBusy, false);
+        assert.equal(f.results.at(-1)?.outcome, 'completed');
+        assert.equal(f.events.filter(e => e === 'turn_completed').length, 1);
+        assert.equal(f.events.includes('turn_aborted'), false);
+        assert.equal(await send('second'), true);
+        assert.deepEqual(f.requests[1].body.history, [{ role: 'user', content: 'こんにちは' }, { role: 'assistant', content: text }]);
+        assert.ok(f.requests.every(r => r.url.endsWith('/chat') && r.body.streamSpeech === false));
+        assert.equal(f.plays.length, 0);
+        assert.deepEqual(f.captureEvents, []);
+        const late = deferred<Response>();
+        f.setChat(() => late.promise);
+        const pending = send('late');
+        await flush();
+        assert.equal(f.runtime.getSnapshot().isSubtitleVisible, false);
+        f.runtime.resetConversation();
+        late.resolve(streaming ? streamingResponse() : Response.json(response));
+        assert.equal(await pending, false);
+        assert.equal(f.runtime.getSnapshot().reply, '');
+        assert.equal(f.runtime.getSnapshot().isSubtitleVisible, false);
+        f.setChat(async () => Response.json(response));
+        await send('after-reset');
+        assert.deepEqual(f.requests.at(-1)?.body.history, []);
+      });
+    }
+  }
+}
+
+test('unmuting a pending text turn keeps it silent and enables audio on the next turn', async () => {
+  const f = fixture({ isMuted: true, isExhibitionMode: true });
+  const chat = deferred<Response>();
+  f.setChat(() => chat.promise);
+  const pending = f.send('text');
+  await flush();
+  f.updateOptions({ isMuted: false });
+  chat.resolve(streamingResponse());
+  assert.equal(await pending, true);
+  assert.equal(f.plays.length, 0);
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.results.at(-1)?.outcome, 'completed');
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, true);
+  f.setChat(async () => Response.json(response));
+  const next = f.send('audible');
+  await flush();
+  assert.equal(f.plays.length, 1);
+  assert.equal(f.requests[1].body.streamSpeech, true);
+  f.plays[0].pending.resolve(result);
+  assert.equal(await next, true);
+});
+
 test('streaming failure retains only completed units and reports partial spoken text', async () => {
   const f = fixture(); f.setChat(async () => streamingResponse());
   const pending = f.send('stream'); await flush();
@@ -237,3 +301,39 @@ test('autonomous history and self context contain only delivered speech', async 
   assert.equal(body.lastSelfUtterance, response.text);
   f.plays[1].pending.resolve(result); await next;
 });
+
+for (const streaming of [false, true]) {
+  test(`muted card insertion completes once without audio, streaming=${streaming}`, async () => {
+    const state = observeAutonomyEvidence(createInitialAutonomyState(), {
+      id: 'card-evidence', kind: 'environment_change', at: Date.now(), semanticKey: 'card:card-a',
+      reasonProposals: [{ kind: 'environment_change', content: 'カード交換', semanticKey: 'card:card-a', salience: 0.82 }],
+    });
+    const candidate = selectAutonomyCandidate(state, { enabled: true, busy: false, floorAvailable: true, attentionAvailable: true, interactionAvailable: true });
+    assert.ok(candidate);
+    const f = fixture({ isMuted: true, isExhibitionMode: true });
+    const payload = { ...response, externalAction: 'speak', usedReasonIds: [candidate.reasons[0].id] };
+    f.setChat(async () => streaming ? new Response([
+      { type: 'speech_unit', index: 0, text: payload.text, response: payload },
+      { type: 'done', response: payload },
+    ].map(e => JSON.stringify(e)).join('\n') + '\n', { headers: { 'content-type': 'application/x-ndjson' } }) : Response.json(payload));
+    const cardContext = { ...cards, forcedCardId: 'card-a' };
+    const program = { ...DEFAULT_PROGRAM_CONTEXT, phase: 'after_card_change' as const };
+    const decision = await f.runtime.sendAutonomous(cardContext, INITIAL_AUTONOMOUS_CONTEXT, () => {}, plan('card'), program, candidate);
+    assert.equal(decision?.externalAction, 'speak');
+    assert.deepEqual(decision?.usedReasonIds, payload.usedReasonIds);
+    assert.equal(f.runtime.getSnapshot().isSubtitleVisible, true);
+    assert.equal(f.results.at(-1)?.outcome, 'completed');
+    assert.equal(f.events.filter(e => e === 'turn_completed').length, 1);
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.requests[0].body.streamSpeech, false);
+    assert.equal(f.plays.length, 0);
+    assert.deepEqual(f.captureEvents, []);
+    // Neither a stale card phase nor a forced card alone admits unsolicited speech.
+    assert.equal(await f.runtime.sendAutonomous(cards, INITIAL_AUTONOMOUS_CONTEXT, () => {}, plan('idle'), program, candidate), null);
+    assert.equal(await f.runtime.sendAutonomous(cardContext, INITIAL_AUTONOMOUS_CONTEXT, () => {}, plan('idle'), DEFAULT_PROGRAM_CONTEXT, candidate), null);
+    assert.equal(f.requests.length, 1);
+    f.setChat(async () => Response.json(response));
+    await f.send('next');
+    assert.deepEqual(f.requests[1].body.history, [{ role: 'assistant', content: response.text }]);
+  });
+}
