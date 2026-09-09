@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="public/vayria-icon.png" width="128" alt="Vayriaのキャラクターアイコン">
-</p>
-
 <h1 align="center">Vayria</h1>
 
 <p align="center">
@@ -10,11 +6,19 @@
   <a href="https://github.com/wakadorimk2/vayria/actions/workflows/ci.yml?query=branch%3Amain+event%3Apush"><img src="https://github.com/wakadorimk2/vayria/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" alt="CI: mainのpush実行結果"></a>
 </p>
 
-Vayria（ヴェイリア）は、会話やカードの交換に、声・表情・動きで応えるAIキャラクターです。
-
-「AIだけでキャラクターが成立するのか知りたい」と思って作っています。
-会話ができることと、キャラクターとして成立することは、どこまで同じなんだろう。
-そこを実際に作って確かめたい、という感じです。
+<table>
+  <tr>
+    <td width="40%" align="center" valign="middle">
+      <a href="docs/images/vayria-kv.png"><img src="docs/images/vayria-kv.png" width="240" alt="カードを手に持つVayriaの全身キービジュアル"></a>
+    </td>
+    <td width="60%" valign="middle">
+      <p>Vayria（ヴェイリア）は、会話やカードの交換に、声・表情・動きで応えるAIキャラクターです。</p>
+      <p>「AIだけでキャラクターが成立するのか知りたい」と思って作っています。</p>
+      <p>会話ができることと、キャラクターとして成立することは、どこまで同じなんだろう。</p>
+      <p>そこを実際に作って確かめたい、という感じです。</p>
+    </td>
+  </tr>
+</table>
 
 ## 今できること
 
