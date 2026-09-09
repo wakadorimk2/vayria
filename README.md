@@ -1,4 +1,14 @@
-# Vayria
+<p align="center">
+  <img src="public/vayria-icon.png" width="128" alt="Vayriaのキャラクターアイコン">
+</p>
+
+<h1 align="center">Vayria</h1>
+
+<p align="center">
+  <a href="https://vayria.me/"><img src="https://img.shields.io/badge/website-vayria.me-8064A2?style=flat" alt="公式サイト: vayria.me"></a>
+  <a href="#試していること"><img src="https://img.shields.io/badge/status-in%20development-777080?style=flat" alt="開発中: 試していること"></a>
+  <a href="https://github.com/wakadorimk2/vayria/actions/workflows/ci.yml?query=branch%3Amain+event%3Apush"><img src="https://github.com/wakadorimk2/vayria/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" alt="CI: mainのpush実行結果"></a>
+</p>
 
 Vayria（ヴェイリア）は、会話やカードの交換に、声・表情・動きで応えるAIキャラクターです。
 
