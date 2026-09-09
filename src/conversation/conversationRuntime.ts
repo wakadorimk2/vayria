@@ -507,7 +507,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         emitTerminalEvent('turn_aborted', { reason: 'missing_candidate' });
         return { completed: false, decision: null };
       }
-      if (isMutedRef.current ||
+      if ((isMutedRef.current && !isCardChangeTurn) ||
         ACTIVE_STATUSES.includes(statusRef.current)) {
         emitTerminalEvent('turn_aborted', {
           reason: isMutedRef.current ? 'muted' : 'busy',
@@ -1059,7 +1059,8 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         onAutonomyDeltaRef.current?.(internalDelta, autonomyDeltaContext);
         if (turnSource === 'voice') floorController.release('response_completed');
         setConversationState('idle', null);
-        const interactionAction = interactionDecision?.action ?? executionPlan.actionDecision?.action;
+        const interactionAction = interactionDecision?.action ??
+          (autonomousDecision ? 'take_floor' : executionPlan.actionDecision?.action);
         emitOwnedResult(executionPlan, 'completed', {
           interactionAction,
           spokenText: deliveredText,
@@ -1069,7 +1070,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
           },
         });
         emitTerminalEvent('turn_completed', { interactionAction });
-        return { completed: true, decision: null };
+        return { completed: true, decision: autonomousDecision };
       }
       if (isMutedRef.current) {
         if (turnSource === 'voice') {

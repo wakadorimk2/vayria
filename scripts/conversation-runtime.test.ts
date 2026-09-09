@@ -1,5 +1,6 @@
 import { createInitialAutonomyState, observeAutonomyEvidence, selectAutonomyCandidate } from '../src/conversation/autonomyState.js';
 import { INITIAL_AUTONOMOUS_CONTEXT } from '../src/conversation/autonomousContext.js';
+import { DEFAULT_PROGRAM_CONTEXT } from '../src/conversation/programContext.js';
 import type { InteractionTimelineEvent } from '../src/conversation/interactionTimeline.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -300,3 +301,39 @@ test('autonomous history and self context contain only delivered speech', async 
   assert.equal(body.lastSelfUtterance, response.text);
   f.plays[1].pending.resolve(result); await next;
 });
+
+for (const streaming of [false, true]) {
+  test(`muted card insertion completes once without audio, streaming=${streaming}`, async () => {
+    const state = observeAutonomyEvidence(createInitialAutonomyState(), {
+      id: 'card-evidence', kind: 'environment_change', at: Date.now(), semanticKey: 'card:card-a',
+      reasonProposals: [{ kind: 'environment_change', content: 'カード交換', semanticKey: 'card:card-a', salience: 0.82 }],
+    });
+    const candidate = selectAutonomyCandidate(state, { enabled: true, busy: false, floorAvailable: true, attentionAvailable: true, interactionAvailable: true });
+    assert.ok(candidate);
+    const f = fixture({ isMuted: true, isExhibitionMode: true });
+    const payload = { ...response, externalAction: 'speak', usedReasonIds: [candidate.reasons[0].id] };
+    f.setChat(async () => streaming ? new Response([
+      { type: 'speech_unit', index: 0, text: payload.text, response: payload },
+      { type: 'done', response: payload },
+    ].map(e => JSON.stringify(e)).join('\n') + '\n', { headers: { 'content-type': 'application/x-ndjson' } }) : Response.json(payload));
+    const cardContext = { ...cards, forcedCardId: 'card-a' };
+    const program = { ...DEFAULT_PROGRAM_CONTEXT, phase: 'after_card_change' as const };
+    const decision = await f.runtime.sendAutonomous(cardContext, INITIAL_AUTONOMOUS_CONTEXT, () => {}, plan('card'), program, candidate);
+    assert.equal(decision?.externalAction, 'speak');
+    assert.deepEqual(decision?.usedReasonIds, payload.usedReasonIds);
+    assert.equal(f.runtime.getSnapshot().isSubtitleVisible, true);
+    assert.equal(f.results.at(-1)?.outcome, 'completed');
+    assert.equal(f.events.filter(e => e === 'turn_completed').length, 1);
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.requests[0].body.streamSpeech, false);
+    assert.equal(f.plays.length, 0);
+    assert.deepEqual(f.captureEvents, []);
+    // Neither a stale card phase nor a forced card alone admits unsolicited speech.
+    assert.equal(await f.runtime.sendAutonomous(cards, INITIAL_AUTONOMOUS_CONTEXT, () => {}, plan('idle'), program, candidate), null);
+    assert.equal(await f.runtime.sendAutonomous(cardContext, INITIAL_AUTONOMOUS_CONTEXT, () => {}, plan('idle'), DEFAULT_PROGRAM_CONTEXT, candidate), null);
+    assert.equal(f.requests.length, 1);
+    f.setChat(async () => Response.json(response));
+    await f.send('next');
+    assert.deepEqual(f.requests[1].body.history, [{ role: 'assistant', content: response.text }]);
+  });
+}

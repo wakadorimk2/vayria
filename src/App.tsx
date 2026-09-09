@@ -489,7 +489,7 @@ export default function App() {
   });
   const characterIdentityRef = useRef<CharacterIdentity>(characterIdentity);
 
-  const pendingCardStimulusRef = useRef<{
+  const [pendingCardStimulus, setPendingCardStimulus] = useState<{
     cardContext: ChatCardContext;
     contribution: DirectionContribution;
     programContext: ProgramContext;
@@ -988,7 +988,7 @@ export default function App() {
             (routerSnapshot.controlState === 'idle' &&
               routerSnapshot.vayriaOutputGate === 'open')),
         attentionAvailable: !isCardSelectionActive,
-        interactionAvailable: isAvatarReady && !isMuted,
+        interactionAvailable: isAvatarReady && (!isMuted || pendingCardStimulus !== null),
       }),
     [
       autonomyState,
@@ -996,6 +996,7 @@ export default function App() {
       isAutonomousLoopEnabled,
       isCardSelectionActive,
       isMuted,
+      pendingCardStimulus,
       isPerformerBusy,
       isSttProcessing,
       isVadSpeech,
@@ -1293,7 +1294,7 @@ export default function App() {
     const initialAutonomyState = createInitialAutonomyState();
     autonomyStateRef.current = initialAutonomyState;
     setAutonomyState(initialAutonomyState);
-    pendingCardStimulusRef.current = null;
+    setPendingCardStimulus(null);
     setProgramPhase(DEFAULT_PROGRAM_CONTEXT.phase);
     setInput('');
     setIsAutonomousLoopEnabled(true);
@@ -1760,6 +1761,7 @@ export default function App() {
       const expectedSessionGeneration = sessionGeneration;
       const isCurrentSession = () =>
         expectedSessionGeneration === sessionGenerationRef.current;
+      const stimulus = pendingCardStimulus;
 
       if (
         !isCurrentSession() ||
@@ -1767,7 +1769,7 @@ export default function App() {
         (runtimeConfig.routerEnabled &&
           (routerSnapshot.controlState !== 'idle' ||
             routerSnapshot.vayriaOutputGate === 'closed')) ||
-        isMuted ||
+        (isMuted && !stimulus) ||
         isBusy ||
         Boolean(activePlanRef.current)
       ) {
@@ -1776,9 +1778,8 @@ export default function App() {
 
       const candidate = options.candidate ?? autonomyCandidate;
       if (!candidate) return 'aborted' as AutonomousTurnOutcome;
-      const stimulus = pendingCardStimulusRef.current;
       if (!allowExhibitionAutonomy(!!exhibitionRegistration, !!stimulus)) return 'aborted' as AutonomousTurnOutcome;
-      pendingCardStimulusRef.current = null;
+      setPendingCardStimulus(null);
       const cardContextOverride =
         options.cardContextOverride ?? stimulus?.cardContext;
       const contribution = options.contribution ?? stimulus?.contribution;
@@ -1834,13 +1835,13 @@ export default function App() {
         });
       };
 
-      if (isExhibitionMode) {
+      if (!isMuted && isExhibitionMode) {
         const audioReady = await prepare();
         if (!audioReady || !isCurrentSession()) {
           cancelPreactivatedPlan();
           return 'aborted' as AutonomousTurnOutcome;
         }
-      } else {
+      } else if (!isMuted) {
         void prepare();
       }
       const currentActivePlan: PerformancePlan | null =
@@ -1851,7 +1852,7 @@ export default function App() {
         currentActivePlan.planId === preactivatedPlan.planId;
       if (
         !isCurrentSession() ||
-        isMuted ||
+        (isMuted && !stimulus) ||
         isBusy ||
         (preactivatedPlan === null
           ? activePlanRef.current !== null
@@ -1906,7 +1907,7 @@ export default function App() {
       setAutonomyState(nextState);
       return decision.externalAction === 'speak' ? 'speak' : 'none';
     },
-    [exhibitionRegistration, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleReplyAccepted, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, pendingActivatedCardIdsRef, prepare, executeNonSpeechPlan],
+    [pendingCardStimulus, exhibitionRegistration, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleReplyAccepted, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, pendingActivatedCardIdsRef, prepare, executeNonSpeechPlan],
   );
 
   const handleCardInserted = useCallback(
@@ -1970,8 +1971,8 @@ export default function App() {
         cardDropReactionPlanIdsRef.current.add(reactionPlan.planId);
         executeNonSpeechPlan(reactionPlan);
       }
-      if (!isAutonomousLoopEnabled || isMuted) return;
-      pendingCardStimulusRef.current = {
+      if (!isAutonomousLoopEnabled) return;
+      setPendingCardStimulus({
         cardContext: {
           brainCardIds: result.brainCardIds,
           forcedCardId: result.forcedCardId,
@@ -1981,7 +1982,7 @@ export default function App() {
           ...programContext,
           phase: 'after_card_change',
         },
-      };
+      });
     },
     [activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
@@ -2033,9 +2034,9 @@ export default function App() {
     isBusy: isPerformerBusy,
     isVoiceActivityActive: isVadSpeech || isSttProcessing,
     isLoopEnabled: isAutonomousLoopEnabled && (runtimeConfig.mode !== 'public' || publicSessionActive),
-    isMuted,
+    isMuted: isMuted && pendingCardStimulus === null,
     isReady:
-      isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
+      isAvatarReady && (!isExhibitionMode || isAudioUnlocked || (isMuted && pendingCardStimulus !== null)),
     onCandidate: startAutonomous,
     onGateEvent: emitAutonomyGateEvent,
     sessionGeneration,
