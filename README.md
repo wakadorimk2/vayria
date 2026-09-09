@@ -1,5 +1,13 @@
 # Vayria
 
+2026年9月23日の展示は、iPadから会場Wi-Fiで公開URLへ接続する方針です。公開版の端末登録式展示機能を使用します。配信・実機確認の成功は別途確認します。
+
+- [展示当日のクイックスタート](docs/exhibition-quickstart.md)
+- [展示準備台帳と5候補の比較](docs/exhibition-readiness.md)
+- [電力・回線確認票](docs/exhibition-power-network-check.md)
+
+当日はWindows Mobile Hotspot、テザリング、モバイルルーターを代替回線にしません。PC稼働とiPad充電を含む合計100W以内を実測します。
+
 一般公開版の検証環境、利用枠、Secretsは [一般公開版の運用手順](docs/public-deployment.md) を参照してください。
 本番CDの準備、実機確認表、初回公開、自動更新、切り戻しは [本番公開手順](docs/production-launch.md) を参照してください。本番CDは明示的に有効化するまで実行しません。
 本番の `vayria.me` は、公開前の確認が完了するまで準備中ページを維持します。
@@ -135,11 +143,13 @@ Vayriaの発話中は、既存のbusy制御で新しい自律候補を開始し�
 
 ## 音声入力
 
+以下のPython STT・Remote PCMの説明は、旧ローカル構成の`exhibition`モードを対象にします。9/23の公開版展示では [公開版の展示モード](docs/public-exhibition.md) を参照してください。
+
 `local`モードでは、会話欄の`🎙 聞く`を押すとマイク入力を開始します。
 利用可能な場合は、ブラウザーの`SpeechRecognition`を使用します。
 `exhibition`モードでは、画面上部の`音声とマイクを有効化`を最初に押してください。
 音声再生とマイク入力を同時に開始し、成功後は操作ボタンを隠します。
-展示では、`AudioWorklet`で16 kHz、モノラル、PCM16へ変換し、
+旧ローカル構成の`exhibition`では、`AudioWorklet`で16 kHz、モノラル、PCM16へ変換し、
 同一originの`/api/voice-stream`へWebSocket送信します。
 
 ViteはPCMを解釈しません。ViteはPCMを`127.0.0.1`のPython STTサービスへ中継します。
@@ -149,7 +159,7 @@ PythonサービスはWebRTC VADとfaster-whisperを実行します。
 音声認識は全二重です。Vayriaが話している間も入力を受け付けます。
 ユーザーの発話が確定すると、現在のLLM、TTS、音声再生を中断します。
 
-展示モードではHTTPSとPython STTサービスが必要です。
+旧ローカル構成の`exhibition`ではHTTPSとPython STTサービスが必要です。
 音声入力を利用できない場合は、テキスト入力を使用してください。
 スピーカー使用時はVayriaの音声を認識する可能性があります。初回確認ではヘッドセットを推奨します。
 音声データは録音ファイルへ保存しません。
@@ -187,7 +197,7 @@ http://127.0.0.1:5187/?router=1&audioLab=1
 Vayria音声をB1へ戻すと、Vayria自身の発話をSTTが再認識する可能性があります。
 自己認識ループを防ぐため、Vayria音声はB1へ送らないでください。
 
-展示音声入力は、Python STTが`ws://127.0.0.1:8787/stream`で待ち受ける必要があります。
+旧ローカル構成の音声入力は、Python STTが`ws://127.0.0.1:8787/stream`で待ち受ける必要があります。
 次のコマンドは、Windows Mobile HotspotのIPv4を実行時に検出し、検出したインターフェースだけへ展示フロントをbindしたうえで、固定パスのAivisSpeech CLI、uv経由のPython STT、npm経由の展示フロントを起動します。
 OpenAI API keyは`.env.local`へ保存せず、1Passwordから起動プロセスへ注入します。
 
@@ -547,10 +557,13 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 | モード | 用途 | 初期接続先 |
 | --- | --- | --- |
 | `local` | Windows PC 内の開発 | `127.0.0.1:5187` |
-| `exhibition` | Windows PC と iPad の専用Hotspot接続 | 検出したHotspot IPv4:5187 |
-| `public` | 将来の HTTPS 公開 | 今回は公開サーバーを提供しません |
+| `exhibition` | 旧ローカル構成の参考・開発検証。9/23の標準構成ではない | 検出したHotspot IPv4:5187 |
+| `public` | 公開APIを使うブラウザー利用。9/23は端末登録式展示機能を使用 | 配信確認済みの公開HTTPS URL |
 
-展示モードの主URLは`https://vayria.local:5187`です。mDNSが競合・権限・Firewallなどで利用できない場合は、起動ログと`GET /api/health`に表示される実行時検出のHotspot IPを確認します。fallback IPが証明書SANに含まれない場合は、TLS有効なURLとして表示せず、主URLの復旧または現在のIPを含む証明書の再生成が必要です。Internet断でも`localNetwork`とローカルUIは維持され、`internet`だけが`unavailable`になります。
+公開版の展示機能は、`public`モードの同じURL・ビルドで端末を登録して使用します。旧`exhibition`モードへの切替ではありません。iPadは会場Wi-Fiから直接インターネットへ接続します。PCとの端末間通信やmDNSは不要です。
+公開版の実装と運用は [一般公開版の運用手順](docs/public-deployment.md)、登録・交代は [公開版の展示モード](docs/public-exhibition.md) を参照してください。
+
+旧ローカル構成の`exhibition`の主URLは`https://vayria.local:5187`です。mDNSが競合・権限・Firewallなどで利用できない場合は、起動ログと`GET /api/health`に表示される実行時検出のHotspot IPを確認します。fallback IPが証明書SANに含まれない場合は、TLS有効なURLとして表示せず、主URLの復旧または現在のIPを含む証明書の再生成が必要です。Internet断でも`localNetwork`とローカルUIは維持され、`internet`だけが`unavailable`になります。
 
 ### 展示コピー
 
@@ -564,7 +577,9 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 
 > 気になるカードを一枚、Vayriaの脳内へ。
 
-### iPad 展示の確認
+### 旧ローカル構成のiPad接続確認（参考）
+
+以下はHotspotを利用できる環境での旧構成の参考手順です。9/23の会場では実行しません。当日は [展示クイックスタート](docs/exhibition-quickstart.md) に従います。
 
 1. `.env.example` を `.env.local` へコピーし、AivisSpeechの設定を記述します。
    OpenAI API keyは`.env.local`へ書かず、セットアップの1Password手順で構成します。
@@ -619,7 +634,7 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    `$env:VAYRIA_AIVIS_INSTALL_PATH`を設定してください。
    `AIVIS_BASE_URL`は引き続き `http://127.0.0.1:10101` を使用します。
 
-6. Windows SettingsでMobile Hotspotを初回設定します。SSIDは`Vayria-Exhibition`、パスワード、帯域を確認し、展示時にHotspotをONにします。Hotspotの自動ON/OFFやSSID変更はこのリポジトリから行いません。
+6. Windows SettingsでMobile Hotspotを初回設定します。SSIDは`Vayria-Exhibition`、パスワード、帯域を確認し、この旧構成を検証する環境でHotspotをONにします。Hotspotの自動ON/OFFやSSID変更はこのリポジトリから行いません。
 
    ```powershell
    Start-Process 'ms-settings:network-mobilehotspot'
@@ -627,7 +642,7 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 
 7. 対象worktreeで、Python STTとexhibitionフロントを起動します。
 
-   展示当日の短い手順は[`docs/exhibition-quickstart.md`](docs/exhibition-quickstart.md)を参照してください。
+   9/23当日はこの起動コマンドを使わず、[公開版の展示クイックスタート](docs/exhibition-quickstart.md)を参照してください。
 
    ```powershell
    npm run exhibition:start:op
@@ -640,7 +655,7 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
    Windows Terminalがない場合は、サービスごとのPowerShell別窓を使用します。
    AivisSpeechがzonokoを提供し、Python STTが`127.0.0.1:8787`で待ち受けた後、
    exhibitionフロントを起動します。
-   起動ログに表示された`https://vayria.local:5187`をiPadで開きます。mDNSが使えない場合は、診断でfallback IPが証明書SANに含まれることを確認できたときだけfallback URLを使います。iPadは会場Wi-Fiへ接続せず、`Vayria-Exhibition`だけに接続します。
+   起動ログに表示された`https://vayria.local:5187`をiPadで開きます。mDNSが使えない場合は、診断でfallback IPが証明書SANに含まれることを確認できたときだけfallback URLを使います。この旧構成の検証時だけ、iPadを検証用Hotspotへ接続します。9/23は会場Wi-Fiから公開URLへ接続します。
    制御タブで`Ctrl+C`を押すと、このコマンドが起動したサービスの親子プロセスを停止します。
    サービスタブで`Ctrl+C`を押すと、そのサービスだけを停止します。
    既に正常なAivisSpeechが起動中の場合は再利用し、そのプロセスは停止しません。
@@ -689,7 +704,9 @@ ARDY の source、Python 環境、checkpoint、LLM cache、生成途中ファイ
 実機用のexhibition設定は、worktreeに関係なく`5187`を使用します。
 通常のlocal開発だけが、worker worktreeごとに`5188`から`5210`のポートを使用します。
 
-### 展示中の受動ログとOwner観察
+### 旧ローカル構成の受動ログとOwner観察（参考）
+
+以下のキャプチャ・observe・export・診断は、旧`exhibition`モード専用です。公開版の運営・集計手順として使用しません。
 
 `npm run dev:exhibition`は、起動から停止までを1つの展示キャプチャとして保存します。
 通常の`npm run dev`は展示キャプチャを保存しません。
@@ -746,9 +763,9 @@ playcheck-results/local/exhibition/<captureId>/
 展示イベントには発話本文、履歴、API key、個人情報を保存しません。
 Ownerも、メモと理由へ発話本文、履歴、API key、個人情報を貼り付けません。
 `playcheckRunId`がある既存のPlaycheckイベントは、従来のraw保存を優先します。
-`public`モードのユーザー入力は今回実装しません。
+このローカルキャプチャは`public`モードの入力を収集しません。公開版の文字・カード・音声入力とセッション管理は [一般公開版の運用手順](docs/public-deployment.md) を参照してください。
 
-展示前に、読み取り専用診断を実行します。
+旧ローカル構成の検証前に、読み取り専用診断を実行します。
 
 ```powershell
 npm run exhibition:check
@@ -765,8 +782,8 @@ New-NetFirewallRule -DisplayName 'Vayria Exhibition mDNS UDP 5353 (Private)' -Di
 
 `VITE_API_BASE_URL=/` は現在のページと同じ接続先を使用します。別の HTTPS API を使用する場合だけ、`VITE_API_BASE_URL` を変更します。
 
-`public` モードは将来の公開用設定名です。公開 URL、公開中継、認証、永続セッション管理は今回の対象外です。
-展示音声入力は`getUserMedia()`を使用します。HTTPSページでマイク許可を与えてください。
+`public`モードには公開API、認証、セッション管理を実装しています。配信状態と実機結果は運用時に確認します。上記のHotspot・Python STT診断は公開版には適用しません。
+旧ローカル構成の音声入力は`getUserMedia()`を使用します。HTTPSページでマイク許可を与えてください。
 Pythonサービスは`127.0.0.1`だけで待ち受けます。iPadからPythonポートへ直接接続しません。
 
 `.env.local`、`public/avatar/*.vrm`、生成途中の motion asset は Git の追跡対象外です。
