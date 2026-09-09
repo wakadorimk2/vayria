@@ -23,6 +23,11 @@ test('exhibit enrollment, repeated handoff, revoked access and budget rejection 
   const admin = input => post('/api/admin', input, '', { Authorization: `Bearer ${token}` });
   const cookie = async () => (await mf.dispatchFetch(base + '/api/session')).headers.get('set-cookie').split(';')[0];
   try {
+    for (const path of ['/exhibition', '/exhibition/']) {
+      const page = await mf.dispatchFetch(base + path);
+      assert.equal(page.status, 200);
+      assert.equal(await page.text(), 'public app');
+    }
     const a = await cookie(), b = await cookie();
     const config = { op: 'exhibition-create', event: 'test', starts: Date.now() - 1000, expires: Date.now() + 3600000, budget: 1 };
     assert.equal((await post('/api/admin', config)).status, 401);

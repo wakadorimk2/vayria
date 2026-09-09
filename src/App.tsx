@@ -1,3 +1,4 @@
+import { calculateSettingsLayout, type AvatarScreenBounds } from './public/settingsLayout';
 import {
   useCallback,
   useEffect,
@@ -425,6 +426,9 @@ export default function App() {
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public';
+  const [publicAvatarBounds, setPublicAvatarBounds] = useState<AvatarScreenBounds | null>(null);
+  const [publicSettingsOpen, setPublicSettingsOpen] = useState(false);
+  const publicSettingsLayout = calculateSettingsLayout(publicAvatarBounds);
   const [publicTextInputOpen, setPublicTextInputOpen] = useState(false);
   const [publicCardsOpen, setPublicCardsOpen] = useState(false);
   const [publicGreetingComplete, setPublicGreetingComplete] = useState(false);
@@ -2498,6 +2502,8 @@ export default function App() {
           listeningReaction={listeningReaction}
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
+          onScreenBounds={runtimeConfig.mode === 'public' ? setPublicAvatarBounds : undefined}
+          horizontalOffset={runtimeConfig.mode === 'public' && publicSettingsOpen ? publicSettingsLayout.avatarOffset : 0}
           performancePlan={activePlan ?? undefined}
           ref={stageRef}
           sessionGeneration={sessionGeneration}
@@ -2663,6 +2669,8 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
+          settingsLayout={publicSettingsLayout}
+          onSettingsOpenChange={setPublicSettingsOpen}
           cardsOpen={publicCardsOpen}
           textOpen={publicTextInputOpen}
           onCardsToggle={togglePublicCards}

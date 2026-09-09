@@ -50,12 +50,12 @@
 .public-layout .public-entry .public-entry__title { font-size: 17px; font-weight: 600; }
 .public-layout .public-entry button { color: var(--public-ink); background: var(--public-button); border-color: var(--public-button-border); margin: 6px 0; }
 .public-layout .public-entry .public-entry__greeting { min-height: 48px; padding: 10px 30px; font-size: 16px; }
-.public-layout .public-entry--notice { background: var(--public-surface); text-align: left; }
+.public-layout .public-entry--notice { z-index: 3; background: var(--public-surface); text-align: left; }
 .public-layout .public-entry--notice iframe { max-width: 100%; }
 .public-layout .public-controls__actions button[aria-expanded="true"] { background: var(--public-on); }
 @media (max-height: 500px) { .public-layout .public-entry { max-height: 32dvh; padding: 6px 12px; } }
 .public-controls { position: absolute; z-index: 30; inset: auto 0 var(--public-controls-bottom); display: flex; justify-content: center; color: #f4efe6; font-size: 13px; background: none; pointer-events: none; }
-.public-controls__actions { display: flex; justify-content: center; gap: 4px; padding: 6px; border: 0; border-radius: 999px; background: rgb(38 31 53 / 88%); box-shadow: 0 6px 20px rgb(10 7 20 / 18%); pointer-events: auto; }
+.public-controls__actions { position: relative; z-index: 2; display: flex; justify-content: center; gap: 4px; padding: 6px; border: 0; border-radius: 999px; background: rgb(38 31 53 / 88%); box-shadow: 0 6px 20px rgb(10 7 20 / 18%); pointer-events: auto; }
 .public-controls .public-controls__actions button { display: inline-flex; align-items: center; justify-content: center; width: 48px; min-width: 48px; height: 48px; padding: 12px; margin: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; transition: background-color 300ms ease, transform 300ms ease; }
 .public-controls .public-controls__actions button:active { transform: scale(.94); background: rgb(255 255 255 / 16%); }
 .public-controls__actions svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 2px rgb(12 8 22 / 65%)); }
@@ -65,7 +65,11 @@
 .public-controls .public-controls__close { display: block; margin-left: auto; }
 .public-controls button { padding: 8px 12px; margin: 0 6px 4px 0; min-height: 44px; border: 1px solid #bca06a; border-radius: 16px; color: #f4efe6; background: #453957; cursor: pointer; }
 .public-controls button:disabled { opacity: .5; cursor: default; }
-.public-controls__panel { position: absolute; bottom: calc(100% + 16px); left: 50%; transform: translateX(-50%); width: min(380px, calc(100vw - 2rem)); max-height: min(55dvh, 440px, calc(100dvh - var(--public-controls-clearance) - 16px)); overflow: auto; padding: 16px; border: 1px solid #bca06a; border-radius: 16px; background: #201c30; box-shadow: 0 12px 32px #0008; pointer-events: auto; }
+.public-controls__panel { display: flex; flex-direction: column; z-index: 1; position: fixed; inset: 0 16px 0 auto; width: 480px; height: 100dvh; max-width: 100vw; max-height: 100dvh; box-sizing: border-box; margin: 0; overflow: hidden; padding: 0; border: 1px solid var(--public-accent); border-radius: 0; background: #201c30; box-shadow: 0 12px 32px #0008; pointer-events: auto; font: inherit; font-size: 16px; }
+.public-layout .public-controls .public-controls__panel[data-open] { overflow: hidden; translate: none; }
+.public-controls__panel-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 24px max(24px, env(safe-area-inset-bottom)); }
+.public-controls__panel[data-layout="panel"] { inset: max(16px, env(safe-area-inset-top)) 16px calc(var(--public-controls-bottom) + var(--public-controls-height) + 16px); margin: 0; width: auto; height: auto; max-height: none; border-radius: 20px; }
+.public-controls__panel[data-layout="panel"] .public-controls__panel-body { padding-right: 20px; padding-left: 20px; }
 .public-controls__panel[hidden] { display: none; }
 .public-controls p { margin: 0 0 12px; line-height: 1.6; }
 .public-controls label { display: flex; align-items: center; gap: 6px; min-height: 44px; }
@@ -262,7 +266,7 @@ html[data-public-theme="dark"] .public-layout {
 html[data-public-theme] { background: #cbbacb; }
 html[data-public-theme="dark"] { background: #292331; }
 .public-controls__panel h2 { margin: 0 0 16px; font-size: 18px; }
-.public-controls__panel h3 { margin: 18px 0 10px; font-size: 14px; }
+.public-controls__panel h3 { margin: 24px 0 12px; font-size: 16px; }
 .public-theme { display: flex; gap: 4px; padding: 0; margin: 0; border: 0; min-width: 0; }
 .public-theme legend { margin-bottom: 8px; }
 .public-theme label { flex: 1; min-width: 0; min-height: 44px; justify-content: center; border-radius: 12px; cursor: pointer; }
@@ -304,7 +308,7 @@ html[data-public-theme="dark"] { background: #292331; }
  html[data-public-theme] .public-layout { --public-ink: CanvasText; --public-paper: Canvas; --public-lavender: Canvas; --public-surface: Canvas; --public-input: Canvas; --public-button: ButtonFace; --public-focus: Highlight; --public-accent: Highlight; }
 }
 
-.public-controls__panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.public-controls__panel-header { display: flex; flex: none; align-items: center; justify-content: space-between; padding: max(16px, env(safe-area-inset-top)) 20px 12px; }
 .public-controls__panel-header h2 { margin: 0; }
 .public-layout .public-controls .public-controls__close { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-width: 44px; padding: 10px; margin: 0; border: 0; border-radius: 50%; background: transparent; }
 .public-controls__close svg, .public-theme svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -320,9 +324,15 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-layout .public-exhibition-handoff button { min-height: 44px; padding: 8px 18px; border-radius: 24px; background: var(--public-surface); color: var(--public-ink); border: 1px solid currentColor; font: inherit; }
 .public-exhibition-notification { position: absolute; top: 0; right: 0; min-width: 18px; border-radius: 50%; background: var(--public-ink); color: var(--public-paper); font-size: 13px; text-align: center; }
 .public-exhibition-settings { margin: 16px 0; }
-.public-exhibition-settings summary { cursor: pointer; min-height: 44px; align-content: center; }
-.public-exhibition-settings input { display: block; width: 100%; box-sizing: border-box; min-height: 44px; margin: 8px 0; font: inherit; }
-.public-controls .public-exhibition-settings label { display: block; }
+.public-registration-layout { overflow-y: auto; padding: max(32px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom)); box-sizing: border-box; }
+.public-registration { max-width: 560px; margin: 0 auto; padding: 24px; border-radius: 20px; background: var(--public-paper); color: var(--public-ink); font-size: 16px; line-height: 1.7; }
+.public-registration h1 { margin-top: 0; font-size: 26px; }
+.public-registration input { display: block; width: 100%; box-sizing: border-box; min-height: 48px; margin: 8px 0 16px; padding: 8px; font: inherit; color: inherit; background: var(--public-bg); border: 1px solid var(--public-accent); border-radius: 8px; }
+.public-registration button { min-height: 44px; padding: 8px 16px; margin: 8px 12px 8px 0; font: inherit; color: var(--public-ink); background: var(--public-lavender); border: 1px solid var(--public-accent); border-radius: 10px; cursor: pointer; }
+.public-registration button:disabled { opacity: .5; cursor: default; }
+.public-registration a { display: inline-block; padding: 10px 0; color: var(--public-link); }
+.public-registration summary { min-height: 44px; align-content: center; cursor: pointer; }
+.public-registration :focus-visible { outline: 2px solid var(--public-focus); outline-offset: 3px; }
 .public-handoff { box-sizing: border-box; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px; text-align: center; }
 .public-handoff h1 { font-size: clamp(20px, 3vw, 28px); }
 .public-handoff button { min-height: 48px; padding: 12px 24px; font: inherit; }

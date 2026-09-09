@@ -65,7 +65,17 @@ async function handle(request: Request, env: Env): Promise<Response> {
       return new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#201c30;color:#f4efe6}form{max-width:360px}input,button{box-sizing:border-box;font:inherit;min-height:44px}input{display:block;width:100%;margin:12px 0}button{padding:8px 24px}</style><h1>Vayria 検証環境</h1><form method="post" action="/preview"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"></label><button>開く</button></form></html>', { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
   }
-  if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
+  if (!url.pathname.startsWith('/api/')) {
+    if (/^\/exhibition\/?$/.test(url.pathname)) {
+      const assetUrl = new URL(request.url);
+      assetUrl.pathname = '/';
+      const response = await env.ASSETS.fetch(new Request(assetUrl, request));
+      const headers = new Headers(response.headers);
+      headers.set('X-Robots-Tag', 'noindex');
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    }
+    return env.ASSETS.fetch(request);
+  }
   if (request.method !== 'GET' && request.headers.get('Origin') !== url.origin) throw new LimitError('invalid_origin', 0, 403);
   if (url.pathname === '/api/admin' && request.method === 'POST') {
     const token = request.headers.get('Authorization')?.replace(/^Bearer /, '') ?? '';
