@@ -1,3 +1,5 @@
+import { captureAvatarPoints, projectAvatarBounds } from './screenBounds';
+import type { AvatarScreenBounds } from './screenBounds';
 import { AvatarLoadOwnership } from './avatarLoadOwnership';
 import {
   forwardRef,
@@ -235,6 +237,8 @@ interface VrmStageProps {
   motionScale?: number;
   mouthOpen: number;
   onReady?: () => void;
+  onScreenBounds?: (bounds: AvatarScreenBounds | null) => void;
+  horizontalOffset?: number;
   performancePlan?: PerformancePlan;
   sessionGeneration?: number;
   spatialTargetRegistry?: SpatialTargetRegistry;
@@ -486,6 +490,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       motionScale = 1,
       mouthOpen,
       onReady,
+      onScreenBounds,
+      horizontalOffset = 0,
       performancePlan,
       sessionGeneration = 0,
       spatialTargetRegistry,
@@ -501,6 +507,11 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const lifeDynamicsProfileId = lifeDynamicsRuntimeOptions.profileId;
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const screenBoundsCallbackRef = useRef(onScreenBounds);
+    const horizontalOffsetRef = useRef(horizontalOffset);
+    const updateViewRef = useRef<(() => void) | null>(null);
+    useEffect(() => { screenBoundsCallbackRef.current = onScreenBounds; }, [onScreenBounds]);
+    useEffect(() => { horizontalOffsetRef.current = horizontalOffset; updateViewRef.current?.(); }, [horizontalOffset]);
     const mouthOpenRef = useRef(mouthOpen);
     const emotionRef = useRef(emotion);
     const attentionReaderRef = useRef(attentionReader);
@@ -1052,6 +1063,20 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           '(orientation: portrait) and (min-width: 600px)',
         ).matches;
 
+      let basePosePoints: Vector3[] = [];
+      const updateView = () => {
+        const width = Math.max(container.clientWidth, 1);
+        const height = Math.max(container.clientHeight, 1);
+        camera.clearViewOffset();
+        if (horizontalOffsetRef.current > 0) camera.setViewOffset(width, height, horizontalOffsetRef.current, 0, width, height);
+      };
+      updateViewRef.current = updateView;
+      const publishBounds = () => {
+        if (!screenBoundsCallbackRef.current) return;
+        camera.clearViewOffset();
+        screenBoundsCallbackRef.current(projectAvatarBounds(basePosePoints, camera, container.clientWidth));
+        updateView();
+      };
       const resize = () => {
         stageRect = readStageRect(container);
         const width = Math.max(container.clientWidth, 1);
@@ -1069,7 +1094,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
           );
         }
       };
-      const resizeObserver = new ResizeObserver(resize);
+      const resizeWithBounds = () => { resize(); publishBounds(); };
+      const resizeObserver = new ResizeObserver(resizeWithBounds);
       const handleWindowScroll = () => {
         stageRect = readStageRect(container);
       };
@@ -1116,6 +1142,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               type: vrmLookAtBoundaryDriver.applierType,
             });
             applyBasePose(vrm);
+            if (screenBoundsCallbackRef.current) { vrm.update(0); basePosePoints = captureAvatarPoints(vrm.scene); }
             idleController = new IdleController(vrm);
             idleGazeController = new IdleGazeController(
               vrm,
@@ -1196,6 +1223,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
                 ? EXHIBITION_PORTRAIT_CAMERA
                 : STAGE_PRESET.camera,
             );
+            publishBounds();
             setLoadState('ready');
             onReadyRef.current?.();
             void syncMotionAsset();
@@ -2379,6 +2407,8 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         disposed = true;
         cancelAnimationFrame(animationFrame);
         resizeObserver.disconnect();
+        updateViewRef.current = null;
+        screenBoundsCallbackRef.current?.(null);
         window.removeEventListener('scroll', handleWindowScroll, true);
         blinkController?.dispose();
         emotionController?.dispose();

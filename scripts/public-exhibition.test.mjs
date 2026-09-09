@@ -8,9 +8,43 @@ const load = async path => {
 };
 const { Ledger, initialState, DEFAULT_LIMITS } = await load('worker/ledger.ts');
 const { prepareHandoff, readHandoff, completeHandoff, allowExhibitionAutonomy } = await load('src/public/exhibitionHandoff.ts');
+const { readRegistrationStatus, finishRegistration } = await load('src/public/exhibitionRegistration.ts');
 const now = Date.parse('2026-09-23T12:00:00+09:00');
 const hash = 'a'.repeat(64);
 const eventId = 'expo-20260923';
+test('registration checks Cookie readiness and retains an uncertain reset for retry', async () => {
+  const previousFetch = globalThis.fetch, previousStorage = globalThis.sessionStorage;
+  const data = new Map();
+  globalThis.sessionStorage = { getItem: k => data.get(k) ?? null, setItem: (k,v) => data.set(k,v), removeItem: k => data.delete(k) };
+  const signal = new AbortController().signal;
+  try {
+    let reads = 0;
+    globalThis.fetch = async path => { assert.equal(path, '/api/session'); return Response.json({ cookieReady: ++reads === 2 }); };
+    assert.equal((await readRegistrationStatus(signal)).cookieReady, true);
+    assert.equal(reads, 2);
+    reads = 0;
+    globalThis.fetch = async () => { reads++; return Response.json({ cookieReady: false }); };
+    assert.equal((await readRegistrationStatus(signal)).cookieReady, false);
+    assert.equal(reads, 2);
+    const requests = [];
+    globalThis.fetch = async (path, init) => {
+      assert.equal(path, '/api/exhibition/next'); requests.push(JSON.parse(init.body));
+      throw new TypeError('Response lost after commit');
+    };
+    await assert.rejects(finishRegistration(3, signal));
+    assert.ok(readHandoff(globalThis.sessionStorage));
+    globalThis.fetch = async (path, init) => {
+      assert.equal(path, '/api/exhibition/next'); requests.push(JSON.parse(init.body));
+      return Response.json({ exhibition: { epoch: 4 } });
+    };
+    await finishRegistration(4, signal);
+    assert.deepEqual(requests[1], requests[0]);
+    assert.equal(readHandoff(globalThis.sessionStorage), null);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousStorage === undefined) delete globalThis.sessionStorage; else globalThis.sessionStorage = previousStorage;
+  }
+});
 function setup() {
   const l = new Ledger(initialState(), now);
   const config = adminCommand('exhibition-create');

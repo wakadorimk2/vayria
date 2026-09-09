@@ -7,13 +7,15 @@ import { runtimeConfig } from './runtimeConfig';
 import './public/public.css';
 import { initializePublicTheme } from './public/theme';
 import PublicApp from './public/PublicApp';
+import ExhibitionRegistrationPage from './public/ExhibitionRegistrationPage';
 
 if (runtimeConfig.mode === 'public') initializePublicTheme();
 
 const RootPage = window.location.pathname === '/cards' ? CardsPreviewPage : App;
+const PublicPage = /^\/exhibition\/?$/.test(window.location.pathname) ? ExhibitionRegistrationPage : PublicApp;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {runtimeConfig.mode === 'public' ? <PublicApp /> : <RootPage />}
+    {runtimeConfig.mode === 'public' ? <PublicPage /> : <RootPage />}
   </StrictMode>,
 );
