@@ -1,5 +1,7 @@
 import { setComparingAudio, observeExhibitionAudio, configureExhibition, readPublicExperience, readExhibitionAudioMode, subscribeExhibition, readAudioObservations, subscribeAudioObservations, type PublicExperience, type ExhibitionAudioMode } from './public/exhibition';
 import { SharedConversationQueue, resemblesPlayback } from './conversation/sharedConversation';
+import { environmentStorageKey } from './storageKey';
+import { calculateSettingsLayout, type AvatarScreenBounds } from './public/settingsLayout';
 import {
   useCallback,
   useEffect,
@@ -11,7 +13,8 @@ import {
   type FormEvent,
 } from 'react';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
-import { publicActive, requestPublicSession, subscribePublic } from './public/session';
+import { publicActive, publicExhibition, runPublicAction, subscribePublic } from './public/session';
+import { allowExhibitionAutonomy } from './public/exhibitionHandoff';
 import { useViewerArrival } from './app/useViewerArrival';
 import { createViewerNoticePlan } from './performer/viewerNotice';
 import { EXHIBITION_CONVERSATION_CONTEXT } from './conversation/participationController';
@@ -382,7 +385,7 @@ function readAudioControlState(): AudioControlState {
       AUDIO_SETTINGS_STORAGE_KEY,
       LEGACY_AUDIO_SETTINGS_STORAGE_KEY,
     ]) {
-      const state = parseAudioControlState(localStorage.getItem(storageKey));
+      const state = parseAudioControlState(localStorage.getItem(environmentStorageKey(storageKey)));
       if (state !== null) return state;
     }
   } catch {
@@ -394,7 +397,7 @@ function readAudioControlState(): AudioControlState {
 
 function readRouterAudioInputDeviceId(): string {
   try {
-    return localStorage.getItem(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY)?.trim() ?? '';
+    return localStorage.getItem(environmentStorageKey(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY))?.trim() ?? '';
   } catch {
     return '';
   }
@@ -414,6 +417,7 @@ export default function App() {
   const publicTransitionRef = useRef(false);
   const playbackAtSpeechRef = useRef(new Map<string, string>());
   const publicSessionActive = useSyncExternalStore(subscribePublic, publicActive);
+  const exhibitionRegistration = useSyncExternalStore(subscribePublic, publicExhibition);
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
@@ -426,13 +430,15 @@ export default function App() {
     DEFAULT_PROGRAM_CONTEXT.phase,
   );
   const [showExhibitionCards, setShowExhibitionCards] = useState(false);
+  const [publicCardsOpen, setPublicCardsOpen] = useState(false);
+  const exhibitionCardsOpen = runtimeConfig.mode === 'public' ? publicCardsOpen : showExhibitionCards;
   const programContext = useMemo<ProgramContext>(
-    () => (isPublicExhibition || runtimeConfig.mode === 'exhibition') && !showExhibitionCards
+    () => (isPublicExhibition || runtimeConfig.mode === 'exhibition') && !exhibitionCardsOpen
       ? { ...DEFAULT_PROGRAM_CONTEXT, format: 'live_conversation',
         objective: 'converse_freely', participantRole: 'shared_microphone_group', phase: programPhase }
       : { ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase,
         participantRole: (isPublicExhibition || runtimeConfig.mode === 'exhibition') ? 'shared_microphone_group' : 'viewer_directed' },
-    [programPhase, showExhibitionCards, isPublicExhibition],
+    [programPhase, exhibitionCardsOpen, isPublicExhibition],
   );
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>(INITIAL_AUTONOMOUS_CONTEXT);
@@ -443,12 +449,18 @@ export default function App() {
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition' || isPublicExhibition;
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public';
+  const [publicAvatarBounds, setPublicAvatarBounds] = useState<AvatarScreenBounds | null>(null);
+  const [publicSettingsOpen, setPublicSettingsOpen] = useState(false);
+  const publicSettingsLayout = calculateSettingsLayout(publicAvatarBounds);
   const [publicTextInputOpen, setPublicTextInputOpen] = useState(false);
+  const [publicGreetingComplete, setPublicGreetingComplete] = useState(false);
+  const publicCardsRef = usePanelVisibility<HTMLDivElement>(runtimeConfig.mode !== 'public' || publicCardsOpen, '.public-controls__cards');
+  const togglePublicCards = () => { setPublicTextInputOpen(false); setPublicCardsOpen(value => !value); };
   const publicTextPanelRef = usePanelVisibility<HTMLFormElement>(runtimeConfig.mode !== 'public' || publicTextInputOpen, '.public-controls__text');
   const [publicSubmitPending, setPublicSubmitPending] = useState(false);
   const publicSubmitPendingRef = useRef(false);
   useEffect(() => {
-    const toggle = () => setPublicTextInputOpen(value => !value);
+    const toggle = () => { setPublicCardsOpen(false); setPublicTextInputOpen(value => !value); };
     window.addEventListener('vayria-public-text-input', toggle);
     return () => window.removeEventListener('vayria-public-text-input', toggle);
   }, []);
@@ -469,6 +481,7 @@ export default function App() {
     beginReply,
     clearReplyPresentation,
     presentReply,
+    resetCards,
     resetTurn,
     zones,
   } = cardGame;
@@ -508,7 +521,7 @@ export default function App() {
   });
   const characterIdentityRef = useRef<CharacterIdentity>(characterIdentity);
 
-  const pendingCardStimulusRef = useRef<{
+  const [pendingCardStimulus, setPendingCardStimulus] = useState<{
     cardContext: ChatCardContext;
     contribution: DirectionContribution;
     programContext: ProgramContext;
@@ -592,7 +605,7 @@ export default function App() {
   const voiceReactionIdRef = useRef(0);
 
   const routerBlockedSegmentRef = useRef<string | null>(null);
-  const { backchannelAudioRef, backchannelVariantIndexRef, backchannelLoadingRef, preloadBackchannel } = useListeningBackchannels();
+  const { backchannelAudioRef, backchannelVariantIndexRef, backchannelLoadingRef, preloadBackchannel } = useListeningBackchannels(runtimeConfig.mode !== 'public');
 
   const [audioLabMode, setAudioLabMode] = useState<AudioLabMode>(
     () =>
@@ -851,7 +864,12 @@ export default function App() {
     [],
   );
 
-  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, pendingActivatedCardIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, resetTurn, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
+  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, pendingActivatedCardIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted: acceptReplyPresentation, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, resetTurn, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
+
+  const handleReplyAccepted = useCallback((ids: string[]) => {
+    acceptReplyPresentation(ids);
+    if (runtimeConfig.mode === 'public' && ids.length > 0) setPublicGreetingComplete(true);
+  }, [acceptReplyPresentation]);
 
   const {
     cancelAutonomous,
@@ -1054,7 +1072,7 @@ export default function App() {
             (routerSnapshot.controlState === 'idle' &&
               routerSnapshot.vayriaOutputGate === 'open')),
         attentionAvailable: !isCardSelectionActive,
-        interactionAvailable: isAvatarReady && !isMuted,
+        interactionAvailable: isAvatarReady && (!isMuted || pendingCardStimulus !== null),
       }),
     [
       autonomyState,
@@ -1064,6 +1082,7 @@ export default function App() {
       comparisonPlaying,
       isCardSelectionActive,
       isMuted,
+      pendingCardStimulus,
       isPerformerBusy,
       isSttProcessing,
       isVadSpeech,
@@ -1347,8 +1366,9 @@ export default function App() {
     setCardAttentionPhase(null);
 
     resetConversation();
+    setVoiceValidationError('');
     resetRuntime();
-    resetTurn();
+    resetCards();
     cardDropReactionControllerRef.current.reset();
     cardDropReactionPlanIdsRef.current.clear();
     cardReactionPlanIdsRef.current.clear();
@@ -1360,14 +1380,14 @@ export default function App() {
     const initialAutonomyState = createInitialAutonomyState();
     autonomyStateRef.current = initialAutonomyState;
     setAutonomyState(initialAutonomyState);
-    pendingCardStimulusRef.current = null;
+    setPendingCardStimulus(null);
     setProgramPhase(DEFAULT_PROGRAM_CONTEXT.phase);
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setIsHumanExchange(false);
     setExhibitionSessionMessage('');
     setSessionGeneration(nextGeneration);
-  }, [stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetTurn, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, pendingActivatedCardIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
+  }, [stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetCards, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, pendingActivatedCardIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
 
   useEffect(() => {
     routerResetSessionRef.current = resetSession;
@@ -1387,26 +1407,27 @@ export default function App() {
   }, [dispatchRouterCommand, resetSession]);
 
   const handleNextVisitor = async () => {
-    if (publicTransitionRef.current || isResettingExhibition || microphoneInputTransitionRef.current !== null) return;
+    if ((publicTransitionRef.current && !comparisonPlaying) || isResettingExhibition || microphoneInputTransitionRef.current !== null) return;
+    if (runtimeConfig.mode === 'public' && exhibitionRegistration) {
+      window.dispatchEvent(new Event('vayria-exhibition-next'));
+      return;
+    }
     publicTransitionRef.current = true;
     window.dispatchEvent(new Event('vayria-exhibition-reset'));
     sharedGenerationRef.current++; sharedQueue.reset(); playbackAtSpeechRef.current.clear();
     interruptCurrentTurn('visitor_reset');
+    setComparingAudio(false); setComparisonPlaying(false); setComparisonSample(null);
     setIsResettingExhibition(true);
-    const restartMicrophone = isVoiceInputEnabled;
     try {
       await stopVoiceInput();
       resetSession(false);
       wildcardDirection.reset(cardGame.resetCards());
       setShowExhibitionCards(false);
       setShowExhibitionText(false);
-      setPublicTextInputOpen(false);
+      setPublicTextInputOpen(false); setPublicCardsOpen(false); setPublicGreetingComplete(false);
       setTextInputAudience('vayria');
       viewerInputSequenceRef.current = 0;
       setExhibitionSessionMessage('新しい会話を始められます');
-      if (restartMicrophone && !(await startVoiceInput())) {
-        setExhibitionSessionMessage('会話をリセットしました。マイクを再開してください');
-      }
     } catch {
       setExhibitionSessionMessage('切り替えに失敗しました。マイクの状態を確認して再試行してください');
     } finally {
@@ -1422,11 +1443,13 @@ export default function App() {
     sharedGenerationRef.current++; sharedQueue.reset(); playbackAtSpeechRef.current.clear();
     interruptCurrentTurn('experience_change');
     const resume = isVoiceInputEnabled;
+    const generation = sharedGenerationRef.current;
     try {
       await stopVoiceInput(); resetSession(false);
       wildcardDirection.reset(cardGame.resetCards());
-      setShowExhibitionCards(false); setShowExhibitionText(false); setPublicTextInputOpen(false);
+      setShowExhibitionCards(false); setShowExhibitionText(false); setPublicTextInputOpen(false); setPublicCardsOpen(false); setPublicGreetingComplete(false);
       setTextInputAudience('vayria');
+      if (generation !== sharedGenerationRef.current) return;
       configureExhibition(next, audio);
       if (resume && publicActive() && !(await startVoiceInput())) setExhibitionSessionMessage('切り替えました。マイクを再開してください');
     } catch { setExhibitionSessionMessage('切り替えに失敗しました。マイクを再開してください'); }
@@ -1438,17 +1461,22 @@ export default function App() {
     sharedQueue.reset(); sharedGenerationRef.current++;
     interruptCurrentTurn('audio_comparison');
     publicTransitionRef.current = true; setComparisonPlaying(true); setComparingAudio(true);
+    const generation = sharedGenerationRef.current;
     try {
       if (withoutMicrophone) await stopVoiceInput();
-      else if (!(await requestPublicSession()) || !(await startVoiceInput())) return;
+      else if (!(await runPublicAction(() => startVoiceInput()))) return;
+      if (generation !== sharedGenerationRef.current || document.hidden) return;
       observeExhibitionAudio({ event: withoutMicrophone ? 'comparison_no_microphone' : 'comparison_start' });
       await prepare();
+      if (generation !== sharedGenerationRef.current || document.hidden) return;
       await play({ kind: 'buffer', ...comparisonSample, data: comparisonSample.data.slice(0) }, {
         onPlaybackStartup: info => observeExhibitionAudio({ event: 'comparison_playback', contextState: info.audioContextState, sampleRate: info.sampleRateHz }),
       });
     } catch { setExhibitionSessionMessage('比較音声を再生できませんでした'); }
     finally {
-      setComparingAudio(false); publicTransitionRef.current = false; setComparisonPlaying(false);
+      if (generation === sharedGenerationRef.current) {
+        setComparingAudio(false); publicTransitionRef.current = false; setComparisonPlaying(false);
+      }
       observeExhibitionAudio({ event: 'comparison_end' });
     }
   };
@@ -1541,7 +1569,7 @@ export default function App() {
       LEGACY_AUDIO_SETTINGS_STORAGE_KEY,
     ]) {
       try {
-        localStorage.setItem(storageKey, serialized);
+        localStorage.setItem(environmentStorageKey(storageKey), serialized);
       } catch {
         // Playback remains usable when storage is unavailable.
       }
@@ -1553,11 +1581,11 @@ export default function App() {
     try {
       if (routerAudioInputDeviceId) {
         localStorage.setItem(
-          ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY,
+          environmentStorageKey(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY),
           routerAudioInputDeviceId,
         );
       } else {
-        localStorage.removeItem(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY);
+        localStorage.removeItem(environmentStorageKey(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY));
       }
     } catch {
       // Remote PCM remains usable when local settings storage is unavailable.
@@ -1644,7 +1672,6 @@ export default function App() {
     });
     const overflow = () => sharedQueue.reportOverflow();
     const stopShared = () => {
-      if (!isPublicExhibition) return;
       sharedQueue.reset(); sharedGenerationRef.current++; playbackAtSpeechRef.current.clear();
       setDucked(false); interruptCurrentTurn('public_session_stopped');
     };
@@ -1655,7 +1682,7 @@ export default function App() {
       window.removeEventListener('vayria-public-stop', stopShared);
     };
   }, [isPublicExhibition, sharedQueue, autonomyStateRef, setAutonomyState, interruptCurrentTurn, readCardContext, createPlanForTrigger, sendVoice, handleReplyAccepted, programContext, stopVoiceInput, setDucked]);
-  useEffect(() => () => sharedQueue.reset(), [sharedQueue]);
+  useEffect(() => () => { sharedGenerationRef.current++; sharedQueue.reset(); setComparingAudio(false); }, [sharedQueue]);
 
   const handleVoiceEvent = useCallback(
     (event: VoiceInputEvent) => {
@@ -1969,6 +1996,7 @@ export default function App() {
       const expectedSessionGeneration = sessionGeneration;
       const isCurrentSession = () =>
         expectedSessionGeneration === sessionGenerationRef.current;
+      const stimulus = pendingCardStimulus;
 
       if (
         !isCurrentSession() ||
@@ -1976,7 +2004,7 @@ export default function App() {
         (runtimeConfig.routerEnabled &&
           (routerSnapshot.controlState !== 'idle' ||
             routerSnapshot.vayriaOutputGate === 'closed')) ||
-        isMuted ||
+        (isMuted && !stimulus) ||
         isBusy ||
         Boolean(activePlanRef.current)
       ) {
@@ -1985,8 +2013,8 @@ export default function App() {
 
       const candidate = options.candidate ?? autonomyCandidate;
       if (!candidate) return 'aborted' as AutonomousTurnOutcome;
-      const stimulus = pendingCardStimulusRef.current;
-      pendingCardStimulusRef.current = null;
+      if (!allowExhibitionAutonomy(!!exhibitionRegistration, !!stimulus)) return 'aborted' as AutonomousTurnOutcome;
+      setPendingCardStimulus(null);
       const cardContextOverride =
         options.cardContextOverride ?? stimulus?.cardContext;
       const contribution = options.contribution ?? stimulus?.contribution;
@@ -2042,13 +2070,13 @@ export default function App() {
         });
       };
 
-      if (isExhibitionMode) {
+      if (!isMuted && isExhibitionMode) {
         const audioReady = await prepare();
         if (!audioReady || !isCurrentSession()) {
           cancelPreactivatedPlan();
           return 'aborted' as AutonomousTurnOutcome;
         }
-      } else {
+      } else if (!isMuted) {
         void prepare();
       }
       const currentActivePlan: PerformancePlan | null =
@@ -2059,7 +2087,7 @@ export default function App() {
         currentActivePlan.planId === preactivatedPlan.planId;
       if (
         !isCurrentSession() ||
-        isMuted ||
+        (isMuted && !stimulus) ||
         isBusy ||
         (preactivatedPlan === null
           ? activePlanRef.current !== null
@@ -2114,14 +2142,14 @@ export default function App() {
       setAutonomyState(nextState);
       return decision.externalAction === 'speak' ? 'speak' : 'none';
     },
-    [sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleReplyAccepted, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, pendingActivatedCardIdsRef, prepare, executeNonSpeechPlan],
+    [pendingCardStimulus, exhibitionRegistration, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleReplyAccepted, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, pendingActivatedCardIdsRef, prepare, executeNonSpeechPlan],
   );
 
   const handleCardInserted = useCallback(
     (result: CardSwapResult) => {
       if (runtimeConfig.mode === 'public') {
         if (!isMuted) void prepare();
-        void requestPublicSession();
+        void runPublicAction(() => true);
       }
       setProgramPhase('after_card_change');
       const contribution = activateCardSwap(result);
@@ -2178,8 +2206,8 @@ export default function App() {
         cardDropReactionPlanIdsRef.current.add(reactionPlan.planId);
         executeNonSpeechPlan(reactionPlan);
       }
-      if (!isAutonomousLoopEnabled || isMuted) return;
-      pendingCardStimulusRef.current = {
+      if (!isAutonomousLoopEnabled) return;
+      setPendingCardStimulus({
         cardContext: {
           brainCardIds: result.brainCardIds,
           forcedCardId: result.forcedCardId,
@@ -2189,7 +2217,7 @@ export default function App() {
           ...programContext,
           phase: 'after_card_change',
         },
-      };
+      });
     },
     [activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
@@ -2208,7 +2236,13 @@ export default function App() {
 
       if (runtimeConfig.mode === 'public') {
         void prepare();
-        if (!(await requestPublicSession())) return;
+        await runPublicAction(async () => {
+          if (!(await startVoiceInput())) return false;
+          if (!publicActive() || document.hidden) { await stopVoiceInput(); return false; }
+          void prepare(); preloadBackchannel();
+          return true;
+        });
+        return;
       }
       if (!(await startVoiceInput())) return;
       void prepare();
@@ -2235,9 +2269,9 @@ export default function App() {
     isBusy: isPerformerBusy,
     isVoiceActivityActive: isVadSpeech || isSttProcessing,
     isLoopEnabled: isAutonomousLoopEnabled && !comparisonPlaying && !isHumanExchange && (runtimeConfig.mode !== 'public' || publicSessionActive),
-    isMuted,
+    isMuted: isMuted && pendingCardStimulus === null,
     isReady:
-      isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
+      isAvatarReady && (!isExhibitionMode || isAudioUnlocked || (isMuted && pendingCardStimulus !== null)),
     onCandidate: startAutonomous,
     onGateEvent: emitAutonomyGateEvent,
     sessionGeneration,
@@ -2245,27 +2279,25 @@ export default function App() {
     timingMode: runtimeConfig.autonomyTimingMode,
   });
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!trimmedInput || isManualBusy || publicSubmitPendingRef.current || publicTransitionRef.current) return;
-    const submittedGeneration = sharedGenerationRef.current;
-    if (runtimeConfig.mode === 'public') {
+  const submitMessage = async (message: string, greeting?: true, admitted = false, audience: 'vayria' | 'room' = 'vayria'): Promise<boolean> => {
+    const text = message.trim();
+    if (publicTransitionRef.current || !text || isManualBusy || (!admitted && publicSubmitPendingRef.current)) return false;
+    if (runtimeConfig.mode === 'public' && !admitted) {
       if (!isMuted) void prepare();
       publicSubmitPendingRef.current = true;
       setPublicSubmitPending(true);
-      try { if (!(await requestPublicSession())) return; }
+      try { return await runPublicAction(() => submitMessage(text, greeting, true, audience)); }
       finally { publicSubmitPendingRef.current = false; setPublicSubmitPending(false); }
-      setPublicTextInputOpen(false);
     }
-    if (submittedGeneration !== sharedGenerationRef.current) return;
+    if (admitted) setPublicSubmitPending(false);
     viewerInputSequenceRef.current += 1;
-    if (isPublicExhibition && textInputAudience === 'room') {
-      sharedQueue.speechEnded(); sharedQueue.append(trimmedInput); setInput(''); return;
+    if (isPublicExhibition && !greeting && audience === 'room') {
+      sharedQueue.speechEnded(); sharedQueue.append(text); setInput(''); return true;
     }
-    if (isExhibitionMode && textInputAudience === 'room') {
+    if (isExhibitionMode && !greeting && audience === 'room') {
       const participation = evaluateVoiceParticipation({
         segmentId: `room-text:${Date.now()}:${viewerInputSequenceRef.current}`,
-        text: trimmedInput, at: Date.now(),
+        text: text, at: Date.now(),
       }, characterIdentityRef.current);
       if (participation.decision === 'SILENT') {
         const state = autonomyStateRef.current;
@@ -2277,7 +2309,7 @@ export default function App() {
         setInput('');
         setIsHumanExchange(true);
         setExhibitionSessionMessage('お二人の会話を聞いています');
-        return;
+        return true;
       }
     }
     setIsHumanExchange(false);
@@ -2287,7 +2319,7 @@ export default function App() {
       routerSnapshot.vayriaOutputGate === 'closed' &&
       routerSnapshot.controlState !== 'human_override'
     ) {
-      return;
+      return false;
     }
     if (
       !runtimeConfig.routerEnabled ||
@@ -2306,12 +2338,12 @@ export default function App() {
     cancelActiveCardReactionPlan();
     const trigger: PerformerTrigger = {
       kind: 'viewer_message',
-      text: trimmedInput,
+      text: text,
     };
-    const identityForRequest = rememberExplicitAlias(trimmedInput);
+    const identityForRequest = rememberExplicitAlias(text);
     let manualAutonomyEvidenceContext: AutonomyEvidenceContext | undefined;
-    if (isContentBearingVoiceMessage(trimmedInput)) {
-      const semanticKey = `conversation:${trimmedInput
+    if (isContentBearingVoiceMessage(text)) {
+      const semanticKey = `conversation:${text
         .normalize('NFKC')
         .replace(/\s+/gu, ' ')
         .trim()
@@ -2322,14 +2354,14 @@ export default function App() {
         kind: 'conversation_input',
         at: Date.now(),
         semanticKey,
-        content: trimmedInput,
+        content: text,
         wakeConditions: ['new_evidence', 'floor_available'],
         reasonProposals: [
           {
             kind: 'conversation_continuation',
-            content: trimmedInput,
+            content: text,
             semanticKey,
-            salience: /[?？]/u.test(trimmedInput) ? 0.9 : 0.68,
+            salience: /[?？]/u.test(text) ? 0.9 : 0.68,
           },
         ],
       });
@@ -2338,7 +2370,7 @@ export default function App() {
         readAutonomyEvidenceContext(nextAutonomyState, evidenceId) ?? undefined;
     }
     setAutonomousContext((current) =>
-      recordViewerIntent(current, trimmedInput, identityForRequest),
+      recordViewerIntent(current, text, identityForRequest),
     );
     const plan = createPlanForTrigger(trigger);
     cardDropReactionControllerRef.current.handoffToReply(
@@ -2350,15 +2382,22 @@ export default function App() {
     }
     if (!isMuted) void prepare();
     setInput('');
-    void sendManual(
-      trimmedInput,
+    if (runtimeConfig.mode === 'public') setPublicTextInputOpen(false);
+    return await sendManual(
+      text,
       manualCardContext,
       handleReplyAccepted,
       plan,
       identityForRequest,
       undefined,
       manualAutonomyEvidenceContext,
+      greeting,
     );
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void submitMessage(input, undefined, false, textInputAudience);
   };
 
   const handleMuteToggle = () => {
@@ -2463,6 +2502,50 @@ export default function App() {
   const localNetworkLabel = `Local network: ${isLocalNetworkAvailable ? 'Connected' : 'Unavailable'}`;
   const internetLabel = `Internet: ${isInternetAvailable ? 'Connected' : 'Unavailable'}`;
 
+  const exhibitionTools = isExhibitionMode ? (
+          <details className={isPublicExhibition ? "public-conversation-tools" : "exhibition-operator"}>
+            <summary>三者会話の操作・音声比較</summary>
+            <div className="exhibition-operator__body">
+              <p>出展者・Vayria・参加者の三者会話</p>
+              <p>共用マイク：話者を自動で断定しません。</p>
+              <p>取得チャンネル数：{(isPublicExhibition ? [...audioObservations].reverse().find(item => item.event === 'capture_acquired')?.channelCount : voiceInput.mediaSettings?.applied.channelCount) ?? '未取得'}<br />音声認識へ送る音：モノラル</p>
+              <p>「Vayria、どう思う？」で会話に招けます。</p>
+              {isPublicExhibition && <>
+                <button type="button" disabled={!canNoticeViewer || isResettingExhibition || comparisonPlaying || publicSubmitPending}
+                  onClick={() => void runPublicAction(() => { sharedQueue.speechEnded(); sharedQueue.append(isHumanExchange ? 'Vayria、今の話を聞いてどう思う？' : 'Vayria、こんにちは。'); })}>Vayriaに振る</button>
+                <button type="button" disabled={cameraAttentionIsStarting} onClick={handleCameraAttentionToggle}>
+                  {cameraAttentionEnabled ? '視線追従を止める' : 'カメラで視線追従'}
+                </button>
+                <label>音声経路（実験）<select value={exhibitionAudioMode} disabled={isResettingExhibition || comparisonPlaying}
+                  onChange={event => void changePublicExperience('exhibition', event.target.value as ExhibitionAudioMode)}>
+                  <option value="release_capture">録音を停止して再生（現在の方式）</option>
+                  <option value="duplex_auto">同時録音・再生／auto</option>
+                  <option value="duplex_record">同時録音・再生／play-and-record</option>
+                </select></label>
+                <details><summary>音声比較と診断</summary>
+                  <p>同じ短い音声ファイルを選び、各経路で比較します。ファイルは端末内だけで再生します。</p>
+                  <input type="file" accept="audio/*" aria-label="比較用の音声ファイル" disabled={comparisonPlaying} onChange={async event => {
+                    const file = event.target.files?.[0];
+                    if (file && file.size <= 8 * 1024 * 1024) setComparisonSample({ data: await file.arrayBuffer(), mimeType: file.type });
+                    else { setComparisonSample(null); setExhibitionSessionMessage('8 MB以内の音声を選んでください'); }
+                  }} />
+                  <button type="button" disabled={!comparisonSample || comparisonPlaying || isResettingExhibition} onClick={() => void compareAudio(false)}>現在の経路で比較再生</button>
+                  <button type="button" disabled={!comparisonSample || comparisonPlaying || isResettingExhibition} onClick={() => void compareAudio(true)}>マイクなしで比較再生</button>
+                  <p>要求：1ch・エコーキャンセルあり・ノイズ抑制あり。下記は取得結果です。音声と本文は記録しません。</p>
+                  <pre aria-label="音声診断">{JSON.stringify(audioObservations.slice(-8), null, 2)}</pre>
+                </details>
+              </>}
+              {!exhibitionRegistration && <button type="button" disabled={runtimeConfig.routerEnabled || isResettingExhibition || isMicrophoneInputTransitionPending}
+                onClick={() => void handleNextVisitor()}>
+                {isResettingExhibition ? '切り替え中…' : '次の参加者へ'}
+              </button>}
+              <p className="exhibition-operator__hint">参加者交代では会話とカードを初期化し、マイクを停止します。</p>
+              {runtimeConfig.routerEnabled && <p>Router使用中はRouterのResetを使います。</p>}
+              {conversationError && <p className="exhibition-operator__error">{conversationError}</p>}
+            </div>
+          </details>
+  ) : undefined;
+
   return (
     <main
       className="app-shell"
@@ -2471,7 +2554,7 @@ export default function App() {
       data-public-text-input={publicTextInputOpen}
       data-exhibition-experience={isExhibitionMode}
       data-exhibition-state={exhibitionPresentationState}
-      data-exhibition-cards={showExhibitionCards ? 'open' : 'closed'}
+      data-exhibition-cards={exhibitionCardsOpen ? 'open' : 'closed'}
       data-exhibition-text={(isPublicExhibition ? publicTextInputOpen : showExhibitionText) ? 'open' : 'closed'}
     >
       {runtimeConfig.mode !== 'public' && (shouldShowAudioUnlockControl || isExhibitionMode) && (
@@ -2722,6 +2805,8 @@ export default function App() {
           listeningReaction={listeningReaction}
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
+          onScreenBounds={runtimeConfig.mode === 'public' ? setPublicAvatarBounds : undefined}
+          horizontalOffset={runtimeConfig.mode === 'public' && publicSettingsOpen ? publicSettingsLayout.avatarOffset : 0}
           performancePlan={activePlan ?? undefined}
           ref={stageRef}
           sessionGeneration={sessionGeneration}
@@ -2735,16 +2820,10 @@ export default function App() {
             </p>
           </aside>
         )}
-        {isExhibitionMode && (
+        {runtimeConfig.mode === 'exhibition' && (
           <nav className="exhibition-invitation" aria-label="体験の切り替え">
             <button type="button" className="exhibition-call" disabled={!canNoticeViewer || isResettingExhibition || comparisonPlaying}
               onClick={async () => {
-                if (isPublicExhibition) {
-                  const requestedGeneration = sharedGenerationRef.current;
-                  if (!(await requestPublicSession()) || requestedGeneration !== sharedGenerationRef.current) return;
-                  sharedQueue.speechEnded(); sharedQueue.append(isHumanExchange ? 'Vayria、今の話を聞いてどう思う？' : 'Vayria、こんにちは。');
-                  return;
-                }
                 viewerInputSequenceRef.current += 1;
                 setIsHumanExchange(false);
                 setExhibitionSessionMessage('');
@@ -2772,51 +2851,28 @@ export default function App() {
             </button>
           </nav>
         )}
-        {isExhibitionMode && (
-          <details className="exhibition-operator">
-            <summary>展示設定</summary>
-            <div className="exhibition-operator__body">
-              <p>出展者・Vayria・参加者の三者会話</p>
-              <p>共用マイク：話者を自動で断定しません。</p>
-              <p>取得チャンネル数：{(isPublicExhibition ? [...audioObservations].reverse().find(item => item.event === 'capture_acquired')?.channelCount : voiceInput.mediaSettings?.applied.channelCount) ?? '未取得'}<br />音声認識へ送る音：モノラル</p>
-              <p>「Vayria、どう思う？」で会話に招けます。</p>
-              {isPublicExhibition && <>
-                <button type="button" disabled={cameraAttentionIsStarting} onClick={handleCameraAttentionToggle}>
-                  {cameraAttentionEnabled ? '視線追従を止める' : 'カメラで視線追従'}
-                </button>
-                <label>音声経路（実験）<select value={exhibitionAudioMode} disabled={isResettingExhibition || comparisonPlaying}
-                  onChange={event => void changePublicExperience('exhibition', event.target.value as ExhibitionAudioMode)}>
-                  <option value="release_capture">録音を停止して再生（現在の方式）</option>
-                  <option value="duplex_auto">同時録音・再生／auto</option>
-                  <option value="duplex_record">同時録音・再生／play-and-record</option>
-                </select></label>
-                <details><summary>音声比較と診断</summary>
-                  <p>同じ短い音声ファイルを選び、各経路で比較します。ファイルは端末内だけで再生します。</p>
-                  <input type="file" accept="audio/*" aria-label="比較用の音声ファイル" disabled={comparisonPlaying} onChange={async event => {
-                    const file = event.target.files?.[0];
-                    if (file && file.size <= 8 * 1024 * 1024) setComparisonSample({ data: await file.arrayBuffer(), mimeType: file.type });
-                    else { setComparisonSample(null); setExhibitionSessionMessage('8 MB以内の音声を選んでください'); }
-                  }} />
-                  <button type="button" disabled={!comparisonSample || comparisonPlaying || isResettingExhibition} onClick={() => void compareAudio(false)}>現在の経路で比較再生</button>
-                  <button type="button" disabled={!comparisonSample || comparisonPlaying || isResettingExhibition} onClick={() => void compareAudio(true)}>マイクなしで比較再生</button>
-                  <p>要求：1ch・エコーキャンセルあり・ノイズ抑制あり。下記は取得結果です。音声と本文は記録しません。</p>
-                  <pre aria-label="音声診断">{JSON.stringify(audioObservations.slice(-8), null, 2)}</pre>
-                </details>
-              </>}
-              <button type="button" disabled={runtimeConfig.routerEnabled || isResettingExhibition || isMicrophoneInputTransitionPending}
-                onClick={() => void handleNextVisitor()}>
-                {isResettingExhibition ? '切り替え中…' : '次の参加者へ'}
-              </button>
-              <p className="exhibition-operator__hint">会話とカードを初期化します。マイク使用中は再開します。</p>
-              {runtimeConfig.routerEnabled && <p>Router使用中はRouterのResetを使います。</p>}
-              {conversationError && <p className="exhibition-operator__error">{conversationError}</p>}
-            </div>
-          </details>
-        )}
+        {runtimeConfig.mode !== 'public' && exhibitionTools}
+        <div ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}>
         <CardGamePrototype
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
-          game={cardGame}
           key={sessionGeneration}
+          game={cardGame}
+          onAskQuestion={message => { void submitMessage(message); }}
+          lastReply={!conversationError ? reply : undefined}
+          isQuestionDisabled={isManualBusy || (runtimeConfig.routerEnabled && routerSnapshot.vayriaOutputGate === 'closed' && routerSnapshot.controlState !== 'human_override')}
+          feedbackMessage={
+            conversationError
+              ? '返答を続けられませんでした。もう一度聞くか、最初からやり直せます。'
+              : needsPlaybackGesture
+                ? '音声の再生許可が必要です。下の「音声を再開」を押してください。'
+                : isMuted
+                  ? '音声はオフです。「今どんな気分？」と聞くと、字幕で返答を読めます。'
+                  : status === 'idle'
+                    ? zones.forcedCardId
+                      ? 'カードを受け取りました。まだ返答がなければ、下のボタンで聞けます。'
+                      : 'もう一枚替えても、ここで終えても大丈夫。'
+                    : conversationStatusLabel
+          }
           isResetLocked={isPerformerBusy}
           onCardAttentionInput={handleCardAttentionInput}
           onCardDragPositionChange={handleCardDragPositionChange}
@@ -2824,9 +2880,10 @@ export default function App() {
           onCardInteraction={handleCardInteraction}
           onCardInserted={handleCardInserted}
           onSessionReset={handleSessionReset}
-          onSelectionActiveChange={setIsCardSelectionActive}
+          onSelectionActiveChange={active => setIsCardSelectionActive(active && (runtimeConfig.mode !== 'public' || publicCardsOpen))}
           spatialTargetRegistry={spatialTargetRegistry}
         />
+        </div>
       </section>
 
       <section
@@ -2872,7 +2929,7 @@ export default function App() {
           )}
         </div>
 
-        <form ref={runtimeConfig.mode === 'public' ? publicTextPanelRef : undefined} className="message-form" onSubmit={handleSubmit}>
+        <form id="public-text-panel" ref={runtimeConfig.mode === 'public' ? publicTextPanelRef : undefined} className="message-form" onSubmit={handleSubmit}>
           {isExhibitionMode && (
             <select aria-label="入力の宛先" value={textInputAudience}
               onChange={(event) => setTextInputAudience(event.target.value as 'vayria' | 'room')}>
@@ -2956,9 +3013,18 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
+          exhibitionTools={exhibitionTools}
           experience={publicExperience}
           onExperienceChange={next => void changePublicExperience(next)}
           experiencePending={isResettingExhibition || comparisonPlaying}
+          settingsLayout={publicSettingsLayout}
+          onSettingsOpenChange={setPublicSettingsOpen}
+          cardsOpen={publicCardsOpen}
+          textOpen={publicTextInputOpen}
+          onCardsToggle={togglePublicCards}
+          greetingComplete={publicGreetingComplete}
+          greetingBusy={isManualBusy || publicSubmitPending}
+          onGreeting={() => { void submitMessage('こんにちは', true); }}
           themePreference={themePreference}
           resolvedTheme={resolvedTheme}
           onThemeChange={setThemePreference}

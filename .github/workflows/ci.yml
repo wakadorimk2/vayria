@@ -13,6 +13,25 @@ permissions:
   contents: read
 
 jobs:
+  preview-reset:
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.x'
+      - run: node scripts/staging-preview.mjs main-reset
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   stt:
     name: Python STT
     runs-on: windows-2025
@@ -85,19 +104,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:VAYRIA_PUBLIC_VRM = Join-Path $PWD '.wrangler/ci-model.vrm'
           npm run public:build
-      - run: npm run public:check
       - run: npm run production:check
       - run: npm run production:recovery:check
+      - name: Staging build with a non-deployable fixture
+        shell: pwsh
+        run: |
+          $env:VAYRIA_PUBLIC_VRM = Join-Path $PWD '.wrangler/ci-model.vrm'
+          npm run staging:build
+      - run: npm run public:check
 
   deploy-staging:
     name: Deploy staging
-    needs: [ci, stt, public]
+    needs: [ci, stt, public, preview-reset]
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: write
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: windows-2025
     timeout-minutes: 20
     environment:
       name: staging
-      url: https://staging.vayria.me
+      url: https://vayria.me/staging/
     concurrency:
       group: vayria-staging-deployment
       cancel-in-progress: false
@@ -115,10 +144,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.VAYRIA_ASSETS_READ_TOKEN }}
       - name: Build deployable public assets
-        run: npm run public:build
+        run: npm run staging:build
         env:
           VAYRIA_PUBLIC_VRM: .wrangler/public-vrm/model.vrm
       - run: npm run public:check
+      - name: Drain previews before publishing main
+        run: node scripts/staging-preview.mjs main-wait
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Verify current main and deploy staging
         run: node scripts/staging-cd.mjs deploy
         env:

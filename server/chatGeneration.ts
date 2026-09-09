@@ -521,10 +521,11 @@ export async function generateInteractiveResponse(
   streaming: StreamingReplyCallbacks | null = null,
   earlySpeechLead = true,
   recentExpressionLevels: readonly ExpressionLevel[],
+  greeting = false,
 ): Promise<CardAssistantResponse> {
   const selfNameResolution = resolveSelfName(message, characterIdentity);
   const fastPathDecision: ConversationActionDecision | null =
-    selfNameResolution.role === 'direct_address'
+    greeting || selfNameResolution.role === 'direct_address'
       ? { action: 'take_floor', backchannelCue: 'none' as const }
       : classifyViewerMessageFastPath(message);
   const policyDecision =
@@ -581,6 +582,7 @@ export async function generateInteractiveResponse(
       : null,
     earlySpeechLead,
     recentExpressionLevels,
+    greeting,
   );
   return {
     ...reply.response,
@@ -700,6 +702,7 @@ export async function generateReply(
   streaming: StreamingReplyCallbacks | null = null,
   earlySpeechLead = true,
   recentExpressionLevels: readonly ExpressionLevel[] = [],
+  greeting = false,
 ): Promise<GeneratedChatResponse> {
   if (programContext.participantRole === 'shared_microphone_group') earlySpeechLead = false;
   const streamingEnabled = streaming !== null;
@@ -1046,7 +1049,7 @@ export async function generateReply(
         'Each audible unit must be independently speakable and must not contain Markdown.',
       ].join(' ')
       : '',
-    'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
+    greeting ? 'For this greeting, use a short welcome and exactly one easy, low-pressure question. Keep it to two short Japanese sentences. Follow the character identity. Do not ask for personal information or explain controls. The second sentence may be the question.' : 'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
   ].join('\n');
   const dynamicSystemPrompt = [
     buildCharacterIdentityDynamicPrompt(message, characterIdentity),

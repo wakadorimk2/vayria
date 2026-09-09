@@ -36,6 +36,46 @@ test('ending a public session prevents pending exhibition requests from being se
   const pending = api.publicFetch('/api/chat', { method: 'POST', body: '{}' });
   const rejected = assert.rejects(pending, { name: 'AbortError' });
   await settle(); api.pausePublic(); requests[0].resolve(Response.json({ text: '' }));
-  await first; await rejected; assert.equal(requests.length, 1);
+  await assert.rejects(first, { name: 'AbortError' }); await rejected; assert.equal(requests.length, 1);
   api.configureExhibition('normal');
+});
+
+test('conversation settings preserve registered exhibition and cancel stale admission', async () => {
+  const registration = { id: 'venue', epoch: 7, available: true, usedYen: 1234, budgetYen: 10000 };
+  api.updatePublicStatus({ exhibition: registration });
+  api.activatePublic({ id: 'registered', expires: Date.now() + 60000 });
+  api.configureExhibition('exhibition', 'duplex_auto');
+  assert.equal(api.publicExhibition(), registration);
+  api.configureExhibition('normal');
+  assert.equal(api.publicSessionId(), 'registered');
+  assert.equal(api.publicExhibition().usedYen, 1234);
+  api.pausePublic();
+  let admitted;
+  const unregister = api.registerPublicSessionRequest(() => new Promise(resolve => { admitted = resolve; }));
+  let calls = 0;
+  const pending = api.runPublicAction(() => { calls++; });
+  api.cancelPublicAction();
+  api.activatePublic({ id: 'registered', expires: Date.now() + 60000 });
+  admitted(true);
+  assert.equal(await pending, false);
+  assert.equal(calls, 0);
+  unregister(); api.pausePublic();
+});
+
+test('reactivating the same session cannot send queued work from its previous lifetime', async () => {
+  const requests = [];
+  globalThis.fetch = (path, init) => new Promise(resolve => requests.push({ path, init, resolve }));
+  api.activatePublic({ id: 'same', expires: Date.now() + 60000 });
+  api.configureExhibition('exhibition');
+  const first = api.publicFetch('/api/transcribe', { method: 'POST' });
+  const firstRejected = assert.rejects(first, { name: 'AbortError' });
+  const pending = api.publicFetch('/api/chat', { method: 'POST', body: '{}' });
+  const pendingRejected = assert.rejects(pending, { name: 'AbortError' });
+  await settle();
+  api.pausePublic();
+  api.activatePublic({ id: 'same', expires: Date.now() + 60000 });
+  requests[0].resolve(Response.json({ text: '' }));
+  await firstRejected; await pendingRejected;
+  assert.equal(requests.length, 1);
+  api.configureExhibition('normal'); api.pausePublic();
 });

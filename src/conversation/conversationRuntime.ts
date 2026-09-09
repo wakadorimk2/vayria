@@ -487,7 +487,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     }
     return decision;
   };
-  const processTurn = async (turnSource: ConversationSource, message: string | null, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, autonomousContext: AutonomousContext | null, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyCandidate: AutonomyCandidate | null = null, autonomyEvidenceContext: AutonomyEvidenceContext | null = null): Promise<ProcessTurnResult> => {
+  const processTurn = async (turnSource: ConversationSource, message: string | null, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, autonomousContext: AutonomousContext | null, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyCandidate: AutonomyCandidate | null = null, autonomyEvidenceContext: AutonomyEvidenceContext | null = null, greeting?: true): Promise<ProcessTurnResult> => {
     const eventEmitter = createConversationEventEmitter(turnSource);
     const messageForRequest = message;
     const programContextForRequest = programContextOverride ?? programContextRef.current;
@@ -510,7 +510,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         emitTerminalEvent('turn_aborted', { reason: 'missing_candidate' });
         return { completed: false, decision: null };
       }
-      if (isMutedRef.current ||
+      if ((isMutedRef.current && !isCardChangeTurn) ||
         ACTIVE_STATUSES.includes(statusRef.current)) {
         emitTerminalEvent('turn_aborted', {
           reason: isMutedRef.current ? 'muted' : 'busy',
@@ -648,7 +648,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       const llmStartedAt = dependencies.monotonicNow();
       eventEmitter.emit('llm_start', { phase: 'llm' });
       const enqueueStreamingSpeechUnit = (index: number, text: string, candidate: ChatResponse) => {
-        if (generation !== generationRef.current ||
+        if (textOnlyTurn || isMutedRef.current || generation !== generationRef.current ||
           streamingUnitIndexes.has(index) ||
           !text.trim()) {
           return;
@@ -812,6 +812,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
             : {}),
         },
         body: JSON.stringify({
+          ...(greeting ? { greeting } : {}),
           mode: turnSource === 'autonomous'
             ? 'autonomous'
             : turnSource === 'voice'
@@ -842,7 +843,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
               autonomyCandidate: serializeAutonomyCandidate(autonomyCandidate!),
             }
             : {}),
-          streamSpeech: programContextForRequest.participantRole !== 'shared_microphone_group' && runtimeConfig.streamingSpeechEnabled &&
+          streamSpeech: !textOnlyTurn && programContextForRequest.participantRole !== 'shared_microphone_group' && runtimeConfig.streamingSpeechEnabled &&
             (INTERACTIVE_SOURCES.includes(turnSource) || isCardChangeTurn),
           earlySpeechLead: programContextForRequest.participantRole !== 'shared_microphone_group' && runtimeConfig.earlySpeechLeadEnabled,
         }),
@@ -1033,7 +1034,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
       });
       onReplyAccepted(activatedCards);
-      if (!streamingSpeechStarted)
+      if (!textOnlyTurn && !streamingSpeechStarted)
         eventEmitter.emit('speech_unit_ready');
       if (INTERACTIVE_SOURCES.includes(turnSource)) {
         if (turnSource === 'voice' && interactionDecision) {
@@ -1049,8 +1050,33 @@ export function createConversationRuntime(playback: PerformancePlayback, options
           // Delivery commits the assistant text.
         }
       }
+      if (textOnlyTurn) {
+        recordDelivered(0, responseText);
+        if (abortControllerRef.current === chatController) {
+          abortControllerRef.current = null;
+        }
+        if (isExpressionLevel(expressionLevel)) {
+          recentExpressionLevelsRef.current = [
+            ...recentExpressionLevelsRef.current, expressionLevel,
+          ].slice(-10);
+        }
+        onAutonomyDeltaRef.current?.(internalDelta, autonomyDeltaContext);
+        if (turnSource === 'voice') floorController.release('response_completed');
+        setConversationState('idle', null);
+        const interactionAction = interactionDecision?.action ??
+          (autonomousDecision ? 'take_floor' : executionPlan.actionDecision?.action);
+        emitOwnedResult(executionPlan, 'completed', {
+          interactionAction,
+          spokenText: deliveredText,
+          emotionCue: {
+            emotion: responseEmotion,
+            intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
+          },
+        });
+        emitTerminalEvent('turn_completed', { interactionAction });
+        return { completed: true, decision: autonomousDecision };
+      }
       if (isMutedRef.current) {
-        if (textOnlyTurn) recordDelivered(0, responseText);
         if (turnSource === 'voice') {
           floorController.release('muted');
         }
@@ -1433,7 +1459,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       }
     }
   };
-  const sendManual = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext) => (await processTurn('manual', message, cardContext, onReplyAccepted, null, plan, undefined, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null)).completed;
+  const sendManual = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext, greeting?: true) => (await processTurn('manual', message, cardContext, onReplyAccepted, null, plan, undefined, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null, greeting)).completed;
   const sendVoice = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext) => (await processTurn('voice', message, cardContext, onReplyAccepted, null, plan, voiceMetadata, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null)).completed;
   const sendAutonomous = async (cardContext: ChatCardContext, autonomousContext: AutonomousContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, programContextOverride?: ProgramContext, autonomyCandidate?: AutonomyCandidate) => {
     const result = await processTurn('autonomous', null, cardContext, onReplyAccepted, autonomousContext, plan, undefined, undefined, programContextOverride, autonomyCandidate ?? null, null);

@@ -13,6 +13,10 @@
     {
       "pattern": "staging.vayria.me",
       "custom_domain": true
+    },
+    {
+      "pattern": "vayria.me/staging*",
+      "zone_name": "vayria.me"
     }
   ],
   "assets": {
@@ -40,10 +44,11 @@
   "vars": {
     "GENERATION_ENABLED": "true",
     "REQUIRE_PREVIEW_ACCESS": "true",
-    "PUBLIC_HOSTNAME": "staging.vayria.me",
+    "PUBLIC_HOSTNAME": "vayria.me",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAErno-F0ugJTtA7B",
     "AIVIS_MODEL_UUID": "7fc08a41-b64d-456d-8b22-8e1284674775",
-    "AIVIS_SPEAKER_UUID": "8e2dfde9-a155-4bd8-b451-80832ad5e8ac"
+    "AIVIS_SPEAKER_UUID": "8e2dfde9-a155-4bd8-b451-80832ad5e8ac",
+    "PUBLIC_BASE_PATH": "/staging"
   },
   "observability": {
     "enabled": false
