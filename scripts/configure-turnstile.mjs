@@ -26,9 +26,13 @@ for (const target of [
   if (widget) {
     widget = await api(`challenges/widgets/${widget.sitekey}`);
     if (target.worker === 'vayria-public-staging' && !widget.domains.includes(target.domain) && widget.mode === 'managed') {
+      const originalSecret = widget.secret;
       widget = await api(`challenges/widgets/${widget.sitekey}`, 'PUT', {
         name: widget.name, domains: [...widget.domains, target.domain], mode: widget.mode,
+        ...Object.fromEntries(['bot_fight_mode', 'clearance_level', 'ephemeral_id', 'offlabel', 'region']
+          .filter(key => widget[key] !== undefined).map(key => [key, widget[key]])),
       });
+      if (widget.secret !== originalSecret) throw new Error('Turnstile secret changed unexpectedly');
     }
     if (!widget.domains.includes(target.domain) || widget.mode !== 'managed' ||
         (target.worker === 'vayria-web' && widget.domains.length !== 1)) {
@@ -37,9 +41,14 @@ for (const target of [
   } else {
     widget = await api('challenges/widgets', 'POST', { name: target.name, domains: [target.domain], mode: 'managed' });
   }
-  await api(`workers/scripts/${target.worker}/secrets`, 'PUT', { name: 'TURNSTILE_SECRET', text: widget.secret, type: 'secret_text' });
-  config.vars.TURNSTILE_SITE_KEY = widget.sitekey;
-  await writeFile(target.config, JSON.stringify(config, null, 2) + '\n');
+  // Migration preparation must not create a Worker deployment through a secret update.
+  if (!process.argv.includes('--staging')) {
+    await api(`workers/scripts/${target.worker}/secrets`, 'PUT', { name: 'TURNSTILE_SECRET', text: widget.secret, type: 'secret_text' });
+  }
+  if (config.vars.TURNSTILE_SITE_KEY !== widget.sitekey) {
+    config.vars.TURNSTILE_SITE_KEY = widget.sitekey;
+    await writeFile(target.config, JSON.stringify(config, null, 2) + '\n');
+  }
   const verified = await api(`challenges/widgets/${widget.sitekey}`);
   const secrets = await api(`workers/scripts/${target.worker}/secrets`);
   if (!secrets.some(s => s.name === 'TURNSTILE_SECRET')) throw new Error('Worker secret registration failed');
