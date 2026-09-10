@@ -18,7 +18,7 @@ export async function visualTicket(response: { visualIntent?: unknown }, env: Vi
   if (!video) { intent.motion = ''; intent.motionEvidence = ''; }
   const token = crypto.randomUUID();
   if (intent.type === 'background') intent.targetId = 'background';
-  else if (intent.action === 'add' || !intent.targetId) intent.targetId = token;
+  else if ((intent.type === 'prop' && intent.action === 'add') || !intent.targetId) intent.targetId = token;
   const ticket = await sign({ purpose:'visual', visitor, session, generation, token, intent, video, exp: Date.now()+90000 }, env.COOKIE_SECRET);
   return { ...response, visualIntent: intent, visualTicket: ticket, visualGeneration: generation };
 }

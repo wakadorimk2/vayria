@@ -98,3 +98,9 @@ test('real route pipeline reserves image and removal, inspects PNG, stores priva
  assert.equal(submits,2);assert.equal(puts,1);assert.equal(l.report().manifestation.reservedUsd,.06);assert.equal(ops.filter(o=>o==='visualReserve').length,2);
  }finally{globalThis.fetch=original;}
 });
+
+test('effect changes require server acceptance and keep the displayed target ID',async()=>{
+ const {visualTicket}=await import('../'+dir+'/test.mjs');const effect={...intent,type:'effect',concept:'sparkle',targetId:'existing'};
+ const signed=await visualTicket({visualIntent:effect},{COOKIE_SECRET:'test-secret-'.repeat(4)},'v','s',1,false);assert.equal(signed.visualIntent.targetId,'existing');
+ let rejectEffect=true;const session=new VisualSession({now:()=>0,prepare:async()=>{},generate:async(job,signal,accept)=>{if(job.intent.type==='effect'){if(rejectEffect)throw new Error('visual_disabled');return;}await accept(asset);}});session.permission(true,1);session.dispatch('object',{...intent,targetId:'existing'},'ticket',1);await flush();session.visible('existing');session.dispatch('blocked',effect,'ticket',1);await flush();assert.deepEqual(session.getSnapshot().objects[0].effects,[]);rejectEffect=false;session.dispatch('allowed',effect,'ticket',1);await flush();assert.deepEqual(session.getSnapshot().objects[0].effects,['sparkle']);
+});

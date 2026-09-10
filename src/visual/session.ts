@@ -38,9 +38,13 @@ export class VisualSession {
     if(intent.action==='cancel'){const controller=new AbortController();void this.deps.generate({id,target,intent,ticket,at:this.deps.now(),controller},controller.signal,async()=>{}).catch(()=>{});return true;}
     if(intent.type==='effect'){
       const effects=[intent.concept,...intent.modifiers].filter(e=>VISUAL_EFFECTS.includes(e as VisualEffect)) as VisualEffect[];
-      let changed=false;
-      const objects=this.snapshot.objects.map(o=>{if(o.id!==target||!o.visible)return o;changed=true;return{...o,effects:[...new Set([...o.effects,...effects])]};});
-      this.publish({objects});if(changed)this.deps.notice?.(id,'表示中の小物に演出が加わった。');return true;
+      const controller=new AbortController();
+      void this.deps.generate({id,target,intent,ticket,at:this.deps.now(),controller},controller.signal,async()=>{}).then(()=>{
+        if(!this.snapshot.enabled||this.snapshot.generation!==generation)return;
+        let changed=false;
+        const objects=this.snapshot.objects.map(o=>{if(o.id!==target||!o.visible)return o;changed=true;return{...o,effects:[...new Set([...o.effects,...effects])]};});
+        this.publish({objects});if(changed)this.deps.notice?.(id,'表示中の小物に演出が加わった。');
+      }).catch(()=>this.deps.diagnostic?.('effect_rejected',id,0));return true;
     }
     const waiting=this.snapshot.pending.find(j=>!j.controller);
     if(waiting){this.deps.diagnostic?.('queue_replaced',waiting.id,this.deps.now()-waiting.at);this.publish({pending:this.snapshot.pending.filter(j=>j!==waiting)});}
