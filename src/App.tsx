@@ -468,7 +468,6 @@ export default function App() {
     clearReplyPresentation,
     presentReply,
     resetCards,
-    resetTurn,
     resetGame,
     zones,
   } = cardGame;
