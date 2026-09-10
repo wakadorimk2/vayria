@@ -173,3 +173,35 @@ test('measurement persistence failures do not fail successful generation or repl
     assert.equal(calls.filter(c => c.op === 'reject').length, 1);
   } finally { globalThis.fetch = previousFetch; }
 });
+
+test('staging visual routes pass through the real Worker entry and never invoke paid providers for mode changes', async()=>{
+ const secret='visual-entry-secret-'.repeat(3),base='https://test.example';
+ const sign=value=>{const p=Buffer.from(JSON.stringify(value)).toString('base64url');return p+'.'+createHmac('sha256',secret).update(p).digest('base64url');};
+ for(const enabled of ['true','false']){
+  const calls=[];const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'visual-entry-'+enabled,modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],durableObjects:{USAGE:{className:'PublicUsage',useSQLite:true}},bindings:{PUBLIC_BASE_PATH:'/staging',MANIFESTATION_ENABLED:enabled,COOKIE_SECRET:secret,IP_SECRET:secret,PREVIEW_SECRET:secret,REQUIRE_PREVIEW_ACCESS:'true',GENERATION_ENABLED:'true',TURNSTILE_SECRET:'test',PUBLIC_HOSTNAME:'test.example'},serviceBindings:{ASSETS:()=>new Response('app')},outboundService:request=>{calls.push(new URL(request.url).pathname);if(request.url.includes('/siteverify'))return Response.json({success:true,hostname:'test.example',action:'session'});throw new Error('Unexpected paid provider');}}]}));
+  try{
+   const preview='__Host-vayria-staging-preview='+sign({purpose:'preview',exp:Date.now()+60000});
+   const headers={Origin:base,'Content-Type':'application/json',Cookie:preview,'CF-Connecting-IP':'192.0.2.20'};
+   const post=(path,body,extra={})=>mf.dispatchFetch(base+'/staging'+path,{method:'POST',headers:{...headers,...extra},body:JSON.stringify(body)});
+   assert.equal((await post('/api/visual/mode',{enabled:true,generation:0},{Cookie:''})).status,403);
+   assert.equal((await post('/api/visual/mode',{enabled:true,generation:0})).status,403);
+   const bootstrap=await mf.dispatchFetch(base+'/staging/api/session',{headers});headers.Cookie+='; '+bootstrap.headers.get('set-cookie').split(';')[0];
+   const started=await (await post('/api/session',{token:'test'})).json();headers['X-Vayria-Session']=started.session.id;
+   const mode=(on,generation)=>post('/api/visual/mode',{enabled:on,generation});
+   if(enabled==='false'){assert.equal((await mode(true,0)).status,404);continue;}
+   assert.deepEqual(await (await mode(false,0)).json(),{enabled:false,generation:1});
+   assert.deepEqual(await (await mode(true,1)).json(),{enabled:true,generation:2});
+   assert.deepEqual(await (await mode(false,2)).json(),{enabled:false,generation:3});
+   assert.equal((await mode(true,1)).status,409);
+   assert.deepEqual(await (await mode(true,3)).json(),{enabled:true,generation:4});
+   // Reload initialization always sends OFF, even when its local generation starts at zero.
+   assert.deepEqual(await (await mode(false,0)).json(),{enabled:false,generation:5});
+   assert.equal((await post('/api/visual/not-a-route',{})).status,404);
+   assert.equal((await post('/api/not-a-route',{})).status,404);
+   assert.equal((await post('/api/visual/mode',{enabled:true,generation:5},{'X-Vayria-Session':'expired'})).status,401);
+   await mf.dispatchFetch(base+'/staging/api/session',{method:'DELETE',headers});
+   assert.equal((await mode(true,5)).status,401);
+   assert.deepEqual(calls,['/turnstile/v0/siteverify']);
+  }finally{await mf.dispose();}
+ }
+});

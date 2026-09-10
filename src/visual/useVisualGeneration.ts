@@ -1,3 +1,4 @@
+import { VisualModeError, visualModeErrorMessage } from './modeError';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { publicFetch, publicSessionId, requestPublicSession } from '../public/session';
 import { runtimeConfig } from '../runtimeConfig';
@@ -30,9 +31,9 @@ export function useVisualGeneration(){
       const requestedRevision=++revision;
       if(!enabled){setVisualAccess(null);runtime.permission(false,runtime.getSnapshot().generation);}
       serial=serial.catch(()=>{}).then(async()=>{
-        if(!publicSessionId())return;
+        if(!publicSessionId())throw new VisualModeError(401,'session_required');
         const response=await publicFetch('/api/visual/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled,generation:runtime.getSnapshot().generation})});
-        if(!response.ok)throw new Error('mode_failed');const p=await response.json() as {enabled:boolean;generation:number};
+        if(!response.ok){const body=await response.json().catch(()=>null);const error=new VisualModeError(response.status,body?.code);console.info('[visual-mode]',JSON.stringify({status:error.status,code:error.code}));throw error;}const p=await response.json() as {enabled:boolean;generation:number};
         const active=requestedRevision===revision&&p.enabled;
         runtime.permission(active,p.generation);setVisualAccess(active?p.generation:null);
       });return serial;
@@ -46,6 +47,6 @@ export function useVisualGeneration(){
     const timer=setInterval(()=>client.runtime.tick(),100);
     return()=>{window.removeEventListener('vayria-public-start',off);window.removeEventListener('vayria-public-stop',off);clearInterval(timer);setVisualAccess(null);client.runtime.reset();};
   },[client]);
-  const toggle=async()=>{if(busy)return;setBusy(true);try{if(!snapshot.enabled&&!await requestPublicSession())return;await client.mode(!snapshot.enabled);setMessage(client.runtime.getSnapshot().enabled?'生成モード ON。カードや会話に応じて背景・小物が変化します。':'生成モード OFF。新しい変化を止めました。');}catch{setMessage('生成モードを変更できませんでした。');}finally{setBusy(false);}};
+  const toggle=async()=>{if(busy)return;setBusy(true);try{if(!snapshot.enabled&&!await requestPublicSession())return;await client.mode(!snapshot.enabled);setMessage(client.runtime.getSnapshot().enabled?'生成モード ON。カードや会話に応じて背景・小物が変化します。':'生成モード OFF。新しい変化を止めました。');}catch(error){setMessage(visualModeErrorMessage(error));}finally{setBusy(false);}};
   return{runtime:client.runtime,snapshot,busy,message,toggle,reset:client.reset};
 }

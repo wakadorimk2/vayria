@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 const dir='node_modules/.tmp/visual';await mkdir(dir,{recursive:true});
-const result=await build({stdin:{contents:'export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
+const result=await build({stdin:{contents:'export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
 await writeFile(dir+'/test.mjs',result.outputFiles[0].text);
 const {Ledger,initialState,readVisualIntent,cacheDecision,assetDescriptionKey,permitsVideo,VisualSession,sharedVisual,inspectVisualPng}=await import('../'+dir+'/test.mjs');
 const intent={type:'prop',action:'add',concept:'chicken',modifiers:[],targetId:'target',motion:'',motionEvidence:'',sharing:'general',regenerate:false};
@@ -103,4 +103,12 @@ test('effect changes require server acceptance and keep the displayed target ID'
  const {visualTicket}=await import('../'+dir+'/test.mjs');const effect={...intent,type:'effect',concept:'sparkle',targetId:'existing'};
  const signed=await visualTicket({visualIntent:effect},{COOKIE_SECRET:'test-secret-'.repeat(4)},'v','s',1,false);assert.equal(signed.visualIntent.targetId,'existing');
  let rejectEffect=true;const session=new VisualSession({now:()=>0,prepare:async()=>{},generate:async(job,signal,accept)=>{if(job.intent.type==='effect'){if(rejectEffect)throw new Error('visual_disabled');return;}await accept(asset);}});session.permission(true,1);session.dispatch('object',{...intent,targetId:'existing'},'ticket',1);await flush();session.visible('existing');session.dispatch('blocked',effect,'ticket',1);await flush();assert.deepEqual(session.getSnapshot().objects[0].effects,[]);rejectEffect=false;session.dispatch('allowed',effect,'ticket',1);await flush();assert.deepEqual(session.getSnapshot().objects[0].effects,['sparkle']);
+});
+
+test('mode failures expose only safe codes and distinguish connection, session, and unavailable feature',async()=>{
+ const {VisualModeError,visualModeErrorMessage}=await import('../'+dir+'/test.mjs');
+ assert.match(visualModeErrorMessage(new VisualModeError(503,'network_error')),/接続できません/);
+ assert.match(visualModeErrorMessage(new VisualModeError(401,'session_expired')),/有効期限/);
+ assert.match(visualModeErrorMessage(new VisualModeError(404,'not_found')),/利用できません/);
+ assert.equal(new VisualModeError(500,'private response data').code,'unknown');
 });

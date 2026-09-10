@@ -118,7 +118,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     return json(await ledger(env, 'configure', { patch: input.patch, stopped: input.stopped }));
   }
   const known = ['/api/session', '/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts', '/api/exhibition/enroll', '/api/exhibition/next'];
-  if (!known.includes(url.pathname) && !url.pathname.startsWith('/api/manifestation/')) return json({ code: 'not_found' }, 404);
+  if (!known.includes(url.pathname) && !url.pathname.startsWith('/api/manifestation/') && !url.pathname.startsWith('/api/visual/')) return json({ code: 'not_found' }, 404);
   let visitor = await verify<Visitor>(cookie(request, visitorCookie), env.COOKIE_SECRET);
   if (visitor?.purpose !== 'visitor') visitor = null;
   if (url.pathname === '/api/session' && request.method === 'GET') {
