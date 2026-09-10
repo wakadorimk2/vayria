@@ -1,6 +1,9 @@
 import type { VoiceInputNotice } from '../voice/voiceInput';
 
 export function voiceInputNoticeMessage(notice: VoiceInputNotice): string {
+  if (notice.state === 'recovering' && notice.code === 'playback-wait') return '返答が終わると、音声入力を再開します';
+  if (notice.state === 'recovering' && notice.code === 'capture-starting') return 'マイクの接続を確認しています';
+  if (notice.state === 'failed' && notice.code === 'playback-timeout') return '音声入力を再開できませんでした。文字やカードで続けられます。';
   if (notice.state === 'recovering') return '音声入力を再開しています';
   if (notice.state === 'resumed') return 'もう一度どうぞ';
   if (notice.code === 'not-allowed') return 'マイクの許可が必要です。ブラウザーの設定を確認してください。';

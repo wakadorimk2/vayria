@@ -8,6 +8,20 @@ import {
   reduceVoiceInput,
   type VoiceInputSnapshot,
 } from '../src/voice/voiceInput.js';
+
+test('capture and playback waiting never present active listening or retain old speech', () => {
+  const controller = createVoiceInputController();
+  for (const reason of ['capture-starting', 'playback-wait'] as const) {
+    controller.dispatch({ type: 'speech_started', segmentId: 'old', at: 1 });
+    controller.dispatch({ type: 'listening_pending', reason, at: 2 });
+    assert.equal(controller.getSnapshot().phase, 'recovering');
+    assert.equal(controller.getSnapshot().segmentId, null);
+    assert.equal(controller.getSnapshot().errorCode, null);
+    assert.equal(controller.getSnapshot().notice?.code, reason);
+    controller.dispatch({ type: 'listening_started', at: 3 });
+    assert.equal(controller.getSnapshot().notice, undefined);
+  }
+});
 import { createBrowserSpeechRecognitionAdapter } from '../src/voice/browserSpeechRecognition.js';
 import {
   PCM_CHUNK_BYTES,
