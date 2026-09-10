@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { splitSpeechAtBoundaries } from '../src/conversation/cardContinuation.js';
 import { performance } from 'node:perf_hooks';
 import {
   classifyViewerMessageFastPath
@@ -38,6 +39,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
     streamSpeech,
     earlySpeechLead,
     recentExpressionLevels,
+    cardContinuation,
   } = readChatRequest(payload);
   const startedAt = performance.now();
   const providerTurnId = headerTurnId ?? requestId;
@@ -97,19 +99,17 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
   };
   let stateRejected = false;
   let deliveryMetadataRejected = false;
+  let emittedUnitCount = 0;
   const streamingCallbacks: StreamingReplyCallbacks | null = streamSpeech
     ? {
-      onSpeechUnit: (index, unit, candidate) => {
+      onSpeechUnit: (_index, unit, candidate) => {
         const streamedCandidate =
           mode === 'voice'
             ? { ...candidate, interactionAction: candidate.voiceAction }
             : candidate;
-        writeNdjson(response, {
-          type: 'speech_unit',
-          index,
-          text: unit,
-          response: streamedCandidate,
-        });
+        for (const text of splitSpeechAtBoundaries(unit)) {
+          writeNdjson(response, { type: 'speech_unit', index: emittedUnitCount++, text, response: streamedCandidate });
+        }
       },
       onStateRejected: () => {
         stateRejected = true;
@@ -164,6 +164,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
         streamingCallbacks,
         earlySpeechLead,
         recentExpressionLevels,
+        cardContinuation,
       );
     } else {
       const generatedResponse = await generateReply(
@@ -188,6 +189,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
         streamingCallbacks,
         earlySpeechLead,
         recentExpressionLevels,
+        cardContinuation,
       );
       assistantResponse =
         mode === 'voice'

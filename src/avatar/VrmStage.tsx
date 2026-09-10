@@ -1,3 +1,4 @@
+import { runtimeConfig } from '../runtimeConfig';
 import { AvatarLoadOwnership } from './avatarLoadOwnership';
 import {
   forwardRef,
@@ -1096,7 +1097,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             camera,
             width,
             height,
-            usesExhibitionPortraitCamera()
+            (runtimeConfig.manifestationEnabled || usesExhibitionPortraitCamera())
               ? EXHIBITION_PORTRAIT_CAMERA
               : STAGE_PRESET.camera,
           );
@@ -1225,7 +1226,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               camera,
               container.clientWidth,
               container.clientHeight,
-              usesExhibitionPortraitCamera()
+              (runtimeConfig.manifestationEnabled || usesExhibitionPortraitCamera())
                 ? EXHIBITION_PORTRAIT_CAMERA
                 : STAGE_PRESET.camera,
             );

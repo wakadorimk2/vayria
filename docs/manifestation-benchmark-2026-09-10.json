@@ -1,0 +1,561 @@
+{
+  "note": "Local browser comparison; quality and voice unverified; p95 is small-sample reference. Credentials and media URLs omitted.",
+  "records": [
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 0,
+      "success": true,
+      "totalMs": 5357.30000000447,
+      "timings": {
+        "requestStartedAt": 1789045463051,
+        "inProgressAt": 1789045464773,
+        "videoCompletedAt": 1789045466454,
+        "inferenceSeconds": 0.3524789239963866,
+        "downloadCompletedAt": 1789045468345,
+        "compositeReadyAt": 1789045468395
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image-then-video",
+      "trial": 0,
+      "success": true,
+      "totalMs": 7873.89999999851,
+      "timings": {
+        "requestStartedAt": 1789045468417,
+        "inProgressAt": 1789045469030,
+        "imageCompletedAt": 1789045470408,
+        "videoCompletedAt": 1789045474272,
+        "inferenceSeconds": 0.3658647750016826,
+        "downloadCompletedAt": 1789045476228,
+        "compositeReadyAt": 1789045476282
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 0,
+      "success": true,
+      "totalMs": 5055.19999999553,
+      "timings": {
+        "requestStartedAt": 1789045476305,
+        "inProgressAt": 1789045476674,
+        "videoCompletedAt": 1789045479284,
+        "inferenceSeconds": 0.7841127169958781,
+        "downloadCompletedAt": 1789045481281,
+        "compositeReadyAt": 1789045481347
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "fresh-image-then-video",
+      "trial": 0,
+      "success": false,
+      "totalMs": 9527,
+      "error": "key-quality",
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 1,
+      "success": true,
+      "totalMs": 8596.69999999553,
+      "timings": {
+        "requestStartedAt": 1789045490900,
+        "inProgressAt": 1789045495901,
+        "videoCompletedAt": 1789045497595,
+        "inferenceSeconds": 0.36394275398924947,
+        "downloadCompletedAt": 1789045499424,
+        "compositeReadyAt": 1789045499486
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image-then-video",
+      "trial": 1,
+      "success": true,
+      "totalMs": 7099.69999999553,
+      "timings": {
+        "requestStartedAt": 1789045499497,
+        "inProgressAt": 1789045500413,
+        "imageCompletedAt": 1789045501485,
+        "videoCompletedAt": 1789045504722,
+        "inferenceSeconds": 0.7091846838593483,
+        "downloadCompletedAt": 1789045506509,
+        "compositeReadyAt": 1789045506580
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 1,
+      "success": true,
+      "totalMs": 6753.9000000059605,
+      "timings": {
+        "requestStartedAt": 1789045506598,
+        "inProgressAt": 1789045507857,
+        "videoCompletedAt": 1789045510776,
+        "inferenceSeconds": 0.796970751020126,
+        "downloadCompletedAt": 1789045513268,
+        "compositeReadyAt": 1789045513339
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "fresh-image-then-video",
+      "trial": 1,
+      "success": false,
+      "totalMs": 6515,
+      "error": "key-quality",
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 2,
+      "success": true,
+      "totalMs": 4558.20000000298,
+      "timings": {
+        "requestStartedAt": 1789045519867,
+        "inProgressAt": 1789045520549,
+        "videoCompletedAt": 1789045522567,
+        "inferenceSeconds": 0.47463631800019357,
+        "downloadCompletedAt": 1789045524357,
+        "compositeReadyAt": 1789045524414
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image-then-video",
+      "trial": 2,
+      "success": false,
+      "totalMs": 5941.39999999851,
+      "error": "key-quality",
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 2,
+      "success": true,
+      "totalMs": 5501.5,
+      "timings": {
+        "requestStartedAt": 1789045530367,
+        "inProgressAt": 1789045530878,
+        "videoCompletedAt": 1789045533500,
+        "inferenceSeconds": 0.7949954670039006,
+        "downloadCompletedAt": 1789045535785,
+        "compositeReadyAt": 1789045535856
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "fresh-image-then-video",
+      "trial": 2,
+      "success": false,
+      "totalMs": 11230.79999999702,
+      "error": "key-quality",
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 3,
+      "success": true,
+      "totalMs": 5471.20000000298,
+      "timings": {
+        "requestStartedAt": 1789045547100,
+        "inProgressAt": 1789045548822,
+        "videoCompletedAt": 1789045550822,
+        "inferenceSeconds": 0.45162393199279904,
+        "downloadCompletedAt": 1789045552502,
+        "compositeReadyAt": 1789045552559
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image-then-video",
+      "trial": 3,
+      "success": false,
+      "totalMs": 5566.20000000298,
+      "error": "key-quality",
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 3,
+      "success": true,
+      "totalMs": 4968.20000000298,
+      "timings": {
+        "requestStartedAt": 1789045558137,
+        "inProgressAt": 1789045558500,
+        "videoCompletedAt": 1789045561117,
+        "inferenceSeconds": 0.7876422230037861,
+        "downloadCompletedAt": 1789045563017,
+        "compositeReadyAt": 1789045563093
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "fresh-image-then-video",
+      "trial": 3,
+      "success": false,
+      "totalMs": 7494,
+      "error": "key-quality",
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 4,
+      "success": true,
+      "totalMs": 4736.60000000149,
+      "timings": {
+        "requestStartedAt": 1789045570600,
+        "inProgressAt": 1789045570980,
+        "videoCompletedAt": 1789045573291,
+        "inferenceSeconds": 0.3641672630037647,
+        "downloadCompletedAt": 1789045575262,
+        "compositeReadyAt": 1789045575326
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image-then-video",
+      "trial": 4,
+      "success": true,
+      "totalMs": 6391.30000000447,
+      "timings": {
+        "requestStartedAt": 1789045575337,
+        "inProgressAt": 1789045575644,
+        "imageCompletedAt": 1789045576411,
+        "videoCompletedAt": 1789045579621,
+        "inferenceSeconds": 0.39011097699403763,
+        "downloadCompletedAt": 1789045581663,
+        "compositeReadyAt": 1789045581719
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 4,
+      "success": true,
+      "totalMs": 5715.89999999851,
+      "timings": {
+        "requestStartedAt": 1789045581729,
+        "inProgressAt": 1789045582098,
+        "videoCompletedAt": 1789045585066,
+        "inferenceSeconds": 0.793191000004299,
+        "downloadCompletedAt": 1789045587358,
+        "compositeReadyAt": 1789045587432
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "768p",
+      "mode": "fresh-image-then-video",
+      "trial": 4,
+      "success": false,
+      "totalMs": 6335.60000000149,
+      "error": "key-quality",
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image",
+      "trial": 0,
+      "success": true,
+      "totalMs": 4838.10000000149,
+      "timings": {
+        "requestStartedAt": 1789045619482,
+        "inProgressAt": 1789045620864,
+        "imageCompletedAt": 1789045621633,
+        "maskCompletedAt": 1789045622715,
+        "downloadCompletedAt": 1789045624285
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image",
+      "trial": 1,
+      "success": true,
+      "totalMs": 4206.39999999851,
+      "timings": {
+        "requestStartedAt": 1789045624320,
+        "inProgressAt": 1789045624632,
+        "imageCompletedAt": 1789045625388,
+        "maskCompletedAt": 1789045627088,
+        "downloadCompletedAt": 1789045628488
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image",
+      "trial": 2,
+      "success": true,
+      "totalMs": 3987.1999999955297,
+      "timings": {
+        "requestStartedAt": 1789045628526,
+        "inProgressAt": 1789045628838,
+        "imageCompletedAt": 1789045629623,
+        "maskCompletedAt": 1789045631016,
+        "downloadCompletedAt": 1789045632491
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image",
+      "trial": 3,
+      "success": true,
+      "totalMs": 4265.80000000447,
+      "timings": {
+        "requestStartedAt": 1789045632513,
+        "inProgressAt": 1789045633125,
+        "imageCompletedAt": 1789045633585,
+        "maskCompletedAt": 1789045635285,
+        "downloadCompletedAt": 1789045636753
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "fal",
+      "resolution": "480p",
+      "mode": "fresh-image",
+      "trial": 4,
+      "success": true,
+      "totalMs": 3608.89999999851,
+      "timings": {
+        "requestStartedAt": 1789045636779,
+        "inProgressAt": 1789045637091,
+        "imageCompletedAt": 1789045637550,
+        "maskCompletedAt": 1789045638931,
+        "downloadCompletedAt": 1789045640357
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 0,
+      "success": true,
+      "totalMs": 15942.09999999404,
+      "timings": {
+        "requestStartedAt": 1789045768081,
+        "videoCompletedAt": 1789045783240,
+        "downloadCompletedAt": 1789045783959,
+        "compositeReadyAt": 1789045784013
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "480p",
+      "mode": "fresh-image-then-video",
+      "trial": 0,
+      "success": true,
+      "totalMs": 28610.30000000447,
+      "timings": {
+        "requestStartedAt": 1789045784034,
+        "imageCompletedAt": 1789045787931,
+        "videoCompletedAt": 1789045812047,
+        "downloadCompletedAt": 1789045812585,
+        "compositeReadyAt": 1789045812636
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 0,
+      "success": true,
+      "totalMs": 14227,
+      "timings": {
+        "requestStartedAt": 1789045812657,
+        "videoCompletedAt": 1789045825953,
+        "downloadCompletedAt": 1789045826794,
+        "compositeReadyAt": 1789045826871
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "768p",
+      "mode": "fresh-image-then-video",
+      "trial": 0,
+      "success": true,
+      "totalMs": 26758.5,
+      "timings": {
+        "requestStartedAt": 1789045826897,
+        "imageCompletedAt": 1789045827724,
+        "videoCompletedAt": 1789045853008,
+        "downloadCompletedAt": 1789045853594,
+        "compositeReadyAt": 1789045853647
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 0,
+      "success": true,
+      "totalMs": 15197,
+      "timings": {
+        "requestStartedAt": 1789045885328,
+        "videoCompletedAt": 1789045899949,
+        "downloadCompletedAt": 1789045900464,
+        "compositeReadyAt": 1789045900516
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 0,
+      "success": true,
+      "totalMs": 14331.60000000149,
+      "timings": {
+        "requestStartedAt": 1789045900534,
+        "videoCompletedAt": 1789045914222,
+        "downloadCompletedAt": 1789045914786,
+        "compositeReadyAt": 1789045914856
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 1,
+      "success": true,
+      "totalMs": 13896.10000000149,
+      "timings": {
+        "requestStartedAt": 1789045914867,
+        "videoCompletedAt": 1789045928169,
+        "downloadCompletedAt": 1789045928708,
+        "compositeReadyAt": 1789045928755
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 1,
+      "success": true,
+      "totalMs": 14908.20000000298,
+      "timings": {
+        "requestStartedAt": 1789045928763,
+        "videoCompletedAt": 1789045942500,
+        "downloadCompletedAt": 1789045943596,
+        "compositeReadyAt": 1789045943663
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 2,
+      "success": true,
+      "totalMs": 24674.10000000149,
+      "timings": {
+        "requestStartedAt": 1789045943671,
+        "videoCompletedAt": 1789045967610,
+        "downloadCompletedAt": 1789045968276,
+        "compositeReadyAt": 1789045968337
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 2,
+      "success": true,
+      "totalMs": 15354.19999999553,
+      "timings": {
+        "requestStartedAt": 1789045968347,
+        "videoCompletedAt": 1789045982974,
+        "downloadCompletedAt": 1789045983623,
+        "compositeReadyAt": 1789045983689
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "480p",
+      "mode": "reused-base-video",
+      "trial": 3,
+      "success": true,
+      "totalMs": 14426,
+      "timings": {
+        "requestStartedAt": 1789045983702,
+        "videoCompletedAt": 1789045997467,
+        "downloadCompletedAt": 1789045998067,
+        "compositeReadyAt": 1789045998117
+      },
+      "quality": "unreviewed"
+    },
+    {
+      "provider": "runware",
+      "resolution": "768p",
+      "mode": "reused-base-video",
+      "trial": 3,
+      "success": true,
+      "totalMs": 16396.5,
+      "timings": {
+        "requestStartedAt": 1789045998128,
+        "videoCompletedAt": 1789046013685,
+        "downloadCompletedAt": 1789046014447,
+        "compositeReadyAt": 1789046014514
+      },
+      "quality": "unreviewed"
+    }
+  ]
+}

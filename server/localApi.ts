@@ -32,6 +32,7 @@ import {
 } from './voiceLabStore.js';
 
 import { handleWorldRequest } from './worldHandler.js';
+import { handleManifestationRequest } from './manifestationHandler.js';
 
 export async function handleRequest(
   request: IncomingMessage,
@@ -43,6 +44,10 @@ export async function handleRequest(
     'http://127.0.0.1',
   ).pathname;
 
+  if (pathname.startsWith('/api/manifestation/')) {
+    await handleManifestationRequest(request, response, config);
+    return;
+  }
   if (pathname.startsWith('/api/world/')) {
     await handleWorldRequest(request, response, config);
     return;
@@ -513,7 +518,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
           pathname !== EVENTS_PATH &&
           pathname !== VOICE_LAB_EVENTS_PATH &&
           pathname !== ROUTER_EVENTS_PATH &&
-          !pathname.startsWith('/api/world/')
+          !pathname.startsWith('/api/world/') && !pathname.startsWith('/api/manifestation/')
         ) {
           next();
           return;

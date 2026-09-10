@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.performer-test.json",
+  "compilerOptions": { "outDir": "./node_modules/.tmp/manifestation-test", "tsBuildInfoFile": "./node_modules/.tmp/manifestation-test.tsbuildinfo" },
+  "include": ["scripts/manifestation.test.ts"]
+}

@@ -20,3 +20,6 @@ for (const asset of manifest.assets) {
 await writeFile(join(root, 'avatar/motions/manifest.json'), JSON.stringify(manifest));
 await copyFile('public/vayria-icon.png', join(root, 'vayria-icon.png'));
 console.log(`Public assets: VRM ${(vrm.length / 1048576).toFixed(1)} MiB; ${manifest.assets.length} registered motions.`);
+
+await mkdir(join(root, 'manifestation'), { recursive: true });
+for (const name of ['chicken-1.png', 'chicken-2.png', 'chicken-3.png', 'chicken-source.png']) await copyFile(join('public/manifestation', name), join(root, 'manifestation', name));

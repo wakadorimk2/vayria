@@ -10,12 +10,59 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
   const audioSession = getIosAudioSession();
   let wanted = false;
   let opening: Promise<boolean> | null = null;
+  let disposed = false;
+  let recoveryAt: number | null = null;
+  let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  let recoverySequence = 0;
+  let consecutiveFailures = 0;
   const emit = options.onEvent;
   const reset = () => { chunks = []; samples = 0; silent = 0; segmentId = ''; };
+  const cancelRecoveryTimer = () => {
+    ++recoverySequence;
+    if (recoveryTimer !== null) clearTimeout(recoveryTimer);
+    recoveryTimer = null;
+  };
+  // Playback can release the capture without cancelling the user's microphone intent.
+  const resumeListening = () => {
+    if (!wanted || disposed) return;
+    if (!publicActive() || document.hidden) { void stop(); return; }
+    if (playing || audioSession?.playbackHeld || !context || !node) return;
+    if (recoveryAt !== null && recoveryAt > Date.now()) {
+      cancelRecoveryTimer();
+      const sequence = recoverySequence;
+      recoveryTimer = setTimeout(() => {
+        if (sequence !== recoverySequence) return;
+        recoveryTimer = null;
+        resumeListening();
+      }, Math.min(recoveryAt - Date.now(), 2_147_483_647));
+      return;
+    }
+    const recovered = recoveryAt !== null;
+    cancelRecoveryTimer();
+    recoveryAt = null;
+    reset();
+    emit({ type: 'listening_started', recovered, at: Date.now() });
+  };
+  const failTranscription = async (code: string, current: number, retryAt?: number) => {
+    if (!enabled || generation !== current || !wanted || disposed) return;
+    if (!publicActive() || document.hidden) { await stop(); return; }
+    const recoverable = ['network_error', 'provider_unavailable', 'service_unavailable', 'busy', 'ip_rate_limit', 'no-speech'].includes(code);
+    if (recoverable) {
+      const delay = [1000, 3000, 10000, 30000][Math.min(consecutiveFailures++, 3)];
+      recoveryAt = Math.max(Date.now() + delay, retryAt ?? 0);
+      reset();
+      emit({ type: 'recognition_failed', code, recoverable: true, retryAt: recoveryAt, at: Date.now() });
+      resumeListening();
+      return;
+    }
+    const stopped = stop(); const failedGeneration = generation;
+    await stopped;
+    if (generation === failedGeneration) emit({ type: 'recognition_failed', code, recoverable: false, retryAt, at: Date.now() });
+  };
   const flush = async () => {
     if (!samples || busy) { reset(); return; }
     const id = segmentId; const count = samples; const parts = chunks; const current = generation; reset();
-    if (count < 3200 || !enabled || playing || !publicActive()) return;
+    if (count < 3200 || !enabled || playing || recoveryAt !== null || !publicActive()) return;
     busy = true; const request = new AbortController(); transcription = request;
     emit({ type: 'speech_ended', segmentId: id, at: Date.now() });
     try {
@@ -27,15 +74,25 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
       ascii(36, 'data'); view.setUint32(40, count * 2, true); let offset = 44;
       for (const part of parts) for (const sample of part) { view.setInt16(offset, sample, true); offset += 2; }
       const response = await publicFetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: buffer, signal: request.signal });
-      if (!response.ok) throw new Error('transcription failed');
-      const result = await response.json();
-      if (enabled && generation === current) emit({ type: 'utterance_finalized', segmentId: id, text: result.text, at: Date.now() });
-    } catch {
-      if (enabled && generation === current) {
-        const stopped = stop(); const failedGeneration = generation;
-        await stopped;
-        if (generation === failedGeneration) emit({ type: 'recognition_failed', code: 'recognition-failed', at: Date.now() });
+      if (!response.ok) {
+        const reason = await response.json().catch(() => null);
+        const code = typeof reason?.code === 'string' ? reason.code : 'recognition-failed';
+        const retryAt = typeof reason?.retryAt === 'number' && Number.isFinite(reason.retryAt) && reason.retryAt > 0 && !Number.isNaN(new Date(reason.retryAt).getTime()) ? reason.retryAt : undefined;
+        await failTranscription(code, current, retryAt);
+        return;
       }
+      const result: unknown = await response.json();
+      if (!result || typeof result !== 'object' || !('text' in result) || typeof result.text !== 'string') {
+        await failTranscription('recognition-failed', current);
+        return;
+      }
+      if (!result.text.trim()) { await failTranscription('no-speech', current); return; }
+      if (enabled && generation === current && publicActive() && !document.hidden) {
+        consecutiveFailures = 0;
+        emit({ type: 'utterance_finalized', segmentId: id, text: result.text, at: Date.now() });
+      }
+    } catch (error) {
+      if (!request.signal.aborted) await failTranscription(error instanceof SyntaxError ? 'recognition-failed' : 'network_error', current);
     } finally {
       if (transcription === request) { transcription = null; busy = false; }
     }
@@ -51,6 +108,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
   };
   const stop = async () => {
     wanted = false; enabled = false;
+    cancelRecoveryTimer(); recoveryAt = null; consecutiveFailures = 0; pressed = false;
     const released = releaseCapture(); const stoppedGeneration = generation;
     await released;
     if (generation === stoppedGeneration) {
@@ -59,19 +117,22 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
     }
   };
   const pause = () => { void stop(); };
+  const hidden = () => { if (document.hidden) void stop(); };
   const control = (event: Event) => {
     const detail = (event as CustomEvent<{ manual: boolean; pressed: boolean }>).detail;
     if (manual !== detail.manual) reset(); manual = detail.manual; pressed = detail.pressed;
     if (manual && !pressed) void flush();
   };
   window.addEventListener('vayria-public-stop', pause); window.addEventListener('vayria-public-microphone', control);
+  document.addEventListener('visibilitychange', hidden);
   const adapter: VoiceInputAdapter = {
     isSupported: !!navigator.mediaDevices?.getUserMedia && typeof AudioWorkletNode !== 'undefined', supportErrorCode: null,
     start() {
-      if (!publicActive()) return Promise.resolve(false);
+      if (disposed || document.hidden || !publicActive()) return Promise.resolve(false);
       wanted = true;
       if (audioSession?.playbackHeld) {
-        enabled = true; emit({ type: 'listening_started', at: Date.now() });
+        enabled = true;
+        if (recoveryAt === null) emit({ type: 'listening_started', at: Date.now() });
         return Promise.resolve(true);
       }
       if (enabled && context) return Promise.resolve(true);
@@ -92,7 +153,8 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
         if (!publicActive()) { await stop(); return false; }
         enabled = true;
         node.port.onmessage = event => {
-          if (!enabled || busy || playing || !publicActive() || document.hidden) { reset(); return; }
+          if (current !== generation) return;
+          if (!enabled || busy || playing || recoveryAt !== null || !publicActive() || document.hidden) { reset(); return; }
           const pcm = new Int16Array(event.data); const rms = Math.sqrt(pcm.reduce((sum, value) => sum + (value / 32768) ** 2, 0) / pcm.length);
           const speaking = manual ? pressed : rms >= .015;
           if (!speaking && !samples) return;
@@ -100,19 +162,21 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
           chunks.push(pcm); samples += pcm.length; silent = speaking ? 0 : silent + pcm.length;
           if (samples >= 320000 || (!manual && silent >= 9600)) void flush();
         };
-        emit({ type: 'listening_started', at: Date.now() }); return true;
-      } catch {
+        if (recoveryAt !== null) resumeListening();
+        else emit({ type: 'listening_started', at: Date.now() });
+        return true;
+      } catch (error) {
         if (generation !== current) return false;
         const stopped = stop(); const failedGeneration = generation;
         await stopped;
-        if (generation === failedGeneration) emit({ type: 'recognition_failed', code: 'audio-capture', at: Date.now() });
+        if (generation === failedGeneration) emit({ type: 'recognition_failed', code: error instanceof DOMException && error.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture', recoverable: false, at: Date.now() });
         return false;
       }
       })().finally(() => { if (opening === attempt) opening = null; });
       opening = attempt;
       return attempt;
-    }, stop, setTtsPlaying(value) { playing = value; if (value) reset(); },
-    dispose() { window.removeEventListener('vayria-public-stop', pause); window.removeEventListener('vayria-public-microphone', control); void stop(); unregister?.(); },
+    }, stop, setTtsPlaying(value) { playing = value; if (value) reset(); else if (recoveryAt !== null) resumeListening(); },
+    dispose() { disposed = true; document.removeEventListener('visibilitychange', hidden); window.removeEventListener('vayria-public-stop', pause); window.removeEventListener('vayria-public-microphone', control); void stop(); unregister?.(); },
   };
   const unregister = audioSession?.register({
     pause: releaseCapture,

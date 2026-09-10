@@ -1,3 +1,4 @@
+import type { InputEvent } from '../src/manifestation/types';
 import { distribution, sanitizeMeasurements, safeMetricCode, timingFields, type Measurements } from './diagnostics';
 // All monetary values are integer micro-yen. No conversation content belongs here.
 export const DEFAULT_LIMITS = {
@@ -18,6 +19,9 @@ export type Session = {
 type Job = { session: string; kind: Kind; expires: number };
 type Charge = { amount: number; day: string; month: string; settled: boolean; expires: number };
 export type LedgerState = {
+  manifestation?: { reservedMicrousd: number; requests: Record<string, number>; events: Record<string, boolean>;
+    jobs: Record<string, { visitor: string; session: string; expires: number; active: boolean; target?: string }>;
+    metrics: { code: string; timings: Record<string, number> }[] };
   limits: Limits; stopped: boolean; sessions: Record<string, Session>; counters: Record<string, Counter>;
   jobs: Record<string, Job>; charges: Record<string, Charge>; usedTickets: Record<string, number>;
   metrics?: { at: number; kind: Kind; durationMs: number; code: string; rejected?: boolean; measurements?: Measurements }[];
@@ -56,6 +60,13 @@ export class Ledger {
     }
   }
   cleanup() {
+    const m = this.state.manifestation;
+    if (m) {
+      for (const [key, job] of Object.entries(m.jobs)) if (job.expires <= this.now) delete m.jobs[key];
+      for (const id of Object.keys(m.requests)) if (!this.state.sessions[id] || this.state.sessions[id].expires <= this.now) {
+        delete m.requests[id]; for (const key of Object.keys(m.events)) if (key.startsWith(id + ':')) delete m.events[key];
+      }
+    }
     this.state.metrics = (this.state.metrics ?? []).filter(m => m.at + 86400_000 > this.now).slice(-2000);
     for (const [id, s] of Object.entries(this.state.sessions)) {
       if (s.expires <= this.now) this.close(s);
@@ -182,10 +193,48 @@ export class Ledger {
     this.state.metrics!.push({ at: this.now, kind, durationMs: 0, code: safeMetricCode(code), rejected: true });
     this.state.metrics = this.state.metrics!.slice(-2000);
   }
+  private manifestationState() {
+    return this.state.manifestation ??= { reservedMicrousd: 0, requests: {}, events: {}, jobs: {}, metrics: [] };
+  }
+  manifestationBegin(visitor: string, id: string, event: InputEvent, token: string) {
+    const session = this.session(visitor, id); const state = this.manifestationState();
+    if (this.state.stopped) throw new LimitError('generation_stopped', 0, 503);
+    const key = `${id}:${event.eventId}`;
+    if (state.events[key]) throw new LimitError('duplicate_event', 0, 409);
+    if ((state.requests[id] ?? 0) >= 20) throw new LimitError('manifestation_limit', session.expires);
+    const active = Object.values(state.jobs).filter(j => j.active && j.expires > this.now);
+    if (active.filter(j => j.session === id).length >= 2 || active.length >= 10) throw new LimitError('busy', this.now + 1000);
+    // Normal 480p price: 5 seconds * $0.025. Never assume a promotional discount.
+    const cost = 125000;
+    if (state.reservedMicrousd + cost > 5000000) throw new LimitError('manifestation_budget', 0);
+    const yen = Math.ceil(cost * this.state.limits.usdJpy); this.checkBudget(yen);
+    const p = periods(this.now);
+    this.add(`bd:${p.day}`, yen, p.dayEnd + 2 * 86400_000);
+    this.add(`bm:${p.month}`, yen, p.monthEnd + 7 * 86400_000);
+    state.reservedMicrousd += cost; state.requests[id] = (state.requests[id] ?? 0) + 1;
+    state.events[key] = true; session.paid = true;
+    state.jobs[token] = { visitor, session: id, expires: Math.min(session.expires, this.now + 10000), active: true };
+  }
+  manifestationComplete(visitor: string, id: string, token: string, target: string) {
+    const session = this.session(visitor, id); const job = this.manifestationState().jobs[token];
+    if (!job || job.visitor !== visitor || job.session !== id || !job.active || job.expires <= this.now) throw new LimitError('job_expired', 0, 409);
+    job.target = target; job.expires = Math.min(session.expires, this.now + 600000);
+  }
+  manifestationMedia(visitor: string, token: string) {
+    const job = this.manifestationState().jobs[token];
+    if (!job || job.visitor !== visitor || !job.target || job.expires <= this.now) throw new LimitError('invalid_ticket', 0, 403);
+    this.session(visitor, job.session); return job.target;
+  }
+  manifestationFinish(token: string, code: string, timings: Record<string, number>) {
+    const state = this.manifestationState(); const job = state.jobs[token]; if (!job) return;
+    job.active = false;
+    state.metrics.push({ code: code === 'complete' ? 'complete' : 'provider_failure', timings: Object.fromEntries(Object.entries(timings ?? {}).filter(([k,v]) => /^[a-zA-Z0-9._]{1,60}$/.test(k) && Number.isFinite(v) && v >= 0).slice(0,30)) });
+    state.metrics = state.metrics.slice(-100);
+  }
   report() {
     const p = periods(this.now); const l = this.state.limits;
     const estimatedYen = this.count(`bm:${p.month}`) / 1e6 + l.infrastructureYen;
-    return { limits: l, stopped: this.state.stopped, dayYen: this.count(`bd:${p.day}`) / 1e6,
+    return { manifestation: { reservedUsd: (this.state.manifestation?.reservedMicrousd ?? 0) / 1e6, limitUsd: 5, metrics: this.state.manifestation?.metrics ?? [] }, limits: l, stopped: this.state.stopped, dayYen: this.count(`bd:${p.day}`) / 1e6,
       monthApiYen: this.count(`bm:${p.month}`) / 1e6, estimatedYen,
       warning: estimatedYen >= l.targetYen ? 'target_exceeded' : estimatedYen >= l.warningYen ? 'warning' : null,
       activeJobs: Object.keys(this.state.jobs).length,

@@ -30,6 +30,9 @@ import {
   shouldReactToCardInteraction
 } from './cards/cardReactions';
 import type { CardSwapResult } from './cards/useCardGamePrototype';
+import { useManifestation } from './manifestation/useManifestation';
+import { manifestationContext } from './manifestation/session';
+import { ManifestationStage } from './manifestation/ManifestationStage';
 import { useWorldMutation } from './world/useWorldMutation';
 import { WorldControls, WorldStage } from './world/WorldStage';
 import { worldConversationContext } from './world/worldState';
@@ -420,16 +423,17 @@ export default function App() {
     useState(true);
   const [sessionGeneration, setSessionGeneration] = useState(0);
   const { runtime: worldRuntime, snapshot: worldSnapshot } = useWorldMutation();
+  const { runtime: manifestationRuntime, snapshot: manifestationSnapshot, bind: bindManifestation, newExperiment: newManifestationExperiment } = useManifestation();
   const worldReactionKeyRef = useRef(new Set<string>());
   const worldReactionPendingRef = useRef(false);
   const worldReactionRunningRef = useRef(false);
   const programContext = useMemo(
-    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
-    [programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
+    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(runtimeConfig.manifestationEnabled ? { worldContext: manifestationContext(manifestationSnapshot) } : runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
+    [manifestationSnapshot, programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
   );
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
-  const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled;
+  const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled;
   const [publicTextInputOpen, setPublicTextInputOpen] = useState(false);
   const publicTextPanelRef = usePanelVisibility<HTMLFormElement>((runtimeConfig.mode !== 'public' && !runtimeConfig.worldMutationEnabled) || publicTextInputOpen, '.public-controls__text');
   const [publicSubmitPending, setPublicSubmitPending] = useState(false);
@@ -444,9 +448,11 @@ export default function App() {
     () => new SpatialTargetRegistry(),
   );
 
-  const cardGame = useCardGamePrototype(runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled, runtimeConfig.worldMutationEnabled);
+  const cardGame = useCardGamePrototype(runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled, runtimeConfig.worldMutationEnabled);
   const {
     acceptReply,
+    insertSlotCard,
+    readCardContext,
     beginReply,
     clearReplyPresentation,
     presentReply,
@@ -828,10 +834,23 @@ export default function App() {
     [],
   );
 
-  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, pendingActivatedCardIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, resetTurn, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
+  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
 
+  const handleCardReplyDelivered = useCallback((ids: string[], revision?: number) => {
+    handleReplyAccepted(ids, revision);
+    if (!ids.length || revision === undefined) return;
+    let next = autonomyStateRef.current;
+    const cardReasons = next.reasons.filter(reason => reason.status === 'active' &&
+      reason.decisionEvidenceIds.some(id => id.startsWith('card-evidence:') && Number(id.slice(14)) <= revision));
+    for (const reason of cardReasons) next = resolveUsedReasons(next, [reason.id], reason.episodeId);
+    next = completeInactiveEpisodes(next);
+    autonomyStateRef.current = next;
+    setAutonomyState(next);
+    if ((pendingCardStimulusRef.current?.cardContext.swapRevision ?? Infinity) <= revision) pendingCardStimulusRef.current = null;
+  }, [handleReplyAccepted, autonomyStateRef, setAutonomyState]);
   const {
     cancelAutonomous,
+    changeCardsDuringTurn,
     error,
     evaluateVoiceParticipation,
     interruptCurrentTurn,
@@ -847,6 +866,7 @@ export default function App() {
     source,
     status,
   } = useConversation(playbackCoordinator, {
+    createCardContinuationPlan: trigger => createPlanForTrigger(trigger),
     historyTurnLimit: 5,
     isExhibitionMode,
     isMuted,
@@ -1039,8 +1059,9 @@ export default function App() {
     enabled: isVoiceInputEnabled,
     recognizing: isSttProcessing,
     speaking: isVadSpeech || voiceInputPhase === 'speech_detected',
+    recovering: voiceInputPhase === 'recovering',
   });
-  const conversationError = error || voiceValidationError || voiceError;
+  const conversationError = error || voiceValidationError || (runtimeConfig.mode === 'public' ? '' : voiceError);
   const shouldShowStatus =
     (!usesExhibitionUi || !shouldShowReply) &&
     !(runtimeConfig.mode === 'public' && (
@@ -1248,7 +1269,8 @@ export default function App() {
 
   const resetSession = useCallback(() => {
     worldRuntime.reset();
-    if (runtimeConfig.worldMutationEnabled) resetGame();
+    manifestationRuntime.reset();
+    if (runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled) resetGame();
     worldReactionKeyRef.current.clear();
     worldReactionPendingRef.current = false;
     worldReactionRunningRef.current = false;
@@ -1288,7 +1310,6 @@ export default function App() {
     cardDropReactionControllerRef.current.reset();
     cardDropReactionPlanIdsRef.current.clear();
     cardReactionPlanIdsRef.current.clear();
-    pendingActivatedCardIdsRef.current.clear();
     activePlanRef.current = null;
     setActivePlan(null);
     setActiveEmotionCue(null);
@@ -1301,7 +1322,7 @@ export default function App() {
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
-  }, [resetGame, worldRuntime, stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetTurn, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, pendingActivatedCardIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
+  }, [manifestationRuntime, resetGame, worldRuntime, stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetTurn, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
 
   useEffect(() => {
     routerResetSessionRef.current = resetSession;
@@ -1464,14 +1485,6 @@ export default function App() {
       spatialTargetRegistry.clearTransient('game');
     };
   }, [clearCardAttentionTimers, nonSpeechTimerRef, spatialTargetRegistry]);
-
-  const readCardContext = useCallback(
-    () => ({
-      brainCardIds: zones.brain.map((card) => card.id),
-      forcedCardId: zones.forcedCardId,
-    }),
-    [zones.brain, zones.forcedCardId],
-  );
 
   const getDirectionContribution = useCallback(
     (trigger: PerformerTrigger) =>
@@ -1714,7 +1727,7 @@ export default function App() {
           void sendVoice(
             message,
             voiceCardContext,
-            handleReplyAccepted,
+            handleCardReplyDelivered,
             plan,
             { segmentId: event.segmentId, at: event.at, asrConfidence: null },
             identityForRequest,
@@ -1742,7 +1755,7 @@ export default function App() {
           return;
       }
     },
-    [recordVoiceSignal, routerSnapshot.gptInputGate, observeRouterSignal, recordAutonomyEvidence, dispatchBargeIn, activeBargeInSegmentRef, stopReaction, ttsPlaying, getPrimaryPlaybackAgeMs, source, rememberExplicitAlias, isBusy, evaluateVoiceParticipation, readCardContext, cardDropReactionControllerRef, cancelNonSpeechPlan, cancelActiveCardReactionPlan, createPlanForTrigger, isMuted, prepare, handleConversationInputReceived, sendVoice, handleReplyAccepted, notifyMeaningfulAutonomyEvent, readAutonomyEvidenceContext, interruptCurrentTurn, beginReply],
+    [recordVoiceSignal, routerSnapshot.gptInputGate, observeRouterSignal, recordAutonomyEvidence, dispatchBargeIn, activeBargeInSegmentRef, stopReaction, ttsPlaying, getPrimaryPlaybackAgeMs, source, rememberExplicitAlias, isBusy, evaluateVoiceParticipation, readCardContext, cardDropReactionControllerRef, cancelNonSpeechPlan, cancelActiveCardReactionPlan, createPlanForTrigger, isMuted, prepare, handleConversationInputReceived, sendVoice, handleCardReplyDelivered, notifyMeaningfulAutonomyEvent, readAutonomyEvidenceContext, interruptCurrentTurn, beginReply],
   );
 
   useEffect(() => {
@@ -1825,7 +1838,6 @@ export default function App() {
           activePlanRef.current;
         if (currentActivePlan?.planId !== preactivatedPlan.planId) {
           cardReactionPlanIdsRef.current.delete(preactivatedPlan.planId);
-          pendingActivatedCardIdsRef.current.delete(preactivatedPlan.planId);
           return;
         }
         handlePerformanceResult({
@@ -1876,9 +1888,9 @@ export default function App() {
       }
       beginReply();
       const decision = await sendAutonomous(
-        cardContextOverride ?? readCardContext(),
+        readCardContext(),
         autonomousContext,
-        handleReplyAccepted,
+        handleCardReplyDelivered,
         plan,
         programContextOverride,
         candidate,
@@ -1909,7 +1921,7 @@ export default function App() {
       setAutonomyState(nextState);
       return decision.externalAction === 'speak' ? 'speak' : 'none';
     },
-    [worldRuntime, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleReplyAccepted, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, pendingActivatedCardIdsRef, prepare, executeNonSpeechPlan],
+    [worldRuntime, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleCardReplyDelivered, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, prepare, executeNonSpeechPlan],
   );
 
   const handleCardInserted = useCallback(
@@ -1941,11 +1953,12 @@ export default function App() {
         ],
       });
       notifyMeaningfulAutonomyEvent('card_change');
+      changeCardsDuringTurn(readCardContext());
       const reducedMotion = window.matchMedia(
         '(prefers-reduced-motion: reduce)',
       ).matches;
       const canStartCardDropReaction =
-        activePlanRef.current === null && !isBusy;
+        activePlanRef.current === null && !isBusy && !isVadSpeech && !isSttProcessing;
       const cardDropReaction = canStartCardDropReaction
         ? cardDropReactionControllerRef.current.begin(
           result,
@@ -1982,6 +1995,7 @@ export default function App() {
         cardContext: {
           brainCardIds: result.brainCardIds,
           forcedCardId: result.forcedCardId,
+          swapRevision: result.animationSequence,
         },
         contribution,
         programContext: {
@@ -1990,8 +2004,25 @@ export default function App() {
         },
       };
     },
-    [worldRuntime, activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
+    [changeCardsDuringTurn, readCardContext, isVadSpeech, isSttProcessing, worldRuntime, activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
+
+  useEffect(() => {
+    if (!runtimeConfig.manifestationEnabled) return;
+    bindManifestation(event => {
+      const result = insertSlotCard(event.cardId);
+      if (!result) return false;
+      handleCardInserted(result);
+      return true;
+    }, (id, description) => {
+      recordAutonomyEvidence({ id: `manifestation:${id}`, kind: 'environment_change', at: Date.now(), semanticKey: `manifestation:${id}`, content: description, wakeConditions: ['new_evidence', 'interaction_state_changed'], reasonProposals: [{ kind: 'environment_change', content: description, semanticKey: `manifestation:${id}`, salience: .85 }] });
+      notifyMeaningfulAutonomyEvent('card_change');
+    });
+  }, [bindManifestation, insertSlotCard, handleCardInserted, recordAutonomyEvidence, notifyMeaningfulAutonomyEvent]);
+
+  useEffect(() => {
+    if (runtimeConfig.manifestationEnabled && ttsPlaying) manifestationRuntime.markAudioStarted();
+  }, [ttsPlaying, manifestationRuntime]);
 
   useEffect(() => {
     if (!runtimeConfig.worldMutationEnabled) return;
@@ -2161,7 +2192,7 @@ export default function App() {
     void sendManual(
       trimmedInput,
       manualCardContext,
-      handleReplyAccepted,
+      handleCardReplyDelivered,
       plan,
       identityForRequest,
       undefined,
@@ -2274,7 +2305,7 @@ export default function App() {
   return (
     <main
       className="app-shell"
-      data-app-mode={runtimeConfig.mode} data-world-ui={runtimeConfig.worldMutationEnabled}
+      data-app-mode={runtimeConfig.mode} data-world-ui={runtimeConfig.worldMutationEnabled} data-manifestation-ui={runtimeConfig.manifestationEnabled}
       data-ui-mode={usesExhibitionUi ? 'exhibition' : 'local'}
       data-public-text-input={publicTextInputOpen}
       data-exhibition-state={exhibitionPresentationState}
@@ -2520,7 +2551,7 @@ export default function App() {
       <section className="avatar-area" aria-label="VRM character">
         {runtimeConfig.worldMutationEnabled && <WorldStage snapshot={worldSnapshot} runtime={worldRuntime} stage={stageRef} />}
         <VrmStage
-          stageVariant={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled ? 'public' : 'default'}
+          stageVariant={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled ? 'public' : 'default'}
           attentionReader={readAttention}
           emotion={displayEmotion}
           isExhibitionMode={usesExhibitionUi}
@@ -2540,7 +2571,7 @@ export default function App() {
             </p>
           </aside>
         )}
-        <CardGamePrototype
+        {runtimeConfig.manifestationEnabled ? <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} /> : <CardGamePrototype
           isExchangeLocked={runtimeConfig.worldMutationEnabled && worldSnapshot.source === 'card' && (worldSnapshot.phase === 'pending' || worldSnapshot.phase === 'ready')}
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
           game={cardGame}
@@ -2553,9 +2584,10 @@ export default function App() {
           onSessionReset={handleSessionReset}
           onSelectionActiveChange={setIsCardSelectionActive}
           spatialTargetRegistry={spatialTargetRegistry}
-        />
+        />}
       </section>
 
+      {runtimeConfig.manifestationEnabled && <nav className="manifestation-actions" aria-label="会話の操作"><button onClick={() => { void handleVoiceToggle(); }} aria-pressed={isVoiceInputEnabled}>マイク</button><button onClick={() => setPublicTextInputOpen(value => !value)} aria-expanded={publicTextInputOpen}>文字で話す</button></nav>}
       {runtimeConfig.worldMutationEnabled && <WorldControls snapshot={worldSnapshot} runtime={worldRuntime} onReset={resetSession} isMuted={isMuted} onMute={handleMuteToggle} microphoneOn={isVoiceInputEnabled} onMicrophone={() => { void handleVoiceToggle(); }} onText={() => { void prepare(); setPublicTextInputOpen(value => !value); }} onNewExperiment={() => { resetSession(); void worldRuntime.newExperiment(); }} />}
 
       <section
@@ -2599,7 +2631,7 @@ export default function App() {
           )}
         </div>
 
-        <form ref={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled ? publicTextPanelRef : undefined} className="message-form" onSubmit={handleSubmit}>
+        <form ref={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled ? publicTextPanelRef : undefined} className="message-form" data-manifestation-open={publicTextInputOpen} onSubmit={handleSubmit}>
           <label className="visually-hidden" htmlFor="message-input">
             キャラクターへ送るメッセージ
           </label>
@@ -2683,6 +2715,7 @@ export default function App() {
           onMuteToggle={handleMuteToggle}
           microphoneOn={isVoiceInputEnabled}
           microphoneState={publicMicrophoneState}
+          microphoneNotice={voiceInput.notice}
           microphoneLevel={displayedAudioLevel === null ? null : microphoneInputStrength}
           onMicrophoneToggle={() => { void handleVoiceToggle(); }}
         />

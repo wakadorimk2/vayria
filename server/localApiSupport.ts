@@ -1,3 +1,4 @@
+import type { CardContinuation } from '../src/conversation/cardContinuation.js';
 import { Buffer } from 'node:buffer';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { cardPool } from '../src/cards/cardPool.js';
@@ -199,6 +200,11 @@ export const ALL_CARD_IDS = cardPool.map((card) => card.id);
 export const providerRequestCounts = { active: 0 };
 
 export interface LocalApiConfig {
+  manifestationBudgetLimitUsd?: number;
+  manifestationEnabled?: boolean;
+  manifestationBenchmarkEnabled?: boolean;
+  manifestationRunwareEnabled?: boolean;
+  manifestation?: import('./manifestationProvider.js').ManifestationConfig;
   worldMutationEnabled?: boolean;
   openAiApiKey?: string;
   aivisBaseUrl?: string;
@@ -359,6 +365,7 @@ export interface PerformanceContextPayload {
 }
 
 export interface ChatRequestPayload {
+  cardContinuation?: CardContinuation;
   mode: ChatMode;
   message: string | null;
   characterIdentity: CharacterIdentity;

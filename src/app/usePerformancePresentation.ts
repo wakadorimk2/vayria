@@ -8,13 +8,12 @@ import type {
   PerformancePlan,
   PerformanceResult
 } from '../performer/types';
-export function usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, resetTurn, handlePerformancePlan, sessionGeneration, sessionGenerationRef }: { activePlanRef: React.RefObject<PerformancePlan | null>; setActivePlan: (plan: PerformancePlan | null) => void; setActiveEmotionCue: (cue: NonNullable<PerformanceResult['emotionCue']> | null) => void; setIsAutonomousLoopEnabled: (enabled: boolean) => void; playbackCoordinator: PerformancePlaybackCoordinator; completePlan: (result: PerformanceResult) => void; acceptReply: (ids: string[]) => void; resetTurn: () => void; handlePerformancePlan: (plan: PerformancePlan) => void; sessionGeneration: number; sessionGenerationRef: React.RefObject<number> }) {
+export function usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, handlePerformancePlan, sessionGeneration, sessionGenerationRef }: { activePlanRef: React.RefObject<PerformancePlan | null>; setActivePlan: (plan: PerformancePlan | null) => void; setActiveEmotionCue: (cue: NonNullable<PerformanceResult['emotionCue']> | null) => void; setIsAutonomousLoopEnabled: (enabled: boolean) => void; playbackCoordinator: PerformancePlaybackCoordinator; completePlan: (result: PerformanceResult) => void; acceptReply: (ids: string[], swapRevision?: number) => void; handlePerformancePlan: (plan: PerformancePlan) => void; sessionGeneration: number; sessionGenerationRef: React.RefObject<number> }) {
   const cardDropReactionControllerRef = useRef(
     new CardDropReactionController(),
   );
   const cardReactionPlanIdsRef = useRef(new Set<string>());
   const cardDropReactionPlanIdsRef = useRef(new Set<string>());
-  const pendingActivatedCardIdsRef = useRef(new Map<string, string[]>());
   const nonSpeechTimerRef = useRef<number | null>(null);
   const handlePerformanceResult = useCallback(
     (result: PerformanceResult) => {
@@ -29,41 +28,25 @@ export function usePerformancePresentation({ activePlanRef, setActivePlan, setAc
       }
       cardDropReactionControllerRef.current.settleReply(result.planId);
       if (activePlanRef.current?.planId !== result.planId) return;
-      const isCardReactionPlan = cardReactionPlanIdsRef.current.delete(
+      cardReactionPlanIdsRef.current.delete(
         result.planId,
       );
-      const pendingActivatedCardIds = pendingActivatedCardIdsRef.current.get(
-        result.planId,
-      );
-      pendingActivatedCardIdsRef.current.delete(result.planId);
       if (result.outcome === 'failed') {
         setIsAutonomousLoopEnabled(false);
       }
       playbackCoordinator.stop();
       completePlan(result);
-      if (isCardReactionPlan) {
-        if (result.outcome === 'completed' && pendingActivatedCardIds) {
-          acceptReply(pendingActivatedCardIds);
-        } else {
-          resetTurn();
-        }
-      }
       activePlanRef.current = null;
       setActivePlan(null);
       setActiveEmotionCue(null);
     },
-    [acceptReply, activePlanRef, completePlan, playbackCoordinator, resetTurn, setActiveEmotionCue, setActivePlan, setIsAutonomousLoopEnabled],
+    [activePlanRef, completePlan, playbackCoordinator, setActiveEmotionCue, setActivePlan, setIsAutonomousLoopEnabled],
   );
   const handleReplyAccepted = useCallback(
-    (activatedCardIds: string[]) => {
-      const planId = activePlanRef.current?.planId;
-      if (planId && cardReactionPlanIdsRef.current.has(planId)) {
-        pendingActivatedCardIdsRef.current.set(planId, activatedCardIds);
-        return;
-      }
-      acceptReply(activatedCardIds);
+    (activatedCardIds: string[], swapRevision?: number) => {
+      acceptReply(activatedCardIds, swapRevision);
     },
-    [acceptReply, activePlanRef],
+    [acceptReply],
   );
   const cancelActiveCardReactionPlan = useCallback(() => {
     const plan = activePlanRef.current;
@@ -122,5 +105,5 @@ export function usePerformancePresentation({ activePlanRef, setActivePlan, setAc
       interactionAction: plan.actionDecision?.action,
     });
   }, [activePlanRef, handlePerformanceResult]);
-  return { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, pendingActivatedCardIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan };
+  return { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan };
 }

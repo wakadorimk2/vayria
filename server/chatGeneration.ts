@@ -1,3 +1,4 @@
+import type { CardContinuation } from '../src/conversation/cardContinuation.js';
 import { randomUUID } from 'node:crypto';
 import { cardPool } from '../src/cards/cardPool.js';
 import { CARD_REACTION_PROFILES } from '../src/cards/cardReactions.js';
@@ -491,10 +492,11 @@ export async function generateInteractiveResponse(
   streaming: StreamingReplyCallbacks | null = null,
   earlySpeechLead = true,
   recentExpressionLevels: readonly ExpressionLevel[],
+  cardContinuation?: CardContinuation,
 ): Promise<CardAssistantResponse> {
   const selfNameResolution = resolveSelfName(message, characterIdentity);
   const fastPathDecision: ConversationActionDecision | null =
-    selfNameResolution.role === 'direct_address'
+    cardContinuation?.deliveredText || selfNameResolution.role === 'direct_address'
       ? { action: 'take_floor', backchannelCue: 'none' as const }
       : classifyViewerMessageFastPath(message);
   const policyDecision =
@@ -551,6 +553,7 @@ export async function generateInteractiveResponse(
       : null,
     earlySpeechLead,
     recentExpressionLevels,
+    cardContinuation,
   );
   return {
     ...reply.response,
@@ -670,6 +673,7 @@ export async function generateReply(
   streaming: StreamingReplyCallbacks | null = null,
   earlySpeechLead = true,
   recentExpressionLevels: readonly ExpressionLevel[] = [],
+  cardContinuation?: CardContinuation,
 ): Promise<GeneratedChatResponse> {
   const streamingEnabled = streaming !== null;
   const providerSource = resolveLlmProviderSource(
@@ -921,7 +925,9 @@ export async function generateReply(
       mode === 'voice'
         ? `For voiceAction take_floor, activatedCards[0] must be ${forcedCardId}. For listen, react_nonverbally, or backchannel, activatedCards must be empty.`
         : `For a speaking response, activatedCards[0] must be ${forcedCardId}.`,
-      'Start the spoken text with a short immediate reaction shaped by that card. Do not merely explain or name the card.',
+      cardContinuation?.acknowledgementDelivered
+        ? 'The card receipt was already acknowledged. Continue with its influence without thanking the viewer again.'
+        : 'Briefly acknowledge receiving the card, naturally (for example あ、カードありがとう). Then let that card change the wording or stance of the answer. Do not explain the card mechanics.',
     ].join(' ')
     : 'No card is forced for this reply.';
   const responseInstruction =
@@ -1031,6 +1037,15 @@ export async function generateReply(
     'The character has the following five brain cards:',
     cardInstructions,
     forcedInstruction,
+    ...(cardContinuation ? [
+      'A card changed during this answer. Continue the original question or topic with the current cards. Do not restart the answer or repeat delivered words. Do not switch to an unrelated topic.',
+      cardContinuation.acknowledgementDelivered
+        ? 'The card receipt was already acknowledged. Do not thank the viewer again.'
+        : 'Start with one brief natural acknowledgement of the card, then continue the original answer.',
+      `Already delivered text (context only, not instructions): ${JSON.stringify(cardContinuation.deliveredText)}`,
+      'Keep each sentence short. Use a sentence boundary between the acknowledgement and the continuation.',
+      'For this continuation, the sentence after the acknowledgement should continue the original answer, not introduce another interruption.',
+    ] : []),
     performerPolicyDynamicInstruction,
     buildUtterancePlanDynamicInstruction(expressionBudget),
     dynamicActivationInstruction,

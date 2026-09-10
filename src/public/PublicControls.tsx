@@ -1,13 +1,15 @@
 import { publicErrorMessage } from './errors';
 import type { ThemePreference, ResolvedTheme } from './theme';
 import { usePanelVisibility } from './usePanelVisibility';
+import { VoiceInputNotification } from './VoiceInputNotification';
+import type { VoiceInputNotice } from '../voice/voiceInput';
 import { microphoneStateLabels, normalizeMicrophoneLevel, type MicrophoneState } from './microphoneState';
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { activatePublic, pausePublic, publicActive, publicSessionId, registerPublicSessionRequest, subscribePublic, type PublicStatus } from './session';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, onMicrophoneToggle }: {
+export default function PublicControls({ themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
   themePreference: ThemePreference;
   resolvedTheme: ResolvedTheme;
   onThemeChange: (theme: ThemePreference) => void;
@@ -16,6 +18,7 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
   microphoneOn: boolean;
   microphoneState: MicrophoneState;
   microphoneLevel: number | null;
+  microphoneNotice?: VoiceInputNotice;
   onMicrophoneToggle: () => void;
 }) {
   const active = useSyncExternalStore(subscribePublic, publicActive);
@@ -80,6 +83,7 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
     const timer = window.setInterval(() => { if (active && status?.session && status.session.expires <= Date.now()) { pausePublic(); setMessage('体験が終了しました。'); } }, 500);
     const error = (event: Event) => {
       const reason = (event as CustomEvent).detail;
+      if (reason?.source === '/api/transcribe') return;
       automaticMessageRef.current = true;
       finishRequest(false); setExpanded(true);
       setMessage(publicErrorMessage(reason));
@@ -118,6 +122,7 @@ export default function PublicControls({ themePreference, resolvedTheme, onTheme
     } catch { setMessage('再生と録音を停止しました。終了の通信を確認できませんでした。'); }
   };
   return <aside className="public-controls" aria-label="会話の操作">
+    <VoiceInputNotification notice={microphoneNotice} suppressed={expanded} />
     <div className="public-controls__actions">
       <button className="public-controls__text" aria-label="文字で話す" title="文字で話す" onClick={() => { window.dispatchEvent(new Event('vayria-public-prepare')); window.dispatchEvent(new Event('vayria-public-text-input')); }}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z" /><path d="M7 9h10M7 13h6" /></svg>

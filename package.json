@@ -20,7 +20,7 @@
     "exhibition:start:op": "pwsh -NoProfile -File .\\scripts\\Start-VayriaWithOnePassword.ps1 -CommandPath npm.cmd -CommandArguments \"run exhibition:start\"",
     "exhibition:check": "pwsh -NoProfile -File .\\scripts\\Test-VayriaExhibition.ps1",
     "build": "tsc -b && vite build",
-    "test": "npm run test:world && npm run test:project-view && npm run test:performer && npm run test:playback && npm run test:motion && npm run test:avatar && npm run test:secret-config && npm run test:onepassword && npm run test:playcheck && npm run test:voice && npm run test:router && npm run test:exhibition-network && npm run test:worktree-setup && node --test scripts/stress-test.test.mjs",
+    "test": "npm run test:manifestation && npm run test:world && npm run test:project-view && npm run test:performer && npm run test:playback && npm run test:motion && npm run test:avatar && npm run test:secret-config && npm run test:onepassword && npm run test:playcheck && npm run test:voice && npm run test:router && npm run test:exhibition-network && npm run test:worktree-setup && node --test scripts/stress-test.test.mjs",
     "test:voice": "tsc -p tsconfig.voice-input-test.json && node scripts/run-voice-input-tests.mjs",
     "test:router": "tsc -p tsconfig.router-test.json && node scripts/run-router-tests.mjs",
     "test:exhibition-network": "tsc -p tsconfig.exhibition-network-test.json && node scripts/run-exhibition-network-tests.mjs",
@@ -49,8 +49,11 @@
     "test:cd": "node --test scripts/staging-cd.test.mjs scripts/production-cd.test.mjs",
     "production:check": "wrangler deploy --config wrangler.production.jsonc --env-file deploy/placeholder.env --dry-run",
     "production:recovery:check": "wrangler deploy --config wrangler.recovery.jsonc --env-file deploy/placeholder.env --dry-run",
-    "test:public": "tsc -p tsconfig.worker.json && node --test scripts/public-ledger.test.mjs scripts/public-worker.test.mjs scripts/public-errors.test.mjs scripts/cloud-voice.test.mjs scripts/public-theme.test.mjs",
-    "public:admin": "node scripts/public-admin.mjs"
+    "test:public": "tsc -p tsconfig.worker.json && node --test scripts/public-ledger.test.mjs scripts/public-worker.test.mjs scripts/public-errors.test.mjs scripts/cloud-voice.test.mjs scripts/public-theme.test.mjs scripts/card-concurrency-public.test.mjs",
+    "public:admin": "node scripts/public-admin.mjs",
+    "test:manifestation": "tsc -p tsconfig.manifestation-test.json && node scripts/run-manifestation-tests.mjs",
+    "dev:manifestation": "node scripts/start-manifestation.mjs",
+    "dev:manifestation:op": "pwsh -NoProfile -File .\\scripts\\Start-VayriaWithOnePassword.ps1 -CommandPath npm.cmd -CommandArguments \"run dev:manifestation\""
   },
   "dependencies": {
     "@aituber-onair/chat": "0.52.0",

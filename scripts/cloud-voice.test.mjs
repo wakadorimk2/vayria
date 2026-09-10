@@ -16,10 +16,10 @@ function fixture(ios = false) {
   let captureFailure = false;
   let captureWait = null;
   globalThis.window = new EventTarget();
-  globalThis.document = { hidden: false };
+  globalThis.document = Object.assign(new EventTarget(), { hidden: false });
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: ios ? 'iPhone' : 'Chrome Windows', audioSession: { type: 'auto' }, mediaDevices: { async getUserMedia() {
     if (captureWait) { const pending = captureWait; captureWait = null; await pending; }
-    if (captureFailure) throw new Error('denied');
+    if (captureFailure) throw captureFailure;
     const track = { stopped: false, stop() { this.stopped = true; } }; tracks.push(track);
     return { getTracks: () => [track] };
   } } } });
@@ -38,22 +38,88 @@ function fixture(ios = false) {
   const utterance = (callback = nodes.at(-1).port.onmessage) => {
     for (let i = 0; i < 40; i++) callback?.({ data: new Int16Array(320).fill(i < 10 ? 4000 : 0).buffer });
   };
-  return { adapter, events, requests, tracks, nodes, contexts, utterance, failCapture: () => { captureFailure = true; },
+  return { adapter, events, requests, tracks, nodes, contexts, utterance, failCapture: (error = new Error('capture failed')) => { captureFailure = error; },
     deferCapture() { let resolve; captureWait = new Promise(done => { resolve = done; }); return () => resolve(); } };
 }
-for (const failure of ['http', 'network']) test(`${failure}: failure releases capture, blocks repeated audio, and allows manual restart`, async () => {
+for (const failure of ['http', 'network']) test(`${failure}: failure preserves capture and resumes without a click or retransmission`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const f = fixture(); await f.adapter.start();
   const oldCallback = f.nodes[0].port.onmessage; f.utterance();
   assert.equal(f.requests.length, 1);
-  if (failure === 'http') f.requests[0].resolve(Response.json({ code: 'service_error' }, { status: 503 }));
+  if (failure === 'http') f.requests[0].resolve(Response.json({ code: 'provider_unavailable' }, { status: 502 }));
   else f.requests[0].reject(new Error('offline'));
   await settle();
   assert.equal(f.events.at(-1).type, 'recognition_failed');
-  assert(f.tracks.every(t => t.stopped)); assert(f.nodes.every(n => n.disconnected)); assert(f.contexts.every(c => c.state === 'closed'));
+  assert.equal(f.events.at(-1).recoverable, true);
+  assert(f.tracks.every(t => !t.stopped)); assert(f.nodes.every(n => !n.disconnected));
   f.utterance(oldCallback); assert.equal(f.requests.length, 1);
-  assert(await f.adapter.start()); assert.equal(f.events.at(-1).type, 'listening_started');
+  t.mock.timers.tick(999); assert.equal(f.events.at(-1).type, 'recognition_failed');
+  t.mock.timers.tick(1); assert.equal(f.events.at(-1).type, 'listening_started');
+  assert.equal(f.events.at(-1).recovered, true); assert.equal(f.requests.length, 1);
   f.utterance(); assert.equal(f.requests.length, 2);
+  f.requests[1].resolve(Response.json({ text: '話し直しました' })); await settle();
+  assert.equal(f.events.at(-1).text, '話し直しました'); assert.equal(f.tracks.length, 1);
   await f.adapter.stop();
+});
+
+test('consecutive failures back off, respect retryAt and reset after success', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const f = fixture(); await f.adapter.start();
+  for (const delay of [1000, 3000, 10000, 30000, 30000]) {
+    f.utterance(); f.requests.at(-1).resolve(Response.json({ code: 'busy' }, { status: 429 })); await settle();
+    assert.equal(f.events.at(-1).retryAt, Date.now() + delay);
+    const count = f.requests.length;
+    f.utterance(); t.mock.timers.tick(delay); assert.equal(f.requests.length, count);
+  }
+  f.utterance(); f.requests.at(-1).resolve(Response.json({ text: '成功' })); await settle();
+  f.utterance(); f.requests.at(-1).resolve(Response.json({ code: 'busy', retryAt: Date.now() + 5000 }, { status: 429 })); await settle();
+  assert.equal(f.events.at(-1).retryAt, Date.now() + 5000);
+  t.mock.timers.tick(4999); f.utterance(); const count = f.requests.length;
+  t.mock.timers.tick(1); f.utterance(); assert.equal(f.requests.length, count + 1);
+  f.requests.at(-1).resolve(Response.json({ text: '成功' })); await settle();
+  f.utterance(); f.requests.at(-1).resolve(Response.json({ text: '' })); await settle();
+  assert.equal(f.events.at(-1).retryAt, Date.now() + 1000);
+  await f.adapter.stop();
+});
+
+for (const code of ['transcribe_limit', 'audio_limit', 'user_limit', 'daily_budget', 'session_expired', 'generation_stopped', 'unexpected']) {
+  test(`${code}: stops only capture and retains the reason without automatic restart`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    const f = fixture(); await f.adapter.start(); f.utterance();
+    const retryAt = Date.now() + 5000;
+    f.requests[0].resolve(Response.json({ code, retryAt }, { status: 429 })); await settle();
+    assert.equal(f.events.at(-1).code, code); assert.equal(f.events.at(-1).retryAt, retryAt);
+    assert.equal(f.events.at(-1).recoverable, false); assert(f.tracks.every(track => track.stopped));
+    t.mock.timers.tick(60000); assert.equal(f.requests.length, 1); assert.equal(f.tracks.length, 1);
+    assert.equal(globalThis.cloudVoiceFixture.active, true); f.adapter.dispose(); await settle();
+  });
+}
+
+for (const action of ['off', 'hidden', 'expired', 'dispose']) test(`recovery is cancelled by ${action}`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const f = fixture(); await f.adapter.start(); f.utterance();
+  f.requests[0].reject(new TypeError('offline')); await settle();
+  if (action === 'off') await f.adapter.stop();
+  if (action === 'hidden') { document.hidden = true; document.dispatchEvent(new Event('visibilitychange')); }
+  if (action === 'expired') { globalThis.cloudVoiceFixture.active = false; window.dispatchEvent(new Event('vayria-public-stop')); }
+  if (action === 'dispose') f.adapter.dispose();
+  await settle(); const count = f.events.length;
+  t.mock.timers.tick(60000); await settle();
+  assert.equal(f.events.length, count); assert(f.tracks.every(track => track.stopped));
+  f.adapter.dispose(); await settle();
+});
+
+test('iPhone recovery waits for the entire playback before reacquiring capture', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const f = fixture(true); await f.adapter.start(); f.utterance();
+  f.requests[0].reject(new TypeError('offline')); await settle();
+  const held = getIosAudioSession().holdPlayback(); await held.ready;
+  t.mock.timers.tick(1000); await settle();
+  assert.equal(f.events.at(-1).type, 'recognition_failed'); assert.equal(f.tracks.length, 1);
+  held.release(); await settle();
+  assert.equal(f.events.at(-1).type, 'listening_started'); assert.equal(f.events.at(-1).recovered, true);
+  assert.equal(f.tracks.length, 2); f.utterance(); assert.equal(f.requests.length, 2);
+  f.adapter.dispose(); await settle();
 });
 test('old completion cannot finalize speech or clear the new request busy flag', async () => {
   const f = fixture(); await f.adapter.start(); f.utterance();
@@ -70,6 +136,47 @@ test('old failure cannot stop a restarted recording', async () => {
   f.requests[0].reject(new Error('late failure')); await settle();
   assert.equal(f.events.at(-1).type, 'listening_started'); assert.equal(f.tracks[1].stopped, false);
   f.utterance(); assert.equal(f.requests.length, 2); await f.adapter.stop();
+});
+
+test('an old recovery timer and capture callback cannot alter a newly started request', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const f = fixture(); await f.adapter.start(); const oldCapture = f.nodes[0].port.onmessage;
+  f.utterance(); f.requests[0].reject(new TypeError('offline')); await settle();
+  await f.adapter.stop(); await f.adapter.start(); f.utterance();
+  const count = f.events.length;
+  t.mock.timers.tick(30000); f.utterance(oldCapture);
+  assert.equal(f.events.length, count); assert.equal(f.requests.length, 2);
+  f.requests[1].resolve(Response.json({ text: '新しい発話' })); await settle();
+  assert.equal(f.events.at(-1).text, '新しい発話'); await f.adapter.stop();
+});
+
+test('permission denial requires an explicit action and does not loop', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const f = fixture(); f.failCapture(new DOMException('denied', 'NotAllowedError'));
+  assert.equal(await f.adapter.start(), false);
+  assert.equal(f.events.at(-1).code, 'not-allowed'); assert.equal(f.events.at(-1).recoverable, false);
+  const count = f.events.length; t.mock.timers.tick(60000);
+  assert.equal(f.events.length, count); assert.equal(f.requests.length, 0); f.adapter.dispose(); await settle();
+});
+
+test('playback completion at the recovery deadline cannot emit a second listening start', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const f = fixture(); await f.adapter.start(); f.utterance();
+  f.requests[0].reject(new TypeError('offline')); await settle();
+  f.adapter.setTtsPlaying(true);
+  t.mock.timers.setTime(Date.now() + 1000);
+  f.adapter.setTtsPlaying(false);
+  f.utterance(); const count = f.events.length;
+  t.mock.timers.tick(1);
+  assert.equal(f.events.length, count); assert.equal(f.requests.length, 2);
+  await f.adapter.stop();
+});
+
+for (const result of [{ text: 42 }, null]) test(`invalid STT response ${JSON.stringify(result)} does not reach conversation`, async () => {
+  const f = fixture(); await f.adapter.start(); f.utterance();
+  f.requests[0].resolve(Response.json(result)); await settle();
+  assert.equal(f.events.at(-1).code, 'recognition-failed'); assert.equal(f.events.at(-1).recoverable, false);
+  assert(!f.events.some(event => event.type === 'utterance_finalized')); f.adapter.dispose(); await settle();
 });
 test('capture startup failure stays in error after cleanup', async () => {
   const f = fixture(); f.failCapture(); assert.equal(await f.adapter.start(), false);

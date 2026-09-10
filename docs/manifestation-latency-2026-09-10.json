@@ -1,0 +1,2015 @@
+{
+  "note": "Additional fal latency experiment. Replay uses unique client URLs, CDN may be warm. Wall-clock and monotonic clocks are not subtracted across processes.",
+  "comparisons": {
+    "latency-ab": [
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "balanced",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 0,
+        "trace": {
+          "origin": 2262588.3349,
+          "server": {
+            "inputAccepted": 0.00139999995008111,
+            "inputPrepareStart": 2.8470000000670552,
+            "inputPrepareEnd": 45.747999999672174,
+            "video.submitStart": 48.813399999868125,
+            "video.submitAccepted": 1305.429699999746,
+            "video.observed.IN_PROGRESS": 1761.058699999936,
+            "video.pollCount": 6,
+            "video.observed.COMPLETED": 3297.06520000007,
+            "video.resultFetchStart": 3297.0733999996446,
+            "video.responseReceived": 3448.5718999998644,
+            "videoUrlAvailable": 3448.589099999983,
+            "mediaFetchStart": 3448.797899999656,
+            "mediaHeaders": 4461.301899999846,
+            "mediaFirstByte": 4483.562299999874,
+            "mediaDownloadEnd": 5539.4490999998525,
+            "mediaValidationEnd": 5540.124099999666,
+            "mediaSaved": 5542.226699999999,
+            "responseReady": 5542.229199999943
+          },
+          "browser": {
+            "responseReceived": 5552.20000000298,
+            "mediaPrepareStart": 5552.29999999702,
+            "mediaRequestStart": 5552.60000000149,
+            "loadedmetadata": 5575,
+            "loadeddata": 5601.29999999702,
+            "firstKeyCompleted": 5608.39999999851,
+            "canplay": 5610.5,
+            "firstFrameDraw": 5616.5
+          },
+          "requestIds": [
+            "01a08b91-7581-7a41-a780-c91054518e61"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.40427034097956493,
+          "browserOrigin": 8143.70000000298
+        },
+        "success": true,
+        "totalMs": 5616.60000000149,
+        "timings": {
+          "requestStartedAt": 1789047958828,
+          "inProgressAt": 1789047960587,
+          "videoCompletedAt": 1789047962274,
+          "inferenceSeconds": 0.40427034097956493,
+          "downloadCompletedAt": 1789047964368,
+          "compositeReadyAt": 1789047964434
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 0,
+        "trace": {
+          "origin": 2268220.3482,
+          "server": {
+            "inputAccepted": 0.00139999995008111,
+            "inputPrepareStart": 2.274699999950826,
+            "inputPrepareEnd": 43.803300000261515,
+            "video.submitStart": 46.296099999919534,
+            "video.submitAccepted": 359.01230000006035,
+            "video.observed.IN_PROGRESS": 511.3591000000015,
+            "video.pollCount": 11,
+            "video.observed.COMPLETED": 3587.7035000002943,
+            "video.resultFetchStart": 3587.7090000002645,
+            "video.responseReceived": 3738.8634000001475,
+            "videoUrlAvailable": 3738.879699999932,
+            "mediaFetchStart": 3738.9572000000626,
+            "mediaHeaders": 4431.079400000162,
+            "mediaFirstByte": 4452.6430000001565,
+            "mediaDownloadEnd": 5491.824299999978,
+            "mediaValidationEnd": 5492.268099999987,
+            "mediaSaved": 5494.43610000005,
+            "responseReady": 5494.436800000258
+          },
+          "browser": {
+            "responseReceived": 5503.20000000298,
+            "mediaPrepareStart": 5503.20000000298,
+            "mediaRequestStart": 5503.29999999702,
+            "loadedmetadata": 5528.29999999702,
+            "loadeddata": 5551.79999999702,
+            "firstKeyCompleted": 5556.60000000149,
+            "canplay": 5558.70000000298,
+            "firstFrameDraw": 5563.79999999702
+          },
+          "requestIds": [
+            "01a08b91-87d4-7723-8552-a463439fbe7a"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.38814591796835884,
+          "browserOrigin": 13775.70000000298
+        },
+        "success": true,
+        "totalMs": 5563.89999999851,
+        "timings": {
+          "requestStartedAt": 1789047964460,
+          "inProgressAt": 1789047964969,
+          "videoCompletedAt": 1789047968196,
+          "inferenceSeconds": 0.38814591796835884,
+          "downloadCompletedAt": 1789047969952,
+          "compositeReadyAt": 1789047970014
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "balanced",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 1,
+        "trace": {
+          "origin": 2273785.2898,
+          "server": {
+            "inputAccepted": 0.009599999990314245,
+            "inputPrepareStart": 2.6247000000439584,
+            "inputPrepareEnd": 45.27160000009462,
+            "video.submitStart": 47.8078000000678,
+            "video.submitAccepted": 219.9942999999039,
+            "video.observed.IN_PROGRESS": 371.94659999990836,
+            "video.pollCount": 8,
+            "video.observed.COMPLETED": 2529.0158999999985,
+            "video.resultFetchStart": 2529.025299999863,
+            "video.responseReceived": 2679.942199999932,
+            "videoUrlAvailable": 2679.964600000065,
+            "mediaFetchStart": 2680.031700000167,
+            "mediaHeaders": 3421.8311000000685,
+            "mediaFirstByte": 3443.1156999999657,
+            "mediaDownloadEnd": 4488.8275999999605,
+            "mediaValidationEnd": 4489.233800000045,
+            "mediaSaved": 4491.491500000004,
+            "responseReady": 4491.493699999992
+          },
+          "browser": {
+            "responseReceived": 4502.60000000149,
+            "mediaPrepareStart": 4502.60000000149,
+            "mediaRequestStart": 4502.70000000298,
+            "loadedmetadata": 4525.4000000059605,
+            "loadeddata": 4545.80000000447,
+            "firstKeyCompleted": 4549.80000000447,
+            "canplay": 4551.30000000447,
+            "firstFrameDraw": 4555.60000000149
+          },
+          "requestIds": [
+            "01a08b91-9d05-7a50-8ea2-3585d7a6d308"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.39536680100718513,
+          "browserOrigin": 19340
+        },
+        "success": true,
+        "totalMs": 4555.60000000149,
+        "timings": {
+          "requestStartedAt": 1789047970025,
+          "inProgressAt": 1789047970394,
+          "videoCompletedAt": 1789047972702,
+          "inferenceSeconds": 0.39536680100718513,
+          "downloadCompletedAt": 1789047974514,
+          "compositeReadyAt": 1789047974571
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 1,
+        "trace": {
+          "origin": 2278341.1874,
+          "server": {
+            "inputAccepted": 0.0038999998942017555,
+            "inputPrepareStart": 2.2607999998144805,
+            "inputPrepareEnd": 43.0077999997884,
+            "video.submitStart": 45.07899999991059,
+            "video.submitAccepted": 217.6706999996677,
+            "video.observed.IN_PROGRESS": 369.08729999978095,
+            "video.pollCount": 7,
+            "video.observed.COMPLETED": 2215.1430999999866,
+            "video.resultFetchStart": 2215.146799999755,
+            "video.responseReceived": 2365.935199999716,
+            "videoUrlAvailable": 2365.9525999999605,
+            "mediaFetchStart": 2366.0184999997728,
+            "mediaHeaders": 3059.2235999996774,
+            "mediaFirstByte": 3214.6642999998294,
+            "mediaDownloadEnd": 4113.637600000016,
+            "mediaValidationEnd": 4114.107199999969,
+            "mediaSaved": 4116.245299999602,
+            "responseReady": 4116.246199999936
+          },
+          "browser": {
+            "responseReceived": 4121.30000000447,
+            "mediaPrepareStart": 4121.30000000447,
+            "mediaRequestStart": 4121.4000000059605,
+            "loadedmetadata": 4142,
+            "loadeddata": 4164.10000000149,
+            "firstKeyCompleted": 4168.5,
+            "canplay": 4171,
+            "firstFrameDraw": 4176.20000000298
+          },
+          "requestIds": [
+            "01a08b91-aecf-77b0-b610-11924a54e906"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.39198967500124127,
+          "browserOrigin": 23896
+        },
+        "success": true,
+        "totalMs": 4176.20000000298,
+        "timings": {
+          "requestStartedAt": 1789047974580,
+          "inProgressAt": 1789047974947,
+          "videoCompletedAt": 1789047976944,
+          "inferenceSeconds": 0.39198967500124127,
+          "downloadCompletedAt": 1789047978694,
+          "compositeReadyAt": 1789047978747
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "balanced",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 2,
+        "trace": {
+          "origin": 2282517.6633,
+          "server": {
+            "inputAccepted": 0.003199999686330557,
+            "inputPrepareStart": 2.276799999643117,
+            "inputPrepareEnd": 45.864000000059605,
+            "video.submitStart": 48.2980999997817,
+            "video.submitAccepted": 220.68969999998808,
+            "video.observed.IN_PROGRESS": 371.9627000000328,
+            "video.pollCount": 6,
+            "video.observed.COMPLETED": 1907.3972000000067,
+            "video.resultFetchStart": 1907.400599999819,
+            "video.responseReceived": 2058.1932999999262,
+            "videoUrlAvailable": 2058.2066999999806,
+            "mediaFetchStart": 2058.279000000097,
+            "mediaHeaders": 2772.336399999913,
+            "mediaFirstByte": 2792.7902999999933,
+            "mediaDownloadEnd": 3858.6957999998704,
+            "mediaValidationEnd": 3859.145199999679,
+            "mediaSaved": 3861.655999999959,
+            "responseReady": 3861.6569999996573
+          },
+          "browser": {
+            "responseReceived": 3872.5,
+            "mediaPrepareStart": 3872.5,
+            "mediaRequestStart": 3872.5,
+            "loadedmetadata": 3891.3000000044703,
+            "loadeddata": 3915.39999999851,
+            "firstKeyCompleted": 3919.60000000149,
+            "canplay": 3920.8000000044703,
+            "firstFrameDraw": 3925.8000000044703
+          },
+          "requestIds": [
+            "01a08b91-bf22-7532-aa94-8d6d0f73af80"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.3916100619826466,
+          "browserOrigin": 28072.60000000149
+        },
+        "success": true,
+        "totalMs": 3925.8000000044703,
+        "timings": {
+          "requestStartedAt": 1789047978757,
+          "inProgressAt": 1789047979127,
+          "videoCompletedAt": 1789047980813,
+          "inferenceSeconds": 0.3916100619826466,
+          "downloadCompletedAt": 1789047982616,
+          "compositeReadyAt": 1789047982674
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 2,
+        "trace": {
+          "origin": 2286444.6272,
+          "server": {
+            "inputAccepted": 0.003399999812245369,
+            "inputPrepareStart": 2.6104999999515712,
+            "inputPrepareEnd": 43.89170000003651,
+            "video.submitStart": 46.21959999995306,
+            "video.submitAccepted": 216.45230000000447,
+            "video.observed.IN_PROGRESS": 368.408400000073,
+            "video.pollCount": 8,
+            "video.observed.COMPLETED": 2520.584799999837,
+            "video.resultFetchStart": 2520.588099999819,
+            "video.responseReceived": 2671.752400000114,
+            "videoUrlAvailable": 2671.7662999997847,
+            "mediaFetchStart": 2671.846700000111,
+            "mediaHeaders": 3436.1674000001512,
+            "mediaFirstByte": 3457.6134999999776,
+            "mediaDownloadEnd": 4481.519700000063,
+            "mediaValidationEnd": 4481.884899999946,
+            "mediaSaved": 4483.996799999848,
+            "responseReady": 4483.997700000182
+          },
+          "browser": {
+            "responseReceived": 4493.60000000149,
+            "mediaPrepareStart": 4493.69999999553,
+            "mediaRequestStart": 4493.69999999553,
+            "loadedmetadata": 4516.19999999553,
+            "loadeddata": 4536,
+            "firstKeyCompleted": 4540.69999999553,
+            "canplay": 4542.29999999702,
+            "firstFrameDraw": 4548.10000000149
+          },
+          "requestIds": [
+            "01a08b91-ce78-7791-896e-bd82b2e157f5"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.37090238300152123,
+          "browserOrigin": 31998.80000000447
+        },
+        "success": true,
+        "totalMs": 4548.10000000149,
+        "timings": {
+          "requestStartedAt": 1789047982684,
+          "inProgressAt": 1789047983050,
+          "videoCompletedAt": 1789047985353,
+          "inferenceSeconds": 0.37090238300152123,
+          "downloadCompletedAt": 1789047987166,
+          "compositeReadyAt": 1789047987221
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "balanced",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 3,
+        "trace": {
+          "origin": 2290992.4509,
+          "server": {
+            "inputAccepted": 0.007400000002235174,
+            "inputPrepareStart": 2.447300000116229,
+            "inputPrepareEnd": 43.398300000000745,
+            "video.submitStart": 45.59819999989122,
+            "video.submitAccepted": 213.96620000014082,
+            "video.observed.IN_PROGRESS": 365.4205999998376,
+            "video.pollCount": 6,
+            "video.observed.COMPLETED": 1910.8854000000283,
+            "video.resultFetchStart": 1910.8892000000924,
+            "video.responseReceived": 2062.161100000143,
+            "videoUrlAvailable": 2062.177799999714,
+            "mediaFetchStart": 2062.2346999999136,
+            "mediaHeaders": 3509.557699999772,
+            "mediaFirstByte": 3665.028799999971,
+            "mediaDownloadEnd": 4550.121999999974,
+            "mediaValidationEnd": 4550.50829999987,
+            "mediaSaved": 4552.646399999969,
+            "responseReady": 4552.647400000133
+          },
+          "browser": {
+            "responseReceived": 4561.29999999702,
+            "mediaPrepareStart": 4561.29999999702,
+            "mediaRequestStart": 4561.39999999851,
+            "loadedmetadata": 4579.5999999940395,
+            "loadeddata": 4600.39999999851,
+            "firstKeyCompleted": 4604.89999999851,
+            "canplay": 4606.29999999702,
+            "firstFrameDraw": 4610.69999999553
+          },
+          "requestIds": [
+            "01a08b91-e03a-7511-a0f5-f9a4f0727800"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.3959599329973571,
+          "browserOrigin": 36547.40000000596
+        },
+        "success": true,
+        "totalMs": 4610.69999999553,
+        "timings": {
+          "requestStartedAt": 1789047987232,
+          "inProgressAt": 1789047987595,
+          "videoCompletedAt": 1789047989292,
+          "inferenceSeconds": 0.3959599329973571,
+          "downloadCompletedAt": 1789047991782,
+          "compositeReadyAt": 1789047991834
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 3,
+        "trace": {
+          "origin": 2295603.6783,
+          "server": {
+            "inputAccepted": 0.002400000113993883,
+            "inputPrepareStart": 2.404300000052899,
+            "inputPrepareEnd": 44.457900000270456,
+            "video.submitStart": 46.717700000386685,
+            "video.submitAccepted": 218.161600000225,
+            "video.observed.IN_PROGRESS": 370.03670000005513,
+            "video.pollCount": 8,
+            "video.observed.COMPLETED": 2524.9199000000954,
+            "video.resultFetchStart": 2524.9226999999955,
+            "video.responseReceived": 2676.712999999989,
+            "videoUrlAvailable": 2676.7286000000313,
+            "mediaFetchStart": 2676.7938000001013,
+            "mediaHeaders": 3430.0101000000723,
+            "mediaFirstByte": 3430.1408999999985,
+            "mediaDownloadEnd": 4450.352799999993,
+            "mediaValidationEnd": 4450.744900000282,
+            "mediaSaved": 4452.838100000285,
+            "responseReady": 4452.839300000109
+          },
+          "browser": {
+            "responseReceived": 4463.39999999851,
+            "mediaPrepareStart": 4463.39999999851,
+            "mediaRequestStart": 4463.5,
+            "loadedmetadata": 4489,
+            "loadeddata": 4512.5,
+            "firstKeyCompleted": 4519,
+            "canplay": 4520.5,
+            "firstFrameDraw": 4525.5
+          },
+          "requestIds": [
+            "01a08b91-f240-7440-bc00-eca129e39288"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.37744564001332037,
+          "browserOrigin": 41158.60000000149
+        },
+        "success": true,
+        "totalMs": 4525.5,
+        "timings": {
+          "requestStartedAt": 1789047991843,
+          "inProgressAt": 1789047992211,
+          "videoCompletedAt": 1789047994517,
+          "inferenceSeconds": 0.37744564001332037,
+          "downloadCompletedAt": 1789047996293,
+          "compositeReadyAt": 1789047996359
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "balanced",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 4,
+        "trace": {
+          "origin": 2300129.8387,
+          "server": {
+            "inputAccepted": 0.0016999999061226845,
+            "inputPrepareStart": 2.755200000014156,
+            "inputPrepareEnd": 45.105299999937415,
+            "video.submitStart": 47.19109999993816,
+            "video.submitAccepted": 216.65589999966323,
+            "video.observed.IN_PROGRESS": 368.8227999997325,
+            "video.pollCount": 8,
+            "video.observed.COMPLETED": 2520.9786999998614,
+            "video.resultFetchStart": 2520.991199999582,
+            "video.responseReceived": 2672.6947999997064,
+            "videoUrlAvailable": 2672.714199999813,
+            "mediaFetchStart": 2672.8142999997362,
+            "mediaHeaders": 4456.549299999606,
+            "mediaFirstByte": 4478.021799999755,
+            "mediaDownloadEnd": 5483.911299999803,
+            "mediaValidationEnd": 5484.3200999996625,
+            "mediaSaved": 5486.376199999824,
+            "responseReady": 5486.378699999768
+          },
+          "browser": {
+            "responseReceived": 5497.5999999940395,
+            "mediaPrepareStart": 5497.5999999940395,
+            "mediaRequestStart": 5497.5999999940395,
+            "loadedmetadata": 5517.29999999702,
+            "loadeddata": 5543.69999999553,
+            "firstKeyCompleted": 5547.89999999851,
+            "canplay": 5549.19999999553,
+            "firstFrameDraw": 5553.5999999940395
+          },
+          "requestIds": [
+            "01a08b92-03ee-7e53-a7c8-3d0d2777a26f"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.3917382549843751,
+          "browserOrigin": 45684.40000000596
+        },
+        "success": true,
+        "totalMs": 5553.5999999940395,
+        "timings": {
+          "requestStartedAt": 1789047996370,
+          "inProgressAt": 1789047996736,
+          "videoCompletedAt": 1789047999040,
+          "inferenceSeconds": 0.3917382549843751,
+          "downloadCompletedAt": 1789048001853,
+          "compositeReadyAt": 1789048001914
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "inline",
+        "delivery": "stored",
+        "trial": 4,
+        "trace": {
+          "origin": 2305683.5613,
+          "server": {
+            "inputAccepted": 0.0012999996542930603,
+            "inputPrepareStart": 2.412699999753386,
+            "inputPrepareEnd": 43.16749999998137,
+            "video.submitStart": 45.28829999966547,
+            "video.submitAccepted": 217.00239999964833,
+            "video.observed.IN_PROGRESS": 369.1113999998197,
+            "video.pollCount": 7,
+            "video.observed.COMPLETED": 2210.027599999681,
+            "video.resultFetchStart": 2210.038100000005,
+            "video.responseReceived": 2363.1964999996126,
+            "videoUrlAvailable": 2363.210999999661,
+            "mediaFetchStart": 2363.286199999973,
+            "mediaHeaders": 3178.723999999929,
+            "mediaFirstByte": 3178.816399999894,
+            "mediaDownloadEnd": 4274.961499999743,
+            "mediaValidationEnd": 4275.374700000044,
+            "mediaSaved": 4277.648399999831,
+            "responseReady": 4277.649999999907
+          },
+          "browser": {
+            "responseReceived": 4287.19999999553,
+            "mediaPrepareStart": 4287.19999999553,
+            "mediaRequestStart": 4287.29999999702,
+            "loadedmetadata": 4303.5999999940395,
+            "loadeddata": 4328.69999999553,
+            "firstKeyCompleted": 4333.19999999553,
+            "canplay": 4334.39999999851,
+            "firstFrameDraw": 4339.5999999940395
+          },
+          "requestIds": [
+            "01a08b92-199e-7ce3-bbfc-72efa70d1ceb"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.3405147669836879,
+          "browserOrigin": 51238.40000000596
+        },
+        "success": true,
+        "totalMs": 4339.5999999940395,
+        "timings": {
+          "requestStartedAt": 1789048001923,
+          "inProgressAt": 1789048002290,
+          "videoCompletedAt": 1789048004284,
+          "inferenceSeconds": 0.3405147669836879,
+          "downloadCompletedAt": 1789048006198,
+          "compositeReadyAt": 1789048006253
+        },
+        "quality": "unreviewed"
+      }
+    ],
+    "latency-hosted": [
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 0,
+        "trace": {
+          "origin": 2330643.318,
+          "server": {
+            "inputAccepted": 0.0008999998681247234,
+            "inputPrepareStart": 2.115100000053644,
+            "inputUploadStart": 43.54300000006333,
+            "inputUploadEnd": 2368.1148000000976,
+            "inputPrepareEnd": 2368.120600000024,
+            "video.submitStart": 2370.0569000001997,
+            "video.submitAccepted": 2832.378599999938,
+            "video.observed.IN_PROGRESS": 3282.5391999999993,
+            "video.pollCount": 8,
+            "video.observed.COMPLETED": 5425.065400000196,
+            "video.resultFetchStart": 5425.073199999984,
+            "video.responseReceived": 5584.601400000043,
+            "videoUrlAvailable": 5584.613299999852,
+            "mediaFetchStart": 5584.665599999949,
+            "mediaHeaders": 6297.68600000022,
+            "mediaFirstByte": 6297.813000000082,
+            "mediaDownloadEnd": 7363.859500000253,
+            "mediaValidationEnd": 7364.2332999999635,
+            "mediaSaved": 7366.326400000136,
+            "responseReady": 7366.333600000013
+          },
+          "browser": {
+            "responseReceived": 7379,
+            "mediaPrepareStart": 7379,
+            "mediaRequestStart": 7379.10000000149,
+            "loadedmetadata": 7402.89999999851,
+            "loadeddata": 7425,
+            "firstKeyCompleted": 7429.60000000149,
+            "canplay": 7430.80000000447,
+            "firstFrameDraw": 7435.20000000298
+          },
+          "requestIds": [
+            "01a08b92-855d-7b81-abec-c213ccd3651f"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.48747838009148836,
+          "browserOrigin": 76198.60000000149
+        },
+        "success": true,
+        "totalMs": 7435.20000000298,
+        "timings": {
+          "requestStartedAt": 1789048026882,
+          "inProgressAt": 1789048030163,
+          "videoCompletedAt": 1789048032465,
+          "inferenceSeconds": 0.48747838009148836,
+          "downloadCompletedAt": 1789048034246,
+          "compositeReadyAt": 1789048034309
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 1,
+        "trace": {
+          "origin": 2338079.2968,
+          "server": {
+            "inputAccepted": 0.0012999996542930603,
+            "inputPrepareStart": 2.74640000006184,
+            "inputPrepareEnd": 45.38510000007227,
+            "video.submitStart": 47.981399999931455,
+            "video.submitAccepted": 203.90999999968335,
+            "video.observed.IN_PROGRESS": 353.6740999999456,
+            "video.pollCount": 9,
+            "video.observed.COMPLETED": 2813.5740000000224,
+            "video.resultFetchStart": 2813.5778000000864,
+            "video.responseReceived": 2966.525599999819,
+            "videoUrlAvailable": 2966.533400000073,
+            "mediaFetchStart": 2966.5745000001043,
+            "mediaHeaders": 3756.1604999997653,
+            "mediaFirstByte": 3784.0509999999776,
+            "mediaDownloadEnd": 4816.823700000066,
+            "mediaValidationEnd": 4817.165899999905,
+            "mediaSaved": 4819.335200000089,
+            "responseReady": 4819.336199999787
+          },
+          "browser": {
+            "responseReceived": 4825.20000000298,
+            "mediaPrepareStart": 4825.20000000298,
+            "mediaRequestStart": 4825.20000000298,
+            "loadedmetadata": 4841.89999999851,
+            "loadeddata": 4865.70000000298,
+            "firstKeyCompleted": 4870,
+            "canplay": 4871.10000000149,
+            "firstFrameDraw": 4876.20000000298
+          },
+          "requestIds": [
+            "01a08b92-9825-7551-af46-79cc6537ee69"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.415788873040583,
+          "browserOrigin": 83634.10000000149
+        },
+        "success": true,
+        "totalMs": 4876.20000000298,
+        "timings": {
+          "requestStartedAt": 1789048034319,
+          "inProgressAt": 1789048034670,
+          "videoCompletedAt": 1789048037283,
+          "inferenceSeconds": 0.415788873040583,
+          "downloadCompletedAt": 1789048039135,
+          "compositeReadyAt": 1789048039185
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 2,
+        "success": false,
+        "totalMs": 11271,
+        "error": "key-quality",
+        "trace": {
+          "origin": 2342955.8539,
+          "server": {
+            "inputAccepted": 0.0014999997802078724,
+            "inputPrepareStart": 2.5833000000566244,
+            "inputPrepareEnd": 48.76239999989048,
+            "video.submitStart": 50.90530000021681,
+            "video.submitAccepted": 207.59429999999702,
+            "video.observed.IN_PROGRESS": 357.77879999997094,
+            "video.pollCount": 10,
+            "video.observed.COMPLETED": 3130.63450000016,
+            "video.resultFetchStart": 3130.6430999999866,
+            "video.responseReceived": 3279.1466000000946,
+            "videoUrlAvailable": 3279.1625999999233,
+            "mediaFetchStart": 3279.216399999801,
+            "mediaHeaders": 5072.565500000026,
+            "mediaFirstByte": 5094.331799999811,
+            "mediaDownloadEnd": 11213.641299999785,
+            "mediaValidationEnd": 11214.015699999873,
+            "mediaSaved": 11216.050700000022,
+            "responseReady": 11216.05290000001
+          },
+          "browser": {
+            "responseReceived": 11227.39999999851,
+            "mediaPrepareStart": 11227.39999999851,
+            "mediaRequestStart": 11227.5,
+            "loadedmetadata": 11245.69999999553,
+            "loadeddata": 11270.19999999553,
+            "firstKeyCompleted": 11270.39999999851
+          },
+          "requestIds": [
+            "01a08b92-ab35-7d42-b7f4-99a8a5a26496"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.3530579560028855,
+          "browserOrigin": 88510.80000000447
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 3,
+        "trace": {
+          "origin": 2354227.2456,
+          "server": {
+            "inputAccepted": 0.0013000001199543476,
+            "inputPrepareStart": 2.237300000153482,
+            "inputPrepareEnd": 43.443800000008196,
+            "video.submitStart": 45.50579999992624,
+            "video.submitAccepted": 498.2491000001319,
+            "video.observed.IN_PROGRESS": 951.559299999848,
+            "video.pollCount": 8,
+            "video.observed.COMPLETED": 3095.1795000000857,
+            "video.resultFetchStart": 3095.1822000001557,
+            "video.responseReceived": 3245.1496000001207,
+            "videoUrlAvailable": 3245.157000000123,
+            "mediaFetchStart": 3245.1976999999024,
+            "mediaHeaders": 5143.3006000001915,
+            "mediaFirstByte": 5164.930399999954,
+            "mediaDownloadEnd": 7440.972000000067,
+            "mediaValidationEnd": 7441.289900000207,
+            "mediaSaved": 7443.4884000001475,
+            "responseReady": 7443.489399999846
+          },
+          "browser": {
+            "responseReceived": 7453.69999999553,
+            "mediaPrepareStart": 7453.69999999553,
+            "mediaRequestStart": 7453.69999999553,
+            "loadedmetadata": 7471.89999999851,
+            "loadeddata": 7496.5,
+            "firstKeyCompleted": 7501.0999999940395,
+            "canplay": 7502.69999999553,
+            "firstFrameDraw": 7507
+          },
+          "requestIds": [
+            "01a08b92-d862-7c22-98dc-3f7b831c4b0e"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.46373403212055564,
+          "browserOrigin": 99781.90000000596
+        },
+        "success": true,
+        "totalMs": 7507,
+        "timings": {
+          "requestStartedAt": 1789048050466,
+          "inProgressAt": 1789048051416,
+          "videoCompletedAt": 1789048053709,
+          "inferenceSeconds": 0.46373403212055564,
+          "downloadCompletedAt": 1789048057908,
+          "compositeReadyAt": 1789048057965
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "queue",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 4,
+        "trace": {
+          "origin": 2361734.5925,
+          "server": {
+            "inputAccepted": 0.001600000075995922,
+            "inputPrepareStart": 3.1007000003010035,
+            "inputPrepareEnd": 43.425800000317395,
+            "video.submitStart": 45.474600000306964,
+            "video.submitAccepted": 504.5279000001028,
+            "video.observed.IN_PROGRESS": 958.1742000002414,
+            "video.pollCount": 9,
+            "video.observed.COMPLETED": 3415.1741000004113,
+            "video.resultFetchStart": 3415.1772000002675,
+            "video.responseReceived": 3564.123300000094,
+            "videoUrlAvailable": 3564.130600000266,
+            "mediaFetchStart": 3564.1748000001535,
+            "mediaHeaders": 4265.00540000014,
+            "mediaFirstByte": 4285.904800000135,
+            "mediaDownloadEnd": 5300.30560000008,
+            "mediaValidationEnd": 5300.729300000239,
+            "mediaSaved": 5303.063300000038,
+            "responseReady": 5303.064300000202
+          },
+          "browser": {
+            "responseReceived": 5312.89999999851,
+            "mediaPrepareStart": 5312.89999999851,
+            "mediaRequestStart": 5312.89999999851,
+            "loadedmetadata": 5334.19999999553,
+            "loadeddata": 5358.60000000149,
+            "firstKeyCompleted": 5363.39999999851,
+            "canplay": 5364.69999999553,
+            "firstFrameDraw": 5368.89999999851
+          },
+          "requestIds": [
+            "01a08b92-f5bb-7b00-92e8-a57a049dfaf8"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable"
+          ],
+          "inferenceSeconds": 0.38240139100525994,
+          "browserOrigin": 107289.30000000447
+        },
+        "success": true,
+        "totalMs": 5368.89999999851,
+        "timings": {
+          "requestStartedAt": 1789048057974,
+          "inProgressAt": 1789048058930,
+          "videoCompletedAt": 1789048061536,
+          "inferenceSeconds": 0.38240139100525994,
+          "downloadCompletedAt": 1789048063274,
+          "compositeReadyAt": 1789048063334
+        },
+        "quality": "unreviewed"
+      }
+    ],
+    "latency-direct": [
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "direct",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 0,
+        "trace": {
+          "origin": 2445328.9226,
+          "server": {
+            "inputAccepted": 0.00139999995008111,
+            "inputPrepareStart": 2.829699999652803,
+            "inputPrepareEnd": 43.42199999978766,
+            "video.submitStart": 45.7695999997668,
+            "video.responseHeaders": 2682.1399999996647,
+            "video.responseReceived": 2682.465199999977,
+            "videoUrlAvailable": 2682.4799999999814,
+            "mediaFetchStart": 2682.680999999866,
+            "mediaHeaders": 3527.334799999837,
+            "mediaFirstByte": 3527.4491999996826,
+            "mediaDownloadEnd": 4546.8243999998085,
+            "mediaValidationEnd": 4547.180599999614,
+            "mediaSaved": 4549.366699999664,
+            "responseReady": 4549.36969999969
+          },
+          "browser": {
+            "responseReceived": 4560.69999999553,
+            "mediaPrepareStart": 4560.69999999553,
+            "mediaRequestStart": 4560.89999999851,
+            "loadedmetadata": 4576.69999999553,
+            "loadeddata": 4598.10000000149,
+            "firstKeyCompleted": 4604.29999999702,
+            "canplay": 4606.5,
+            "firstFrameDraw": 4612.5
+          },
+          "requestIds": [
+            "01a08b94-3c55-7332-899d-90cafbaa3878"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable",
+            "video: direct transport has no queue observations"
+          ],
+          "inferenceSeconds": 0.3616686550012673,
+          "browserOrigin": 21717.80000000447
+        },
+        "success": true,
+        "totalMs": 4612.5,
+        "timings": {
+          "requestStartedAt": 1789048141569,
+          "videoCompletedAt": 1789048144248,
+          "inferenceSeconds": 0.3616686550012673,
+          "downloadCompletedAt": 1789048146115,
+          "compositeReadyAt": 1789048146171
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "direct",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 1,
+        "trace": {
+          "origin": 2449943.036,
+          "server": {
+            "inputAccepted": 0.006300000008195639,
+            "inputPrepareStart": 2.4048999999649823,
+            "inputPrepareEnd": 40.47050000028685,
+            "video.submitStart": 42.52090000035241,
+            "video.responseHeaders": 2795.949900000356,
+            "video.responseReceived": 2796.0729000000283,
+            "videoUrlAvailable": 2796.0819000001065,
+            "mediaFetchStart": 2796.1405000002123,
+            "mediaHeaders": 6394.346900000237,
+            "mediaFirstByte": 6415.2416000002995,
+            "mediaDownloadEnd": 23259.15180000011,
+            "mediaValidationEnd": 23259.59250000026,
+            "mediaSaved": 23261.843700000085,
+            "responseReady": 23261.844599999953
+          },
+          "browser": {
+            "responseReceived": 23271.5,
+            "mediaPrepareStart": 23271.5,
+            "mediaRequestStart": 23271.60000000149,
+            "loadedmetadata": 23288.69999999553,
+            "loadeddata": 23315.69999999553,
+            "firstKeyCompleted": 23320.69999999553,
+            "canplay": 23322.60000000149,
+            "firstFrameDraw": 23328.10000000149
+          },
+          "requestIds": [
+            "01a08b94-4d19-7b13-b007-b659b695ff26"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable",
+            "video: direct transport has no queue observations"
+          ],
+          "inferenceSeconds": 0.37096981098875403,
+          "browserOrigin": 26331.30000000447
+        },
+        "success": true,
+        "totalMs": 23328.10000000149,
+        "timings": {
+          "requestStartedAt": 1789048146182,
+          "videoCompletedAt": 1789048148976,
+          "inferenceSeconds": 0.37096981098875403,
+          "downloadCompletedAt": 1789048169442,
+          "compositeReadyAt": 1789048169500
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "direct",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 2,
+        "trace": {
+          "origin": 2473271.4489,
+          "server": {
+            "inputAccepted": 0.0026999996043741703,
+            "inputPrepareStart": 2.415599999949336,
+            "inputPrepareEnd": 42.11149999964982,
+            "video.submitStart": 44.24560000002384,
+            "video.responseHeaders": 2726.774799999781,
+            "video.responseReceived": 2726.908999999985,
+            "videoUrlAvailable": 2726.9180999998935,
+            "mediaFetchStart": 2726.9748999997973,
+            "mediaHeaders": 3522.4575999998488,
+            "mediaFirstByte": 3544.1036999998614,
+            "mediaDownloadEnd": 4586.361999999732,
+            "mediaValidationEnd": 4586.752399999648,
+            "mediaSaved": 4588.699799999595,
+            "responseReady": 4588.700899999589
+          },
+          "browser": {
+            "responseReceived": 4595.5,
+            "mediaPrepareStart": 4595.5,
+            "mediaRequestStart": 4595.5,
+            "loadedmetadata": 4615.5,
+            "loadeddata": 4641.0999999940395,
+            "firstKeyCompleted": 4645.79999999702,
+            "canplay": 4647.29999999702,
+            "firstFrameDraw": 4652
+          },
+          "requestIds": [
+            "01a08b94-a96e-7703-9e50-2c4eeefcabd4"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable",
+            "video: direct transport has no queue observations"
+          ],
+          "inferenceSeconds": 0.38651359000141383,
+          "browserOrigin": 49659.90000000596
+        },
+        "success": true,
+        "totalMs": 4652,
+        "timings": {
+          "requestStartedAt": 1789048169511,
+          "videoCompletedAt": 1789048172235,
+          "inferenceSeconds": 0.38651359000141383,
+          "downloadCompletedAt": 1789048174097,
+          "compositeReadyAt": 1789048174154
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "direct",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 3,
+        "trace": {
+          "origin": 2477923.7732,
+          "server": {
+            "inputAccepted": 0.003000000026077032,
+            "inputPrepareStart": 2.5975999999791384,
+            "inputPrepareEnd": 44.027999999932945,
+            "video.submitStart": 46.24139999970794,
+            "video.responseHeaders": 2045.6574999997392,
+            "video.responseReceived": 2045.773799999617,
+            "videoUrlAvailable": 2045.780199999921,
+            "mediaFetchStart": 2045.8273000000045,
+            "mediaHeaders": 2898.4155999999493,
+            "mediaFirstByte": 2919.463099999819,
+            "mediaDownloadEnd": 3928.7588999997824,
+            "mediaValidationEnd": 3929.1724000000395,
+            "mediaSaved": 3933.80449999962,
+            "responseReady": 3933.810599999968
+          },
+          "browser": {
+            "responseReceived": 3944,
+            "mediaPrepareStart": 3944,
+            "mediaRequestStart": 3944,
+            "loadedmetadata": 3959.8000000044703,
+            "loadeddata": 3983.5,
+            "firstKeyCompleted": 3988.3000000044703,
+            "canplay": 3989.89999999851,
+            "firstFrameDraw": 3996.2000000029802
+          },
+          "requestIds": [
+            "01a08b94-ba6a-7010-abbd-aff9de67af68"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable",
+            "video: direct transport has no queue observations"
+          ],
+          "inferenceSeconds": 0.3600112700078171,
+          "browserOrigin": 54312.10000000149
+        },
+        "success": true,
+        "totalMs": 3996.2000000029802,
+        "timings": {
+          "requestStartedAt": 1789048174163,
+          "videoCompletedAt": 1789048176207,
+          "inferenceSeconds": 0.3600112700078171,
+          "downloadCompletedAt": 1789048178095,
+          "compositeReadyAt": 1789048178148
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "resolution": "480p",
+        "mode": "reused-base-video",
+        "expansion": "fast",
+        "transport": "direct",
+        "inputMode": "hosted",
+        "delivery": "stored",
+        "trial": 4,
+        "trace": {
+          "origin": 2481920.3655,
+          "server": {
+            "inputAccepted": 0.0020000003278255463,
+            "inputPrepareStart": 2.4990000003017485,
+            "inputPrepareEnd": 44.72620000038296,
+            "video.submitStart": 47.11610000021756,
+            "video.responseHeaders": 2628.637700000312,
+            "video.responseReceived": 2628.7697000000626,
+            "videoUrlAvailable": 2628.7772000003606,
+            "mediaFetchStart": 2628.845200000331,
+            "mediaHeaders": 4005.161000000313,
+            "mediaFirstByte": 4026.8634000001475,
+            "mediaDownloadEnd": 5037.774399999995,
+            "mediaValidationEnd": 5038.37890000036,
+            "mediaSaved": 5040.805099999998,
+            "responseReady": 5040.806000000332
+          },
+          "browser": {
+            "responseReceived": 5050.89999999851,
+            "mediaPrepareStart": 5051,
+            "mediaRequestStart": 5051,
+            "loadedmetadata": 5075.5,
+            "loadeddata": 5106.69999999553,
+            "firstKeyCompleted": 5111.79999999702,
+            "canplay": 5113.79999999702,
+            "firstFrameDraw": 5120.39999999851
+          },
+          "requestIds": [
+            "01a08b94-ca08-7523-8c9b-3edda4056ca2"
+          ],
+          "missing": [
+            "prompt expansion / encode / CDN publish internal timestamps unavailable",
+            "video: direct transport has no queue observations"
+          ],
+          "inferenceSeconds": 0.4429521788842976,
+          "browserOrigin": 58308.80000000447
+        },
+        "success": true,
+        "totalMs": 5120.39999999851,
+        "timings": {
+          "requestStartedAt": 1789048178160,
+          "videoCompletedAt": 1789048180786,
+          "inferenceSeconds": 0.4429521788842976,
+          "downloadCompletedAt": 1789048183198,
+          "compositeReadyAt": 1789048183268
+        },
+        "quality": "unreviewed"
+      }
+    ],
+    "latency-replay": [
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stored",
+        "trial": 0,
+        "success": true,
+        "totalMs": 1190.7000000029802,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 159481,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0.10000000149011612,
+            "mediaRequestStart": 0.20000000298023224,
+            "loadedmetadata": 1156.2000000029802,
+            "loadeddata": 1178.7000000029802,
+            "firstKeyCompleted": 1183.4000000059605,
+            "canplay": 1185.5,
+            "firstFrameDraw": 1190.7000000029802
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stream",
+        "trial": 0,
+        "success": true,
+        "totalMs": 800.5999999940395,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 160671.90000000596,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0.09999999403953552,
+            "mediaRequestStart": 0.19999999552965164,
+            "loadedmetadata": 745.5999999940395,
+            "loadeddata": 793.0999999940395,
+            "firstKeyCompleted": 795,
+            "canplay": 796,
+            "firstFrameDraw": 800.5999999940395
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stream",
+        "trial": 1,
+        "success": true,
+        "totalMs": 783,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 161472.80000000447,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0,
+            "mediaRequestStart": 0,
+            "loadedmetadata": 728.3999999985099,
+            "loadeddata": 775.1999999955297,
+            "firstKeyCompleted": 777.3999999985099,
+            "canplay": 778.6999999955297,
+            "firstFrameDraw": 783
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stored",
+        "trial": 1,
+        "success": true,
+        "totalMs": 1152.3999999985099,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 162256.20000000298,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0,
+            "mediaRequestStart": 0.10000000149011612,
+            "loadedmetadata": 1130.8999999985099,
+            "loadeddata": 1143.7999999970198,
+            "firstKeyCompleted": 1147.1000000014901,
+            "canplay": 1148.3999999985099,
+            "firstFrameDraw": 1152.3999999985099
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stored",
+        "trial": 2,
+        "success": true,
+        "totalMs": 1159.8999999985099,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 163408.80000000447,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0,
+            "mediaRequestStart": 0.10000000149011612,
+            "loadedmetadata": 1123.6999999955297,
+            "loadeddata": 1151.8999999985099,
+            "firstKeyCompleted": 1153.7999999970198,
+            "canplay": 1155.3999999985099,
+            "firstFrameDraw": 1159.8999999985099
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stream",
+        "trial": 2,
+        "success": true,
+        "totalMs": 854.1000000014901,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 164569,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0,
+            "mediaRequestStart": 0.10000000149011612,
+            "loadedmetadata": 799.6000000014901,
+            "loadeddata": 846.7000000029802,
+            "firstKeyCompleted": 848.8000000044703,
+            "canplay": 849.9000000059605,
+            "firstFrameDraw": 854.1000000014901
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stream",
+        "trial": 3,
+        "success": true,
+        "totalMs": 807.3000000044703,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 165423.5,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0,
+            "mediaRequestStart": 0,
+            "loadedmetadata": 753.7000000029802,
+            "loadeddata": 799.2000000029802,
+            "firstKeyCompleted": 801.9000000059605,
+            "canplay": 803.4000000059605,
+            "firstFrameDraw": 807.3000000044703
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stored",
+        "trial": 3,
+        "success": true,
+        "totalMs": 1210,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 166231.20000000298,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0,
+            "mediaRequestStart": 0,
+            "loadedmetadata": 1182.7999999970198,
+            "loadeddata": 1201.5,
+            "firstKeyCompleted": 1204.1000000014901,
+            "canplay": 1205.2000000029802,
+            "firstFrameDraw": 1210
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stored",
+        "trial": 4,
+        "success": true,
+        "totalMs": 1219.8000000044703,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 167441.5,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0,
+            "mediaRequestStart": 0.10000000149011612,
+            "loadedmetadata": 1184.9000000059605,
+            "loadeddata": 1209.6000000014901,
+            "firstKeyCompleted": 1213.9000000059605,
+            "canplay": 1215.5,
+            "firstFrameDraw": 1219.8000000044703
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      },
+      {
+        "provider": "fal",
+        "mode": "reused-base-video",
+        "resolution": "480p",
+        "delivery": "stream",
+        "trial": 4,
+        "success": true,
+        "totalMs": 819.2999999970198,
+        "trace": {
+          "origin": 0,
+          "browserOrigin": 168661.70000000298,
+          "server": {},
+          "browser": {
+            "mediaPrepareStart": 0,
+            "mediaRequestStart": 0.10000000149011612,
+            "loadedmetadata": 765.5,
+            "loadeddata": 810.6000000014901,
+            "firstKeyCompleted": 812.7000000029802,
+            "canplay": 814.3999999985099,
+            "firstFrameDraw": 819.2000000029802
+          },
+          "missing": [
+            "Replay: no generation"
+          ],
+          "requestIds": []
+        },
+        "quality": "unreviewed"
+      }
+    ]
+  },
+  "play": [
+    {
+      "id": "6a98218f-b819-4fc6-bdc4-31cc1fbcf134",
+      "reason": "generated",
+      "elapsed": 4693,
+      "trace": {
+        "origin": 2656009.4237,
+        "server": {
+          "inputAccepted": 0.001999999862164259,
+          "inputPrepareStart": 2.8594999997876585,
+          "inputPrepareEnd": 42.68779999995604,
+          "video.submitStart": 45.40760000003502,
+          "video.submitAccepted": 1261.1878999997862,
+          "video.observed.IN_PROGRESS": 1717.963999999687,
+          "video.pollCount": 7,
+          "video.observed.COMPLETED": 3575.5181999998167,
+          "video.resultFetchStart": 3575.524299999699,
+          "video.responseReceived": 3726.4773999997415,
+          "videoUrlAvailable": 3726.496400000062,
+          "responseReady": 3726.688399999868
+        },
+        "browser": {
+          "responseReceived": 3754.1999999955297,
+          "mediaPrepareStart": 3754.39999999851,
+          "mediaRequestStart": 3754.5,
+          "loadedmetadata": 4643.0999999940395,
+          "loadeddata": 4689.69999999553,
+          "firstKeyCompleted": 4693.19999999553,
+          "canplay": 4697.69999999553,
+          "firstFrameDraw": 4701
+        },
+        "requestIds": [
+          "01a08b97-7632-7be2-b53c-5925fb97e84e"
+        ],
+        "missing": [
+          "prompt expansion / encode / CDN publish internal timestamps unavailable"
+        ],
+        "inferenceSeconds": 0.3838249449618161,
+        "browserOrigin": 19703.60000000149
+      },
+      "timings": {
+        "requestStartedAt": 1789048352250,
+        "inProgressAt": 1789048353965,
+        "videoCompletedAt": 1789048355973,
+        "inferenceSeconds": 0.3838249449618161,
+        "compositeReadyAt": 1789048356915,
+        "inputAt": 1789048352222,
+        "firstDisplayedAt": 1789048356925
+      }
+    },
+    {
+      "id": "42260c79-6d42-4e6d-876a-dbc97b726bd4",
+      "reason": "generated",
+      "elapsed": 4268,
+      "trace": {
+        "origin": 2677809.6454,
+        "server": {
+          "inputAccepted": 0.003100000321865082,
+          "inputPrepareStart": 2.7665000003762543,
+          "inputPrepareEnd": 42.202200000174344,
+          "video.submitStart": 44.17489999998361,
+          "video.submitAccepted": 1259.816200000234,
+          "video.observed.IN_PROGRESS": 1710.4666000003926,
+          "video.pollCount": 6,
+          "video.observed.COMPLETED": 3260.163500000257,
+          "video.resultFetchStart": 3260.166700000409,
+          "video.responseReceived": 3409.841800000053,
+          "videoUrlAvailable": 3409.855100000277,
+          "responseReady": 3409.9031000002287
+        },
+        "browser": {
+          "responseReceived": 3417.3000000044703,
+          "mediaPrepareStart": 3417.3000000044703,
+          "mediaRequestStart": 3417.39999999851,
+          "loadedmetadata": 4215,
+          "loadeddata": 4265.30000000447,
+          "firstKeyCompleted": 4267.10000000149,
+          "canplay": 4271,
+          "firstFrameDraw": 4274.80000000447
+        },
+        "requestIds": [
+          "01a08b97-cb5c-7c40-911b-c7c634278c8f"
+        ],
+        "missing": [
+          "prompt expansion / encode / CDN publish internal timestamps unavailable"
+        ],
+        "inferenceSeconds": 0.26431437116116285,
+        "browserOrigin": 41523.79999999702
+      },
+      "timings": {
+        "requestStartedAt": 1789048374050,
+        "inProgressAt": 1789048375757,
+        "videoCompletedAt": 1789048377457,
+        "inferenceSeconds": 0.26431437116116285,
+        "compositeReadyAt": 1789048378309,
+        "inputAt": 1789048374042,
+        "firstDisplayedAt": 1789048378321
+      }
+    },
+    {
+      "id": "5216cec1-d35a-4c73-b64f-f18da1ee6db2",
+      "reason": "generated",
+      "elapsed": 3364,
+      "trace": {
+        "origin": 2682422.6314,
+        "server": {
+          "inputAccepted": 0.0026000002399086952,
+          "inputPrepareStart": 2.4725000001490116,
+          "inputPrepareEnd": 43.235800000373274,
+          "video.submitStart": 45.777999999932945,
+          "video.submitAccepted": 361.79630000004545,
+          "video.observed.IN_PROGRESS": 511.6641000001691,
+          "video.pollCount": 7,
+          "video.observed.COMPLETED": 2360.3392000002787,
+          "video.resultFetchStart": 2360.346000000369,
+          "video.responseReceived": 2509.651800000109,
+          "videoUrlAvailable": 2509.691700000316,
+          "responseReady": 2509.7623000000603
+        },
+        "browser": {
+          "responseReceived": 2520.89999999851,
+          "mediaPrepareStart": 2520.89999999851,
+          "mediaRequestStart": 2521,
+          "loadedmetadata": 3318.10000000149,
+          "loadeddata": 3360.60000000149,
+          "firstKeyCompleted": 3362.60000000149,
+          "canplay": 3366.7000000029802,
+          "firstFrameDraw": 3370.10000000149
+        },
+        "requestIds": [
+          "01a08b97-d9db-7763-bfce-9297b7f38ccf"
+        ],
+        "missing": [
+          "prompt expansion / encode / CDN publish internal timestamps unavailable"
+        ],
+        "inferenceSeconds": 0.35271881500375457,
+        "browserOrigin": 46136.29999999702
+      },
+      "timings": {
+        "requestStartedAt": 1789048378662,
+        "inProgressAt": 1789048379172,
+        "videoCompletedAt": 1789048381170,
+        "inferenceSeconds": 0.35271881500375457,
+        "compositeReadyAt": 1789048382018,
+        "inputAt": 1789048378654,
+        "firstDisplayedAt": 1789048382030
+      }
+    },
+    {
+      "id": "0ef845ad-af12-4285-b96f-a2e12c363013",
+      "reason": "generated",
+      "elapsed": 3596,
+      "trace": {
+        "origin": 2686187.4455,
+        "server": {
+          "inputAccepted": 0.002199999988079071,
+          "inputPrepareStart": 2.5197999998927116,
+          "inputPrepareEnd": 43.11679999995977,
+          "video.submitStart": 45.26949999993667,
+          "video.submitAccepted": 216.98389999987558,
+          "video.observed.IN_PROGRESS": 367.25040000025183,
+          "video.pollCount": 8,
+          "video.observed.COMPLETED": 2529.007500000298,
+          "video.resultFetchStart": 2529.0115000000224,
+          "video.responseReceived": 2678.9552000002004,
+          "videoUrlAvailable": 2678.9753999998793,
+          "responseReady": 2679.030400000047
+        },
+        "browser": {
+          "responseReceived": 2691.89999999851,
+          "mediaPrepareStart": 2691.89999999851,
+          "mediaRequestStart": 2692,
+          "loadedmetadata": 3521.10000000149,
+          "loadeddata": 3594.39999999851,
+          "firstKeyCompleted": 3595.89999999851,
+          "canplay": 3599.7000000029802,
+          "firstFrameDraw": 3604.2999999970198
+        },
+        "requestIds": [
+          "01a08b97-e801-7ff2-b9eb-f9ab783c5609"
+        ],
+        "missing": [
+          "prompt expansion / encode / CDN publish internal timestamps unavailable"
+        ],
+        "inferenceSeconds": 0.35842555000272114,
+        "browserOrigin": 49901.39999999851
+      },
+      "timings": {
+        "requestStartedAt": 1789048382427,
+        "inProgressAt": 1789048382792,
+        "videoCompletedAt": 1789048385104,
+        "inferenceSeconds": 0.35842555000272114,
+        "compositeReadyAt": 1789048386015,
+        "inputAt": 1789048382419,
+        "firstDisplayedAt": 1789048386027
+      }
+    },
+    {
+      "id": "688bd0eb-871d-42b4-9569-6dc6af11b933",
+      "reason": "generated",
+      "elapsed": 4241,
+      "trace": {
+        "origin": 2690153.7298,
+        "server": {
+          "inputAccepted": 0.0023000002838671207,
+          "inputPrepareStart": 1.9171000001952052,
+          "inputPrepareEnd": 40.92560000019148,
+          "video.submitStart": 43.29440000001341,
+          "video.submitAccepted": 216.30110000027344,
+          "video.observed.IN_PROGRESS": 366.93090000003576,
+          "video.pollCount": 10,
+          "video.observed.COMPLETED": 3144.5208000000566,
+          "video.resultFetchStart": 3144.5241000000387,
+          "video.responseReceived": 3294.3008000003174,
+          "videoUrlAvailable": 3294.31930000009,
+          "responseReady": 3294.4180000000633
+        },
+        "browser": {
+          "responseReceived": 3304.7999999970198,
+          "mediaPrepareStart": 3304.7999999970198,
+          "mediaRequestStart": 3304.7999999970198,
+          "loadedmetadata": 4189.10000000149,
+          "loadeddata": 4239.29999999702,
+          "firstKeyCompleted": 4240.79999999702,
+          "canplay": 4244.19999999553,
+          "firstFrameDraw": 4247.79999999702
+        },
+        "requestIds": [
+          "01a08b97-f780-7313-9b99-5e4eb9ec6293"
+        ],
+        "missing": [
+          "prompt expansion / encode / CDN publish internal timestamps unavailable"
+        ],
+        "inferenceSeconds": 0.36305565998191014,
+        "browserOrigin": 53865
+      },
+      "timings": {
+        "requestStartedAt": 1789048386393,
+        "inProgressAt": 1789048386758,
+        "videoCompletedAt": 1789048389685,
+        "inferenceSeconds": 0.36305565998191014,
+        "compositeReadyAt": 1789048390624,
+        "inputAt": 1789048386383,
+        "firstDisplayedAt": 1789048390636
+      }
+    },
+    {
+      "id": "addea5be-733e-402c-be0a-7d0983289d6e",
+      "reason": "deadline",
+      "elapsed": 5033,
+      "timings": {
+        "inputAt": 1789048438137,
+        "firstDisplayedAt": 1789048443186
+      }
+    },
+    {
+      "id": "c52a6200-c7cc-439c-84f8-e571fb21bb2a",
+      "reason": "generated",
+      "elapsed": 4162,
+      "trace": {
+        "origin": 2747288.6912,
+        "server": {
+          "inputAccepted": 0.0013000001199543476,
+          "inputPrepareStart": 2.6720000002533197,
+          "inputPrepareEnd": 43.15550000034273,
+          "video.submitStart": 45.50360000040382,
+          "video.submitAccepted": 356.5966000002809,
+          "video.observed.IN_PROGRESS": 507.4425000003539,
+          "video.pollCount": 8,
+          "video.observed.COMPLETED": 2678.172700000461,
+          "video.resultFetchStart": 2678.1759000001475,
+          "video.responseReceived": 2828.37620000029,
+          "videoUrlAvailable": 2828.3936000000685,
+          "responseReady": 2828.4519000002183
+        },
+        "browser": {
+          "responseReceived": 2836.6999999955297,
+          "mediaPrepareStart": 2836.6999999955297,
+          "mediaRequestStart": 2836.6999999955297,
+          "loadedmetadata": 4084.7999999970198,
+          "loadeddata": 4159.69999999553,
+          "firstKeyCompleted": 4162.10000000149,
+          "canplay": 4165.19999999553,
+          "firstFrameDraw": 4168.29999999702
+        },
+        "requestIds": [
+          "01a08b98-d740-7040-bb9d-da4a920dcce9"
+        ],
+        "missing": [
+          "prompt expansion / encode / CDN publish internal timestamps unavailable"
+        ],
+        "inferenceSeconds": 0.3582606419950025,
+        "browserOrigin": 111003
+      },
+      "timings": {
+        "requestStartedAt": 1789048443528,
+        "inProgressAt": 1789048444033,
+        "videoCompletedAt": 1789048446354,
+        "inferenceSeconds": 0.3582606419950025,
+        "compositeReadyAt": 1789048447683,
+        "inputAt": 1789048443521,
+        "firstDisplayedAt": 1789048447692
+      }
+    },
+    {
+      "id": "9239d6fe-978a-4ab8-a2eb-c2e50a0f418d",
+      "reason": "generated",
+      "elapsed": 3367,
+      "trace": {
+        "origin": 2751807.4175,
+        "server": {
+          "inputAccepted": 0.0010000001639127731,
+          "inputPrepareStart": 2.396100000012666,
+          "inputPrepareEnd": 40.41080000018701,
+          "video.submitStart": 42.48799999989569,
+          "video.submitAccepted": 211.80819999985397,
+          "video.observed.IN_PROGRESS": 363.45679999981076,
+          "video.pollCount": 6,
+          "video.observed.COMPLETED": 1912.464399999939,
+          "video.resultFetchStart": 1912.467199999839,
+          "video.responseReceived": 2062.475500000175,
+          "videoUrlAvailable": 2062.4947000001557,
+          "responseReady": 2062.564999999944
+        },
+        "browser": {
+          "responseReceived": 2071.10000000149,
+          "mediaPrepareStart": 2071.10000000149,
+          "mediaRequestStart": 2071.10000000149,
+          "loadedmetadata": 3286.7999999970198,
+          "loadeddata": 3364.7999999970198,
+          "firstKeyCompleted": 3367,
+          "canplay": 3370.7000000029802,
+          "firstFrameDraw": 3373.7999999970198
+        },
+        "requestIds": [
+          "01a08b98-e855-77c1-998e-a059eccf6316"
+        ],
+        "missing": [
+          "prompt expansion / encode / CDN publish internal timestamps unavailable"
+        ],
+        "inferenceSeconds": 0.3291318400297314,
+        "browserOrigin": 115521.89999999851
+      },
+      "timings": {
+        "requestStartedAt": 1789048448047,
+        "inProgressAt": 1789048448408,
+        "videoCompletedAt": 1789048450107,
+        "inferenceSeconds": 0.3291318400297314,
+        "compositeReadyAt": 1789048451407,
+        "inputAt": 1789048448040,
+        "firstDisplayedAt": 1789048451416
+      }
+    },
+    {
+      "id": "39a294e4-1955-4e66-9b2b-3e7aaee10d31",
+      "reason": "generated",
+      "elapsed": 4521,
+      "trace": {
+        "origin": 2755572.3012,
+        "server": {
+          "inputAccepted": 0.0010999999940395355,
+          "inputPrepareStart": 2.375200000125915,
+          "inputPrepareEnd": 41.37690000003204,
+          "video.submitStart": 48.23619999969378,
+          "video.submitAccepted": 223.00490000005811,
+          "video.observed.IN_PROGRESS": 373.07379999989644,
+          "video.pollCount": 7,
+          "video.observed.COMPLETED": 2233.050899999682,
+          "video.resultFetchStart": 2233.0534999999218,
+          "video.responseReceived": 2383.4408999998122,
+          "videoUrlAvailable": 2383.4561000000685,
+          "responseReady": 2383.528899999801
+        },
+        "browser": {
+          "responseReceived": 2391.60000000149,
+          "mediaPrepareStart": 2391.60000000149,
+          "mediaRequestStart": 2391.7000000029802,
+          "loadedmetadata": 4452.70000000298,
+          "loadeddata": 4519.39999999851,
+          "firstKeyCompleted": 4521,
+          "canplay": 4524.39999999851,
+          "firstFrameDraw": 4528.89999999851
+        },
+        "requestIds": [
+          "01a08b98-f711-7352-a095-9994aa32771d"
+        ],
+        "missing": [
+          "prompt expansion / encode / CDN publish internal timestamps unavailable"
+        ],
+        "inferenceSeconds": 0.3776171490026172,
+        "browserOrigin": 119285.79999999702
+      },
+      "timings": {
+        "requestStartedAt": 1789048451812,
+        "inProgressAt": 1789048452182,
+        "videoCompletedAt": 1789048454193,
+        "inferenceSeconds": 0.3776171490026172,
+        "compositeReadyAt": 1789048456325,
+        "inputAt": 1789048451804,
+        "firstDisplayedAt": 1789048456336
+      }
+    },
+    {
+      "id": "0276917f-000b-4baf-920e-b525a0c7c494",
+      "reason": "generated",
+      "elapsed": 4239,
+      "trace": {
+        "origin": 2760516.5513,
+        "server": {
+          "inputAccepted": 0.0008999998681247234,
+          "inputPrepareStart": 2.566899999976158,
+          "inputPrepareEnd": 40.904099999926984,
+          "video.submitStart": 43.483599999919534,
+          "video.submitAccepted": 218.56080000009388,
+          "video.observed.IN_PROGRESS": 368.7025999999605,
+          "video.pollCount": 9,
+          "video.observed.COMPLETED": 2830.8310000002384,
+          "video.resultFetchStart": 2830.8343000002205,
+          "video.responseReceived": 2981.128599999938,
+          "videoUrlAvailable": 2981.1452999999747,
+          "responseReady": 2981.221499999985
+        },
+        "browser": {
+          "responseReceived": 2993.89999999851,
+          "mediaPrepareStart": 2993.89999999851,
+          "mediaRequestStart": 2993.89999999851,
+          "loadedmetadata": 4160.30000000447,
+          "loadeddata": 4238,
+          "firstKeyCompleted": 4239.70000000298,
+          "canplay": 4243,
+          "firstFrameDraw": 4247.80000000447
+        },
+        "requestIds": [
+          "01a08b99-0a5c-7d52-8588-77893c1177f3"
+        ],
+        "missing": [
+          "prompt expansion / encode / CDN publish internal timestamps unavailable"
+        ],
+        "inferenceSeconds": 0.3594636480011104,
+        "browserOrigin": 124230.79999999702
+      },
+      "timings": {
+        "requestStartedAt": 1789048456756,
+        "inProgressAt": 1789048457122,
+        "videoCompletedAt": 1789048459735,
+        "inferenceSeconds": 0.3594636480011104,
+        "compositeReadyAt": 1789048460988,
+        "inputAt": 1789048456749,
+        "firstDisplayedAt": 1789048461000
+      }
+    }
+  ],
+  "quality": [
+    {
+      "asset": "3f6bcf34953e1a116ba32454cc12a0b7f994e783484b4c4788de7b348259b357.mp4",
+      "frames": 124,
+      "failedFrames": 0,
+      "maxFrameAreaChange": 0.003173828125
+    },
+    {
+      "asset": "4f35bff8a55244650ba3ae577d22821bdc065104108973da71e28077509b3273.mp4",
+      "frames": 124,
+      "failedFrames": 0,
+      "maxFrameAreaChange": 0.00238037109375
+    },
+    {
+      "asset": "5215a0c2e302be6744488cd050d20415a0972229aad1c26c5f2f62f23f1a293b.mp4",
+      "frames": 124,
+      "failedFrames": 0,
+      "maxFrameAreaChange": 0.0015869140625
+    },
+    {
+      "asset": "58c23270c56d0f4c7da0880a2c51df0a84c9df0f7af69f35171e97860e7e6afe.mp4",
+      "frames": 124,
+      "failedFrames": 0,
+      "maxFrameAreaChange": 0.001708984375
+    },
+    {
+      "asset": "59141b1e364ba26544488044f2f1329bfbcaf0b3a4814d9af8dcbd76cd999622.mp4",
+      "frames": 124,
+      "failedFrames": 0,
+      "maxFrameAreaChange": 0.0029296875
+    },
+    {
+      "asset": "8c0a3dbd1f1fea9e2d5d29ee0950e3d965cfa6fc67ac3ca7e8e077579179d635.mp4",
+      "frames": 124,
+      "failedFrames": 0,
+      "maxFrameAreaChange": 0.0020751953125
+    },
+    {
+      "asset": "8d179a632cdabf423d4f0a9b4878b1a3bd604e8eb04eba13517bb560d706848b.mp4",
+      "frames": 124,
+      "failedFrames": 0,
+      "maxFrameAreaChange": 0.00244140625
+    },
+    {
+      "asset": "b304d9eb9d922cd96a74f582b8af7866e37e22bff82eff7fb2dcc82c3a6291c8.mp4",
+      "frames": 124,
+      "failedFrames": 0,
+      "maxFrameAreaChange": 0.0023193359375
+    },
+    {
+      "asset": "b3b19adb0007a3b58a8f4a21fd5021663af3af88980ba2754e197d98a9585d32.mp4",
+      "frames": 124,
+      "failedFrames": 0,
+      "maxFrameAreaChange": 0.00335693359375
+    }
+  ],
+  "reservedAdditionalUsd": 3.75
+}
