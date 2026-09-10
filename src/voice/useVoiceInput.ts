@@ -187,6 +187,11 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         controller.dispatch(event);
         optionsRef.current.onEvent?.(event);
         switch (event.type) {
+          case 'listening_pending':
+            setIsEnabled(true);
+            setIsVadSpeech(false);
+            setIsSttProcessing(false);
+            break;
           case 'listening_started':
             setIsEnabled(true);
             break;
@@ -206,7 +211,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
             setIsSttProcessing(false);
             break;
           case 'recognition_failed':
-            if (isFatalVoiceError(event.code)) setIsEnabled(false);
+            if (event.recoverable !== undefined) setIsEnabled(event.recoverable);
+            else if (isFatalVoiceError(event.code)) setIsEnabled(false);
             setIsVadSpeech(false);
             setIsSttProcessing(false);
             break;
@@ -276,6 +282,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       controller.dispatch({
         type: 'recognition_failed',
         code: adapter.supportErrorCode ?? 'unsupported',
+        ...(runtimeConfig.mode === 'public' ? { recoverable: false } : {}),
         at: Date.now(),
       });
     }
@@ -296,6 +303,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const start = useCallback(async () => {
     const adapter = adapterRef.current;
     if (!adapter) return false;
+    if (controllerRef.current?.getSnapshot().phase === 'error') {
+      controllerRef.current.dispatch({ type: 'recognition_stopped', at: Date.now() });
+    }
     return adapter.start();
   }, []);
 
@@ -306,6 +316,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
 
   return {
     errorCode: snapshot.errorCode,
+    notice: snapshot.notice,
     isEnabled,
     isSupported,
     lastDiagnostic,

@@ -155,6 +155,7 @@ export function toTurnSignal(event: VoiceInputEvent): TurnSignal {
       return event;
     case 'recognition_stopped':
       return event;
+    case 'listening_pending':
     case 'listening_started':
       return { type: 'recognition_stopped', at: event.at };
     case 'interim_transcript_updated':

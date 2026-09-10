@@ -127,7 +127,7 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
   if (!response.ok) {
     const reason = await response.clone().json().catch(() => ({}));
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-    window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: reason }));
+    window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: { ...reason, source: path.endsWith('/api/transcribe') ? '/api/transcribe' : path } }));
     const headers = new Headers(response.headers); headers.delete('content-length'); headers.delete('content-encoding');
     return Response.json({ ...reason, error: publicErrorMessage(reason) }, { status: response.status, headers });
   }
