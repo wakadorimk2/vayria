@@ -1,3 +1,21 @@
+import type { VoiceInputNotice } from '../voice/voiceInput';
+
+export function voiceInputNoticeMessage(notice: VoiceInputNotice): string {
+  if (notice.state === 'recovering' && notice.code === 'playback-wait') return '返答が終わると、音声入力を再開します';
+  if (notice.state === 'recovering' && notice.code === 'capture-starting') return 'マイクの接続を確認しています';
+  if (notice.state === 'failed' && notice.code === 'playback-timeout') return '音声入力を再開できませんでした。文字やカードで続けられます。';
+  if (notice.state === 'recovering') return '音声入力を再開しています';
+  if (notice.state === 'resumed') return 'もう一度どうぞ';
+  if (notice.code === 'not-allowed') return 'マイクの許可が必要です。ブラウザーの設定を確認してください。';
+  if (notice.code === 'audio-capture') return 'マイクを開始できませんでした。マイクを押して再試行できます。';
+  if (notice.code === 'unsupported') return 'この環境では音声入力を使えません。文字やカードでどうぞ。';
+  if (!Object.hasOwn(messages, notice.code)) return '音声入力を再開できませんでした。マイクを押して再試行できます。';
+  const message = publicErrorMessage({ code: notice.code });
+  const retryAt = notice.retryAt;
+  if (typeof retryAt !== 'number' || !Number.isFinite(retryAt) || retryAt <= 0 || Number.isNaN(new Date(retryAt).getTime())) return message;
+  return `${message} 再開: ${new Date(retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}（日本時間）`;
+}
+
 // Shared by the conversation response and the public controls.
 const messages: Record<string, string> = {
   exhibition_code_invalid: '端末登録コードが無効か、有効期限が切れています。新しいコードを発行してください。',

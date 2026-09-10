@@ -5,6 +5,7 @@ export type VoiceInputPhase =
   | 'listening'
   | 'speech_detected'
   | 'utterance_finalized'
+  | 'recovering'
   | 'error';
 
 export interface ListeningReactionCue {
@@ -18,7 +19,8 @@ export interface VoiceSpeakerMetadata {
 }
 
 export type VoiceInputEvent =
-  | { type: 'listening_started'; at: number }
+  | { type: 'listening_pending'; reason: 'capture-starting' | 'playback-wait'; at: number }
+  | { type: 'listening_started'; at: number; recovered?: boolean }
   | ({ type: 'speech_started'; segmentId: string; at: number } &
       VoiceSpeakerMetadata)
   | ({
@@ -36,13 +38,22 @@ export type VoiceInputEvent =
       at: number;
     } & VoiceSpeakerMetadata)
   | { type: 'recognition_stopped'; at: number }
-  | { type: 'recognition_failed'; code: string; at: number };
+  | { type: 'recognition_failed'; code: string; at: number; recoverable?: boolean; retryAt?: number };
+
+/** A voice-only notice; it never replaces conversation or card content. */
+export interface VoiceInputNotice {
+  state: 'recovering' | 'resumed' | 'failed';
+  code: string;
+  at: number;
+  retryAt?: number;
+}
 
 export interface VoiceInputSnapshot {
   phase: VoiceInputPhase;
   segmentId: string | null;
   transcript: string;
   errorCode: string | null;
+  notice?: VoiceInputNotice;
 }
 
 export const INITIAL_VOICE_INPUT_SNAPSHOT: VoiceInputSnapshot = {
@@ -64,12 +75,16 @@ export function reduceVoiceInput(
   event: VoiceInputEvent,
 ): VoiceInputSnapshot {
   switch (event.type) {
+    case 'listening_pending':
+      return { phase: 'recovering', segmentId: null, transcript: '', errorCode: null,
+        notice: { state: 'recovering', code: event.reason, at: event.at } };
     case 'listening_started':
       return {
         phase: 'listening',
         segmentId: null,
         transcript: '',
         errorCode: null,
+        ...(event.recovered ? { notice: { state: 'resumed' as const, code: '', at: event.at } } : {}),
       };
     case 'speech_started':
       return {
@@ -118,10 +133,14 @@ export function reduceVoiceInput(
       return INITIAL_VOICE_INPUT_SNAPSHOT;
     case 'recognition_failed':
       return {
-        phase: 'error',
+        phase: event.recoverable ? 'recovering' : 'error',
         segmentId: null,
         transcript: '',
         errorCode: event.code,
+        ...(event.recoverable !== undefined ? { notice: {
+          state: event.recoverable ? 'recovering' as const : 'failed' as const,
+          code: event.code, at: event.at, retryAt: event.retryAt,
+        } } : {}),
       };
   }
 }

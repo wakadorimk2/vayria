@@ -1056,8 +1056,9 @@ export default function App() {
     enabled: isVoiceInputEnabled,
     recognizing: isSttProcessing,
     speaking: isVadSpeech || voiceInputPhase === 'speech_detected',
+    recovering: voiceInputPhase === 'recovering',
   });
-  const conversationError = error || voiceValidationError || voiceError;
+  const conversationError = error || voiceValidationError || (runtimeConfig.mode === 'public' ? '' : voiceError);
   const shouldShowStatus =
     (!usesExhibitionUi || !shouldShowReply) &&
     !(runtimeConfig.mode === 'public' && (
@@ -2687,6 +2688,7 @@ export default function App() {
           onMuteToggle={handleMuteToggle}
           microphoneOn={isVoiceInputEnabled}
           microphoneState={publicMicrophoneState}
+          microphoneNotice={voiceInput.notice}
           microphoneLevel={displayedAudioLevel === null ? null : microphoneInputStrength}
           onMicrophoneToggle={() => { void handleVoiceToggle(); }}
         />
