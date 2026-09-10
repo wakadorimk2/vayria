@@ -12,7 +12,8 @@ import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicEx
 import ExhibitionControls from './ExhibitionControls';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+export default function PublicControls({ generation, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+  generation?: { enabled: boolean; busy: boolean; message: string; toggle: () => Promise<void> };
   settingsLayout: SettingsLayout;
   onSettingsOpenChange: (open: boolean) => void;
   cardsOpen: boolean;
@@ -154,6 +155,8 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
       setMessage('会話を終了しました。カード操作は続けられます。');
     } catch { setMessage('再生と録音を停止しました。終了の通信を確認できませんでした。'); }
   };
+  const [generationNotice, setGenerationNotice] = useState(false);
+  useEffect(() => { if (!generationNotice) return; const timer=setTimeout(()=>setGenerationNotice(false),4000); return()=>clearTimeout(timer); }, [generationNotice, generation?.message]);
   return <aside className="public-controls" aria-label="会話の操作">
     <VoiceInputNotification notice={microphoneNotice} suppressed={expanded || noticeOpen} />
     {exhibition && <div className="public-exhibition-handoff">
@@ -173,6 +176,7 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
       <div ref={challenge} hidden={active} />
       <button onClick={() => { cancelRequest(); setNoticeOpen(false); }}>{requested ? 'キャンセル' : '操作を選び直す'}</button>
     </section>}
+    {generationNotice && generation?.message && <p className="public-generation-notice" role="status">{generation.message}</p>}
     <div className="public-controls__actions">
       <button className="public-controls__cards" aria-label="カードで遊ぶ" title="カードで遊ぶ" aria-expanded={cardsOpen} aria-controls="public-card-panel" onClick={() => { setExpanded(false); if (!expanded || !cardsOpen) onCardsToggle(); }}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="3" width="13" height="18" rx="2" /><path d="m4 6-2 1 3 14M13.5 8l3 4-3 4-3-4Z" /></svg>
@@ -189,6 +193,7 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
       <button aria-label={isMuted ? '音声をオンにする' : '音声をミュートする'} title={isMuted ? '音声をオンにする' : '音声をミュートする'} aria-pressed={isMuted} onClick={onMuteToggle}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 4 6 8H3v8h3l5 4Z" />{isMuted ? <path d="m16 9 5 6m0-6-5 6" /> : <><path d="M15 8a6 6 0 0 1 0 8M18 4a11 11 0 0 1 0 16" /></>}</svg>
       </button>
+      {generation && <button className="public-controls__generation" aria-label={`生成モード ${generation.enabled ? 'ON' : 'OFF'}`} title="生成モード" aria-pressed={generation.enabled} disabled={generation.busy} onClick={() => { void generation.toggle().then(() => setGenerationNotice(true)); }}><span aria-hidden="true">✨</span></button>}
       <button className="public-controls__disclosure" aria-label={status?.exhibition?.warning ? '設定：展示予算の通知あり' : '設定'} title="設定" aria-expanded={expanded} aria-controls="public-session-panel" onClick={() => { if (expanded) closeSettings(); else setExpanded(true); }}>
         {status?.exhibition?.warning && <span className="public-exhibition-notification" aria-hidden="true">!</span>}
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polygon points="21.95,11.02 21.95,12.98 19.66,14.32 19.06,15.77 19.73,18.34 18.34,19.73 15.77,19.06 14.32,19.66 12.98,21.95 11.02,21.95 9.68,19.66 8.23,19.06 5.66,19.73 4.27,18.34 4.94,15.77 4.34,14.32 2.05,12.98 2.05,11.02 4.34,9.68 4.94,8.23 4.27,5.66 5.66,4.27 8.23,4.94 9.68,4.34 11.02,2.05 12.98,2.05 14.32,4.34 15.77,4.94 18.34,4.27 19.73,5.66 19.06,8.23 19.66,9.68" /><circle cx="12" cy="12" r="3.2" /></svg>

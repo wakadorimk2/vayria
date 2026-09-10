@@ -13,7 +13,7 @@ export async function prepareObject(media: GeneratedObject, signal: AbortSignal)
   const origin = media.trace ? (media.trace.browserOrigin ??= performance.now()) : performance.now();
   const mark = (name: string) => { if (media.trace) media.trace.browser[name] = performance.now() - origin; };
   mark('mediaPrepareStart');
-  if (!/^(?:\/staging)?\/api\/manifestation\/(?:assets\/[a-f0-9]{64}\.(mp4|png)|media\/[\w-]{36}(?:\?(?:buffered=1|replay=[\w-]{36})(?:&buffered=1)?)?)$/.test(media.url)) throw new Error('invalid-local-media');
+  if (!/^\/staging\/api\/visual\/media\/[sp]-[a-f0-9]+\?ticket=[A-Za-z0-9_.%-]+$/.test(media.url) && !/^(?:\/staging)?\/api\/manifestation\/(?:assets\/[a-f0-9]{64}\.(mp4|png)|media\/[\w-]{36}(?:\?(?:buffered=1|replay=[\w-]{36})(?:&buffered=1)?)?)$/.test(media.url)) throw new Error('invalid-local-media');
   if (media.kind === 'image') {
     const img = new Image(); img.src = media.url; await img.decode(); signal.throwIfAborted(); return;
   }

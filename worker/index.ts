@@ -1,3 +1,5 @@
+import { visualRoute, visualTicket, type VisualEnv } from './visual';
+import { permitsVideo, readVisualIntent } from '../src/visual/types';
 import { manifestation } from './manifestation';
 import { splitSpeechAtBoundaries } from '../src/conversation/cardContinuation';
 import { createGenerationMeasurements, type Measurements } from './diagnostics';
@@ -12,7 +14,7 @@ import { readChatRequest, readCardPreviewRequest } from '../server/chatValidatio
 import { normalizeEmotion, VOICE_STYLE_BY_EMOTION } from '../src/character/emotion';
 export { PublicUsage };
 
-interface Env {
+interface Env extends VisualEnv {
   FAL_KEY?: string; MANIFESTATION_ENABLED?: string;
   ASSETS: Fetcher; USAGE: DurableObjectNamespace;
   COOKIE_SECRET: string; IP_SECRET: string; ADMIN_SECRET: string;
@@ -130,6 +132,8 @@ async function handle(request: Request, env: Env): Promise<Response> {
   if (!visitor) throw new LimitError('cookie_required', 0, 403);
   const id = request.headers.get('X-Vayria-Session') ?? '';
   const who = { visitor: visitor.id, id };
+  if (url.pathname.startsWith('/api/visual/')) return visualRoute(request, env, visitor.id, id, (op, args) => ledger(env, op, args));
+  if (url.pathname === '/api/manifestation/generate') throw new LimitError('visual_mode_required', 0, 409);
   if (url.pathname.startsWith('/api/manifestation/')) return manifestation(request, env, visitor.id, id, (op, args) => ledger(env, op, args));
   if (url.pathname === '/api/exhibition/next' && request.method === 'POST') {
     const input = await body(request);
@@ -163,6 +167,8 @@ async function handle(request: Request, env: Env): Promise<Response> {
     return json(await ledger(env, 'start', { visitor: visitor.id, ip, id: crypto.randomUUID() }));
   }
   if (!env.OPENAI_API_KEY || !env.AIVIS_API_KEY || !env.AIVIS_MODEL_UUID) throw new LimitError('configuration_unavailable', 0, 503);
+  const visualPermission = env.MANIFESTATION_ENABLED === 'true' && base === '/staging' ? await ledger<{enabled:boolean;generation:number}>(env, 'visualPermission', who) : { enabled:false, generation:0 };
+  const visualEnabled = visualPermission.enabled && request.headers.get('X-Vayria-Visual-Generation') === String(visualPermission.generation);
   const audio = url.pathname === '/api/transcribe' ? await boundedBody(request, 640044) : null;
   const input = audio ? {} : await body(request);
   if (url.pathname === '/api/chat') readChatRequest(input);
@@ -172,6 +178,13 @@ async function handle(request: Request, env: Env): Promise<Response> {
     ticket = await verify<Ticket>(String(input.ticket ?? ''), env.COOKIE_SECRET);
     if (!ticket || ticket.purpose !== 'tts' || ticket.visitor !== visitor.id || ticket.session !== id) throw new LimitError('invalid_ticket', 0, 403);
   }
+  const attachVisual = async (response: Awaited<ReturnType<typeof generate>>) => {
+    const intent = readVisualIntent('visualIntent' in response ? response.visualIntent : undefined);
+    if (!visualEnabled || !intent || intent.type === 'none') return { ...response, visualDecision: !visualEnabled ? 'disabled' : !intent ? 'invalid' : 'none' };
+    const current = await ledger<{enabled:boolean;generation:number}>(env, 'visualPermission', who);
+    if (!current.enabled || current.generation !== visualPermission.generation) return { ...response, visualIntent: undefined };
+    return visualTicket({ ...response, visualIntent: intent }, env, visitor.id, id, current.generation, permitsVideo(intent, String(input.message ?? '')));
+  };
   const preview = url.pathname === '/api/card-preview';
   const cardReaction = input.mode === 'autonomous' && typeof input.forcedCardId === 'string' &&
     typeof input.programContext === 'object' && input.programContext !== null &&
@@ -249,10 +262,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
                       response: input.mode === 'voice' ? { ...candidate, interactionAction: candidate.voiceAction } : candidate }); });
                   }
                   void queue.catch(() => abort.abort());
-                } }, generation, env.MANIFESTATION_ENABLED === 'true' && base === '/staging'));
+                } }, generation, visualEnabled));
               await queue;
               send({ type: 'state', internalDelta: 'internalDelta' in response ? response.internalDelta : { reasonUpdates: [] }, rejected });
-              send({ type: 'done', response });
+              send({ type: 'done', response: await attachVisual(response) });
               outcome = 'complete';
             } catch (error) {
               if (error instanceof LimitError) outcome = error.code;
@@ -267,11 +280,11 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
     const generation = createGenerationMeasurements();
     let response: Awaited<ReturnType<typeof generate>>;
-    try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation, env.MANIFESTATION_ENABLED === 'true' && base === '/staging')); }
+    try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation, visualEnabled)); }
     finally { generation.finish(); Object.assign(measurements, generation.values); }
     const text = 'text' in response && typeof response.text === 'string' ? response.text : '';
     const ttsTickets = !preview && text ? await Promise.all(splitSpeechAtBoundaries(text).map(async unit => ({ text: unit, ttsTicket: await issue(unit, response.emotion) }))) : [];
-    const result = json({ ...response, ttsTicket: text ? await issue(text, response.emotion) : undefined, ...(ttsTickets.length ? { ttsTickets } : {}) });
+    const result = json({ ...await attachVisual(response), ttsTicket: text ? await issue(text, response.emotion) : undefined, ...(ttsTickets.length ? { ttsTickets } : {}) });
     outcome = 'complete'; return result;
   } catch (error) { if (error instanceof LimitError) outcome = error.code; throw error;
   } finally { if (!streaming) await ledger(env, 'finish', { job, measurements, code: request.signal.aborted ? 'cancelled' : signal.aborted ? 'timeout' : outcome }).catch(() => {}); }

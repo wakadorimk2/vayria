@@ -45,7 +45,7 @@ const serverBuild = await build({ stdin: { contents: 'export { readChatRequest }
     export function modelForProfile() { return 'mock'; }
     export async function processStructuredLlm(request) {
       globalThis.__entryRequests.push(request);
-      return { text: JSON.stringify({ ...(globalThis.__entryManifestation === undefined ? {} : { manifestation: globalThis.__entryManifestation }), text: 'こんにちは。少しお話しする？', emotion: 'neutral', activatedCards: ['chicken'], speechAct: 'answer', expressionLevel: 'low' }), actualModel: 'mock', telemetry: {} };
+      return { text: JSON.stringify({ ...(globalThis.__entryManifestation === undefined ? {} : { visualIntent: globalThis.__entryManifestation }), text: 'こんにちは。少しお話しする？', emotion: 'neutral', activatedCards: ['chicken'], speechAct: 'answer', expressionLevel: 'low' }), actualModel: 'mock', telemetry: {} };
     }` })); } }] });
 await writeFile(`${dir}/server.mjs`, serverBuild.outputFiles[0].text);
 const server = await import(`../${dir}/server.mjs`);
@@ -79,12 +79,12 @@ test('context generation is opt-in and shares the normal conversation provider c
   globalThis.__entryRequests = [];
   try {
     for (const enabled of [false, true]) {
-      globalThis.__entryManifestation = enabled ? 'chicken' : undefined;
+      globalThis.__entryManifestation = enabled ? { type:'prop', action:'add', concept:'chicken', modifiers:[], targetId:'', motion:'', motionEvidence:'', sharing:'general', regenerate:false } : undefined;
       const result = await server.generateInteractiveResponse({ ...llm, manifestationEnabled: enabled }, 'manual', input.message, [], input.brainCardIds, null, input.performanceContext, input.characterIdentity, input.programContext, tracker, null, false, [], true);
-      assert.equal(result.manifestation, enabled ? 'chicken' : undefined);
+      assert.deepEqual(result.visualIntent, enabled ? { type:'prop', action:'add', concept:'chicken', modifiers:[], targetId:'', motion:'', motionEvidence:'', sharing:'general', regenerate:false } : undefined);
     }
     assert.equal(globalThis.__entryRequests.length, 2);
-    assert.doesNotMatch(globalThis.__entryRequests[0].staticPrompt, /Choose manifestation/);
-    assert.match(globalThis.__entryRequests[1].staticPrompt, /voice transcript, active cards, and recent conversation together/);
+    assert.doesNotMatch(globalThis.__entryRequests[0].staticPrompt, /Visual generation permission/);
+    assert.match(globalThis.__entryRequests[1].staticPrompt, /current user input or just-inserted card/);
   } finally { delete globalThis.__entryRequests; delete globalThis.__entryManifestation; }
 });

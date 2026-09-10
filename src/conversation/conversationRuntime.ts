@@ -1,3 +1,4 @@
+import { readVisualIntent, type VisualIntent } from '../visual/types.js';
 import { SLOT_CARDS, type SlotCard } from '../manifestation/types.js';
 import { splitSpeechAtBoundaries, type CardContinuation } from './cardContinuation.js';
 /** Session-local conversation execution. Only the current generation can publish or deliver speech. */
@@ -84,6 +85,8 @@ export interface AutonomousDecision {
 }
 
 interface ChatResponse {
+  visualDecision?: string;
+  visualIntent?: unknown; visualTicket?: string; visualGeneration?: number;
   manifestation?: unknown;
   activatedCards: unknown;
   speechAct: unknown;
@@ -132,6 +135,7 @@ export interface ConversationOptions {
   programContext?: ProgramContext;
   getPerformerStateContext?: () => PerformerStateContext;
   createCardContinuationPlan?: (trigger: PerformerTrigger) => PerformancePlan;
+  onVisualIntent?: (eventId: string, intent: VisualIntent, ticket: string, generation: number) => void;
   onManifestation?: (eventId: string, effect: SlotCard) => void;
   onPerformanceCue?: (
     planId: string,
@@ -311,7 +315,7 @@ function normalizeHistoryTurnLimit(value: number | undefined): number {
 
 export interface ConversationDependencies {
   fetch: typeof fetch;
-  config: { streamingSpeechEnabled: boolean; earlySpeechLeadEnabled: boolean; cloudTtsStreamPlaybackEnabled: boolean };
+  config: { mode?: string; manifestationEnabled?: boolean; streamingSpeechEnabled: boolean; earlySpeechLeadEnabled: boolean; cloudTtsStreamPlaybackEnabled: boolean };
   createEventEmitter: (source: ConversationSource) => { turnId: string; runId?: string | null; emit: (event: ConversationEventName, details?: ConversationEventDetails) => void };
   now: () => number;
   monotonicNow: () => number;
@@ -363,6 +367,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       changeCards: (cards: ChatCardContext) => boolean;
     } | null
   } = { current: null };
+  const onVisualIntentRef = { current: options.onVisualIntent };
   const onManifestationRef = { current: options.onManifestation };
   const onPerformanceCueRef = { current: options.onPerformanceCue };
   const onPerformancePlanRef = { current: options.onPerformancePlan };
@@ -1060,6 +1065,10 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         activatedCards[0] !== cardContext.forcedCardId) {
         throw new Error('AI が交換したカードを主役にしませんでした。');
       }
+      const visualIntent = readVisualIntent(chatPayload.visualIntent);
+      if (runtimeConfig.mode === 'public' && runtimeConfig.manifestationEnabled) console.info('[visual-decision]', JSON.stringify({ id: eventEmitter.turnId, target:visualIntent?.targetId, decision: chatPayload.visualDecision ?? (visualIntent ? 'accepted' : 'missing'), ticket: Boolean(chatPayload.visualTicket) }));
+      if (visualIntent && visualIntent.type !== 'none' && typeof chatPayload.visualTicket === 'string' && Number.isSafeInteger(chatPayload.visualGeneration))
+        onVisualIntentRef.current?.(eventEmitter.turnId, visualIntent, chatPayload.visualTicket, chatPayload.visualGeneration!);
       responseEmotion = normalizeEmotion(chatPayload.emotion);
       if (interactionDecision &&
         interactionDecision.action !== 'take_floor') {
@@ -1346,6 +1355,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     isMuted = options.isMuted ?? false;
     isExhibitionMode = options.isExhibitionMode ?? false;
 
+    onVisualIntentRef.current = options.onVisualIntent;
     onManifestationRef.current = options.onManifestation;
     onPerformanceCueRef.current = options.onPerformanceCue;
     onPerformancePlanRef.current = options.onPerformancePlan;

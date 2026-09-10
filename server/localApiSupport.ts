@@ -395,6 +395,7 @@ export interface CardPreviewRequestPayload {
 }
 
 export interface CardAssistantResponse extends AssistantResponse {
+  visualIntent?: import('../src/visual/types.js').VisualIntent;
   manifestation?: 'none' | 'chicken' | 'gigantic' | 'sparkle' | 'underwater';
   activatedCards: string[];
   speechAct: SpeechAct | null;

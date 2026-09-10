@@ -23,3 +23,5 @@ console.log(`Public assets: VRM ${(vrm.length / 1048576).toFixed(1)} MiB; ${mani
 
 await mkdir(join(root, 'manifestation'), { recursive: true });
 for (const name of ['chicken-1.png', 'chicken-2.png', 'chicken-3.png', 'chicken-source.png']) await copyFile(join('public/manifestation', name), join(root, 'manifestation', name));
+
+for (const name of ['egg', 'feather', 'bat']) await copyFile(join('public/world', name + '-painted.png'), join(root, 'manifestation', name + '.png'));

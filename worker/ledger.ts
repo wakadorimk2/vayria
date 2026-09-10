@@ -1,3 +1,4 @@
+import type { VisualAsset } from '../src/visual/types';
 import type { InputEvent } from '../src/manifestation/types';
 import { distribution, sanitizeMeasurements, safeMetricCode, timingFields, type Measurements } from './diagnostics';
 // All monetary values are integer micro-yen. No conversation content belongs here.
@@ -16,15 +17,18 @@ type ExhibitionDevice = { event: string; epoch: number; revoked: boolean; lastHa
 export type Session = {
   id: string; visitor: string; expires: number; created: number; paid: boolean; ended: boolean;
   day: string; month: string; counts: Record<Kind, number>; audioSeconds: number; ttsChars: number;
+  visualPermission?: { enabled: boolean; generation: number };
   closedAt?: number;
   exhibition?: string; epoch?: number;
 };
 type Job = { session: string; kind: Kind; expires: number };
 type Charge = { amount: number; day: string; month: string; settled: boolean; expires: number; exhibition?: string };
 export type LedgerState = {
+  visual?: { cache: Record<string, VisualAsset>; jobs: Record<string, { session: string; generation: number; key: string; target: string; expires: number; finished: boolean }>; claims: Record<string, string> };
+
   manifestation?: { reservedMicrousd: number; requests: Record<string, number>; events: Record<string, boolean>;
     jobs: Record<string, { visitor: string; session: string; expires: number; active: boolean; target?: string }>;
-    metrics: { code: string; timings: Record<string, number> }[] };
+    metrics: { eventId?: string; code: string; timings: Record<string, number> }[] };
   limits: Limits; stopped: boolean; sessions: Record<string, Session>; counters: Record<string, Counter>;
   jobs: Record<string, Job>; charges: Record<string, Charge>; usedTickets: Record<string, number>;
   exhibitions?: Record<string, Exhibition>;
@@ -66,6 +70,12 @@ export class Ledger {
     }
   }
   cleanup() {
+    if (this.state.visual) {
+      const v = this.state.visual;
+      for (const [key, asset] of Object.entries(v.cache)) if (asset.expiresAt <= this.now) delete v.cache[key];
+      for (const [token, job] of Object.entries(v.jobs)) if (job.expires + 86400000 <= this.now) delete v.jobs[token];
+      for (const [key, token] of Object.entries(v.claims)) if (!v.jobs[token] || v.jobs[token].finished || v.jobs[token].expires <= this.now) delete v.claims[key];
+    }
     const m = this.state.manifestation;
     if (m) {
       for (const [key, job] of Object.entries(m.jobs)) if (job.expires <= this.now) delete m.jobs[key];
@@ -297,6 +307,71 @@ export class Ledger {
     if (!['user', 'autonomous', 'card', 'transcribe', 'tts'].includes(kind)) return;
     this.state.metrics!.push({ at: this.now, kind, durationMs: 0, code: safeMetricCode(code), rejected: true });
     this.state.metrics = this.state.metrics!.slice(-2000);
+  }
+  private visualState() { return this.state.visual ??= { cache: {}, jobs: {}, claims: {} }; }
+  visualPermission(visitor: string, id: string) {
+    return this.session(visitor, id).visualPermission ?? { enabled: false, generation: 0 };
+  }
+  visualMode(visitor: string, id: string, enabled: boolean, generation: number) {
+    const session = this.session(visitor, id);
+    const previous = session.visualPermission ?? { enabled: false, generation: 0 };
+    if (enabled && previous.generation !== generation) throw new LimitError('stale_permission', 0, 409);
+    session.visualPermission = { enabled, generation: previous.generation + 1 };
+    for (const job of Object.values(this.visualState().jobs)) if (job.session === id) job.finished = true;
+    return session.visualPermission;
+  }
+  private visualAllowed(visitor: string, id: string, generation: number) {
+    const p = this.visualPermission(visitor, id);
+    if (this.state.stopped || !p.enabled || p.generation !== generation) throw new LimitError('visual_disabled', 0, 409);
+    return this.session(visitor, id);
+  }
+  visualLookup(visitor: string, id: string, generation: number, key: string) {
+    this.visualAllowed(visitor, id, generation);
+    const asset = this.visualState().cache[key];
+    return asset && asset.expiresAt > this.now && (asset.scope === 'shared' || asset.scope === id) ? asset : null;
+  }
+  visualStart(visitor: string, id: string, generation: number, token: string, key: string, target: string, duration: number) {
+    const session = this.visualAllowed(visitor, id, generation), v = this.visualState();
+    const existing = v.jobs[token];
+    if (existing) throw new LimitError('duplicate_event', 0, 409);
+    for (const j of Object.values(v.jobs)) if (j.session === id && j.target === target) j.finished = true;
+    const active = Object.values(v.jobs).filter(j => !j.finished && j.expires > this.now);
+    if (active.filter(j => j.session === id).length >= 2 || active.length >= 10) throw new LimitError('busy', 0, 429);
+    const claimed = v.jobs[v.claims[key]];
+    if (claimed && !claimed.finished && claimed.expires > this.now) return { owner: false };
+    v.jobs[token] = { session: id, generation, key, target, expires: Math.min(session.expires, this.now + Math.min(duration, 60000)), finished: false };
+    v.claims[key] = token;
+    return { owner: true };
+  }
+  visualReserve(visitor: string, id: string, generation: number, token: string, step: string, cost: number) {
+    const session = this.visualAllowed(visitor, id, generation), job = this.visualState().jobs[token], m = this.manifestationState();
+    if (!job || job.session !== id || job.generation !== generation || job.finished || job.expires <= this.now) throw new LimitError('job_expired', 0, 409);
+    if (!Number.isSafeInteger(cost) || cost <= 0 || cost > 200000) throw new LimitError('invalid_price', 0, 400);
+    const key = `${id}:visual:${token}:${step}`;
+    if (m.events[key]) throw new LimitError('duplicate_event', 0, 409);
+    if ((m.requests[id] ?? 0) >= 20) throw new LimitError('manifestation_limit', session.expires);
+    if (m.reservedMicrousd + cost > 5000000) throw new LimitError('manifestation_budget', 0);
+    const yen = Math.ceil(cost * this.state.limits.usdJpy); this.checkBudget(yen, session.exhibition);
+    const p = periods(this.now); this.add(`bd:${p.day}`, yen, p.dayEnd + 2 * 86400000); this.add(`bm:${p.month}`, yen, p.monthEnd + 7 * 86400000);
+    if (session.exhibition) this.state.exhibitions![session.exhibition].used += yen;
+    m.reservedMicrousd += cost; m.requests[id] = (m.requests[id] ?? 0) + 1; m.events[key] = true; session.paid = true;
+  }
+  visualPublish(visitor: string, id: string, generation: number, token: string, asset: VisualAsset) {
+    this.visualAllowed(visitor, id, generation);
+    const v = this.visualState(), job = v.jobs[token];
+    if (!job || job.session !== id || job.finished || job.expires <= this.now) throw new LimitError('job_expired', 0, 409);
+    v.cache[job.key] = asset;
+  }
+  visualFinish(visitor: string, id: string, token: string, code: string, timings: Record<string, number>) {
+    this.session(visitor, id); const v = this.visualState(), job = v.jobs[token];
+    if (job?.session === id) { job.finished = true; if (v.claims[job.key] === token) delete v.claims[job.key]; }
+    const m = this.manifestationState();
+    m.metrics.push({ eventId: /^[\w-]{1,80}$/.test(token) ? token : undefined, code: /^[\w-]{1,60}$/.test(code) ? code : 'visual_failed', timings: Object.fromEntries(Object.entries(timings ?? {}).filter(([k,n]) => /^[\w.]{1,60}$/.test(k) && Number.isFinite(n) && n >= 0).slice(0, 30)) });
+    m.metrics = m.metrics.slice(-100);
+  }
+  visualCancel(visitor: string, id: string, generation: number, target: string, token?: string) {
+    this.visualAllowed(visitor, id, generation);
+    for (const [jobToken, job] of Object.entries(this.visualState().jobs)) if ((!token || jobToken === token) && job.session === id && job.target === target) job.finished = true;
   }
   private manifestationState() {
     return this.state.manifestation ??= { reservedMicrousd: 0, requests: {}, events: {}, jobs: {}, metrics: [] };

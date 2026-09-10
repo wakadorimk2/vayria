@@ -1,3 +1,6 @@
+import { useVisualGeneration } from './visual/useVisualGeneration';
+import { VisualStage } from './visual/VisualStage';
+import { visualContext } from './visual/session';
 import { environmentStorageKey } from './storageKey';
 import { calculateSettingsLayout, type AvatarScreenBounds } from './public/settingsLayout';
 import {
@@ -427,13 +430,15 @@ export default function App() {
     useState(true);
   const [sessionGeneration, setSessionGeneration] = useState(0);
   const { runtime: worldRuntime, snapshot: worldSnapshot } = useWorldMutation();
+  const visual = useVisualGeneration();
+  const resetVisual = visual.reset;
   const { runtime: manifestationRuntime, snapshot: manifestationSnapshot, bind: bindManifestation, newExperiment: newManifestationExperiment } = useManifestation();
   const worldReactionKeyRef = useRef(new Set<string>());
   const worldReactionPendingRef = useRef(false);
   const worldReactionRunningRef = useRef(false);
   const programContext = useMemo(
-    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(runtimeConfig.manifestationEnabled ? { worldContext: manifestationContext(manifestationSnapshot) } : runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
-    [manifestationSnapshot, programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
+    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(runtimeConfig.manifestationEnabled ? { worldContext: runtimeConfig.mode === 'public' ? visualContext(visual.snapshot) : manifestationContext(manifestationSnapshot) } : runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
+    [visual.snapshot, manifestationSnapshot, programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
   );
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
@@ -890,8 +895,11 @@ export default function App() {
     programContext,
     getPerformerStateContext,
     onPerformanceCue: handlePerformanceCue,
+    onVisualIntent: (eventId, intent, ticket, generation) => {
+      if (runtimeConfig.mode === 'public' && runtimeConfig.manifestationEnabled) visual.runtime.dispatch(eventId, intent, ticket, generation);
+    },
     onManifestation: (eventId, cardId) => {
-      if (!runtimeConfig.manifestationEnabled || runtimeConfig.mode !== 'public') return;
+      if (!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') return;
       manifestationRuntime.dispatch({ eventId, cardId, sessionId: manifestationRuntime.id,
         generation: manifestationRuntime.getSnapshot().generation, clientId: 'public-context' });
     },
@@ -1291,6 +1299,7 @@ export default function App() {
 
   const resetSession = useCallback(() => {
     worldRuntime.reset();
+    resetVisual();
     manifestationRuntime.reset();
     if (runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled) resetGame();
     worldReactionKeyRef.current.clear();
@@ -1345,7 +1354,7 @@ export default function App() {
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
-  }, [manifestationRuntime, resetCards, resetGame, worldRuntime, stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
+  }, [resetVisual, manifestationRuntime, resetCards, resetGame, worldRuntime, stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
 
   useEffect(() => {
     routerResetSessionRef.current = resetSession;
@@ -2033,6 +2042,9 @@ export default function App() {
 
   useEffect(() => {
     if (!runtimeConfig.manifestationEnabled) return;
+    visual.runtime.bind((id, description) => {
+      recordAutonomyEvidence({ id: `visual:${id}`, kind: 'environment_change', at: Date.now(), semanticKey: `visual:${id}`, content: description, wakeConditions: ['new_evidence'], reasonProposals: [] });
+    });
     bindManifestation(event => {
       if (runtimeConfig.mode === 'public') return true;
       const result = insertSlotCard(event.cardId);
@@ -2043,7 +2055,7 @@ export default function App() {
       recordAutonomyEvidence({ id: `manifestation:${id}`, kind: 'environment_change', at: Date.now(), semanticKey: `manifestation:${id}`, content: description, wakeConditions: ['new_evidence', 'interaction_state_changed'], reasonProposals: [{ kind: 'environment_change', content: description, semanticKey: `manifestation:${id}`, salience: .85 }] });
       notifyMeaningfulAutonomyEvent('card_change');
     });
-  }, [bindManifestation, insertSlotCard, handleCardInserted, recordAutonomyEvidence, notifyMeaningfulAutonomyEvent]);
+  }, [visual.runtime, bindManifestation, insertSlotCard, handleCardInserted, recordAutonomyEvidence, notifyMeaningfulAutonomyEvent]);
 
   useEffect(() => {
     if (runtimeConfig.manifestationEnabled && ttsPlaying) manifestationRuntime.markAudioStarted();
@@ -2611,7 +2623,7 @@ export default function App() {
             </p>
           </aside>
         )}
-        {runtimeConfig.manifestationEnabled && <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} />}{(!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') && <div ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
+        {runtimeConfig.manifestationEnabled && runtimeConfig.mode === 'public' && <VisualStage runtime={visual.runtime} snapshot={visual.snapshot} stage={stageRef} />}{runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public' && <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} />}{(!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') && <div ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
           isExchangeLocked={runtimeConfig.worldMutationEnabled && worldSnapshot.source === 'card' && (worldSnapshot.phase === 'pending' || worldSnapshot.phase === 'ready')}
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
           key={sessionGeneration}
@@ -2765,6 +2777,7 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
+          generation={runtimeConfig.manifestationEnabled ? { enabled: visual.snapshot.enabled, busy: visual.busy, message: visual.message, toggle: visual.toggle } : undefined}
           settingsLayout={publicSettingsLayout}
           onSettingsOpenChange={setPublicSettingsOpen}
           cardsOpen={publicCardsOpen}

@@ -1,3 +1,4 @@
+import { visualIntentSchema, readVisualIntent } from '../src/visual/types.js';
 import type { CardContinuation } from '../src/conversation/cardContinuation.js';
 import { randomUUID } from 'node:crypto';
 import { cardPool } from '../src/cards/cardPool.js';
@@ -901,8 +902,8 @@ export async function generateReply(
     ];
   const responseSchema = {
     type: 'object',
-    properties: { ...responseProperties, ...(llm.manifestationEnabled ? { manifestation: { type: 'string', enum: ['none', 'chicken', 'gigantic', 'sparkle', 'underwater'] } } : {}) },
-    required: [...responseRequired, ...(llm.manifestationEnabled ? ['manifestation'] : [])],
+    properties: { ...responseProperties, ...(llm.manifestationEnabled ? { visualIntent: visualIntentSchema } : {}) },
+    required: [...responseRequired, ...(llm.manifestationEnabled ? ['visualIntent'] : [])],
     additionalProperties: false,
   };
   const brainCards = brainCardIds.map((id) => CARD_BY_ID.get(id)!);
@@ -1024,7 +1025,7 @@ export async function generateReply(
         'Each audible unit must be independently speakable and must not contain Markdown.',
       ].join(' ')
       : '',
-    ...(llm.manifestationEnabled ? ['Choose manifestation from the current user message, voice transcript, active cards, and recent conversation together. Default to none. Choose chicken only when a NEW physical chicken appearing would fit the current request or card event. Choose gigantic, sparkle, or underwater only to modify an already visible object. Mentioning an object, past events, quoting, refusing, or negating a request does not summon it. Do not repeat a previous summon merely because its card remains active. This is an asynchronous visual request, not proof that an object exists. Do not say you hold it or that generation has finished. Keep your normal conversational response.'] : []),
+    ...(llm.manifestationEnabled ? ['Visual generation permission is ON. You can request a new visual object or background through visualIntent. Use the current user input or just-inserted card, conversation, and visible world together. Default type none. Mere mentions, negation, past events, or unchanged cards do not request generation. Do not ask the user to provide an object when they are asking you to create it. Choose prop for a new small object, background for environment changes, effect for lightweight changes to a visible object. Use its targetId for replacements or cancellations; use an empty targetId for new props. Use short general English nouns for concept and shape modifiers. Never add personal details inferred from the conversation. Set sharing general only for impersonal generic concepts; use private for personal requests and uncertain if unsure. Effects are grow, float, rotate, pulse, sparkle, bubbles. These do not require new images. Motion is empty unless the current input clearly requests walking, pecking or flapping; then use walk, peck or flap, with the exact supporting input substring as motionEvidence. Existing generated videos are not evidence of a new motion request. Regenerate is true only on an explicit request to remake the appearance. You have requested generation but the asset is not yet visible: do not claim it is complete or held in your hand. Acknowledge the attempted change naturally, then continue the conversation.'] : []),
     greeting ? 'For this greeting, use a short welcome and exactly one easy, low-pressure question. Keep it to two short Japanese sentences. Follow the character identity. Do not ask for personal information or explain controls. The second sentence may be the question.' : 'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
   ].join('\n');
   const dynamicSystemPrompt = [
@@ -1403,9 +1404,9 @@ export async function generateReply(
   const parseWithManifestation = (value: string): CardAssistantResponse => {
     if (!llm.manifestationEnabled) return parseAttempt(value);
     const raw = JSON.parse(value) as Record<string, unknown>;
-    const intent = raw.manifestation; delete raw.manifestation;
+    const intent = readVisualIntent(raw.visualIntent); delete raw.visualIntent;
     const response = parseAttempt(JSON.stringify(raw));
-    return { ...response, manifestation: intent === 'chicken' || intent === 'gigantic' || intent === 'sparkle' || intent === 'underwater' ? intent : 'none' };
+    return { ...response, ...(intent ? { visualIntent: intent } : {}) };
   };
   let retryCause: Exclude<ChatRetryCause, null>;
   try {

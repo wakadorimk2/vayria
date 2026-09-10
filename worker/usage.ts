@@ -1,3 +1,4 @@
+import type { VisualAsset } from '../src/visual/types';
 import type { InputEvent } from '../src/manifestation/types';
 import type { Measurements } from './diagnostics';
 import { DurableObject } from 'cloudflare:workers';
@@ -21,11 +22,19 @@ export class PublicUsage extends DurableObject {
   async alarm() { const next = this.run(l => l.nextAlarm()); await this.ctx.storage.setAlarm(next); }
   async fetch(request: Request) {
     try {
-      const b = await request.json() as { manifestationEvent: InputEvent; token: string; target: string; timings: Record<string, number>; op: string; visitor: string; ip: string; id: string; kind: Kind;
+      const b = await request.json() as { enabled: boolean; generation: number; key: string; duration: number; step: string; cost: number; asset: VisualAsset; manifestationEvent: InputEvent; token: string; target: string; timings: Record<string, number>; op: string; visitor: string; ip: string; id: string; kind: Kind;
         job: string; amount: number; ticket: string; charge: string; patch: Partial<Limits>; stopped?: boolean; code: string; measurements?: Measurements;
         event: string; starts: number; expires: number; budget: number; hash: string; epoch: number; requestId: string };
       const result = this.run(l => {
         switch (b.op) {
+          case 'visualPermission': return l.visualPermission(b.visitor, b.id);
+          case 'visualMode': return l.visualMode(b.visitor, b.id, b.enabled, b.generation);
+          case 'visualLookup': return l.visualLookup(b.visitor, b.id, b.generation, b.key);
+          case 'visualStart': return l.visualStart(b.visitor, b.id, b.generation, b.token, b.key, b.target, b.duration);
+          case 'visualReserve': return l.visualReserve(b.visitor, b.id, b.generation, b.token, b.step, b.cost);
+          case 'visualPublish': return l.visualPublish(b.visitor, b.id, b.generation, b.token, b.asset);
+          case 'visualFinish': return l.visualFinish(b.visitor, b.id, b.token, b.code, b.timings);
+          case 'visualCancel': return l.visualCancel(b.visitor, b.id, b.generation, b.target, b.token);
           case 'manifestationBegin': return l.manifestationBegin(b.visitor, b.id, b.manifestationEvent, b.token);
           case 'manifestationComplete': return l.manifestationComplete(b.visitor, b.id, b.token, b.target);
           case 'manifestationMedia': return l.manifestationMedia(b.visitor, b.token);
