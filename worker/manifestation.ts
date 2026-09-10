@@ -58,6 +58,7 @@ export async function manifestation(request: Request, env: ManifestationEnv, vis
   try {
     const read = async (url: string, init?: RequestInit) => {
       const response = await fetch(url, { ...init, headers: { Authorization: `Key ${env.FAL_KEY}`, 'Content-Type': 'application/json' }, redirect: 'error', signal });
+      trace.server.providerHttpStatus = response.status;
       if (!response.ok) throw new Error('provider_failure');
       return response.json() as Promise<Record<string, unknown>>;
     };
@@ -86,5 +87,6 @@ export async function manifestation(request: Request, env: ManifestationEnv, vis
     await ledger('manifestationComplete', { ...who, token, target });
     outcome = 'complete';
     return Response.json({ url: '/staging/api/manifestation/media/' + token, kind: 'video', composite: 'green-key', mode: 'reused-base-video', timings: {}, trace } satisfies GeneratedObject, { headers: { 'Cache-Control': 'no-store' } });
+  } catch { return Response.json({ code: 'manifestation_failed', trace }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
   } finally { await ledger('manifestationFinish', { token, code: outcome, timings: trace.server }).catch(() => {}); }
 }

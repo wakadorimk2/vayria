@@ -37,7 +37,7 @@ export function useManifestation() {
         const browserOrigin = performance.now();
         const experimentId = runtimeConfig.mode === 'public' ? publicSessionId() : await getExperiment(); signal.throwIfAborted();
         const response = await publicFetch('/api/manifestation/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ experimentId, event }), signal });
-        if (!response.ok) { const value = await response.json() as { error?: string }; throw new Error(value.error ?? 'generation-unavailable'); }
+        if (!response.ok) { const value = await response.json() as { error?: string; code?: string; trace?: GeneratedObject['trace'] }; throw Object.assign(new Error(value.code ?? value.error ?? 'generation-unavailable'), { trace: value.trace }); }
         const result = await response.json() as GeneratedObject;
         if (result.trace) { result.trace.browserOrigin = browserOrigin; result.trace.browser.responseReceived = performance.now() - browserOrigin; }
         return result;

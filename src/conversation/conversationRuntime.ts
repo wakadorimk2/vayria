@@ -1,3 +1,4 @@
+import { SLOT_CARDS, type SlotCard } from '../manifestation/types.js';
 import { splitSpeechAtBoundaries, type CardContinuation } from './cardContinuation.js';
 /** Session-local conversation execution. Only the current generation can publish or deliver speech. */
 import type { ConversationEventName, ConversationEventDetails } from './conversationEventTypes.js';
@@ -83,6 +84,7 @@ export interface AutonomousDecision {
 }
 
 interface ChatResponse {
+  manifestation?: unknown;
   activatedCards: unknown;
   speechAct: unknown;
   expressionLevel: unknown;
@@ -130,6 +132,7 @@ export interface ConversationOptions {
   programContext?: ProgramContext;
   getPerformerStateContext?: () => PerformerStateContext;
   createCardContinuationPlan?: (trigger: PerformerTrigger) => PerformancePlan;
+  onManifestation?: (eventId: string, effect: SlotCard) => void;
   onPerformanceCue?: (
     planId: string,
     cue: { emotion: Emotion; intensity: number },
@@ -360,6 +363,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       changeCards: (cards: ChatCardContext) => boolean;
     } | null
   } = { current: null };
+  const onManifestationRef = { current: options.onManifestation };
   const onPerformanceCueRef = { current: options.onPerformanceCue };
   const onPerformancePlanRef = { current: options.onPerformancePlan };
   const onPerformanceResultRef = { current: options.onPerformanceResult };
@@ -1097,6 +1101,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         });
         return { completed: true, decision: autonomousDecision };
       }
+      if (SLOT_CARDS.includes(chatPayload.manifestation as SlotCard)) onManifestationRef.current?.(eventEmitter.turnId, chatPayload.manifestation as SlotCard);
       if (textOnlyTurn) {
         setReply(responseText);
         if (isExhibitionMode) { clearSubtitleTimer(); setIsSubtitleVisible(true); }
@@ -1341,6 +1346,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     isMuted = options.isMuted ?? false;
     isExhibitionMode = options.isExhibitionMode ?? false;
 
+    onManifestationRef.current = options.onManifestation;
     onPerformanceCueRef.current = options.onPerformanceCue;
     onPerformancePlanRef.current = options.onPerformancePlan;
     onPerformanceResultRef.current = options.onPerformanceResult;

@@ -602,3 +602,18 @@ test('streaming burst waits for server completion after the current spoken unit'
   f.plays[1].pending.resolve(result); await pending;
   assert.equal(f.runtime.getSnapshot().status, 'idle');
 });
+
+
+test('validated context effects use the same manual and voice response path once per turn', async () => {
+  const effects: { id: string; effect: string }[] = [];
+  const f = fixture({ isMuted: true, onManifestation: (id, effect) => effects.push({ id, effect }) });
+  f.setChat(async () => Response.json({ ...response, manifestation: 'chicken' }));
+  assert.equal(await f.send('context-manual'), true);
+  assert.equal(effects.length, 1); assert.equal(effects[0].effect, 'chicken');
+  assert.equal(await f.runtime.sendVoice('近くに一羽呼んでみよう', cards, () => {}, plan('context-voice')), true);
+  assert.equal(effects.length, 2); assert.notEqual(effects[0].id, effects[1].id);
+  f.setChat(async () => Response.json({ ...response, manifestation: 'unknown-object' }));
+  await f.send('unsupported'); assert.equal(effects.length, 2);
+  f.setChat(async () => Response.json({ ...response, manifestation: 'none' }));
+  await f.send('none'); assert.equal(effects.length, 2);
+});

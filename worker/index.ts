@@ -249,7 +249,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
                       response: input.mode === 'voice' ? { ...candidate, interactionAction: candidate.voiceAction } : candidate }); });
                   }
                   void queue.catch(() => abort.abort());
-                } }, generation));
+                } }, generation, env.MANIFESTATION_ENABLED === 'true' && base === '/staging'));
               await queue;
               send({ type: 'state', internalDelta: 'internalDelta' in response ? response.internalDelta : { reasonUpdates: [] }, rejected });
               send({ type: 'done', response });
@@ -267,7 +267,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
     const generation = createGenerationMeasurements();
     let response: Awaited<ReturnType<typeof generate>>;
-    try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation)); }
+    try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation, env.MANIFESTATION_ENABLED === 'true' && base === '/staging')); }
     finally { generation.finish(); Object.assign(measurements, generation.values); }
     const text = 'text' in response && typeof response.text === 'string' ? response.text : '';
     const ttsTickets = !preview && text ? await Promise.all(splitSpeechAtBoundaries(text).map(async unit => ({ text: unit, ttsTicket: await issue(unit, response.emotion) }))) : [];

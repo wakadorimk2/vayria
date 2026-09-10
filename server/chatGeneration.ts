@@ -901,8 +901,8 @@ export async function generateReply(
     ];
   const responseSchema = {
     type: 'object',
-    properties: responseProperties,
-    required: responseRequired,
+    properties: { ...responseProperties, ...(llm.manifestationEnabled ? { manifestation: { type: 'string', enum: ['none', 'chicken', 'gigantic', 'sparkle', 'underwater'] } } : {}) },
+    required: [...responseRequired, ...(llm.manifestationEnabled ? ['manifestation'] : [])],
     additionalProperties: false,
   };
   const brainCards = brainCardIds.map((id) => CARD_BY_ID.get(id)!);
@@ -1024,6 +1024,7 @@ export async function generateReply(
         'Each audible unit must be independently speakable and must not contain Markdown.',
       ].join(' ')
       : '',
+    ...(llm.manifestationEnabled ? ['Choose manifestation from the current user message, voice transcript, active cards, and recent conversation together. Default to none. Choose chicken only when a NEW physical chicken appearing would fit the current request or card event. Choose gigantic, sparkle, or underwater only to modify an already visible object. Mentioning an object, past events, quoting, refusing, or negating a request does not summon it. Do not repeat a previous summon merely because its card remains active. This is an asynchronous visual request, not proof that an object exists. Do not say you hold it or that generation has finished. Keep your normal conversational response.'] : []),
     greeting ? 'For this greeting, use a short welcome and exactly one easy, low-pressure question. Keep it to two short Japanese sentences. Follow the character identity. Do not ask for personal information or explain controls. The second sentence may be the question.' : 'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
   ].join('\n');
   const dynamicSystemPrompt = [
@@ -1399,9 +1400,16 @@ export async function generateReply(
     }
   };
 
+  const parseWithManifestation = (value: string): CardAssistantResponse => {
+    if (!llm.manifestationEnabled) return parseAttempt(value);
+    const raw = JSON.parse(value) as Record<string, unknown>;
+    const intent = raw.manifestation; delete raw.manifestation;
+    const response = parseAttempt(JSON.stringify(raw));
+    return { ...response, manifestation: intent === 'chicken' || intent === 'gigantic' || intent === 'sparkle' || intent === 'underwater' ? intent : 'none' };
+  };
   let retryCause: Exclude<ChatRetryCause, null>;
   try {
-    const response = parseAttempt(await requestReply());
+    const response = parseWithManifestation(await requestReply());
     return { response, providerCallCount };
   } catch (error) {
     const acceptedResponse = committedResponse as CardAssistantResponse | null;
@@ -1427,7 +1435,7 @@ export async function generateReply(
     }
   }
 
-  const response = parseAttempt(
+  const response = parseWithManifestation(
     await requestReply(
       mode === 'voice'
         ? streamingEnabled

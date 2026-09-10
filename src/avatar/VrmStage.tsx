@@ -1122,7 +1122,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             camera,
             width,
             height,
-            (runtimeConfig.manifestationEnabled || usesExhibitionPortraitCamera())
+            ((runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public') || usesExhibitionPortraitCamera())
               ? EXHIBITION_PORTRAIT_CAMERA
               : STAGE_PRESET.camera,
           );
@@ -1253,7 +1253,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               camera,
               container.clientWidth,
               container.clientHeight,
-              (runtimeConfig.manifestationEnabled || usesExhibitionPortraitCamera())
+              ((runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public') || usesExhibitionPortraitCamera())
                 ? EXHIBITION_PORTRAIT_CAMERA
                 : STAGE_PRESET.camera,
             );

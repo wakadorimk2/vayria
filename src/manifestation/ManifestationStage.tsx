@@ -65,7 +65,7 @@ export function ManifestationStage({ runtime, snapshot, stage, onSelection, onRe
   return <div className="manifestation-stage" ref={root}>
     {objects}
     {snapshot.pending > 0 && <div className="manifestation-summon" role="status" aria-label="何かが生まれそう">✧</div>}
-    <div className="manifestation-slot">
+    {runtimeConfig.mode !== 'public' && <><div className="manifestation-slot">
       <button key={snapshot.sequence} className={snapshot.sequence ? 'manifestation-slot__entry manifestation-slot__entry--pulse' : 'manifestation-slot__entry'} aria-expanded={open} aria-controls="manifestation-picker" onClick={() => select(!open)}>＋<span>一枚、どうぞ</span></button>
       {open && <div id="manifestation-picker" className="manifestation-picker" role="group" aria-label="入れるカード" onKeyDown={e => { if (e.key === 'Escape') select(false); }}>
         {SLOT_CARDS.map(card => <button key={card} onClick={async () => { if (!await requestPublicSession()) return; select(false); runtime.dispatch({ eventId: crypto.randomUUID(), sessionId: runtime.id, generation: snapshot.generation, clientId, cardId: card }); }}>{labels[card]}</button>)}
@@ -75,6 +75,6 @@ export function ManifestationStage({ runtime, snapshot, stage, onSelection, onRe
     <details className="manifestation-debug"><summary>開発情報</summary><p>脳内: {brain.join(' / ')}</p><p>世代 {snapshot.generation}・待機 {snapshot.pending}</p><pre>{JSON.stringify(snapshot.telemetry, null, 2)}</pre><button onClick={() => { select(false); onReset(); }}>セッションをリセット</button><button onClick={() => { select(false); onNewExperiment(); }}>新しい実験（総予算は維持）</button><button disabled={!snapshot.pending} onClick={() => runtime.cancelPending()}>生成待ちを取り消す</button><button onClick={() => {
       const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot.telemetry, null, 2)], { type: 'application/json' }));
       const a = document.createElement('a'); a.href = url; a.download = 'manifestation-play-latency.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }}>通常操作の計測を保存</button>{runtimeConfig.mode !== 'public' && <BenchmarkPanel />}</details>
+    }}>通常操作の計測を保存</button><BenchmarkPanel /></details></>}
   </div>;
 }

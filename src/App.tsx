@@ -890,6 +890,11 @@ export default function App() {
     programContext,
     getPerformerStateContext,
     onPerformanceCue: handlePerformanceCue,
+    onManifestation: (eventId, cardId) => {
+      if (!runtimeConfig.manifestationEnabled || runtimeConfig.mode !== 'public') return;
+      manifestationRuntime.dispatch({ eventId, cardId, sessionId: manifestationRuntime.id,
+        generation: manifestationRuntime.getSnapshot().generation, clientId: 'public-context' });
+    },
     onPerformancePlan: handlePerformancePlan,
     onPerformanceResult: handlePerformanceResult,
     onInteractionAction: handleInteractionAction,
@@ -2029,6 +2034,7 @@ export default function App() {
   useEffect(() => {
     if (!runtimeConfig.manifestationEnabled) return;
     bindManifestation(event => {
+      if (runtimeConfig.mode === 'public') return true;
       const result = insertSlotCard(event.cardId);
       if (!result) return false;
       handleCardInserted(result);
@@ -2605,7 +2611,7 @@ export default function App() {
             </p>
           </aside>
         )}
-        {runtimeConfig.manifestationEnabled ? <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} /> : <div ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
+        {runtimeConfig.manifestationEnabled && <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} />}{(!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') && <div ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
           isExchangeLocked={runtimeConfig.worldMutationEnabled && worldSnapshot.source === 'card' && (worldSnapshot.phase === 'pending' || worldSnapshot.phase === 'ready')}
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
           key={sessionGeneration}
@@ -2638,7 +2644,7 @@ export default function App() {
         /></div>}
       </section>
 
-      {runtimeConfig.manifestationEnabled && <nav className="manifestation-actions" aria-label="会話の操作"><button onClick={() => { void handleVoiceToggle(); }} aria-pressed={isVoiceInputEnabled}>マイク</button><button onClick={() => setPublicTextInputOpen(value => !value)} aria-expanded={publicTextInputOpen}>文字で話す</button></nav>}
+      {runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public' && <nav className="manifestation-actions" aria-label="会話の操作"><button onClick={() => { void handleVoiceToggle(); }} aria-pressed={isVoiceInputEnabled}>マイク</button><button onClick={() => setPublicTextInputOpen(value => !value)} aria-expanded={publicTextInputOpen}>文字で話す</button></nav>}
       {runtimeConfig.worldMutationEnabled && <WorldControls snapshot={worldSnapshot} runtime={worldRuntime} onReset={resetSession} isMuted={isMuted} onMute={handleMuteToggle} microphoneOn={isVoiceInputEnabled} onMicrophone={() => { void handleVoiceToggle(); }} onText={() => { void prepare(); setPublicTextInputOpen(value => !value); }} onNewExperiment={() => { resetSession(); void worldRuntime.newExperiment(); }} />}
 
       <section

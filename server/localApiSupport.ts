@@ -231,6 +231,7 @@ export interface LocalApiConfig {
 }
 
 export interface LlmRequestContext {
+  manifestationEnabled?: boolean;
   apiKey: string;
   runtime: LlmRuntimeOptions;
   signal: AbortSignal;
@@ -394,6 +395,7 @@ export interface CardPreviewRequestPayload {
 }
 
 export interface CardAssistantResponse extends AssistantResponse {
+  manifestation?: 'none' | 'chicken' | 'gigantic' | 'sparkle' | 'underwater';
   activatedCards: string[];
   speechAct: SpeechAct | null;
   expressionLevel: ExpressionLevel | null;

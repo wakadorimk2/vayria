@@ -1,6 +1,8 @@
 # Generated chicken objects on staging
 
-The public staging build enables the single card slot. The production build leaves it disabled. The Worker also requires `MANIFESTATION_ENABLED=true`, preview access, and the `/staging` mount. Store `FAL_KEY` and the enable flag as staging Worker secrets. Do not add them to production.
+The public staging build preserves the existing card, text, and voice UI. It adds no slot, buttons, or developer panel. Generated objects alone overlay the scene. The production build leaves it disabled. The Worker also requires `MANIFESTATION_ENABLED=true`, preview access, and the `/staging` mount. Store `FAL_KEY` and the enable flag as staging Worker secrets. Do not add them to production.
+
+The existing conversation model considers the latest text or voice message, cards, and conversation together. Its optional structured manifestation decision is validated on the server. It defaults to none; mentions, negations, and old history do not authorize a summon. Only the final validated response triggers one visual event per turn. No extra LLM call is made. The initial supported object is a chicken; size, sparkle, and water effects modify existing objects.
 
 The route uses fal H3 Max Turbo, 5 seconds, 480p, fast prompt expansion, the queue API, and the bundled green-screen chicken source. The browser keys the streamed video. Background generation and provider comparison are not part of this public route. The existing local experiment remains available.
 
