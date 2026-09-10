@@ -68,7 +68,7 @@ export async function publicFetch(path: string, init: RequestInit = {}): Promise
   ttsQueue = response.then(() => {}, () => {});
   return response;
 }
-async function performFetch(path: string, init: RequestInit = {}, continuationRetries = 0): Promise<Response> {
+async function performFetch(path: string, init: RequestInit = {}): Promise<Response> {
   if (runtimeConfig.mode !== 'public') return fetch(path, init);
   path = publicUrl(path);
   if (!active || !session || session.expires <= Date.now() || document.hidden) {
@@ -85,13 +85,28 @@ async function performFetch(path: string, init: RequestInit = {}, continuationRe
   }
   const signal = AbortSignal.any([cancellation.signal, ...(init.signal ? [init.signal] : [])]);
   let response: Response;
-  try { response = await fetch(path, { ...init, body, headers, credentials: 'same-origin',
-    signal });
-  } catch (error) {
-    if (signal.aborted) throw error;
-    response = Response.json({ code: 'network_error' }, { status: 503 });
+  // Admission rejects busy requests before provider calls or ticket consumption.
+  // Keep the prepared body (including the same TTS ticket) across these retries.
+  for (let attempt = 0; ; attempt++) {
+    try { response = await fetch(path, { ...init, body, headers, credentials: 'same-origin', signal }); }
+    catch (error) {
+      if (signal.aborted) throw error;
+      response = Response.json({ code: 'network_error' }, { status: 503 });
+    }
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (response.status !== 429 || attempt >= 5 || !/\/api\/(chat|card-preview|transcribe|tts)$/.test(path)) break;
+    const reason = await response.clone().json().catch(() => null);
+    if (reason?.code !== 'busy') break;
+    const delay = typeof reason.retryAt === 'number' && Number.isFinite(reason.retryAt)
+      ? Math.max(250, Math.min(5000, reason.retryAt - Date.now())) : 1000;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve(); }, delay);
+      function cancel() { clearTimeout(timer); signal.removeEventListener('abort', cancel); reject(new DOMException('Aborted', 'AbortError')); }
+      signal.addEventListener('abort', cancel, { once: true });
+      if (signal.aborted) cancel();
+    });
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   }
-  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   if (response.ok && /\/api\/(chat|card-preview)$/.test(path)) {
     if (response.headers.get('Content-Type')?.startsWith('application/x-ndjson') && response.body) {
       let pending = '';
@@ -139,18 +154,6 @@ async function performFetch(path: string, init: RequestInit = {}, continuationRe
   if (!response.ok) {
     const reason = await response.clone().json().catch(() => ({}));
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-    // The cancelled request may still be releasing its server-side session lock.
-    if (reason.code === 'busy' && continuationRetries < 2 && path.endsWith('/api/chat') &&
-      typeof init.body === 'string' && JSON.parse(init.body).cardContinuation) {
-      await new Promise<void>((resolve, reject) => {
-        const delay = Number.isFinite(reason.retryAt) ? Math.max(0, Math.min(1000, reason.retryAt - Date.now())) : 1000;
-        const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve(); }, delay);
-        function cancel() { clearTimeout(timer); signal.removeEventListener('abort', cancel); reject(new DOMException('Aborted', 'AbortError')); }
-        signal.addEventListener('abort', cancel, { once: true });
-        if (signal.aborted) cancel();
-      });
-      return performFetch(path, init, continuationRetries + 1);
-    }
     window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: { ...reason, source: path.endsWith('/api/transcribe') ? '/api/transcribe' : path } }));
     const headers = new Headers(response.headers); headers.delete('content-length'); headers.delete('content-encoding');
     return Response.json({ ...reason, error: publicErrorMessage(reason) }, { status: response.status, headers });

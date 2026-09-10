@@ -160,10 +160,10 @@ export function useCardGamePrototype(unlimitedInterference = false, worldEnabled
   }, [worldEnabled, updateZones]);
 
   const resetCards = useCallback(() => {
-    setZones(createInitialState());
+    updateZones(() => ({ ...createInitialState(), swapRevision: ++swapSequenceRef.current }));
     setSelectedBrainCardId(null);
     setSelectedHandCardId(null);
-  }, []);
+  }, [updateZones]);
 
   const beginReply = useCallback(() => {
     updateZones((current) => ({ ...current, activatedCardIds: [] }));

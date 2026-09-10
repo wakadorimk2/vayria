@@ -768,8 +768,8 @@ export function readChatRequest(payload: unknown): ChatRequestPayload {
 
   const record = payload as Record<string, unknown>;
   const allowedKeys = new Set([
-    'cardContinuation',
     'greeting',
+    'cardContinuation',
     'mode',
     'message',
     'characterIdentity',

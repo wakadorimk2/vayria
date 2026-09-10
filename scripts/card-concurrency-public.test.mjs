@@ -45,7 +45,7 @@ test('continuation retries only transient busy admission and remains bounded', a
     calls = 0;
     globalThis.fetch = async () => { calls++; return Response.json({ code: 'busy', retryAt: Date.now() }, { status: 429 }); };
     assert.equal((await publicFetch('/api/chat', init)).status, 429);
-    assert.equal(calls, 3); assert.equal(notices.length, 1);
+    assert.equal(calls, 6); assert.equal(notices.length, 1);
     calls = 0;
     const controller = new AbortController();
     globalThis.fetch = async () => { calls++; queueMicrotask(() => controller.abort()); return Response.json({ code: 'busy', retryAt: Date.now() + 1000 }, { status: 429 }); };
@@ -88,4 +88,65 @@ test('public worker signs the exact sentence text for JSON and streaming replies
       assert.equal(JSON.parse(Buffer.from(encoded, 'base64url')).text, unit.text);
     }
   }
+});
+
+for (const kind of ['chat', 'card-preview', 'transcribe', 'tts']) test(`${kind} retains its input while waiting for busy admission`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };
+  globalThis.window = new EventTarget(); globalThis.document = { hidden: false };
+  activatePublic({ id: 'overlap', expires: Date.now() + 60000 });
+  const notices = [], sent = [];
+  window.addEventListener('vayria-public-error', e => notices.push(e.detail));
+  const settle = async () => { for (let i = 0; i < 50; i++) await Promise.resolve(); };
+  try {
+    globalThis.fetch = async () => Response.json({ text: '続き。', ttsTickets: [{ text: '続き。', ttsTicket: 'same-ticket' }] });
+    if (kind === 'tts') await publicFetch('/api/chat');
+    const body = kind === 'transcribe' ? new Uint8Array([1, 2, 3]).buffer : JSON.stringify({ text: '続き。', message: '質問' });
+    globalThis.fetch = async (_path, init) => {
+      sent.push(init.body);
+      return sent.length <= 3 ? Response.json({ code: 'busy', retryAt: Date.now() + 5000 }, { status: 429 }) : Response.json({ text: '続き。' });
+    };
+    const pending = publicFetch('/api/' + kind, { method: 'POST', body });
+    await settle();
+    for (let i = 0; i < 3; i++) {
+      t.mock.timers.tick(4999); await settle(); assert.equal(sent.length, i + 1);
+      t.mock.timers.tick(1); await settle();
+    }
+    assert.equal((await pending).status, 200);
+    assert.equal(sent.length, 4); assert.equal(notices.length, 0);
+    assert(sent.every(value => value === sent[0]));
+    if (kind === 'tts') assert.equal(JSON.parse(sent[0]).ticket, 'same-ticket');
+    else assert.equal(sent[0], body);
+  } finally { Object.assign(globalThis, previous); }
+});
+
+for (const cancel of ['abort', 'session']) test(`busy waiting stops immediately on ${cancel}`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };
+  globalThis.window = new EventTarget(); globalThis.document = { hidden: false };
+  activatePublic({ id: 'old', expires: Date.now() + 60000 });
+  let calls = 0;
+  const controller = new AbortController();
+  const settle = async () => { for (let i = 0; i < 50; i++) await Promise.resolve(); };
+  try {
+    globalThis.fetch = async () => { calls++; return Response.json({ code: 'busy', retryAt: Date.now() + 5000 }, { status: 429 }); };
+    const rejected = assert.rejects(publicFetch('/api/transcribe', { body: new ArrayBuffer(4), signal: controller.signal }), { name: 'AbortError' });
+    await settle();
+    if (cancel === 'abort') controller.abort(); else activatePublic({ id: 'new', expires: Date.now() + 60000 });
+    await rejected;
+    t.mock.timers.tick(30000); await settle(); assert.equal(calls, 1);
+  } finally { Object.assign(globalThis, previous); }
+});
+
+test('quota rejection and network failures are never retried as busy', async () => {
+  const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };
+  globalThis.window = new EventTarget(); globalThis.document = { hidden: false };
+  activatePublic({ id: 'limited', expires: Date.now() + 60000 });
+  try {
+    for (const code of ['user_limit', 'daily_budget', 'provider_unavailable', 'network_error']) {
+      let calls = 0;
+      globalThis.fetch = async () => { calls++; return Response.json({ code }, { status: 429 }); };
+      assert.equal((await publicFetch('/api/chat')).status, 429); assert.equal(calls, 1);
+    }
+  } finally { Object.assign(globalThis, previous); }
 });
