@@ -640,7 +640,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         pendingCardChange = { ...cards, brainCardIds: [...cards.brainCardIds] };
         if (!unitPlaying) {
           unitCancelledBeforeSpeech = true;
-          abortFetch();
+          // Drain admitted work before replacing it; HTTP abort does not prove server release.
           if (playbackPending) playback.stop();
         }
         return true;
@@ -714,46 +714,44 @@ export function createConversationRuntime(playback: PerformancePlayback, options
             unitIndex: index,
           });
         };
-        const audioPromise = dependencies.fetch('/api/tts', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Performer-Turn-Id': eventEmitter.turnId,
-            ...(eventEmitter.runId
-              ? { 'X-Performer-Run-Id': eventEmitter.runId }
-              : {}),
-          },
-          body: JSON.stringify({
-            text: text.trim(),
-            emotion: normalizeEmotion(candidate.emotion),
-            ttsProfile: plan.ttsProfile,
-            unitIndex: index,
-          }),
-          signal: chatController.signal,
-        }).then(async (ttsResponse) => {
-          if (!ttsResponse.ok) {
-            throw new Error(await readError(ttsResponse, '返答音声を生成できませんでした。'));
-          }
-          const audioSource = await readAudioPlaybackSource(ttsResponse, {
-            streamMpegPlayback: runtimeConfig.cloudTtsStreamPlaybackEnabled,
-          });
-          if (audioSource.kind === 'buffer') {
-            emitUnitAudioReady(dependencies.monotonicNow());
-          }
-          if (audioSource.kind === 'buffer' && !streamingFirstAudioEmitted) {
-            streamingFirstAudioEmitted = true;
-            eventEmitter.emit('tts_first_audio', {
-              durationMs: dependencies.monotonicNow() - (streamingTtsStartedAt ?? unitTtsStartedAt),
-              phase: 'tts',
-            });
-          }
-          return audioSource;
-        });
-        void audioPromise.catch(() => { });
         streamingPlaybackQueue = streamingPlaybackQueue.then(async () => {
-
           if (generation !== generationRef.current) return null;
           cardChanged();
+          const audioPromise = dependencies.fetch('/api/tts', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Performer-Turn-Id': eventEmitter.turnId,
+              ...(eventEmitter.runId
+                ? { 'X-Performer-Run-Id': eventEmitter.runId }
+                : {}),
+            },
+            body: JSON.stringify({
+              text: text.trim(),
+              emotion: normalizeEmotion(candidate.emotion),
+              ttsProfile: plan.ttsProfile,
+              unitIndex: index,
+            }),
+            signal: chatController.signal,
+          }).then(async (ttsResponse) => {
+            if (!ttsResponse.ok) {
+              throw new Error(await readError(ttsResponse, '返答音声を生成できませんでした。'));
+            }
+            const audioSource = await readAudioPlaybackSource(ttsResponse, {
+              streamMpegPlayback: runtimeConfig.cloudTtsStreamPlaybackEnabled,
+            });
+            if (audioSource.kind === 'buffer') {
+              emitUnitAudioReady(dependencies.monotonicNow());
+            }
+            if (audioSource.kind === 'buffer' && !streamingFirstAudioEmitted) {
+              streamingFirstAudioEmitted = true;
+              eventEmitter.emit('tts_first_audio', {
+                durationMs: dependencies.monotonicNow() - (streamingTtsStartedAt ?? unitTtsStartedAt),
+                phase: 'tts',
+              });
+            }
+            return audioSource;
+          });
           const audioSource = await audioPromise;
           if (generation !== generationRef.current) return null;
           cardChanged();
@@ -853,7 +851,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
           playbackPending = false;
           if (result) recordDelivered(index, text);
           if (generation !== generationRef.current) return null;
-          if (pendingCardChange) { abortFetch(); cardChanged(); }
+          if (pendingCardChange) cardChanged();
           if (!streamingFirstResult && result)
             streamingFirstResult = result;
           if (result)
@@ -924,13 +922,14 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       if (!chatResponse.ok) {
         throw new Error(await readError(chatResponse, 'AI の返答を取得できませんでした。'));
       }
-      if (!unitPlaying) cardChanged();
       const contentType = chatResponse.headers.get('content-type') ?? '';
       if (contentType.startsWith('application/x-ndjson')) {
         streamingModeUsed = true;
         await readStreamingChatEvents<ChatResponse>(chatResponse, (event) => {
-          if (event.type === 'error')
+          if (event.type === 'error') {
+            if (pendingCardChange) return;
             throw new Error(event.error);
+          }
           if (event.type === 'provider_timing') {
             const eventName = event.milestone === 'start'
               ? 'llm_provider_start'
@@ -957,6 +956,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       const chatPayload = streamingModeUsed
         ? (streamedChatPayload as unknown as ChatResponse)
         : ((await chatResponse.json()) as ChatResponse);
+      if (!unitPlaying) cardChanged();
       eventEmitter.emit('llm_done', {
         durationMs: dependencies.monotonicNow() - llmStartedAt,
         phase: 'llm',
@@ -1244,7 +1244,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         return { completed: false, decision: null };
       }
       if (pendingCardChange) {
-        if (unitPlaying) { try { await streamingPlaybackQueue; } catch { /* The replacement owns the remaining units. */ } }
+        try { await streamingPlaybackQueue; } catch { /* Drain the active audio request; queued old units do not start. */ }
         if (generation !== generationRef.current) return { completed: false, decision: null };
         abortFetch();
         emitTerminalEvent('turn_aborted', { reason: 'card_change' });

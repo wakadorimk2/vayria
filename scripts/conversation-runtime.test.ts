@@ -102,7 +102,7 @@ test('card change before generation completes keeps the question once and coales
   f.runtime.changeCardsDuringTurn(changedCards);
   const latest = { brainCardIds: ['card-c'], forcedCardId: 'card-c', swapRevision: 2 };
   f.runtime.changeCardsDuringTurn(latest);
-  assert.equal(f.requests[0].signal?.aborted, true);
+  assert.equal(f.requests[0].signal?.aborted, false);
   f.setChat(async () => Response.json({ ...response, activatedCards: ['card-c'] }));
   oldChat.resolve(Response.json(response)); await flush();
   assert.equal(f.plays.length, 1);
@@ -520,3 +520,77 @@ for (const streaming of [false, true]) {
     assert.deepEqual(f.requests[1].body.history, [{ role: 'assistant', content: response.text }]);
   });
 }
+
+
+test('ten card exchanges during slow generation drain one request and use only the latest cards', async () => {
+  const f = fixture(); const old = deferred<Response>();
+  let occupied = false; let calls = 0; let maximum = 0; let active = 0;
+  f.setChat(async () => {
+    assert.equal(occupied, false, 'a new chat must not race admitted generation');
+    occupied = true; maximum = Math.max(maximum, ++active);
+    const reply = ++calls === 1 ? await old.promise : Response.json({ ...response, activatedCards: ['card-10'] });
+    occupied = false; active--; return reply;
+  });
+  const accepted: (number | undefined)[] = [];
+  const pending = f.runtime.sendManual('元の質問', cards, (_ids, revision) => accepted.push(revision), plan('burst'));
+  await flush();
+  for (let revision = 1; revision <= 10; revision++) {
+    assert.equal(f.runtime.changeCardsDuringTurn({ brainCardIds: ['card-' + revision], forcedCardId: 'card-' + revision, swapRevision: revision }), true);
+    await flush();
+    assert.equal(calls, 1);
+    assert.equal(f.requests[0].signal?.aborted, false);
+  }
+  old.resolve(Response.json(response)); await flush();
+  assert.equal(calls, 2); assert.equal(maximum, 1);
+  assert.equal(f.requests.filter(r => r.url.endsWith('/chat'))[1].body.forcedCardId, 'card-10');
+  f.plays[0].pending.resolve(result); await pending;
+  assert.deepEqual(accepted, [10]); assert.equal(f.runtime.getSnapshot().status, 'idle');
+});
+
+test('ten exchanges while audio is pending drain it and never request queued stale sentences', async () => {
+  const f = fixture(); const audio = deferred<Response>(); let ttsCalls = 0;
+  f.setChat(async () => Response.json({ ...response, text: '旧文一。旧文二。旧文三。' }));
+  f.setTts(() => { ttsCalls++; return audio.promise; });
+  const pending = f.send('audio-burst'); await flush();
+  assert.equal(ttsCalls, 1);
+  for (let revision = 1; revision <= 10; revision++) {
+    f.runtime.changeCardsDuringTurn({ brainCardIds: ['card-' + revision], forcedCardId: 'card-' + revision, swapRevision: revision });
+    await flush();
+    assert.equal(f.requests.filter(r => r.url.endsWith('/chat')).length, 1);
+  }
+  f.setChat(async () => Response.json({ ...response, activatedCards: ['card-10'] }));
+  f.setTts(async () => { ttsCalls++; return new Response(new Uint8Array([1]), { headers: { 'Content-Type': 'audio/wav' } }); });
+  audio.resolve(new Response(new Uint8Array([1]), { headers: { 'Content-Type': 'audio/wav' } })); await flush();
+  assert.equal(f.plays.length, 1); assert.equal(ttsCalls, 2);
+  assert.equal(f.requests.filter(r => r.url.endsWith('/chat'))[1].body.forcedCardId, 'card-10');
+  f.plays[0].pending.resolve(result); await pending;
+  assert.equal(f.runtime.getSnapshot().status, 'idle');
+});
+
+
+test('streaming burst waits for server completion after the current spoken unit', async () => {
+  const f = fixture(); let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const encode = (value: object) => new TextEncoder().encode(JSON.stringify(value) + '\n');
+  f.setChat(async () => new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }), { headers: { 'Content-Type': 'application/x-ndjson' } }));
+  const pending = f.send('stream-burst'); await flush();
+  stream.enqueue(encode({ type: 'speech_unit', index: 0, text: '前半。', response })); await flush();
+  f.plays[0].callbacks?.onSpeechStart?.(1);
+  for (let revision = 1; revision <= 10; revision++) {
+    f.runtime.changeCardsDuringTurn({ brainCardIds: ['card-' + revision], forcedCardId: 'card-' + revision, swapRevision: revision });
+    await flush();
+  }
+  f.plays[0].callbacks?.onAudioComplete?.(2); f.plays[0].pending.resolve(result); await flush();
+  assert.equal(f.requests[0].signal?.aborted, false);
+  stream.enqueue(encode({ type: 'speech_unit', index: 1, text: '古い続き。', response }));
+  stream.enqueue(encode({ type: 'error', error: 'old generation rejected' }));
+  stream.enqueue(encode({ type: 'done', response })); await flush();
+  assert.equal(f.requests.filter(r => r.url.endsWith('/chat')).length, 1);
+  assert.equal(f.requests.filter(r => r.url.endsWith('/tts')).length, 1);
+  f.setChat(async () => Response.json({ ...response, activatedCards: ['card-10'] }));
+  stream.close(); await flush();
+  const latest = f.requests.filter(r => r.url.endsWith('/chat'))[1];
+  assert.equal(latest.body.forcedCardId, 'card-10');
+  assert.deepEqual(latest.body.cardContinuation, { deliveredText: '前半。', acknowledgementDelivered: false });
+  f.plays[1].pending.resolve(result); await pending;
+  assert.equal(f.runtime.getSnapshot().status, 'idle');
+});
