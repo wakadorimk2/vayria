@@ -52,5 +52,11 @@
   },
   "observability": {
     "enabled": false
-  }
+  },
+  "r2_buckets": [
+    {
+      "binding": "VISUAL_ASSETS",
+      "bucket_name": "vayria-staging-visual-assets"
+    }
+  ]
 }
