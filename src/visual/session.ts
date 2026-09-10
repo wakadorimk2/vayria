@@ -2,7 +2,7 @@ import { fallbackLayout, type WorldLayout } from '../world/worldLayout';
 import { VISUAL_EFFECTS, type VisualIntent, type VisualAsset, type VisualEffect } from './types';
 export interface VisualObject { id: string; eventId?: string; asset: VisualAsset; at: number; visible: boolean; effects: VisualEffect[] }
 export interface VisualJob { id: string; target: string; intent: VisualIntent; ticket: string; at: number; controller?: AbortController }
-export interface VisualSnapshot { enabled: boolean; generation: number; now: number; objects: VisualObject[]; background: VisualObject | null; pending: VisualJob[]; history: string[] }
+export interface VisualSnapshot { enabled: boolean; generation: number; now: number; objects: VisualObject[]; background: VisualObject | null; pending: VisualJob[]; history: string[]; outcomes:string[] }
 export interface VisualDependencies {
   now(): number;
   generate(job: VisualJob, signal: AbortSignal, asset: (value: VisualAsset) => Promise<void>): Promise<void>;
@@ -13,7 +13,7 @@ export interface VisualDependencies {
   diagnostic?(event: string, id: string, milliseconds: number): void;
 }
 export class VisualSession {
-  private snapshot: VisualSnapshot = {enabled:false,generation:0,now:0,objects:[],background:null,pending:[],history:[]};
+  private snapshot: VisualSnapshot = {enabled:false,generation:0,now:0,objects:[],background:null,pending:[],history:[],outcomes:[]};
   private listeners=new Set<()=>void>(); private accepted=new Set<string>(); private notices=new Set<string>(); private active=0; private inputTimes=new Map<string,number>();
   private layout:WorldLayout=fallbackLayout();
   setLayout=(layout:WorldLayout)=>{this.layout=layout;};
@@ -25,9 +25,9 @@ export class VisualSession {
   private publish(patch:Partial<VisualSnapshot>={}){this.snapshot={...this.snapshot,...patch,now:this.deps.now()};for(const listener of this.listeners)listener();}
   permission(enabled:boolean,generation:number){
     for(const job of this.snapshot.pending)job.controller?.abort();
-    this.publish({enabled,generation,pending:[]});
+    this.publish({enabled,generation,pending:[],outcomes:!enabled&&this.snapshot.pending.length?[...this.snapshot.outcomes,'保留中の生成を取り消した。表示済みの対象は維持した。'].slice(-8):this.snapshot.outcomes});
   }
-  reset(){this.permission(false,this.snapshot.generation);this.accepted.clear();this.notices.clear();for(const o of [...this.snapshot.objects,...(this.snapshot.background?[this.snapshot.background]:[])])this.deps.release?.(o.asset);this.publish({objects:[],background:null,history:[]});}
+  reset(){this.permission(false,this.snapshot.generation);this.accepted.clear();this.notices.clear();for(const o of [...this.snapshot.objects,...(this.snapshot.background?[this.snapshot.background]:[])])this.deps.release?.(o.asset);this.publish({objects:[],background:null,history:[],outcomes:[]});}
   dispatch(id:string,intent:VisualIntent,ticket:string,generation:number){
     if(!this.snapshot.enabled||generation!==this.snapshot.generation||this.accepted.has(id)||intent.type==='none')return false;
     this.accepted.add(id);this.inputTimes.set(intent.targetId||id,this.deps.now());this.deps.diagnostic?.('intent_received',id,0);
@@ -35,7 +35,7 @@ export class VisualSession {
     const superseded=this.snapshot.pending.filter(j=>j.target===target);superseded.forEach(j=>j.controller?.abort());
     this.publish({pending:this.snapshot.pending.filter(j=>j.target!==target)});
     for(const old of superseded)void this.deps.cancel?.(old.ticket).catch(()=>{});
-    if(intent.action==='cancel'){const controller=new AbortController();void this.deps.generate({id,target,intent,ticket,at:this.deps.now(),controller},controller.signal,async()=>{}).catch(()=>{});return true;}
+    if(intent.action==='cancel'){const controller=new AbortController();void this.deps.generate({id,target,intent,ticket,at:this.deps.now(),controller},controller.signal,async()=>{}).then(()=>{if(this.snapshot.generation===generation)this.publish({outcomes:[...this.snapshot.outcomes,'対象の保留要求を取り消した。表示済みの対象は消していない。'].slice(-8)});}).catch(()=>{});return true;}
     if(intent.type==='effect'){
       const effects=[intent.concept,...intent.modifiers].filter(e=>VISUAL_EFFECTS.includes(e as VisualEffect)) as VisualEffect[];
       const controller=new AbortController();
@@ -64,7 +64,7 @@ export class VisualSession {
         if(job.intent.type==='background')this.publish({background:object});
         else {const objects=[...this.snapshot.objects.filter(o=>o.id!==job.target),object].slice(-3);for(const removed of this.snapshot.objects)if(!objects.includes(removed))this.deps.release?.(removed.asset);this.publish({objects});}
         this.deps.diagnostic?.('asset_prepared',job.id,this.deps.now()-job.at);
-      }).catch(error=>{if(this.current(job,generation))this.deps.diagnostic?.(error instanceof Error&&/^[\w-]+$/.test(error.message)?error.message:'failed',job.id,this.deps.now()-job.at);})
+      }).catch(error=>{if(this.current(job,generation)){this.publish({outcomes:[...this.snapshot.outcomes,'生成の更新に失敗した。現在の表示は維持した。'].slice(-8)});this.deps.diagnostic?.(error instanceof Error&&/^[\w-]+$/.test(error.message)?error.message:'failed',job.id,this.deps.now()-job.at);}})
         .finally(()=>{this.active--;this.publish({pending:this.snapshot.pending.filter(j=>j!==job)});this.pump();});
     }
   }
@@ -80,7 +80,7 @@ export class VisualSession {
   }
   tick(){
     const now=this.deps.now();const pending=this.snapshot.pending.filter(j=>{
-      if(now-j.at<(j.intent.type==='background'?60000:30000))return true;j.controller?.abort();void this.deps.cancel?.(j.ticket).catch(()=>{});this.deps.diagnostic?.('timeout',j.id,now-j.at);return false;
+      if(now-j.at<(j.intent.type==='background'?60000:30000))return true;j.controller?.abort();void this.deps.cancel?.(j.ticket).catch(()=>{});this.deps.diagnostic?.('timeout',j.id,now-j.at);this.snapshot={...this.snapshot,outcomes:[...this.snapshot.outcomes,'生成の待機上限に達した。現在の表示は維持した。'].slice(-8)};return false;
     });
     for(const o of this.snapshot.objects)if(now-o.at>=45000)this.deps.release?.(o.asset);
     this.publish({pending,objects:this.snapshot.objects.filter(o=>now-o.at<45000)});this.pump();
@@ -88,5 +88,5 @@ export class VisualSession {
 }
 export function visualContext(s:VisualSnapshot){
   return ['現在表示済みの世界:',...(s.background?.visible?[`background: ${s.background.asset.concept}`]:[]),...s.objects.filter(o=>o.visible).map(o=>`${o.id}: ${o.asset.concept}; effects=${o.effects.join(',')}`),
-    `生成許可: ${s.enabled?'ON':'OFF'}`,'未完成の予告は完成物ではない。手に持ったとは断定しない。',s.pending.length?'未完成の生成要求がある。表示済みの対象に含めない。':'生成待ちはない。','過去の出来事（現在の表示とは別）:',...s.history].join('\n');
+    `生成許可: ${s.enabled?'ON':'OFF'}`,'未完成の予告は完成物ではない。手に持ったとは断定しない。',s.pending.length?'未完成の生成要求がある。表示済みの対象に含めない。':'生成待ちはない。','生成処理の結果（新しい対象の出現とは別）:',...s.outcomes,'過去の出来事（現在の表示とは別）:',...s.history].join('\n');
 }
