@@ -356,3 +356,27 @@ test('iPhone discards a late microphone acquisition after a new playback or manu
     f.adapter.dispose(); await settle();
   }
 });
+
+for (const stage of ['headers', 'body']) test(`stalled transcription ${stage} times out, ignores late text and accepts new speech`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const f = fixture(); await f.adapter.start(); f.utterance();
+  let finishBody;
+  if (stage === 'body') {
+    f.requests[0].resolve({ ok: true, json: () => new Promise(done => { finishBody = done; }) });
+    await settle();
+  }
+  t.mock.timers.tick(45000); await settle();
+  assert(f.requests[0].init.signal.aborted);
+  assert.equal(f.events.at(-1).type, 'recognition_failed');
+  assert.equal(f.events.at(-1).recoverable, true);
+  t.mock.timers.tick(1000); await settle();
+  assert.equal(f.events.at(-1).type, 'listening_started');
+  f.utterance(); assert.equal(f.requests.length, 2);
+  if (stage === 'body') finishBody({ text: '古い発言' });
+  else f.requests[0].resolve(Response.json({ text: '古い発言' }));
+  await settle();
+  assert(!f.events.some(e => e.type === 'utterance_finalized'));
+  f.requests[1].resolve(Response.json({ text: '新しい発言' })); await settle();
+  assert.equal(f.events.at(-1).text, '新しい発言');
+  f.adapter.dispose(); await settle();
+});
