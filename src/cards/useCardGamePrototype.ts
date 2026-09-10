@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { cardPool } from './cardPool';
 import { M1_INITIAL_BRAIN_CARD_IDS } from './cardReactions';
 import type { WildcardCardData } from './cardTypes';
+import { acceptCardReply } from './cardReplyState';
 
 const MAX_INTERFERENCE_COUNT = 1;
 
@@ -16,6 +17,7 @@ const INITIAL_HAND_IDS = [
 export type CardZone = 'brain' | 'hand';
 
 export interface CardZoneState {
+  swapRevision: number;
   brain: WildcardCardData[];
   hand: WildcardCardData[];
   remainingInterferenceCount: number;
@@ -41,6 +43,7 @@ function selectCards(ids: readonly string[]): WildcardCardData[] {
 
 function createInitialState(): CardZoneState {
   return {
+    swapRevision: 0,
     brain: selectCards(M1_INITIAL_BRAIN_CARD_IDS),
     hand: selectCards(INITIAL_HAND_IDS),
     remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
@@ -51,6 +54,16 @@ function createInitialState(): CardZoneState {
 
 export function useCardGamePrototype(unlimitedInterference = false) {
   const [zones, setZones] = useState<CardZoneState>(createInitialState);
+  const zonesRef = useRef(zones);
+  const updateZones = useCallback((update: (current: CardZoneState) => CardZoneState) => {
+    zonesRef.current = update(zonesRef.current);
+    setZones(zonesRef.current);
+  }, []);
+  const readCardContext = useCallback(() => ({
+    brainCardIds: zonesRef.current.brain.map(card => card.id),
+    forcedCardId: zonesRef.current.forcedCardId,
+    swapRevision: zonesRef.current.swapRevision,
+  }), []);
   const swapSequenceRef = useRef(0);
   const [selectedBrainCardId, setSelectedBrainCardId] = useState<
     string | null
@@ -71,6 +84,7 @@ export function useCardGamePrototype(unlimitedInterference = false) {
 
   const swapCards = useCallback(
     (brainCardId: string, handCardId: string): CardSwapResult | null => {
+      const zones = zonesRef.current;
       if (zones.remainingInterferenceCount === 0) return null;
 
       const brainIndex = zones.brain.findIndex(
@@ -87,10 +101,11 @@ export function useCardGamePrototype(unlimitedInterference = false) {
 
       const animationSequence = swapSequenceRef.current + 1;
       swapSequenceRef.current = animationSequence;
-      setZones((current) => {
+      updateZones((current) => {
         if (current.remainingInterferenceCount === 0) return current;
 
         return {
+          swapRevision: animationSequence,
           brain,
           hand,
           remainingInterferenceCount: unlimitedInterference ? MAX_INTERFERENCE_COUNT : 0,
@@ -110,11 +125,11 @@ export function useCardGamePrototype(unlimitedInterference = false) {
         insertedCardId: insertedCard.id,
       };
     },
-    [zones, unlimitedInterference],
+    [updateZones, unlimitedInterference],
   );
 
   const resetTurn = useCallback(() => {
-    setZones((current) => ({
+    updateZones((current) => ({
       ...current,
       remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
       activatedCardIds: [],
@@ -122,20 +137,20 @@ export function useCardGamePrototype(unlimitedInterference = false) {
     }));
     setSelectedBrainCardId(null);
     setSelectedHandCardId(null);
-  }, []);
+  }, [updateZones]);
 
   const resetCards = useCallback(() => {
-    setZones(createInitialState());
+    updateZones(() => ({ ...createInitialState(), swapRevision: ++swapSequenceRef.current }));
     setSelectedBrainCardId(null);
     setSelectedHandCardId(null);
-  }, []);
+  }, [updateZones]);
 
   const beginReply = useCallback(() => {
-    setZones((current) => ({ ...current, activatedCardIds: [] }));
-  }, []);
+    updateZones((current) => ({ ...current, activatedCardIds: [] }));
+  }, [updateZones]);
 
   const presentReply = useCallback((activatedCardIds: string[]) => {
-    setZones((current) => {
+    updateZones((current) => {
       const brainCardIds = new Set(current.brain.map((card) => card.id));
       return {
         ...current,
@@ -144,26 +159,18 @@ export function useCardGamePrototype(unlimitedInterference = false) {
           .slice(0, 2),
       };
     });
-  }, []);
+  }, [updateZones]);
 
   const clearReplyPresentation = useCallback(() => {
-    setZones((current) => ({ ...current, activatedCardIds: [] }));
-  }, []);
+    updateZones((current) => ({ ...current, activatedCardIds: [] }));
+  }, [updateZones]);
 
-  const acceptReply = useCallback((activatedCardIds: string[]) => {
-    setZones((current) => {
-      return {
-        ...current,
-        remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
-        activatedCardIds: current.activatedCardIds.filter((id) =>
-          activatedCardIds.includes(id),
-        ),
-        forcedCardId: null,
-      };
-    });
-  }, []);
+  const acceptReply = useCallback((activatedCardIds: string[], swapRevision?: number) => {
+    updateZones(current => acceptCardReply(current, activatedCardIds, swapRevision, MAX_INTERFERENCE_COUNT));
+  }, [updateZones]);
 
   return {
+    readCardContext,
     maxInterferenceCount: MAX_INTERFERENCE_COUNT,
     acceptReply,
     beginReply,

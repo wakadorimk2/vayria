@@ -1,3 +1,4 @@
+import { splitSpeechAtBoundaries } from '../src/conversation/cardContinuation';
 import { createGenerationMeasurements, type Measurements } from './diagnostics';
 import { PublicUsage } from './usage';
 import { LimitError, type Kind, type Limits } from './ledger';
@@ -233,14 +234,17 @@ async function handle(request: Request, env: Env): Promise<Response> {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           const send = (value: object) => controller.enqueue(new TextEncoder().encode(JSON.stringify(value) + '\n'));
-          let queue = Promise.resolve(); let rejected = false;
+          let queue = Promise.resolve(); let rejected = false; let emittedUnitCount = 0;
           void (async () => {
             try {
               const response = await llmExecutionScope.run(execution, () => generate(input, false, env.OPENAI_API_KEY,
-                AbortSignal.any([signal, abort.signal]), { onStateRejected() { rejected = true; }, onDeliveryMetadataRejected() { rejected = true; }, onSpeechUnit(index, text, candidate) {
+                AbortSignal.any([signal, abort.signal]), { onStateRejected() { rejected = true; }, onDeliveryMetadataRejected() { rejected = true; }, onSpeechUnit(_index, text, candidate) {
                   generation.firstSpeechUnit();
-                  queue = queue.then(async () => { send({ type: 'speech_unit', index, text, ttsTicket: await issue(text, candidate.emotion),
-                    response: input.mode === 'voice' ? { ...candidate, interactionAction: candidate.voiceAction } : candidate }); });
+                  for (const unit of splitSpeechAtBoundaries(text)) {
+                    const index = emittedUnitCount++;
+                    queue = queue.then(async () => { send({ type: 'speech_unit', index, text: unit, ttsTicket: await issue(unit, candidate.emotion),
+                      response: input.mode === 'voice' ? { ...candidate, interactionAction: candidate.voiceAction } : candidate }); });
+                  }
                   void queue.catch(() => abort.abort());
                 } }, generation));
               await queue;
@@ -263,7 +267,8 @@ async function handle(request: Request, env: Env): Promise<Response> {
     try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation)); }
     finally { generation.finish(); Object.assign(measurements, generation.values); }
     const text = 'text' in response && typeof response.text === 'string' ? response.text : '';
-    const result = json({ ...response, ttsTicket: text ? await issue(text, response.emotion) : undefined });
+    const ttsTickets = !preview && text ? await Promise.all(splitSpeechAtBoundaries(text).map(async unit => ({ text: unit, ttsTicket: await issue(unit, response.emotion) }))) : [];
+    const result = json({ ...response, ttsTicket: text ? await issue(text, response.emotion) : undefined, ...(ttsTickets.length ? { ttsTickets } : {}) });
     outcome = 'complete'; return result;
   } catch (error) { if (error instanceof LimitError) outcome = error.code; throw error;
   } finally { if (!streaming) await ledger(env, 'finish', { job, measurements, code: request.signal.aborted ? 'cancelled' : signal.aborted ? 'timeout' : outcome }).catch(() => {}); }
