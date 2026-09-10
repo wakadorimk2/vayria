@@ -10,13 +10,64 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
   const audioSession = getIosAudioSession();
   let wanted = false;
   let opening: Promise<boolean> | null = null;
+  let cancelOpening: (() => void) | null = null;
   let disposed = false;
   let recoveryAt: number | null = null;
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let recoverySequence = 0;
   let consecutiveFailures = 0;
+  let captureReady = false;
+  let lastPacketAt = 0;
+  let healthySince = 0;
+  let captureAttempts = 0;
+  let captureRetry: ReturnType<typeof setTimeout> | null = null;
+  let healthTimer: ReturnType<typeof setInterval> | null = null;
+  let waitingSince = 0;
+  let waitingFor: 'capture-starting' | 'playback-wait' | null = null;
   const emit = options.onEvent;
   const reset = () => { chunks = []; samples = 0; silent = 0; segmentId = ''; };
+  // Pending means microphone intent, not proof that audio reaches the worklet.
+  const pending = (reason: 'capture-starting' | 'playback-wait') => {
+    if (waitingFor === reason) return;
+    waitingFor = reason; waitingSince = Date.now();
+    emit({ type: 'listening_pending', reason, at: Date.now() });
+  };
+  const failCapture = async (code = 'audio-capture') => {
+    const stopped = stop(); const current = generation;
+    await stopped;
+    if (current === generation) emit({ type: 'recognition_failed', code, recoverable: false, at: Date.now() });
+  };
+  const recoverCapture = () => {
+    if (!wanted || disposed || captureRetry !== null || audioSession?.playbackHeld) return;
+    if (!publicActive() || document.hidden) { void stop(); return; }
+    if (captureAttempts >= 3) { void failCapture(); return; }
+    captureAttempts += 1;
+    void releaseCapture();
+    const current = generation;
+    waitingFor = null; pending('capture-starting');
+    captureRetry = setTimeout(() => {
+      captureRetry = null;
+      if (current === generation && wanted && !disposed) void adapter.start();
+    }, 1000);
+  };
+  const checkCapture = () => {
+    if (!wanted || disposed) return;
+    if (!publicActive() || document.hidden) { void stop(); return; }
+    if (audioSession?.playbackHeld || playing) {
+      pending('playback-wait');
+      // Never reopen a microphone over a reply whose playback still owns it.
+      if (Date.now() - waitingSince >= 60000) void failCapture('playback-timeout');
+      return;
+    }
+    if (captureRetry !== null) return;
+    if (opening) {
+      if (Date.now() - waitingSince >= 15000) void failCapture();
+      return;
+    }
+    if (!context || context.state !== 'running' || !node ||
+        media?.getTracks().some(track => track.readyState === 'ended' || track.muted) ||
+        Date.now() - lastPacketAt >= 5000) recoverCapture();
+  };
   const cancelRecoveryTimer = () => {
     ++recoverySequence;
     if (recoveryTimer !== null) clearTimeout(recoveryTimer);
@@ -26,7 +77,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
   const resumeListening = () => {
     if (!wanted || disposed) return;
     if (!publicActive() || document.hidden) { void stop(); return; }
-    if (playing || audioSession?.playbackHeld || !context || !node) return;
+    if (playing || audioSession?.playbackHeld || !context || !node || !captureReady) return;
     if (recoveryAt !== null && recoveryAt > Date.now()) {
       cancelRecoveryTimer();
       const sequence = recoverySequence;
@@ -40,6 +91,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
     const recovered = recoveryAt !== null;
     cancelRecoveryTimer();
     recoveryAt = null;
+    waitingFor = null;
     reset();
     emit({ type: 'listening_started', recovered, at: Date.now() });
   };
@@ -98,16 +150,24 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
     }
   };
   const releaseCapture = async () => {
+    cancelOpening?.(); cancelOpening = null;
     ++generation; opening = null; reset(); busy = false;
+    captureReady = false; healthySince = 0;
+    if (captureRetry !== null) clearTimeout(captureRetry);
+    captureRetry = null;
     transcription?.abort(); transcription = null;
-    if (node) { node.port.onmessage = null; node.disconnect(); node = null; }
-    media?.getTracks().forEach(track => track.stop()); media = null;
+    if (node) { node.port.onmessage = null; node.onprocessorerror = null; node.disconnect(); node = null; }
+    media?.getTracks().forEach(track => { track.onended = null; track.onmute = null; track.stop(); }); media = null;
     const previous = context; context = null;
-    try { if (previous && previous.state !== 'closed') await previous.close(); }
+    if (previous) previous.onstatechange = null;
+    // Tracks are already stopped. A stalled close must not lock iOS playback or restart.
+    try { if (previous && previous.state !== 'closed') void previous.close().catch(() => undefined); }
     catch { /* Tracks and nodes are already released even if the context cannot close. */ }
   };
   const stop = async () => {
     wanted = false; enabled = false;
+    if (healthTimer !== null) clearInterval(healthTimer);
+    healthTimer = null; waitingFor = null; captureAttempts = 0;
     cancelRecoveryTimer(); recoveryAt = null; consecutiveFailures = 0; pressed = false;
     const released = releaseCapture(); const stoppedGeneration = generation;
     await released;
@@ -130,15 +190,20 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
     start() {
       if (disposed || document.hidden || !publicActive()) return Promise.resolve(false);
       wanted = true;
+      if (healthTimer === null) healthTimer = setInterval(checkCapture, 1000);
       if (audioSession?.playbackHeld) {
         enabled = true;
-        if (recoveryAt === null) emit({ type: 'listening_started', at: Date.now() });
+        if (recoveryAt === null) pending('playback-wait');
         return Promise.resolve(true);
       }
-      if (enabled && context) return Promise.resolve(true);
+      if (enabled && context && node) return Promise.resolve(true);
       if (opening) return opening;
+      if (captureRetry !== null) return Promise.resolve(true);
+      if (recoveryAt === null) pending('capture-starting');
+      waitingSince = Date.now();
       const current = ++generation;
-      const attempt = (async () => {
+      const abandoned = new Promise<false>(resolve => { cancelOpening = () => resolve(false); });
+      const acquisition = (async () => {
       try {
         audioSession?.recording();
         const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }, video: false });
@@ -152,8 +217,19 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
         if (current !== generation) return false;
         if (!publicActive()) { await stop(); return false; }
         enabled = true;
+        lastPacketAt = Date.now();
+        const interrupted = () => { if (current === generation) recoverCapture(); };
+        context.onstatechange = () => { if (context?.state !== 'running') interrupted(); };
+        node.onprocessorerror = interrupted;
+        media.getTracks().forEach(track => { track.onended = interrupted; track.onmute = interrupted; });
         node.port.onmessage = event => {
           if (current !== generation) return;
+          lastPacketAt = Date.now();
+          if (!context || context.state !== 'running' || media?.getTracks().some(track => track.readyState === 'ended' || track.muted)) return;
+          if (!healthySince) healthySince = Date.now();
+          if (Date.now() - healthySince >= 10000) captureAttempts = 0;
+          if (!captureReady) { captureReady = true; resumeListening(); }
+          else if (waitingFor !== null && !playing && !audioSession?.playbackHeld) resumeListening();
           if (!enabled || busy || playing || recoveryAt !== null || !publicActive() || document.hidden) { reset(); return; }
           const pcm = new Int16Array(event.data); const rms = Math.sqrt(pcm.reduce((sum, value) => sum + (value / 32768) ** 2, 0) / pcm.length);
           const speaking = manual ? pressed : rms >= .015;
@@ -162,8 +238,6 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
           chunks.push(pcm); samples += pcm.length; silent = speaking ? 0 : silent + pcm.length;
           if (samples >= 320000 || (!manual && silent >= 9600)) void flush();
         };
-        if (recoveryAt !== null) resumeListening();
-        else emit({ type: 'listening_started', at: Date.now() });
         return true;
       } catch (error) {
         if (generation !== current) return false;
@@ -172,14 +246,29 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
         if (generation === failedGeneration) emit({ type: 'recognition_failed', code: error instanceof DOMException && error.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture', recoverable: false, at: Date.now() });
         return false;
       }
-      })().finally(() => { if (opening === attempt) opening = null; });
+      })();
+      let startTimer: ReturnType<typeof setTimeout>;
+      const timeout = new Promise<false>(resolve => {
+        startTimer = setTimeout(() => {
+          if (current === generation) void failCapture();
+          resolve(false);
+        }, 15000);
+      });
+      const attempt = Promise.race([acquisition, abandoned, timeout]).finally(() => {
+        clearTimeout(startTimer);
+        if (opening === attempt) { opening = null; cancelOpening = null; }
+      });
       opening = attempt;
       return attempt;
     }, stop, setTtsPlaying(value) { playing = value; if (value) reset(); else if (recoveryAt !== null) resumeListening(); },
     dispose() { disposed = true; document.removeEventListener('visibilitychange', hidden); window.removeEventListener('vayria-public-stop', pause); window.removeEventListener('vayria-public-microphone', control); void stop(); unregister?.(); },
   };
   const unregister = audioSession?.register({
-    pause: releaseCapture,
+    pause: () => {
+      const released = releaseCapture();
+      if (wanted && recoveryAt === null) pending('playback-wait');
+      return released;
+    },
     resume: () => wanted && publicActive() && !document.hidden ? adapter.start() : Promise.resolve(false),
   });
   return adapter;

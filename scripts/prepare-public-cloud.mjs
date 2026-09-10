@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomBytes, createHmac } from 'node:crypto';
 const account = '7414797104d7aca62f03fbd4faf7e5df';
-const domain = 'staging.vayria.me';
+const domain = 'vayria.me';
 if (!process.env.OPENAI_API_KEY || !process.env.AIVIS_CLOUD_API_KEY) throw new Error('Both provider credentials must be supplied by 1Password');
 const auth = await readFile(join(process.env.APPDATA, 'xdg.config/.wrangler/config/default.toml'), 'utf8');
 const token = auth.match(/oauth_token\s*=\s*"([^"]+)"/)?.[1];
@@ -17,9 +17,16 @@ const api = async (path, method = 'GET', body) => {
   return result.result;
 };
 const widgets = await api('challenges/widgets');
-let widget = widgets.find(value => value.name === 'Vayria staging' && value.domains.includes(domain));
+const config = JSON.parse(await readFile('wrangler.public.jsonc', 'utf8'));
+let widget = widgets.find(value => value.sitekey === config.vars.TURNSTILE_SITE_KEY && value.name === 'Vayria staging');
+if (!widget && config.vars.TURNSTILE_SITE_KEY) throw new Error('Configured staging Turnstile widget not found; do not replace its key.');
 if (!widget) widget = await api('challenges/widgets', 'POST', { name: 'Vayria staging', domains: [domain], mode: 'managed' });
-else widget = await api(`challenges/widgets/${widget.sitekey}`);
+else {
+  widget = await api(`challenges/widgets/${widget.sitekey}`);
+  if (!widget.domains.includes(domain)) widget = await api(`challenges/widgets/${widget.sitekey}`, 'PUT', {
+    name: widget.name, domains: [...widget.domains, domain], mode: widget.mode,
+  });
+}
 await mkdir('.wrangler', { recursive: true });
 let secrets = {};
 try { secrets = JSON.parse(await readFile('.wrangler/public-secrets.json', 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -28,7 +35,6 @@ Object.assign(secrets, { OPENAI_API_KEY: process.env.OPENAI_API_KEY, AIVIS_API_K
 await writeFile('.wrangler/public-secrets.json', JSON.stringify(secrets), { mode: 0o600 });
 const payload = Buffer.from(JSON.stringify({ purpose: 'preview', exp: Date.now() + 86400000 })).toString('base64url');
 await writeFile('.wrangler/public-preview-ticket.txt', payload + '.' + createHmac('sha256', secrets.PREVIEW_SECRET).update(payload).digest('base64url'), { mode: 0o600 });
-const config = JSON.parse(await readFile('wrangler.public.jsonc', 'utf8'));
 config.vars.TURNSTILE_SITE_KEY = widget.sitekey;
 await writeFile('wrangler.public.jsonc', JSON.stringify(config, null, 2) + '\n');
 console.log('Staging Turnstile prepared. Secrets and one-day access ticket saved under ignored .wrangler/.');

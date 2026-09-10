@@ -187,6 +187,11 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         controller.dispatch(event);
         optionsRef.current.onEvent?.(event);
         switch (event.type) {
+          case 'listening_pending':
+            setIsEnabled(true);
+            setIsVadSpeech(false);
+            setIsSttProcessing(false);
+            break;
           case 'listening_started':
             setIsEnabled(true);
             break;

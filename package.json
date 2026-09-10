@@ -46,14 +46,15 @@
     "public:build": "npm run public:assets && tsc -b && tsc -p tsconfig.worker.json && vite build --config vite.public.config.ts",
     "public:check": "wrangler deploy --config wrangler.public.jsonc --env-file deploy/placeholder.env --dry-run",
     "public:dev": "wrangler dev --config wrangler.public.jsonc --env-file deploy/placeholder.env --ip 127.0.0.1 --port 8789",
-    "test:cd": "node --test scripts/staging-cd.test.mjs scripts/production-cd.test.mjs",
+    "test:cd": "node --test scripts/staging-cd.test.mjs scripts/production-cd.test.mjs scripts/staging-preview.test.mjs",
     "production:check": "wrangler deploy --config wrangler.production.jsonc --env-file deploy/placeholder.env --dry-run",
     "production:recovery:check": "wrangler deploy --config wrangler.recovery.jsonc --env-file deploy/placeholder.env --dry-run",
-    "test:public": "tsc -p tsconfig.worker.json && node --test scripts/public-ledger.test.mjs scripts/public-worker.test.mjs scripts/public-errors.test.mjs scripts/cloud-voice.test.mjs scripts/public-theme.test.mjs scripts/card-concurrency-public.test.mjs",
+    "test:public": "tsc -p tsconfig.worker.json && node --test scripts/public-ledger.test.mjs scripts/public-worker.test.mjs scripts/public-errors.test.mjs scripts/cloud-voice.test.mjs scripts/public-theme.test.mjs scripts/public-entry.test.mjs scripts/public-exhibition.test.mjs scripts/public-exhibition-worker.test.mjs scripts/public-settings-layout.test.mjs scripts/staging-paths.test.mjs scripts/card-concurrency-public.test.mjs scripts/manifestation-public.test.mjs",
     "public:admin": "node scripts/public-admin.mjs",
     "test:manifestation": "tsc -p tsconfig.manifestation-test.json && node scripts/run-manifestation-tests.mjs",
     "dev:manifestation": "node scripts/start-manifestation.mjs",
-    "dev:manifestation:op": "pwsh -NoProfile -File .\\scripts\\Start-VayriaWithOnePassword.ps1 -CommandPath npm.cmd -CommandArguments \"run dev:manifestation\""
+    "dev:manifestation:op": "pwsh -NoProfile -File .\\scripts\\Start-VayriaWithOnePassword.ps1 -CommandPath npm.cmd -CommandArguments \"run dev:manifestation\"",
+    "staging:build": "npm run public:build -- --mode staging"
   },
   "dependencies": {
     "@aituber-onair/chat": "0.52.0",

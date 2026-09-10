@@ -21,6 +21,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
   }
   const {
     mode,
+    greeting,
     message,
     characterIdentity,
     history,
@@ -165,6 +166,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
         earlySpeechLead,
         recentExpressionLevels,
         cardContinuation,
+        greeting,
       );
     } else {
       const generatedResponse = await generateReply(
@@ -190,6 +192,7 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
         earlySpeechLead,
         recentExpressionLevels,
         cardContinuation,
+        greeting,
       );
       assistantResponse =
         mode === 'voice'

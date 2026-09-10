@@ -19,6 +19,7 @@ export interface VoiceSpeakerMetadata {
 }
 
 export type VoiceInputEvent =
+  | { type: 'listening_pending'; reason: 'capture-starting' | 'playback-wait'; at: number }
   | { type: 'listening_started'; at: number; recovered?: boolean }
   | ({ type: 'speech_started'; segmentId: string; at: number } &
       VoiceSpeakerMetadata)
@@ -74,6 +75,9 @@ export function reduceVoiceInput(
   event: VoiceInputEvent,
 ): VoiceInputSnapshot {
   switch (event.type) {
+    case 'listening_pending':
+      return { phase: 'recovering', segmentId: null, transcript: '', errorCode: null,
+        notice: { state: 'recovering', code: event.reason, at: event.at } };
     case 'listening_started':
       return {
         phase: 'listening',

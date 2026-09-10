@@ -366,6 +366,7 @@ export interface PerformanceContextPayload {
 
 export interface ChatRequestPayload {
   cardContinuation?: CardContinuation;
+  greeting?: true;
   mode: ChatMode;
   message: string | null;
   characterIdentity: CharacterIdentity;

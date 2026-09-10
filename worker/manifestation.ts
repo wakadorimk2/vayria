@@ -4,7 +4,7 @@ import { isInputEvent, type GeneratedObject, type GenerationTrace } from '../src
 
 export interface ManifestationEnv {
   ASSETS: Fetcher; FAL_KEY?: string; MANIFESTATION_ENABLED?: string;
-  PUBLIC_HOSTNAME: string; GENERATION_ENABLED: string;
+  PUBLIC_BASE_PATH?: string; REQUIRE_PREVIEW_ACCESS?: string; PUBLIC_HOSTNAME: string; GENERATION_ENABLED: string;
 }
 type LedgerCall = <T>(op: string, args?: object) => Promise<T>;
 export function mediaUrl(value: unknown) {
@@ -14,7 +14,7 @@ export function mediaUrl(value: unknown) {
   return url.href;
 }
 export async function manifestation(request: Request, env: ManifestationEnv, visitor: string, session: string, ledger: LedgerCall) {
-  if (env.MANIFESTATION_ENABLED !== 'true' || env.PUBLIC_HOSTNAME !== 'staging.vayria.me') throw new LimitError('not_found', 0, 404);
+  if (env.MANIFESTATION_ENABLED !== 'true' || (env.PUBLIC_HOSTNAME !== 'vayria.me' || env.PUBLIC_BASE_PATH !== '/staging' || env.REQUIRE_PREVIEW_ACCESS !== 'true')) throw new LimitError('not_found', 0, 404);
   const path = new URL(request.url).pathname;
   const who = { visitor, id: session };
   if (path.startsWith('/api/manifestation/media/')) {
@@ -53,7 +53,7 @@ export async function manifestation(request: Request, env: ManifestationEnv, vis
   if (!source.ok) throw new LimitError('configuration_unavailable', 0, 503);
   const bytes = new Uint8Array(await source.arrayBuffer());
   const image = 'data:image/png;base64,' + Buffer.from(bytes).toString('base64');
-  await ledger('manifestationBegin', { ...who, event, token });
+  await ledger('manifestationBegin', { ...who, manifestationEvent: event, token });
   let outcome = 'provider_failure';
   try {
     const read = async (url: string, init?: RequestInit) => {
@@ -85,6 +85,6 @@ export async function manifestation(request: Request, env: ManifestationEnv, vis
     if (typeof inference === 'number' && Number.isFinite(inference)) trace.inferenceSeconds = inference;
     await ledger('manifestationComplete', { ...who, token, target });
     outcome = 'complete';
-    return Response.json({ url: '/api/manifestation/media/' + token, kind: 'video', composite: 'green-key', mode: 'reused-base-video', timings: {}, trace } satisfies GeneratedObject, { headers: { 'Cache-Control': 'no-store' } });
+    return Response.json({ url: '/staging/api/manifestation/media/' + token, kind: 'video', composite: 'green-key', mode: 'reused-base-video', timings: {}, trace } satisfies GeneratedObject, { headers: { 'Cache-Control': 'no-store' } });
   } finally { await ledger('manifestationFinish', { token, code: outcome, timings: trace.server }).catch(() => {}); }
 }

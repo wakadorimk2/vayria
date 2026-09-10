@@ -18,6 +18,9 @@ test('Preview admission and repeated visits redirect to the app without serving 
   const payload = Buffer.from(JSON.stringify({ purpose: 'preview', exp: Date.now() + 60000 })).toString('base64url');
   const ticket = payload + '.' + createHmac('sha256', secret).update(payload).digest('base64url');
   try {
+    for (const path of ['/exhibition', '/exhibition/']) {
+      assert.equal((await mf.dispatchFetch(base + path)).status, 401);
+    }
     const submit = (value, cookie = '', origin = base) => mf.dispatchFetch(base + '/preview', {
       method: 'POST', redirect: 'manual', headers: { Origin: origin, Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ ticket: value }).toString(),
@@ -40,6 +43,13 @@ test('Preview admission and repeated visits redirect to the app without serving 
     const app = await mf.dispatchFetch(base + '/', { headers: { Cookie: cookie } });
     assert.equal(await app.text(), 'app');
     assert.deepEqual(assetRequests, ['/']);
+    for (const path of ['/exhibition', '/exhibition/']) {
+      const registration = await mf.dispatchFetch(base + path, { headers: { Cookie: cookie } });
+      assert.equal(registration.status, 200);
+      assert.equal(await registration.text(), 'app');
+      assert.equal(registration.headers.get('x-robots-tag'), 'noindex');
+    }
+    assert.deepEqual(assetRequests, ['/', '/', '/']);
   } finally { await mf.dispose(); }
 });
 test('Worker admission, SQLite serialization, tickets and budget reject before provider calls', async () => {

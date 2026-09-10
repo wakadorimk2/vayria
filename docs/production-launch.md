@@ -1,6 +1,7 @@
 # vayria.me 初回公開と自動更新
 
-この手順は公開準備の成果物。クラウド設定、本番配信、実機確認は未実施。
+2026-09-09に初回公開を実施した。本番CDは無効のまま、手動配信で会話を有効にした。
+配信版、確認結果、未確認事項は[初回公開記録](./production-launch-2026-09-09.md)を参照する。
 初回公開はOwnerの実機確認と公開承認を受けてから行う。
 本番CDはリポジトリ変数 `PRODUCTION_DEPLOY_ENABLED` が未設定または `false` の間は実行しない。
 `wrangler.production.jsonc` はCD用で `GENERATION_ENABLED=true` を持つ。初回の停止配信では必ずCLIで `false` を指定する。
@@ -8,6 +9,7 @@
 ## 公開前の確認表
 
 各項目に確認日、対象SHA、証拠を記録する。自動テストと実機確認を分ける。
+以下の「現在の状態」は公開準備時点の記録。初回公開後の状態は上記の初回公開記録を優先する。
 
 | 項目 | 完了条件 | 現在の状態 |
 | --- | --- | --- |
@@ -104,7 +106,7 @@ HTTPS、画面、VRM取得、GET `/api/session`のCookie往復とenabled=false�
 Turnstileを通過しても生成は有効にならない。
 
 5. 本番管理資格情報を注入して`npm run public:admin -- report`を実行する。日額70円・月額3500円、標準の回数制限、使用量、stopped=falseを確認する。想定外の台帳があれば中止する。使用量を初期化しない。
-6. Repository variableをtrueにする。ActionsのCIをmainに対して手動実行する。
+6. 本番CDを有効にする場合は、公開前の確認表にあるproduction Environmentと専用CD Secretsを準備する。Repository variableをtrueにし、ActionsのCIをmainに対して手動実行する。
 
 ```powershell
 gh variable set PRODUCTION_DEPLOY_ENABLED --body true --repo wakadorimk2/vayria
@@ -116,6 +118,20 @@ CI・Python STT・Public checks → staging配信とスモーク → production�
 本番スモークはページとJavaScriptの一致、VRMのハッシュ、Cookie保持、enabled=true、stopped=falseを確認する。
 GET `/api/session`は利用状態の取得であり、有料セッションの開始確認ではない。自動スモークはPOSTを送らない。
 最後にOwnerが本番で声と会話を確認する。ここで初回公開の完了を記録する。
+
+### 本番CDを保留して初回公開する場合
+
+初回公開の手順5まで確認した後、最新mainと固定素材を再照合する。
+公開承認の範囲で、同じcheckoutから次を実行する。
+
+```powershell
+npx wrangler deploy --config wrangler.production.jsonc --env-file deploy/placeholder.env
+node scripts/production-cd.mjs smoke
+```
+
+本番設定の`GENERATION_ENABLED=true`で会話を有効にする。管理CLIのreportで予算、使用量、停止状態を再確認する。
+SHA、Version ID、確認日時を記録する。Repository variableは未設定またはfalseのまま維持する。
+この間、mainを更新しても本番へは自動反映しない。本番CDの有効化は別の運用変更として扱う。
 
 ## 自動更新と復旧
 

@@ -1,3 +1,4 @@
+import { publicUrl } from '../public/paths';
 import { publicFetch, publicSessionId } from '../public/session';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { ManifestationSession } from './session';
@@ -28,7 +29,7 @@ export function useManifestation() {
       applyCard: () => false,
       fallback: () => {
         lastFallback = lastFallback < 0 ? Math.floor(Math.random() * 3) : (lastFallback + 1 + Math.floor(Math.random() * 2)) % 3;
-        return { url: `/manifestation/chicken-${lastFallback + 1}.png`, kind: 'image', composite: 'alpha', mode: 'static-fallback', timings: {} };
+        return { url: publicUrl(`/manifestation/chicken-${lastFallback + 1}.png`), kind: 'image', composite: 'alpha', mode: 'static-fallback', timings: {} };
       },
       prepare: prepareObject,
       discard: media => releasePrepared(media.url),
@@ -51,7 +52,7 @@ export function useManifestation() {
   const bind = useCallback((apply: (event: InputEvent) => boolean, displayed: (id: string, description: string) => void) => runtime.bind(apply, displayed), [runtime]);
   useEffect(() => {
     if (!runtimeConfig.manifestationEnabled) return;
-    for (let i = 1; i <= 3; i++) { const image = new Image(); image.src = `/manifestation/chicken-${i}.png`; }
+    for (let i = 1; i <= 3; i++) { const image = new Image(); image.src = publicUrl(`/manifestation/chicken-${i}.png`); }
     const timer = window.setInterval(() => runtime.tick(), 100);
     return () => { clearInterval(timer); runtime.reset(); };
   }, [runtime]);

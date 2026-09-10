@@ -67,3 +67,19 @@ test('voice notices distinguish recovery, microphone permission and usage limits
   assert.match(voiceInputNoticeMessage(notice), /文字やカード/);
   assert(!voiceInputNoticeMessage({ state: 'failed', code: '<private>', at: 1 }).includes('private'));
 });
+
+test('staging transcription failures retain the canonical voice-only notification source', async () => {
+  const built = await build({ entryPoints: ['src/public/session.ts'], bundle: true, write: false, format: 'esm', platform: 'node',
+    define: { 'import.meta.env.BASE_URL': '"/staging/"' },
+    plugins: [{ name: 'public-runtime', setup(b) { b.onLoad({ filter: /runtimeConfig\.ts$/ }, () => ({ contents: "export const runtimeConfig = { mode: 'public' };", loader: 'ts' })); } }] });
+  const mounted = await import('data:text/javascript;base64,' + Buffer.from(built.outputFiles[0].text).toString('base64'));
+  const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };
+  globalThis.window = new EventTarget(); globalThis.document = { hidden: false };
+  const notices = []; window.addEventListener('vayria-public-error', event => notices.push(event.detail));
+  try {
+    mounted.activatePublic({ id: 's', expires: Date.now() + 60000 });
+    globalThis.fetch = async path => { assert.equal(path, '/staging/api/transcribe'); return Response.json({ code: 'network_error' }, { status: 503 }); };
+    await mounted.publicFetch('/api/transcribe');
+    assert.equal(notices[0].source, '/api/transcribe'); assert.equal(mounted.publicActive(), true);
+  } finally { Object.assign(globalThis, previous); }
+});

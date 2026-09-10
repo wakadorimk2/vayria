@@ -21,17 +21,24 @@ export class PublicUsage extends DurableObject {
   async alarm() { const next = this.run(l => l.nextAlarm()); await this.ctx.storage.setAlarm(next); }
   async fetch(request: Request) {
     try {
-      const b = await request.json() as { event: InputEvent; token: string; target: string; timings: Record<string, number>; op: string; visitor: string; ip: string; id: string; kind: Kind;
-        job: string; amount: number; ticket: string; charge: string; patch: Partial<Limits>; stopped?: boolean; code: string; measurements?: Measurements };
+      const b = await request.json() as { manifestationEvent: InputEvent; token: string; target: string; timings: Record<string, number>; op: string; visitor: string; ip: string; id: string; kind: Kind;
+        job: string; amount: number; ticket: string; charge: string; patch: Partial<Limits>; stopped?: boolean; code: string; measurements?: Measurements;
+        event: string; starts: number; expires: number; budget: number; hash: string; epoch: number; requestId: string };
       const result = this.run(l => {
         switch (b.op) {
-          case 'manifestationBegin': return l.manifestationBegin(b.visitor, b.id, b.event, b.token);
+          case 'manifestationBegin': return l.manifestationBegin(b.visitor, b.id, b.manifestationEvent, b.token);
           case 'manifestationComplete': return l.manifestationComplete(b.visitor, b.id, b.token, b.target);
           case 'manifestationMedia': return l.manifestationMedia(b.visitor, b.token);
           case 'manifestationFinish': return l.manifestationFinish(b.token, b.code, b.timings);
           case 'status': return l.status(b.visitor);
           case 'attempt': return l.attempt(b.ip);
-          case 'start': return l.start(b.visitor, b.ip, b.id);
+          case 'start': return l.start(b.visitor, b.ip, b.id, b.epoch);
+          case 'exhibition-create': return l.createExhibition(b.event, b.starts, b.expires, b.budget);
+          case 'exhibition-code': return l.issueExhibitionCode(b.event, b.hash);
+          case 'exhibition-enroll': return l.enrollExhibition(b.visitor, b.hash);
+          case 'exhibition-next': return l.nextExhibitionVisitor(b.visitor, b.requestId, b.epoch);
+          case 'exhibition-revoke': return l.revokeExhibitionDevice(b.visitor);
+          case 'exhibition-stop': return l.stopExhibition(b.event);
           case 'end': return l.end(b.visitor, b.id);
           case 'begin': return l.begin(b.visitor, b.id, b.kind, b.job, b.amount, b.ticket);
           case 'reserve': return l.reserve(b.visitor, b.id, b.job, b.charge, b.amount);

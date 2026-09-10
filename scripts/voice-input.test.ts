@@ -8,6 +8,20 @@ import {
   reduceVoiceInput,
   type VoiceInputSnapshot,
 } from '../src/voice/voiceInput.js';
+
+test('capture and playback waiting never present active listening or retain old speech', () => {
+  const controller = createVoiceInputController();
+  for (const reason of ['capture-starting', 'playback-wait'] as const) {
+    controller.dispatch({ type: 'speech_started', segmentId: 'old', at: 1 });
+    controller.dispatch({ type: 'listening_pending', reason, at: 2 });
+    assert.equal(controller.getSnapshot().phase, 'recovering');
+    assert.equal(controller.getSnapshot().segmentId, null);
+    assert.equal(controller.getSnapshot().errorCode, null);
+    assert.equal(controller.getSnapshot().notice?.code, reason);
+    controller.dispatch({ type: 'listening_started', at: 3 });
+    assert.equal(controller.getSnapshot().notice, undefined);
+  }
+});
 import { createBrowserSpeechRecognitionAdapter } from '../src/voice/browserSpeechRecognition.js';
 import {
   PCM_CHUNK_BYTES,
@@ -629,6 +643,62 @@ test('browser adapter restarts after end and reports permission errors', async (
     recognition.onerror?.({ error: 'not-allowed' });
     assert.equal(events.at(-1)?.type, 'recognition_failed');
     assert.equal(events.at(-1)?.code, 'not-allowed');
+    await adapter.stop();
+    adapter.dispose();
+  } finally {
+    restoreWindow();
+  }
+});
+
+test('intentional remote stop ignores late STT results and failures, then can restart', async () => {
+  const environment = installRemoteBrowserEnvironment();
+  try {
+    const events: Array<{ type: string; code?: string }> = [];
+    const adapter = createRemotePcmVoiceAdapter({ audioMode: 'baseline', onEvent: event => events.push(event) });
+    const starting = adapter.start();
+    await waitForRemoteCondition(() => environment.worklets.length === 1);
+    environment.worklets[0].emit(makePcmChunk(0.1));
+    assert.equal(await starting, true);
+    const oldSocket = environment.sockets[0];
+    const oldMessage = oldSocket.onmessage;
+    const stopping = adapter.stop();
+    const restarting = adapter.start();
+    oldMessage?.({ data: JSON.stringify({ type: 'recognition_failed', code: 'stt-unavailable', at: 10 }) } as MessageEvent);
+    oldMessage?.({ data: JSON.stringify({ type: 'utterance_finalized', segmentId: 'previous-visitor', text: 'old speech', at: 11 }) } as MessageEvent);
+    await stopping;
+    assert.equal(events.some(event => event.type === 'recognition_failed'), false);
+    assert.equal(events.some(event => event.type === 'utterance_finalized'), false);
+    assert.equal(events.at(-1)?.type, 'recognition_stopped');
+    await waitForRemoteCondition(() => environment.worklets.length === 2);
+    environment.worklets[1].emit(makePcmChunk(0.1));
+    assert.equal(await restarting, true);
+    const count = events.length;
+    oldMessage?.({ data: '{bad old packet' } as MessageEvent);
+    assert.equal(events.length, count);
+    environment.sockets.at(-1)?.onmessage?.({ data: JSON.stringify({ type: 'recognition_failed', code: 'stt-unavailable', at: 12 }) } as MessageEvent);
+    assert.equal(events.at(-1)?.type, 'recognition_failed');
+    await adapter.stop();
+    adapter.dispose();
+  } finally {
+    environment.restore();
+  }
+});
+
+test('intentional browser stop ignores late abort errors and transcripts', async () => {
+  const restoreWindow = installFakeSpeechWindow();
+  try {
+    const events: Array<{ type: string }> = [];
+    const adapter = createBrowserSpeechRecognitionAdapter({ onEvent: event => events.push(event) });
+    assert.equal(await adapter.start(), true);
+    const recognition = FakeSpeechRecognition.instances[0];
+    await adapter.stop();
+    const count = events.length;
+    recognition.onerror?.({ error: 'aborted' });
+    recognition.onresult?.(makeResultEvent(makeResult('old speech', true)));
+    assert.equal(events.length, count);
+    assert.equal(await adapter.start(), true);
+    recognition.onerror?.({ error: 'not-allowed' });
+    assert.equal(events.at(-1)?.type, 'recognition_failed');
     await adapter.stop();
     adapter.dispose();
   } finally {

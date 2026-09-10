@@ -11,7 +11,7 @@ await build({ stdin: { contents: 'export { createCloudVoiceAdapter } from "./src
 } }] });
 const { createCloudVoiceAdapter, getIosAudioSession } = await import(pathToFileURL(outfile));
 const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
-function fixture(ios = false) {
+function fixture(ios = false, initialPacket = true) {
   const events = [], requests = [], tracks = [], nodes = [], contexts = [];
   let captureFailure = false;
   let captureWait = null;
@@ -20,7 +20,7 @@ function fixture(ios = false) {
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: ios ? 'iPhone' : 'Chrome Windows', audioSession: { type: 'auto' }, mediaDevices: { async getUserMedia() {
     if (captureWait) { const pending = captureWait; captureWait = null; await pending; }
     if (captureFailure) throw captureFailure;
-    const track = { stopped: false, stop() { this.stopped = true; } }; tracks.push(track);
+    const track = { stopped: false, readyState: 'live', muted: false, stop() { this.stopped = true; this.readyState = 'ended'; } }; tracks.push(track);
     return { getTracks: () => [track] };
   } } } });
   globalThis.AudioContext = class {
@@ -30,7 +30,10 @@ function fixture(ios = false) {
     async resume() {} async close() { this.state = 'closed'; }
   };
   globalThis.AudioWorkletNode = class {
-    port = { onmessage: null }; disconnected = false;
+    port = { callback: null, get onmessage() { return this.callback; }, set onmessage(value) {
+      this.callback = value;
+      if (value && initialPacket) queueMicrotask(() => value({ data: new Int16Array(320).buffer }));
+    } }; disconnected = false;
     constructor() { nodes.push(this); } connect() {} disconnect() { this.disconnected = true; }
   };
   globalThis.cloudVoiceFixture = { active: true, fetch(path, init) { return new Promise((resolve, reject) => requests.push({ path, init, resolve, reject })); } };
@@ -41,6 +44,122 @@ function fixture(ios = false) {
   return { adapter, events, requests, tracks, nodes, contexts, utterance, failCapture: (error = new Error('capture failed')) => { captureFailure = error; },
     deferCapture() { let resolve; captureWait = new Promise(done => { resolve = done; }); return () => resolve(); } };
 }
+
+test('listening requires the first PCM packet, including silent input', async () => {
+  const f = fixture(true, false);
+  await f.adapter.start();
+  assert.equal(f.events.at(-1).type, 'listening_pending');
+  assert(!f.events.some(e => e.type === 'listening_started'));
+  f.nodes[0].port.onmessage({ data: new Int16Array(320).buffer });
+  assert.equal(f.events.at(-1).type, 'listening_started');
+  assert.equal(f.requests.length, 0);
+  f.adapter.dispose(); await settle();
+});
+
+for (const cause of ['interrupted', 'ended', 'muted', 'processor', 'packets']) test(`capture ${cause}: reacquires and accepts the next utterance`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const f = fixture(true); await f.adapter.start();
+  const oldPacket = f.nodes[0].port.onmessage;
+  if (cause === 'interrupted') { f.contexts[0].state = 'interrupted'; f.contexts[0].onstatechange(); }
+  if (cause === 'ended') { f.tracks[0].readyState = 'ended'; f.tracks[0].onended(); }
+  if (cause === 'muted') { f.tracks[0].muted = true; f.tracks[0].onmute(); }
+  if (cause === 'processor') f.nodes[0].onprocessorerror();
+  if (cause === 'packets') t.mock.timers.tick(5000);
+  assert.equal(f.events.at(-1).type, 'listening_pending');
+  assert(f.tracks[0].stopped);
+  f.utterance(oldPacket); assert.equal(f.requests.length, 0);
+  t.mock.timers.tick(1000); await settle();
+  assert.equal(f.tracks.length, 2); assert.equal(f.events.at(-1).type, 'listening_started');
+  f.utterance(); assert.equal(f.requests.length, 1);
+  f.adapter.dispose(); await settle();
+});
+
+test('no packets exhaust three capture retries without sending audio', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const f = fixture(true, false); await f.adapter.start();
+  for (let i = 0; i < 3; i++) {
+    t.mock.timers.tick(5000); await settle();
+    t.mock.timers.tick(1000); await settle();
+  }
+  t.mock.timers.tick(5000); await settle();
+  assert.equal(f.tracks.length, 4);
+  assert.equal(f.events.at(-1).type, 'recognition_failed');
+  assert.equal(f.events.at(-1).recoverable, false);
+  assert(!f.events.some(e => e.type === 'listening_started'));
+  t.mock.timers.tick(60000); await settle();
+  assert.equal(f.tracks.length, 4); assert.equal(f.requests.length, 0);
+  f.adapter.dispose(); await settle();
+});
+
+test('silent PCM keeps capture healthy without recognizing silence', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const f = fixture(true); await f.adapter.start();
+  for (let i = 0; i < 60; i++) {
+    f.nodes[0].port.onmessage({ data: new Int16Array(320).buffer });
+    t.mock.timers.tick(1000); await settle();
+  }
+  assert.equal(f.tracks.length, 1); assert.equal(f.requests.length, 0);
+  assert.equal(f.events.at(-1).type, 'listening_started');
+  f.adapter.dispose(); await settle();
+});
+
+test('playback cancels capture retry and resumes only after releasing ownership', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const f = fixture(true); await f.adapter.start(); f.nodes[0].onprocessorerror();
+  const held = getIosAudioSession().holdPlayback(); await held.ready;
+  t.mock.timers.tick(2000); await settle(); assert.equal(f.tracks.length, 1);
+  held.release(); await settle(); assert.equal(f.tracks.length, 2);
+  f.utterance(); assert.equal(f.requests.length, 1);
+  f.adapter.dispose(); await settle();
+});
+
+for (const action of ['off', 'hidden', 'expired', 'dispose']) test(`capture retry is cancelled by ${action}`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const f = fixture(true); await f.adapter.start(); f.nodes[0].onprocessorerror();
+  if (action === 'off') await f.adapter.stop();
+  if (action === 'hidden') { document.hidden = true; document.dispatchEvent(new Event('visibilitychange')); }
+  if (action === 'expired') { cloudVoiceFixture.active = false; window.dispatchEvent(new Event('vayria-public-stop')); }
+  if (action === 'dispose') f.adapter.dispose();
+  await settle(); t.mock.timers.tick(60000); await settle();
+  assert.equal(f.tracks.length, 1); assert(f.tracks.every(t => t.stopped));
+  f.adapter.dispose(); await settle();
+});
+
+test('stuck iOS playback never advertises listening or reacquires over playback', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const f = fixture(true); const held = getIosAudioSession().holdPlayback(); await held.ready;
+  await f.adapter.start();
+  assert.equal(f.events.at(-1).reason, 'playback-wait');
+  t.mock.timers.tick(60000); await settle();
+  assert.equal(f.events.at(-1).code, 'playback-timeout');
+  assert.equal(f.events.at(-1).recoverable, false);
+  assert.equal(f.tracks.length, 0);
+  held.release(); await settle(); assert.equal(f.tracks.length, 0);
+  await f.adapter.start(); assert.equal(f.events.at(-1).type, 'listening_started');
+  f.adapter.dispose(); await settle();
+});
+
+test('hanging AudioContext.close does not block iOS playback or capture restart', async () => {
+  const f = fixture(true); await f.adapter.start();
+  f.contexts[0].close = () => new Promise(() => {});
+  const held = getIosAudioSession().holdPlayback();
+  await held.ready; assert(f.tracks[0].stopped);
+  held.release(); await settle(); assert.equal(f.tracks.length, 2);
+  f.utterance(); assert.equal(f.requests.length, 1);
+  f.adapter.dispose(); await settle();
+});
+
+for (const action of ['timeout', 'off']) test(`pending microphone permission settles on ${action} and stops late tracks`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const f = fixture(true); const finish = f.deferCapture(); const started = f.adapter.start();
+  if (action === 'timeout') t.mock.timers.tick(15000);
+  else await f.adapter.stop();
+  await settle(); assert.equal(await started, false);
+  if (action === 'timeout') assert.equal(f.events.at(-1).code, 'audio-capture');
+  finish(); await settle(); assert(f.tracks.every(t => t.stopped));
+  assert(!f.events.some(e => e.type === 'listening_started'));
+  f.adapter.dispose(); await settle();
+});
 for (const failure of ['http', 'network']) test(`${failure}: failure preserves capture and resumes without a click or retransmission`, async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const f = fixture(); await f.adapter.start();

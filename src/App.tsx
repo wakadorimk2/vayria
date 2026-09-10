@@ -1,3 +1,5 @@
+import { environmentStorageKey } from './storageKey';
+import { calculateSettingsLayout, type AvatarScreenBounds } from './public/settingsLayout';
 import {
   useCallback,
   useEffect,
@@ -9,7 +11,8 @@ import {
   type FormEvent,
 } from 'react';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
-import { publicActive, requestPublicSession, subscribePublic } from './public/session';
+import { publicActive, publicExhibition, runPublicAction, subscribePublic } from './public/session';
+import { allowExhibitionAutonomy } from './public/exhibitionHandoff';
 import { useBargeInControl } from './app/useBargeInControl';
 import { useCardAttention } from './app/useCardAttention';
 import { useListeningBackchannels } from './app/useListeningBackchannels';
@@ -383,7 +386,7 @@ function readAudioControlState(): AudioControlState {
       AUDIO_SETTINGS_STORAGE_KEY,
       LEGACY_AUDIO_SETTINGS_STORAGE_KEY,
     ]) {
-      const state = parseAudioControlState(localStorage.getItem(storageKey));
+      const state = parseAudioControlState(localStorage.getItem(environmentStorageKey(storageKey)));
       if (state !== null) return state;
     }
   } catch {
@@ -395,7 +398,7 @@ function readAudioControlState(): AudioControlState {
 
 function readRouterAudioInputDeviceId(): string {
   try {
-    return localStorage.getItem(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY)?.trim() ?? '';
+    return localStorage.getItem(environmentStorageKey(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY))?.trim() ?? '';
   } catch {
     return '';
   }
@@ -405,6 +408,7 @@ export default function App() {
   const themePreference = useSyncExternalStore(subscribeTheme, readThemePreference);
   const resolvedTheme = useSyncExternalStore(subscribeTheme, readResolvedTheme);
   const publicSessionActive = useSyncExternalStore(subscribePublic, publicActive);
+  const exhibitionRegistration = useSyncExternalStore(subscribePublic, publicExhibition);
   const [input, setInput] = useState('');
   const [isAvatarReady, setIsAvatarReady] = useState(false);
   const [isCardSelectionActive, setIsCardSelectionActive] = useState(false);
@@ -434,12 +438,19 @@ export default function App() {
   const { isMuted, lastAudibleVolume, volume } = audioControl;
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled;
+  const [publicAvatarBounds, setPublicAvatarBounds] = useState<AvatarScreenBounds | null>(null);
+  const [publicSettingsOpen, setPublicSettingsOpen] = useState(false);
+  const publicSettingsLayout = calculateSettingsLayout(publicAvatarBounds);
   const [publicTextInputOpen, setPublicTextInputOpen] = useState(false);
-  const publicTextPanelRef = usePanelVisibility<HTMLFormElement>((runtimeConfig.mode !== 'public' && !runtimeConfig.worldMutationEnabled) || publicTextInputOpen, '.public-controls__text');
+  const [publicCardsOpen, setPublicCardsOpen] = useState(false);
+  const [publicGreetingComplete, setPublicGreetingComplete] = useState(false);
+  const publicCardsRef = usePanelVisibility<HTMLDivElement>(runtimeConfig.mode !== 'public' || publicCardsOpen, '.public-controls__cards');
+  const togglePublicCards = () => { setPublicTextInputOpen(false); setPublicCardsOpen(value => !value); };
+  const publicTextPanelRef = usePanelVisibility<HTMLFormElement>(runtimeConfig.mode !== 'public' || publicTextInputOpen, '.public-controls__text');
   const [publicSubmitPending, setPublicSubmitPending] = useState(false);
   const publicSubmitPendingRef = useRef(false);
   useEffect(() => {
-    const toggle = () => setPublicTextInputOpen(value => !value);
+    const toggle = () => { setPublicCardsOpen(false); setPublicTextInputOpen(value => !value); };
     window.addEventListener('vayria-public-text-input', toggle);
     return () => window.removeEventListener('vayria-public-text-input', toggle);
   }, []);
@@ -456,6 +467,7 @@ export default function App() {
     beginReply,
     clearReplyPresentation,
     presentReply,
+    resetCards,
     resetTurn,
     resetGame,
     zones,
@@ -496,7 +508,7 @@ export default function App() {
   });
   const characterIdentityRef = useRef<CharacterIdentity>(characterIdentity);
 
-  const pendingCardStimulusRef = useRef<{
+  const [pendingCardStimulus, setPendingCardStimulus] = useState<{
     cardContext: ChatCardContext;
     contribution: DirectionContribution;
     programContext: ProgramContext;
@@ -580,7 +592,7 @@ export default function App() {
   const voiceReactionIdRef = useRef(0);
 
   const routerBlockedSegmentRef = useRef<string | null>(null);
-  const { backchannelAudioRef, backchannelVariantIndexRef, backchannelLoadingRef, preloadBackchannel } = useListeningBackchannels();
+  const { backchannelAudioRef, backchannelVariantIndexRef, backchannelLoadingRef, preloadBackchannel } = useListeningBackchannels(runtimeConfig.mode !== 'public');
 
   const [audioLabMode, setAudioLabMode] = useState<AudioLabMode>(
     () =>
@@ -834,7 +846,12 @@ export default function App() {
     [],
   );
 
-  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
+  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted: acceptReplyPresentation, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
+
+  const handleReplyAccepted = useCallback((ids: string[], revision?: number) => {
+    acceptReplyPresentation(ids, revision);
+    if (runtimeConfig.mode === 'public' && ids.length > 0) setPublicGreetingComplete(true);
+  }, [acceptReplyPresentation]);
 
   const handleCardReplyDelivered = useCallback((ids: string[], revision?: number) => {
     handleReplyAccepted(ids, revision);
@@ -846,7 +863,7 @@ export default function App() {
     next = completeInactiveEpisodes(next);
     autonomyStateRef.current = next;
     setAutonomyState(next);
-    if ((pendingCardStimulusRef.current?.cardContext.swapRevision ?? Infinity) <= revision) pendingCardStimulusRef.current = null;
+    setPendingCardStimulus(current => (current?.cardContext.swapRevision ?? Infinity) <= revision ? null : current);
   }, [handleReplyAccepted, autonomyStateRef, setAutonomyState]);
   const {
     cancelAutonomous,
@@ -1007,7 +1024,7 @@ export default function App() {
             (routerSnapshot.controlState === 'idle' &&
               routerSnapshot.vayriaOutputGate === 'open')),
         attentionAvailable: !isCardSelectionActive,
-        interactionAvailable: isAvatarReady && !isMuted,
+        interactionAvailable: isAvatarReady && (!isMuted || pendingCardStimulus !== null),
       }),
     [
       autonomyState,
@@ -1015,6 +1032,7 @@ export default function App() {
       isAutonomousLoopEnabled,
       isCardSelectionActive,
       isMuted,
+      pendingCardStimulus,
       isPerformerBusy,
       isSttProcessing,
       isVadSpeech,
@@ -1305,8 +1323,9 @@ export default function App() {
     setCardAttentionPhase(null);
 
     resetConversation();
+    setVoiceValidationError('');
     resetRuntime();
-    resetTurn();
+    resetCards();
     cardDropReactionControllerRef.current.reset();
     cardDropReactionPlanIdsRef.current.clear();
     cardReactionPlanIdsRef.current.clear();
@@ -1317,12 +1336,12 @@ export default function App() {
     const initialAutonomyState = createInitialAutonomyState();
     autonomyStateRef.current = initialAutonomyState;
     setAutonomyState(initialAutonomyState);
-    pendingCardStimulusRef.current = null;
+    setPendingCardStimulus(null);
     setProgramPhase(DEFAULT_PROGRAM_CONTEXT.phase);
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
-  }, [manifestationRuntime, resetGame, worldRuntime, stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetTurn, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
+  }, [manifestationRuntime, resetCards, resetGame, worldRuntime, stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
 
   useEffect(() => {
     routerResetSessionRef.current = resetSession;
@@ -1429,7 +1448,7 @@ export default function App() {
       LEGACY_AUDIO_SETTINGS_STORAGE_KEY,
     ]) {
       try {
-        localStorage.setItem(storageKey, serialized);
+        localStorage.setItem(environmentStorageKey(storageKey), serialized);
       } catch {
         // Playback remains usable when storage is unavailable.
       }
@@ -1441,11 +1460,11 @@ export default function App() {
     try {
       if (routerAudioInputDeviceId) {
         localStorage.setItem(
-          ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY,
+          environmentStorageKey(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY),
           routerAudioInputDeviceId,
         );
       } else {
-        localStorage.removeItem(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY);
+        localStorage.removeItem(environmentStorageKey(ROUTER_AUDIO_INPUT_DEVICE_STORAGE_KEY));
       }
     } catch {
       // Remote PCM remains usable when local settings storage is unavailable.
@@ -1776,6 +1795,7 @@ export default function App() {
       const expectedSessionGeneration = sessionGeneration;
       const isCurrentSession = () =>
         expectedSessionGeneration === sessionGenerationRef.current;
+      const stimulus = pendingCardStimulus;
 
       if (
         !isCurrentSession() ||
@@ -1783,7 +1803,7 @@ export default function App() {
         (runtimeConfig.routerEnabled &&
           (routerSnapshot.controlState !== 'idle' ||
             routerSnapshot.vayriaOutputGate === 'closed')) ||
-        isMuted ||
+        (isMuted && !stimulus) ||
         isBusy ||
         Boolean(activePlanRef.current) ||
         (runtimeConfig.worldMutationEnabled && (worldRuntime.getSnapshot().phase === 'ready' || worldRuntime.getSnapshot().source === 'autonomous'))
@@ -1793,8 +1813,8 @@ export default function App() {
 
       const candidate = options.candidate ?? autonomyCandidate;
       if (!candidate) return 'aborted' as AutonomousTurnOutcome;
-      const stimulus = pendingCardStimulusRef.current;
-      pendingCardStimulusRef.current = null;
+      if (!allowExhibitionAutonomy(!!exhibitionRegistration, !!stimulus)) return 'aborted' as AutonomousTurnOutcome;
+      setPendingCardStimulus(null);
       const cardContextOverride =
         options.cardContextOverride ?? stimulus?.cardContext;
       const contribution = options.contribution ?? stimulus?.contribution;
@@ -1849,13 +1869,13 @@ export default function App() {
         });
       };
 
-      if (isExhibitionMode) {
+      if (!isMuted && isExhibitionMode) {
         const audioReady = await prepare();
         if (!audioReady || !isCurrentSession()) {
           cancelPreactivatedPlan();
           return 'aborted' as AutonomousTurnOutcome;
         }
-      } else {
+      } else if (!isMuted) {
         void prepare();
       }
       const currentActivePlan: PerformancePlan | null =
@@ -1866,7 +1886,7 @@ export default function App() {
         currentActivePlan.planId === preactivatedPlan.planId;
       if (
         !isCurrentSession() ||
-        isMuted ||
+        (isMuted && !stimulus) ||
         isBusy ||
         (preactivatedPlan === null
           ? activePlanRef.current !== null
@@ -1921,7 +1941,7 @@ export default function App() {
       setAutonomyState(nextState);
       return decision.externalAction === 'speak' ? 'speak' : 'none';
     },
-    [worldRuntime, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleCardReplyDelivered, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, prepare, executeNonSpeechPlan],
+    [pendingCardStimulus, exhibitionRegistration, worldRuntime, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleCardReplyDelivered, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, prepare, executeNonSpeechPlan],
   );
 
   const handleCardInserted = useCallback(
@@ -1932,7 +1952,7 @@ export default function App() {
       }
       if (runtimeConfig.mode === 'public') {
         if (!isMuted) void prepare();
-        void requestPublicSession();
+        void runPublicAction(() => true);
       }
       setProgramPhase('after_card_change');
       const contribution = activateCardSwap(result);
@@ -1990,8 +2010,8 @@ export default function App() {
         cardDropReactionPlanIdsRef.current.add(reactionPlan.planId);
         executeNonSpeechPlan(reactionPlan);
       }
-      if (!isAutonomousLoopEnabled || isMuted) return;
-      pendingCardStimulusRef.current = {
+      if (!isAutonomousLoopEnabled) return;
+      setPendingCardStimulus({
         cardContext: {
           brainCardIds: result.brainCardIds,
           forcedCardId: result.forcedCardId,
@@ -2002,7 +2022,7 @@ export default function App() {
           ...programContext,
           phase: 'after_card_change',
         },
-      };
+      });
     },
     [changeCardsDuringTurn, readCardContext, isVadSpeech, isSttProcessing, worldRuntime, activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
@@ -2073,7 +2093,13 @@ export default function App() {
 
       if (runtimeConfig.mode === 'public') {
         void prepare();
-        if (!(await requestPublicSession())) return;
+        await runPublicAction(async () => {
+          if (!(await startVoiceInput())) return false;
+          if (!publicActive() || document.hidden) { await stopVoiceInput(); return false; }
+          void prepare(); preloadBackchannel();
+          return true;
+        });
+        return;
       }
       if (!(await startVoiceInput())) return;
       void prepare();
@@ -2100,9 +2126,9 @@ export default function App() {
     isBusy: isPerformerBusy || (runtimeConfig.worldMutationEnabled && (worldSnapshot.phase === 'ready' || worldSnapshot.readyProps > 0 || worldSnapshot.source === 'autonomous')),
     isVoiceActivityActive: isVadSpeech || isSttProcessing,
     isLoopEnabled: isAutonomousLoopEnabled && (runtimeConfig.mode !== 'public' || publicSessionActive),
-    isMuted,
+    isMuted: isMuted && pendingCardStimulus === null,
     isReady:
-      isAvatarReady && (!isExhibitionMode || isAudioUnlocked),
+      isAvatarReady && (!isExhibitionMode || isAudioUnlocked || (isMuted && pendingCardStimulus !== null)),
     onCandidate: startAutonomous,
     onGateEvent: emitAutonomyGateEvent,
     sessionGeneration,
@@ -2110,23 +2136,23 @@ export default function App() {
     timingMode: runtimeConfig.autonomyTimingMode,
   });
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!trimmedInput || isManualBusy || publicSubmitPendingRef.current) return;
-    if (runtimeConfig.mode === 'public') {
+  const submitMessage = async (message: string, greeting?: true, admitted = false): Promise<boolean> => {
+    const text = message.trim();
+    if (!text || isManualBusy || (!admitted && publicSubmitPendingRef.current)) return false;
+    if (runtimeConfig.mode === 'public' && !admitted) {
       if (!isMuted) void prepare();
       publicSubmitPendingRef.current = true;
       setPublicSubmitPending(true);
-      try { if (!(await requestPublicSession())) return; }
+      try { return await runPublicAction(() => submitMessage(text, greeting, true)); }
       finally { publicSubmitPendingRef.current = false; setPublicSubmitPending(false); }
-      setPublicTextInputOpen(false);
     }
+    if (admitted) setPublicSubmitPending(false);
     if (
       runtimeConfig.routerEnabled &&
       routerSnapshot.vayriaOutputGate === 'closed' &&
       routerSnapshot.controlState !== 'human_override'
     ) {
-      return;
+      return false;
     }
     if (
       !runtimeConfig.routerEnabled ||
@@ -2145,12 +2171,12 @@ export default function App() {
     cancelActiveCardReactionPlan();
     const trigger: PerformerTrigger = {
       kind: 'viewer_message',
-      text: trimmedInput,
+      text: text,
     };
-    const identityForRequest = rememberExplicitAlias(trimmedInput);
+    const identityForRequest = rememberExplicitAlias(text);
     let manualAutonomyEvidenceContext: AutonomyEvidenceContext | undefined;
-    if (isContentBearingVoiceMessage(trimmedInput)) {
-      const semanticKey = `conversation:${trimmedInput
+    if (isContentBearingVoiceMessage(text)) {
+      const semanticKey = `conversation:${text
         .normalize('NFKC')
         .replace(/\s+/gu, ' ')
         .trim()
@@ -2161,14 +2187,14 @@ export default function App() {
         kind: 'conversation_input',
         at: Date.now(),
         semanticKey,
-        content: trimmedInput,
+        content: text,
         wakeConditions: ['new_evidence', 'floor_available'],
         reasonProposals: [
           {
             kind: 'conversation_continuation',
-            content: trimmedInput,
+            content: text,
             semanticKey,
-            salience: /[?？]/u.test(trimmedInput) ? 0.9 : 0.68,
+            salience: /[?？]/u.test(text) ? 0.9 : 0.68,
           },
         ],
       });
@@ -2177,7 +2203,7 @@ export default function App() {
         readAutonomyEvidenceContext(nextAutonomyState, evidenceId) ?? undefined;
     }
     setAutonomousContext((current) =>
-      recordViewerIntent(current, trimmedInput, identityForRequest),
+      recordViewerIntent(current, text, identityForRequest),
     );
     const plan = createPlanForTrigger(trigger);
     cardDropReactionControllerRef.current.handoffToReply(
@@ -2189,15 +2215,22 @@ export default function App() {
     }
     if (!isMuted) void prepare();
     setInput('');
-    void sendManual(
-      trimmedInput,
+    if (runtimeConfig.mode === 'public') setPublicTextInputOpen(false);
+    return await sendManual(
+      text,
       manualCardContext,
       handleCardReplyDelivered,
       plan,
       identityForRequest,
       undefined,
       manualAutonomyEvidenceContext,
+      greeting,
     );
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    submitMessage(input);
   };
 
   const handleMuteToggle = () => {
@@ -2558,6 +2591,8 @@ export default function App() {
           listeningReaction={listeningReaction}
           mouthOpen={mouthOpen}
           onReady={handleAvatarReady}
+          onScreenBounds={runtimeConfig.mode === 'public' ? setPublicAvatarBounds : undefined}
+          horizontalOffset={runtimeConfig.mode === 'public' && publicSettingsOpen ? publicSettingsLayout.avatarOffset : 0}
           performancePlan={activePlan ?? undefined}
           ref={stageRef}
           sessionGeneration={sessionGeneration}
@@ -2565,16 +2600,33 @@ export default function App() {
         />
         {isExhibitionMode && (
           <aside className="exhibition-copy" aria-label="展示案内">
-            <p className="exhibition-copy__title">Vayriaに一枚、どうぞ。</p>
+            <p className="exhibition-copy__title">一枚替えると、どんな反応？</p>
             <p className="exhibition-copy__hint">
-              気になるカードを一枚、Vayriaの脳内へ。
+              カードでVayriaの話し方や連想が変わります。声を出さずに試せます。
             </p>
           </aside>
         )}
-        {runtimeConfig.manifestationEnabled ? <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} /> : <CardGamePrototype
+        {runtimeConfig.manifestationEnabled ? <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} /> : <div ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
           isExchangeLocked={runtimeConfig.worldMutationEnabled && worldSnapshot.source === 'card' && (worldSnapshot.phase === 'pending' || worldSnapshot.phase === 'ready')}
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
+          key={sessionGeneration}
           game={cardGame}
+          onAskQuestion={message => { void submitMessage(message); }}
+          lastReply={!conversationError ? reply : undefined}
+          isQuestionDisabled={isManualBusy || (runtimeConfig.routerEnabled && routerSnapshot.vayriaOutputGate === 'closed' && routerSnapshot.controlState !== 'human_override')}
+          feedbackMessage={
+            conversationError
+              ? '返答を続けられませんでした。もう一度聞くか、最初からやり直せます。'
+              : needsPlaybackGesture
+                ? '音声の再生許可が必要です。下の「音声を再開」を押してください。'
+                : isMuted
+                  ? '音声はオフです。「今どんな気分？」と聞くと、字幕で返答を読めます。'
+                  : status === 'idle'
+                    ? zones.forcedCardId
+                      ? 'カードを受け取りました。まだ返答がなければ、下のボタンで聞けます。'
+                      : 'もう一枚替えても、ここで終えても大丈夫。'
+                    : conversationStatusLabel
+          }
           isResetLocked={isPerformerBusy && !runtimeConfig.worldMutationEnabled}
           onCardAttentionInput={handleCardAttentionInput}
           onCardDragPositionChange={handleCardDragPositionChange}
@@ -2582,9 +2634,9 @@ export default function App() {
           onCardInteraction={handleCardInteraction}
           onCardInserted={handleCardInserted}
           onSessionReset={handleSessionReset}
-          onSelectionActiveChange={setIsCardSelectionActive}
+          onSelectionActiveChange={active => setIsCardSelectionActive(active && (runtimeConfig.mode !== 'public' || publicCardsOpen))}
           spatialTargetRegistry={spatialTargetRegistry}
-        />}
+        /></div>}
       </section>
 
       {runtimeConfig.manifestationEnabled && <nav className="manifestation-actions" aria-label="会話の操作"><button onClick={() => { void handleVoiceToggle(); }} aria-pressed={isVoiceInputEnabled}>マイク</button><button onClick={() => setPublicTextInputOpen(value => !value)} aria-expanded={publicTextInputOpen}>文字で話す</button></nav>}
@@ -2631,7 +2683,7 @@ export default function App() {
           )}
         </div>
 
-        <form ref={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled ? publicTextPanelRef : undefined} className="message-form" data-manifestation-open={publicTextInputOpen} onSubmit={handleSubmit}>
+        <form id="public-text-panel" ref={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled ? publicTextPanelRef : undefined} className="message-form" data-manifestation-open={publicTextInputOpen} onSubmit={handleSubmit}>
           <label className="visually-hidden" htmlFor="message-input">
             キャラクターへ送るメッセージ
           </label>
@@ -2708,6 +2760,14 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
+          settingsLayout={publicSettingsLayout}
+          onSettingsOpenChange={setPublicSettingsOpen}
+          cardsOpen={publicCardsOpen}
+          textOpen={publicTextInputOpen}
+          onCardsToggle={togglePublicCards}
+          greetingComplete={publicGreetingComplete}
+          greetingBusy={isManualBusy || publicSubmitPending}
+          onGreeting={() => { void submitMessage('こんにちは', true); }}
           themePreference={themePreference}
           resolvedTheme={resolvedTheme}
           onThemeChange={setThemePreference}

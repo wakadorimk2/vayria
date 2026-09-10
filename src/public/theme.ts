@@ -1,6 +1,7 @@
+import { environmentStorageKey } from '../storageKey';
 export type ThemePreference = 'auto' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
-const key = 'vayria-public-theme';
+const key = environmentStorageKey('vayria-public-theme');
 let preference: ThemePreference = 'auto';
 let resolved: ResolvedTheme = 'light';
 let media: MediaQueryList | null = null;

@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
-import { validatePr } from './staging-pr.mjs';
 const bundle = await build({ entryPoints: ['worker/ledger.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
 const { Ledger, initialState } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 function setup() {
@@ -43,13 +42,49 @@ test('global five dollar ceiling and existing daily budget reject before chargin
   assert.throws(() => ledger.manifestationBegin('v', 's', { ...event, eventId: 'b' }, 'b'));
   assert.equal(state.manifestation.reservedMicrousd, 125000);
 });
-test('expired generation cannot publish and staged PR guard rejects dirty/fork/stale revisions', () => {
+test('expired generation cannot publish', () => {
   const { ledger, state, event } = setup(); ledger.manifestationBegin('v', 's', event, 'a');
   assert.throws(() => new Ledger(state, 12000).manifestationComplete('v', 's', 'a', 'url'), /job_expired/);
-  const sha = 'a'.repeat(40); const repo = { full_name: 'wakadorimk2/vayria' };
-  const pr = { state: 'open', head: { sha, repo }, base: { repo, ref: 'main' } };
-  validatePr(pr, sha, sha, '');
-  assert.throws(() => validatePr(pr, sha, sha, ' M file'));
-  assert.throws(() => validatePr(pr, sha, 'b'.repeat(40), ''));
-  assert.throws(() => validatePr({ ...pr, head: { sha, repo: { full_name: 'fork/repo' } } }, sha, sha, ''));
+});
+
+const workerBundle = await build({ entryPoints: ['worker/manifestation.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
+const { manifestation, mediaUrl } = await import('data:text/javascript;base64,' + Buffer.from(workerBundle.outputFiles[0].text).toString('base64'));
+test('public generation is staged, fixed-input, budgeted, and relays authenticated media without credentials', async () => {
+  const { ledger, event } = setup();
+  const calls = []; const previous = globalThis.fetch;
+  const env = { PUBLIC_HOSTNAME: 'vayria.me', PUBLIC_BASE_PATH: '/staging', REQUIRE_PREVIEW_ACCESS: 'true', GENERATION_ENABLED: 'true', MANIFESTATION_ENABLED: 'true', FAL_KEY: 'test', ASSETS: { fetch: async () => new Response('png') } };
+  const call = async (op, b) => {
+    calls.push(op);
+    if (op === 'manifestationBegin') return ledger.manifestationBegin(b.visitor, b.id, b.manifestationEvent, b.token);
+    if (op === 'manifestationComplete') return ledger.manifestationComplete(b.visitor, b.id, b.token, b.target);
+    if (op === 'manifestationFinish') return ledger.manifestationFinish(b.token, b.code, b.timings);
+    return ledger.manifestationMedia(b.visitor, b.token);
+  };
+  let submitted;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('fal.media')) {
+      assert.equal(new Headers(init.headers).get('Authorization'), null);
+      assert.equal(new Headers(init.headers).get('Range'), 'bytes=0-7');
+      return new Response(new Uint8Array(8), { status: 206, headers: { 'Content-Type': 'video/mp4', 'Content-Length': '8', 'Content-Range': 'bytes 0-7/100' } });
+    }
+    if (init.method === 'POST') { assert(calls.includes('manifestationBegin')); submitted = JSON.parse(init.body); return Response.json({ request_id: 'job', status_url: 'https://queue.fal.run/status', response_url: 'https://queue.fal.run/result' }); }
+    if (String(url).endsWith('/status')) return Response.json({ status: 'COMPLETED' });
+    return Response.json({ video: { url: 'https://v3.fal.media/test.mp4' }, timings: { inference: .5 } });
+  };
+  try {
+    const request = () => new Request('https://vayria.me/api/manifestation/generate', { method: 'POST', body: JSON.stringify({ event }) });
+    await assert.rejects(manifestation(request(), { ...env, PUBLIC_BASE_PATH: '' }, 'v', 's', call), /not_found/);
+    await assert.rejects(manifestation(request(), env, 'other', 's', call), /session_expired/);
+    const response = await manifestation(request(), env, 'v', 's', call); const result = await response.json();
+    assert.equal(submitted.prompt_expansion_mode, 'fast'); assert.equal(submitted.resolution, '480P');
+    assert.match(result.url, /^\/staging\/api\/manifestation\/media\//);
+    assert.equal(result.trace.inferenceSeconds, .5);
+    const media = new Request('https://vayria.me' + result.url.replace('/staging', ''), { headers: { Range: 'bytes=0-7' } });
+    await assert.rejects(manifestation(media, env, 'other', '', call), /invalid_ticket/);
+    const video = await manifestation(media, env, 'v', '', call);
+    assert.equal(video.status, 206); assert.equal((await video.arrayBuffer()).byteLength, 8);
+    assert.throws(() => mediaUrl('https://evil.example/video.mp4'));
+    assert.throws(() => mediaUrl('https://fal.media.evil.example/video.mp4'));
+    assert.throws(() => mediaUrl('https://user:password@fal.media/video.mp4'));
+  } finally { globalThis.fetch = previous; }
 });

@@ -159,6 +159,12 @@ export function useCardGamePrototype(unlimitedInterference = false, worldEnabled
     setSelectedHandCardId(null);
   }, [worldEnabled, updateZones]);
 
+  const resetCards = useCallback(() => {
+    setZones(createInitialState());
+    setSelectedBrainCardId(null);
+    setSelectedHandCardId(null);
+  }, []);
+
   const beginReply = useCallback(() => {
     updateZones((current) => ({ ...current, activatedCardIds: [] }));
   }, [updateZones]);
@@ -193,6 +199,7 @@ export function useCardGamePrototype(unlimitedInterference = false, worldEnabled
     presentReply,
     resetTurn,
     resetGame,
+    resetCards,
     selectCard,
     selectedBrainCardId,
     selectedHandCardId,

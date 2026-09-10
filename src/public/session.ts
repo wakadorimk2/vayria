@@ -1,7 +1,16 @@
+import { publicUrl } from './paths';
 import { publicErrorMessage } from './errors';
 import { runtimeConfig } from '../runtimeConfig';
 export type PublicStatus = { session: { id: string; expires: number } | null; remainingDay: number; remainingMonth: number;
-  enabled?: boolean; siteKey?: string; cookieReady?: boolean; stopped?: boolean };
+  enabled?: boolean; siteKey?: string; cookieReady?: boolean; stopped?: boolean; exhibition?: ExhibitionStatus | null };
+export type ExhibitionStatus = { id: string; starts: number; expires: number; epoch: number; budgetYen: number; usedYen: number;
+  available: boolean; revoked: boolean; stopped: boolean; warning: '50' | '80' | null };
+let exhibition: ExhibitionStatus | null = null;
+export const publicExhibition = () => exhibition;
+export function updatePublicStatus(value: Pick<PublicStatus, 'exhibition'>) {
+  exhibition = value.exhibition ?? null;
+  for (const listener of listeners) listener();
+}
 let session: PublicStatus['session'] = null;
 let active = false;
 let cancellation = new AbortController();
@@ -30,7 +39,23 @@ export function activatePublic(value: PublicStatus['session']) {
   for (const listener of listeners) listener();
   window.dispatchEvent(new Event(active ? 'vayria-public-start' : 'vayria-public-stop'));
 }
-export function pausePublic() { activatePublic(null); }
+let pendingAction: object | null = null;
+let actionGeneration = 0;
+// One explicit operation owns admission. A later cancel invalidates its continuation.
+export async function runPublicAction(action: () => void | boolean | Promise<void | boolean>): Promise<boolean> {
+  if (pendingAction || document.hidden) return false;
+  const owner = {};
+  const generation = actionGeneration;
+  pendingAction = owner;
+  try {
+    if (!(await requestPublicSession()) || generation !== actionGeneration || document.hidden || !publicActive()) return false;
+    return (await action()) !== false;
+  } finally {
+    if (pendingAction === owner) pendingAction = null;
+  }
+}
+export function cancelPublicAction() { actionGeneration += 1; pendingAction = null; }
+export function pausePublic() { cancelPublicAction(); activatePublic(null); }
 export const publicSessionId = () => session?.id ?? '';
 let ttsQueue = Promise.resolve();
 export async function publicFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -45,6 +70,7 @@ export async function publicFetch(path: string, init: RequestInit = {}): Promise
 }
 async function performFetch(path: string, init: RequestInit = {}, continuationRetries = 0): Promise<Response> {
   if (runtimeConfig.mode !== 'public') return fetch(path, init);
+  path = publicUrl(path);
   if (!active || !session || session.expires <= Date.now() || document.hidden) {
     pausePublic(); return Response.json({ code: 'session_required', error: publicErrorMessage({ code: 'session_required' }) }, { status: 401 });
   }
@@ -65,6 +91,7 @@ async function performFetch(path: string, init: RequestInit = {}, continuationRe
     if (signal.aborted) throw error;
     response = Response.json({ code: 'network_error' }, { status: 503 });
   }
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   if (response.ok && /\/api\/(chat|card-preview)$/.test(path)) {
     if (response.headers.get('Content-Type')?.startsWith('application/x-ndjson') && response.body) {
       let pending = '';
@@ -75,10 +102,11 @@ async function performFetch(path: string, init: RequestInit = {}, continuationRe
         return JSON.stringify(value); };
       const reader = response.body.pipeThrough(new TextDecoderStream()).pipeThrough(new TransformStream<string, Uint8Array>({
         transform(chunk, controller) {
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
           pending += chunk; let index: number;
           while ((index = pending.indexOf('\n')) >= 0) { const line = pending.slice(0, index); pending = pending.slice(index + 1);
             controller.enqueue(new TextEncoder().encode((line.trim() ? inspect(line) : line) + '\n')); }
-        }, flush(controller) { if (pending.trim()) { controller.enqueue(new TextEncoder().encode(inspect(pending))); } },
+        }, flush(controller) { if (signal.aborted) throw new DOMException('Aborted', 'AbortError'); if (pending.trim()) { controller.enqueue(new TextEncoder().encode(inspect(pending))); } },
       })).getReader();
       const stream = new ReadableStream<Uint8Array>({
         async pull(controller) {

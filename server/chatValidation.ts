@@ -769,6 +769,7 @@ export function readChatRequest(payload: unknown): ChatRequestPayload {
   const record = payload as Record<string, unknown>;
   const allowedKeys = new Set([
     'cardContinuation',
+    'greeting',
     'mode',
     'message',
     'characterIdentity',
@@ -797,6 +798,9 @@ export function readChatRequest(payload: unknown): ChatRequestPayload {
   }
 
   const mode = record.mode;
+  if (record.greeting !== undefined && (record.greeting !== true || mode !== 'manual')) {
+    throw new RequestError('greeting must be true and requires manual mode.', 400);
+  }
   if (mode !== 'manual' && mode !== 'voice' && mode !== 'autonomous') {
     throw new RequestError('mode must be manual, voice, or autonomous.', 400);
   }
@@ -1104,6 +1108,7 @@ export function readChatRequest(payload: unknown): ChatRequestPayload {
     ...(cardContinuation === undefined ? {} : { cardContinuation }),
     mode,
     message: normalizedMessage,
+    ...(record.greeting === true ? { greeting: true as const } : {}),
     characterIdentity,
     history: normalizedHistory,
     brainCardIds,
