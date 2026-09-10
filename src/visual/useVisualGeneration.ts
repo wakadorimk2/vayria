@@ -10,7 +10,7 @@ export function useVisualGeneration(){
   const [client]=useState(()=>{
     let serial=Promise.resolve();let revision=0;
     const runtime=new VisualSession({now:Date.now,release:asset=>releasePrepared(asset.url),
-      diagnostic:(event,id,milliseconds)=>{if(runtimeConfig.mode==='public'&&runtimeConfig.manifestationEnabled)console.info('[visual]',JSON.stringify({event,id,milliseconds}));},
+      diagnostic:(event,id,milliseconds)=>{if(runtimeConfig.mode==='public'&&runtimeConfig.manifestationEnabled)console.info('[visual]',JSON.stringify({event,id,at:Date.now(),milliseconds}));},
       cancel:async(ticket)=>{await publicFetch('/api/visual/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})});},
       prepare:async(asset,signal)=>{
         if(asset.kind==='video'){await prepareObject({...asset,composite:'green-key',mode:'reused-base-video',timings:{}},signal);return;}

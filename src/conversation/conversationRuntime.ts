@@ -517,6 +517,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
   };
   const processTurn = async (turnSource: ConversationSource, message: string | null, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[], swapRevision?: number) => void, autonomousContext: AutonomousContext | null, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyCandidate: AutonomyCandidate | null = null, autonomyEvidenceContext: AutonomyEvidenceContext | null = null, greeting?: true, continuationState?: NonNullable<ProcessTurnResult['cardChange']>): Promise<ProcessTurnResult> => {
     const eventEmitter = createConversationEventEmitter(turnSource);
+    const visualInputAt=Date.now();
     const messageForRequest = message;
     const programContextForRequest = { ...(programContextOverride ?? programContextRef.current), ...(programContextRef.current.worldContext ? { worldContext: programContextRef.current.worldContext } : {}) };
     const isCardChangeTurn = turnSource === 'autonomous' &&
@@ -836,6 +837,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
                 return;
               streamingPlaybackStarted = true;
               speechStartedAt = startedAt;
+              if(runtimeConfig.mode==='public'&&runtimeConfig.manifestationEnabled)console.info('[visual-audio]',JSON.stringify({id:eventEmitter.turnId,at:Date.now(),milliseconds:Date.now()-visualInputAt}));
               eventEmitter.emit('playback_started', {
                 durationMs: startedAt - (streamingTtsStartedAt ?? unitTtsStartedAt),
                 phase: 'tts',
@@ -1066,7 +1068,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         throw new Error('AI が交換したカードを主役にしませんでした。');
       }
       const visualIntent = readVisualIntent(chatPayload.visualIntent);
-      if (runtimeConfig.mode === 'public' && runtimeConfig.manifestationEnabled) console.info('[visual-decision]', JSON.stringify({ id: eventEmitter.turnId, target:visualIntent?.targetId, decision: chatPayload.visualDecision ?? (visualIntent ? 'accepted' : 'missing'), ticket: Boolean(chatPayload.visualTicket) }));
+      if (runtimeConfig.mode === 'public' && runtimeConfig.manifestationEnabled) console.info('[visual-decision]', JSON.stringify({ id: eventEmitter.turnId, at:Date.now(),milliseconds:Date.now()-visualInputAt,target:visualIntent?.targetId, decision: chatPayload.visualDecision ?? (visualIntent ? 'accepted' : 'missing'), ticket: Boolean(chatPayload.visualTicket) }));
       if (visualIntent && visualIntent.type !== 'none' && typeof chatPayload.visualTicket === 'string' && Number.isSafeInteger(chatPayload.visualGeneration))
         onVisualIntentRef.current?.(eventEmitter.turnId, visualIntent, chatPayload.visualTicket, chatPayload.visualGeneration!);
       responseEmotion = normalizeEmotion(chatPayload.emotion);
