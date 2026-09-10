@@ -492,8 +492,8 @@ export async function generateInteractiveResponse(
   streaming: StreamingReplyCallbacks | null = null,
   earlySpeechLead = true,
   recentExpressionLevels: readonly ExpressionLevel[],
-  cardContinuation?: CardContinuation,
   greeting = false,
+  cardContinuation?: CardContinuation,
 ): Promise<CardAssistantResponse> {
   const selfNameResolution = resolveSelfName(message, characterIdentity);
   const fastPathDecision: ConversationActionDecision | null =
@@ -554,8 +554,8 @@ export async function generateInteractiveResponse(
       : null,
     earlySpeechLead,
     recentExpressionLevels,
-    cardContinuation,
     greeting,
+    cardContinuation,
   );
   return {
     ...reply.response,
@@ -675,8 +675,8 @@ export async function generateReply(
   streaming: StreamingReplyCallbacks | null = null,
   earlySpeechLead = true,
   recentExpressionLevels: readonly ExpressionLevel[] = [],
-  cardContinuation?: CardContinuation,
   greeting = false,
+  cardContinuation?: CardContinuation,
 ): Promise<GeneratedChatResponse> {
   const streamingEnabled = streaming !== null;
   const providerSource = resolveLlmProviderSource(

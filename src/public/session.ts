@@ -151,7 +151,7 @@ async function performFetch(path: string, init: RequestInit = {}, continuationRe
       });
       return performFetch(path, init, continuationRetries + 1);
     }
-    window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: { ...reason, source: path } }));
+    window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: { ...reason, source: path.endsWith('/api/transcribe') ? '/api/transcribe' : path } }));
     const headers = new Headers(response.headers); headers.delete('content-length'); headers.delete('content-encoding');
     return Response.json({ ...reason, error: publicErrorMessage(reason) }, { status: response.status, headers });
   }

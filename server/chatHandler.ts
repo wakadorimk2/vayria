@@ -165,8 +165,8 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
         streamingCallbacks,
         earlySpeechLead,
         recentExpressionLevels,
-        cardContinuation,
         greeting,
+        cardContinuation,
       );
     } else {
       const generatedResponse = await generateReply(
@@ -191,8 +191,8 @@ export async function handleChatRequest(request: IncomingMessage, response: Serv
         streamingCallbacks,
         earlySpeechLead,
         recentExpressionLevels,
-        cardContinuation,
         greeting,
+        cardContinuation,
       );
       assistantResponse =
         mode === 'voice'

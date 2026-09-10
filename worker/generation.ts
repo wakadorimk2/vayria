@@ -17,10 +17,10 @@ export async function generate(payload: unknown, preview: boolean, apiKey: strin
   const p = readChatRequest(payload);
   if (p.mode === 'manual') return generateInteractiveResponse(llm, p.mode, p.message!, p.history,
     p.brainCardIds, p.forcedCardId, p.performanceContext, p.characterIdentity, p.programContext,
-    telemetry, callbacks, p.earlySpeechLead, p.recentExpressionLevels, p.cardContinuation, p.greeting);
+    telemetry, callbacks, p.earlySpeechLead, p.recentExpressionLevels, p.greeting, p.cardContinuation);
   const result = await generateReply(llm, p.mode, p.message, p.history, p.brainCardIds, p.forcedCardId,
     p.topic, p.topicTurns, p.viewerIntent, p.viewerTurnsSince, p.viewerEngagement, p.performerState,
     p.lastSelfUtterance, p.performanceContext, p.characterIdentity, p.programContext, p.autonomyCandidate,
-    telemetry, callbacks, p.earlySpeechLead, p.recentExpressionLevels, p.cardContinuation);
+    telemetry, callbacks, p.earlySpeechLead, p.recentExpressionLevels, p.greeting, p.cardContinuation);
   return { ...result.response, ...(p.mode === 'voice' ? { interactionAction: result.response.voiceAction, internalDelta: { reasonUpdates: [] } } : {}) };
 }
