@@ -451,11 +451,11 @@ export default function App() {
   const cardGame = useCardGamePrototype(runtimeConfig.mode === 'public');
   const {
     acceptReply,
+    readCardContext,
     beginReply,
     clearReplyPresentation,
     presentReply,
     resetCards,
-    resetTurn,
     zones,
   } = cardGame;
   const cardPresentationPlanIdRef = useRef<string | null>(null);
@@ -832,15 +832,24 @@ export default function App() {
     [],
   );
 
-  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, pendingActivatedCardIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted: acceptReplyPresentation, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, resetTurn, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
+  const { cardDropReactionControllerRef, cardReactionPlanIdsRef, cardDropReactionPlanIdsRef, nonSpeechTimerRef, handlePerformanceResult, handleReplyAccepted, cancelActiveCardReactionPlan, executeNonSpeechPlan, cancelNonSpeechPlan } = usePerformancePresentation({ activePlanRef, setActivePlan, setActiveEmotionCue, setIsAutonomousLoopEnabled, playbackCoordinator, completePlan, acceptReply, handlePerformancePlan, sessionGeneration, sessionGenerationRef });
 
-  const handleReplyAccepted = useCallback((ids: string[]) => {
-    acceptReplyPresentation(ids);
+  const handleCardReplyDelivered = useCallback((ids: string[], revision?: number) => {
+    handleReplyAccepted(ids, revision);
     if (runtimeConfig.mode === 'public' && ids.length > 0) setPublicGreetingComplete(true);
-  }, [acceptReplyPresentation]);
-
+    if (!ids.length || revision === undefined) return;
+    let next = autonomyStateRef.current;
+    const cardReasons = next.reasons.filter(reason => reason.status === 'active' &&
+      reason.decisionEvidenceIds.some(id => id.startsWith('card-evidence:') && Number(id.slice(14)) <= revision));
+    for (const reason of cardReasons) next = resolveUsedReasons(next, [reason.id], reason.episodeId);
+    next = completeInactiveEpisodes(next);
+    autonomyStateRef.current = next;
+    setAutonomyState(next);
+    setPendingCardStimulus(current => (current?.cardContext.swapRevision ?? Infinity) <= revision ? null : current);
+  }, [handleReplyAccepted, autonomyStateRef, setAutonomyState]);
   const {
     cancelAutonomous,
+    changeCardsDuringTurn,
     error,
     evaluateVoiceParticipation,
     interruptCurrentTurn,
@@ -856,6 +865,7 @@ export default function App() {
     source,
     status,
   } = useConversation(playbackCoordinator, {
+    createCardContinuationPlan: trigger => createPlanForTrigger(trigger),
     historyTurnLimit: 5,
     isExhibitionMode,
     isMuted,
@@ -1292,7 +1302,6 @@ export default function App() {
     cardDropReactionControllerRef.current.reset();
     cardDropReactionPlanIdsRef.current.clear();
     cardReactionPlanIdsRef.current.clear();
-    pendingActivatedCardIdsRef.current.clear();
     activePlanRef.current = null;
     setActivePlan(null);
     setActiveEmotionCue(null);
@@ -1305,7 +1314,7 @@ export default function App() {
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
-  }, [stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetCards, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, pendingActivatedCardIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
+  }, [stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetCards, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
 
   useEffect(() => {
     routerResetSessionRef.current = resetSession;
@@ -1468,14 +1477,6 @@ export default function App() {
       spatialTargetRegistry.clearTransient('game');
     };
   }, [clearCardAttentionTimers, nonSpeechTimerRef, spatialTargetRegistry]);
-
-  const readCardContext = useCallback(
-    () => ({
-      brainCardIds: zones.brain.map((card) => card.id),
-      forcedCardId: zones.forcedCardId,
-    }),
-    [zones.brain, zones.forcedCardId],
-  );
 
   const getDirectionContribution = useCallback(
     (trigger: PerformerTrigger) =>
@@ -1718,7 +1719,7 @@ export default function App() {
           void sendVoice(
             message,
             voiceCardContext,
-            handleReplyAccepted,
+            handleCardReplyDelivered,
             plan,
             { segmentId: event.segmentId, at: event.at, asrConfidence: null },
             identityForRequest,
@@ -1746,7 +1747,7 @@ export default function App() {
           return;
       }
     },
-    [recordVoiceSignal, routerSnapshot.gptInputGate, observeRouterSignal, recordAutonomyEvidence, dispatchBargeIn, activeBargeInSegmentRef, stopReaction, ttsPlaying, getPrimaryPlaybackAgeMs, source, rememberExplicitAlias, isBusy, evaluateVoiceParticipation, readCardContext, cardDropReactionControllerRef, cancelNonSpeechPlan, cancelActiveCardReactionPlan, createPlanForTrigger, isMuted, prepare, handleConversationInputReceived, sendVoice, handleReplyAccepted, notifyMeaningfulAutonomyEvent, readAutonomyEvidenceContext, interruptCurrentTurn, beginReply],
+    [recordVoiceSignal, routerSnapshot.gptInputGate, observeRouterSignal, recordAutonomyEvidence, dispatchBargeIn, activeBargeInSegmentRef, stopReaction, ttsPlaying, getPrimaryPlaybackAgeMs, source, rememberExplicitAlias, isBusy, evaluateVoiceParticipation, readCardContext, cardDropReactionControllerRef, cancelNonSpeechPlan, cancelActiveCardReactionPlan, createPlanForTrigger, isMuted, prepare, handleConversationInputReceived, sendVoice, handleCardReplyDelivered, notifyMeaningfulAutonomyEvent, readAutonomyEvidenceContext, interruptCurrentTurn, beginReply],
   );
 
   useEffect(() => {
@@ -1829,7 +1830,6 @@ export default function App() {
           activePlanRef.current;
         if (currentActivePlan?.planId !== preactivatedPlan.planId) {
           cardReactionPlanIdsRef.current.delete(preactivatedPlan.planId);
-          pendingActivatedCardIdsRef.current.delete(preactivatedPlan.planId);
           return;
         }
         handlePerformanceResult({
@@ -1880,9 +1880,9 @@ export default function App() {
       }
       beginReply();
       const decision = await sendAutonomous(
-        cardContextOverride ?? readCardContext(),
+        readCardContext(),
         autonomousContext,
-        handleReplyAccepted,
+        handleCardReplyDelivered,
         plan,
         programContextOverride,
         candidate,
@@ -1913,7 +1913,7 @@ export default function App() {
       setAutonomyState(nextState);
       return decision.externalAction === 'speak' ? 'speak' : 'none';
     },
-    [pendingCardStimulus, exhibitionRegistration, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleReplyAccepted, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, pendingActivatedCardIdsRef, prepare, executeNonSpeechPlan],
+    [pendingCardStimulus, exhibitionRegistration, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleCardReplyDelivered, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, prepare, executeNonSpeechPlan],
   );
 
   const handleCardInserted = useCallback(
@@ -1941,11 +1941,12 @@ export default function App() {
         ],
       });
       notifyMeaningfulAutonomyEvent('card_change');
+      changeCardsDuringTurn(readCardContext());
       const reducedMotion = window.matchMedia(
         '(prefers-reduced-motion: reduce)',
       ).matches;
       const canStartCardDropReaction =
-        activePlanRef.current === null && !isBusy;
+        activePlanRef.current === null && !isBusy && !isVadSpeech && !isSttProcessing;
       const cardDropReaction = canStartCardDropReaction
         ? cardDropReactionControllerRef.current.begin(
           result,
@@ -1982,6 +1983,7 @@ export default function App() {
         cardContext: {
           brainCardIds: result.brainCardIds,
           forcedCardId: result.forcedCardId,
+          swapRevision: result.animationSequence,
         },
         contribution,
         programContext: {
@@ -1990,7 +1992,7 @@ export default function App() {
         },
       });
     },
-    [activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
+    [changeCardsDuringTurn, readCardContext, isVadSpeech, isSttProcessing, activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
 
   const handleVoiceToggle = useCallback(async () => {
@@ -2133,7 +2135,7 @@ export default function App() {
     return await sendManual(
       text,
       manualCardContext,
-      handleReplyAccepted,
+      handleCardReplyDelivered,
       plan,
       identityForRequest,
       undefined,

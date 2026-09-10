@@ -117,6 +117,14 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
     if (count < 3200 || !enabled || playing || recoveryAt !== null || !publicActive()) return;
     busy = true; const request = new AbortController(); transcription = request;
     emit({ type: 'speech_ended', segmentId: id, at: Date.now() });
+    let timedOut = false;
+    let rejectCancelled!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      rejectCancelled = () => reject(new DOMException('Aborted', 'AbortError'));
+      request.signal.addEventListener('abort', rejectCancelled, { once: true });
+    });
+    // Include admission waiting and response-body reads in the deadline.
+    const deadline = setTimeout(() => { timedOut = true; request.abort(); }, 45000);
     try {
       const buffer = new ArrayBuffer(44 + count * 2); const view = new DataView(buffer);
       const ascii = (offset: number, text: string) => { for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); };
@@ -125,15 +133,20 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
       view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
       ascii(36, 'data'); view.setUint32(40, count * 2, true); let offset = 44;
       for (const part of parts) for (const sample of part) { view.setInt16(offset, sample, true); offset += 2; }
-      const response = await publicFetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: buffer, signal: request.signal });
+      const { response, result } = await Promise.race([
+        (async () => {
+          const response = await publicFetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: buffer, signal: request.signal });
+          const result: unknown = await response.json().catch(error => { if (response.ok) throw error; return null; });
+          return { response, result };
+        })(), cancelled,
+      ]);
       if (!response.ok) {
-        const reason = await response.json().catch(() => null);
+        const reason = result as { code?: unknown; retryAt?: unknown } | null;
         const code = typeof reason?.code === 'string' ? reason.code : 'recognition-failed';
         const retryAt = typeof reason?.retryAt === 'number' && Number.isFinite(reason.retryAt) && reason.retryAt > 0 && !Number.isNaN(new Date(reason.retryAt).getTime()) ? reason.retryAt : undefined;
         await failTranscription(code, current, retryAt);
         return;
       }
-      const result: unknown = await response.json();
       if (!result || typeof result !== 'object' || !('text' in result) || typeof result.text !== 'string') {
         await failTranscription('recognition-failed', current);
         return;
@@ -144,8 +157,10 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
         emit({ type: 'utterance_finalized', segmentId: id, text: result.text, at: Date.now() });
       }
     } catch (error) {
-      if (!request.signal.aborted) await failTranscription(error instanceof SyntaxError ? 'recognition-failed' : 'network_error', current);
+      if (timedOut || !request.signal.aborted) await failTranscription(error instanceof SyntaxError ? 'recognition-failed' : 'network_error', current);
     } finally {
+      clearTimeout(deadline);
+      request.signal.removeEventListener('abort', rejectCancelled);
       if (transcription === request) { transcription = null; busy = false; }
     }
   };

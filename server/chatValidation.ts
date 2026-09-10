@@ -1,3 +1,4 @@
+import { isCardContinuation, MAX_SPEECH_UNIT_INDEX } from '../src/conversation/cardContinuation.js';
 import {
   EMOTIONS,
   normalizeEmotion,
@@ -348,8 +349,8 @@ export function readConversationEvent(payload: unknown): ClientConversationEvent
       record.unitIndex,
       'unitIndex',
     );
-    if (eventPayload.unitIndex > 1) {
-      throw new RequestError('unitIndex must be 0 or 1.', 400);
+    if (eventPayload.unitIndex > MAX_SPEECH_UNIT_INDEX) {
+      throw new RequestError(`unitIndex must be between 0 and ${MAX_SPEECH_UNIT_INDEX}.`, 400);
     }
   }
 
@@ -768,6 +769,7 @@ export function readChatRequest(payload: unknown): ChatRequestPayload {
   const record = payload as Record<string, unknown>;
   const allowedKeys = new Set([
     'greeting',
+    'cardContinuation',
     'mode',
     'message',
     'characterIdentity',
@@ -1097,7 +1099,13 @@ export function readChatRequest(payload: unknown): ChatRequestPayload {
     );
   }
 
+  const cardContinuation = record.cardContinuation;
+  if (cardContinuation !== undefined && (!isCardContinuation(cardContinuation) || forcedCardId === null)) {
+    throw new RequestError('cardContinuation requires valid continuation context and a forced card.', 400);
+  }
+
   return {
+    ...(cardContinuation === undefined ? {} : { cardContinuation }),
     mode,
     message: normalizedMessage,
     ...(record.greeting === true ? { greeting: true as const } : {}),
@@ -1170,9 +1178,9 @@ export function readTtsRequest(payload: unknown): {
     typeof unitIndex !== 'number' ||
     !Number.isSafeInteger(unitIndex) ||
     unitIndex < 0 ||
-    unitIndex > 1
+    unitIndex > MAX_SPEECH_UNIT_INDEX
   ) {
-    throw new RequestError('unitIndex must be 0 or 1.', 400);
+    throw new RequestError(`unitIndex must be between 0 and ${MAX_SPEECH_UNIT_INDEX}.`, 400);
   }
 
   let ttsProfile: {

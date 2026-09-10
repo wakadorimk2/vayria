@@ -1030,8 +1030,8 @@ test('unit TTS events accept only a bounded unit index', () => {
   });
   assert.equal(event.unitIndex, 1);
   assert.throws(
-    () => readConversationEvent({ ...event, unitIndex: 2 }),
-    /unitIndex must be 0 or 1/,
+    () => readConversationEvent({ ...event, unitIndex: 16 }),
+    /unitIndex must be between 0 and 15/,
   );
   assert.throws(
     () => readConversationEvent({ ...event, event: 'tts_start' }),

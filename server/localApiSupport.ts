@@ -1,3 +1,4 @@
+import type { CardContinuation } from '../src/conversation/cardContinuation.js';
 import { Buffer } from 'node:buffer';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { cardPool } from '../src/cards/cardPool.js';
@@ -359,6 +360,7 @@ export interface PerformanceContextPayload {
 
 export interface ChatRequestPayload {
   greeting?: true;
+  cardContinuation?: CardContinuation;
   mode: ChatMode;
   message: string | null;
   characterIdentity: CharacterIdentity;
