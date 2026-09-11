@@ -15,11 +15,12 @@ export function useVisualGeneration(){
       cancel:async(ticket)=>{await publicFetch('/api/visual/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})});},
       prepare:async(asset,signal)=>{
         if(asset.kind==='video'){await prepareObject({...asset,composite:'green-key',mode:'reused-base-video',timings:{}},signal);return;}
-        const image=new Image();image.src=asset.url;await image.decode();signal.throwIfAborted();
+        const image=new Image();image.src=asset.url;await image.decode().catch(()=>{throw new Error('image_decode_failed');});signal.throwIfAborted();
       },
       generate:async(job,signal,onAsset)=>{
         const response=await publicFetch('/api/visual/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:job.ticket,remainingMs:Math.max(1,(job.intent.type==='background'?60000:30000)-(Date.now()-job.at)),portrait:runtime.getLayout().height>runtime.getLayout().width,layout:runtime.getLayout()}),signal});
-        const receive=async(value:{type:string;asset?:VisualAsset;code?:string})=>{if(value.type==='asset'&&value.asset)await onAsset(value.asset);if(value.type==='failed')throw new Error(value.code??'visual_failed');};
+        console.info('[visual-response]',JSON.stringify({id:job.id,status:response.status,stream:response.headers.get('Content-Type')?.includes('ndjson')===true}));
+        const receive=async(value:{type:string;asset?:VisualAsset;code?:string})=>{if(value.type==='asset'&&value.asset){console.info('[visual-response]',JSON.stringify({id:job.id,stage:'asset_received'}));await onAsset(value.asset);}if(value.type==='failed')throw new Error(value.code??'visual_failed');};
         if(!response.ok){const value=await response.json();throw new Error(value.code??'visual_failed');}
         if(!response.headers.get('Content-Type')?.includes('ndjson')){await receive(await response.json());return;}
         const reader=response.body!.pipeThrough(new TextDecoderStream()).getReader();let pending='';

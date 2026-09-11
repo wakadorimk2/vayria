@@ -11,7 +11,7 @@ const verifiedFalPrices = new Map<string, number>();
 async function verifyFalPrice(c: ProviderContext, model: string, maximum: number, units:RegExp) {
   if ((verifiedFalPrices.get(model) ?? 0) > Date.now()) return;
   const response = await (c.fetcher ?? fetch)('https://api.fal.ai/v1/models/pricing?endpoint_id='+encodeURIComponent(model), {
-    headers:{Authorization:'Key '+c.falKey}, signal:c.signal, redirect:'error',
+    headers:{Authorization:'Key '+c.falKey}, signal:c.signal, redirect:'manual',
   });
   if(!response.ok)throw new Error('pricing_unavailable');
   const data=await response.json() as {prices?:{endpoint_id:string;unit_price:number;unit:string;currency:string}[]};
@@ -23,7 +23,7 @@ async function verifyRunwarePrice(c:ProviderContext, stage:'image'|'mask'|'video
   if(stage==='video')throw new Error('unsupported_provider');
   const model=stage==='image'?'runware:400@4':'runware:109@1', cacheKey='runware:'+model;
   if((verifiedFalPrices.get(cacheKey)??0)>Date.now())return;
-  const r=await (c.fetcher??fetch)('https://content.runware.ai/models/'+encodeURIComponent(model)+'/pricing',{signal:c.signal,redirect:'error'});
+  const r=await (c.fetcher??fetch)('https://content.runware.ai/models/'+encodeURIComponent(model)+'/pricing',{signal:c.signal,redirect:'manual'});
   if(!r.ok)throw new Error('pricing_unavailable');
   const data=await r.json() as {air:string;pricingMeasured?:{price:number}[]};
   if(data.air!==model||!data.pricingMeasured?.length||!data.pricingMeasured.every(p=>Number.isFinite(p.price)&&p.price>0&&p.price<=(stage==='image'?.01:.05)))throw new Error('pricing_unverified');
@@ -44,7 +44,7 @@ export async function callVisualProvider(c: ProviderContext, stage: 'image'|'mas
     c.signal.throwIfAborted();
     const response = await fetcher(url, { method: body === undefined ? 'GET' : 'POST',
       headers: { Authorization: c.provider === 'fal' ? `Key ${c.falKey}` : `Bearer ${c.runwareKey}`, 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body), signal: c.signal, redirect: 'error' });
+      body: body === undefined ? undefined : JSON.stringify(body), signal: c.signal, redirect: 'manual' });
     c.timings[stage + '.http'] = response.status;
     if (!response.ok) throw new Error(`provider_http_${response.status}`);
     return response.json() as Promise<Json>;

@@ -178,7 +178,7 @@ test('staging visual routes pass through the real Worker entry and never invoke 
  const secret='visual-entry-secret-'.repeat(3),base='https://test.example';
  const sign=value=>{const p=Buffer.from(JSON.stringify(value)).toString('base64url');return p+'.'+createHmac('sha256',secret).update(p).digest('base64url');};
  for(const enabled of ['true','false']){
-  const calls=[];const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'visual-entry-'+enabled,modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],durableObjects:{USAGE:{className:'PublicUsage',useSQLite:true}},bindings:{PUBLIC_BASE_PATH:'/staging',MANIFESTATION_ENABLED:enabled,COOKIE_SECRET:secret,IP_SECRET:secret,PREVIEW_SECRET:secret,REQUIRE_PREVIEW_ACCESS:'true',GENERATION_ENABLED:'true',TURNSTILE_SECRET:'test',PUBLIC_HOSTNAME:'test.example'},serviceBindings:{ASSETS:()=>new Response('app')},outboundService:request=>{calls.push(new URL(request.url).pathname);if(request.url.includes('/siteverify'))return Response.json({success:true,hostname:'test.example',action:'session'});throw new Error('Unexpected paid provider');}}]}));
+  const calls=[];const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'visual-entry-'+enabled,r2Buckets:['VISUAL_ASSETS'],modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],durableObjects:{USAGE:{className:'PublicUsage',useSQLite:true}},bindings:{PUBLIC_BASE_PATH:'/staging',MANIFESTATION_ENABLED:enabled,COOKIE_SECRET:secret,IP_SECRET:secret,PREVIEW_SECRET:secret,REQUIRE_PREVIEW_ACCESS:'true',GENERATION_ENABLED:'true',TURNSTILE_SECRET:'test',FAL_KEY:'mock',PUBLIC_HOSTNAME:'test.example'},serviceBindings:{ASSETS:()=>new Response('app')},outboundService:request=>{calls.push(new URL(request.url).pathname);if(request.url.includes('/siteverify'))return Response.json({success:true,hostname:'test.example',action:'session'});if(request.url.includes('/models/pricing'))return Response.json({prices:[]});throw new Error('Unexpected paid provider');}}]}));
   try{
    const preview='__Host-vayria-staging-preview='+sign({purpose:'preview',exp:Date.now()+60000});
    const headers={Origin:base,'Content-Type':'application/json',Cookie:preview,'CF-Connecting-IP':'192.0.2.20'};
@@ -202,6 +202,9 @@ test('staging visual routes pass through the real Worker entry and never invoke 
    const asset=await chicken.json();assert.equal(asset.type,'asset');assert.equal(asset.asset.url,'/staging/manifestation/chicken-1.png');
    const background=await generate('background','sea');assert.equal(background.status,200);
    assert.deepEqual(await background.json(),{type:'failed',code:'background_not_adopted'});
+   const unknown=await generate('prop','crab');assert.equal(unknown.status,200);
+   const events=(await unknown.text()).trim().split('\n').map(line=>JSON.parse(line));
+   assert.deepEqual(events,[{type:'failed',code:'pricing_unverified'}]);
    assert.deepEqual(await (await mode(false,2)).json(),{enabled:false,generation:3});
    assert.equal((await mode(true,1)).status,409);
    assert.deepEqual(await (await mode(true,3)).json(),{enabled:true,generation:4});
@@ -212,7 +215,7 @@ test('staging visual routes pass through the real Worker entry and never invoke 
    assert.equal((await post('/api/visual/mode',{enabled:true,generation:5},{'X-Vayria-Session':'expired'})).status,401);
    await mf.dispatchFetch(base+'/staging/api/session',{method:'DELETE',headers});
    assert.equal((await mode(true,5)).status,401);
-   assert.deepEqual(calls,['/turnstile/v0/siteverify']);
+   assert.deepEqual(calls,['/turnstile/v0/siteverify','/v1/models/pricing']);
   }finally{await mf.dispose();}
  }
 });

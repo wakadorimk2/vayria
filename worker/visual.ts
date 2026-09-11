@@ -101,7 +101,7 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
           const result=await callVisualProvider({...context,provider:'fal'},'video',{image_url:'data:image/png;base64,'+Buffer.from(await source.arrayBuffer()).toString('base64'),prompt:`Locked camera. One chicken ${intent.motion}. Full silhouette inside frame. Uniform green background. No cuts, hands, text, or other subjects.`,duration:5,resolution:'480P',prompt_expansion_mode:'fast',enable_safety_checker:true});
           url=String((result.video as {url?:string})?.url);
         }else url=await generateVisualImage(context,intent,portrait);
-        const media=await fetch(safeVisualMediaUrl(url),{signal,redirect:'error'});
+        const media=await fetch(safeVisualMediaUrl(url),{signal,redirect:'manual'});
         if(!media.ok)throw new Error('media_failed');
         const video=ticket.video&&env.VISUAL_VIDEO_ENABLED==='true'&&builtin==='chicken-1'&&!intent.modifiers.length;
         if(!media.headers.get('Content-Type')?.includes(video?'video/mp4':'image/png'))throw new Error('media_type');
