@@ -73,6 +73,12 @@ PCとiPhone/iPadの実マイク権限、音声再生、口パク、割り込み�
 
 ## 公式仕様
 
+2026-09-11のiPhone確認で、開始直後の接続失敗が報告された。
+同日01:57 UTCの管理APIにはLive開始記録がなかった。
+原因は未確定である。開始失敗の表示に、マイク拒否、接続準備段階、公開APIの安全なエラーコードを追加した。
+APIの応答本文とSDPは表示しない。追加後の`test:public`は126件成功した。
+型検査、lint、stagingビルドも成功した。実機での再試行とコードの確認が必要である。
+
 - [Liveセッション](https://developers.openai.com/api/docs/guides/live-conversations)
 - [WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live)
 - [Sideband](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live)

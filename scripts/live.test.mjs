@@ -11,8 +11,8 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 const bundle = await build({ stdin: { contents: `export * from './worker/ledger'; export * from './worker/liveSessionManager';
 export * from './worker/liveContext'; export * from './src/live/liveProtocol'; export * from './src/live/liveConversation';
-export {cardPool} from './src/cards/cardPool';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node' });
-const { Ledger, initialState, LiveSessionManager, LiveConversation, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+export * from './src/live/liveErrors'; export {cardPool} from './src/cards/cardPool';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node' });
+const { Ledger, initialState, LiveSessionManager, LiveConversation, LiveConnectionError, readLiveResponse, liveStartFailure, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const empty = revision => ({ swapRevision: revision, brainCardIds: [], forcedCardId: null });
 const requestId = () => crypto.randomUUID();
 function accounting() {
@@ -183,6 +183,39 @@ function browserFixture() {
   channel.send = text => { originalSend(text); if (JSON.parse(text).type === 'session.close') channel.message({ type: 'session.closed' }); };
   return { channel, peer, microphone, deps, requests, stopped: () => stopped, tick: () => frame() };
 }
+
+test('start errors preserve safe server codes and never display response bodies', async () => {
+  await assert.rejects(readLiveResponse(Response.json({ code: 'busy', detail: 'private body' }, { status: 409 })), error => {
+    assert.equal(error.code, 'busy');
+    assert.match(liveStartFailure(error, 'server'), /（busy）/);
+    assert.doesNotMatch(error.message, /private/);
+    return true;
+  });
+  for (const response of [new Response('<html>private</html>', { status: 502 }), Response.json({ code: 'private body' }, { status: 502 })]) {
+    await assert.rejects(readLiveResponse(response), error => error.code === 'live_http_502');
+  }
+  assert.match(liveStartFailure(new DOMException('private', 'TimeoutError'), 'server'), /（live_request_timeout）/);
+  assert.match(liveStartFailure(new LiveConnectionError('live_ice_timeout'), 'ice'), /（live_ice_timeout）/);
+});
+
+test('denied microphone is identified without starting a provider session', async () => {
+  const f = browserFixture();
+  f.deps.getMicrophone = async () => { throw new DOMException('private browser text', 'NotAllowedError'); };
+  const live = new LiveConversation(f.deps);
+  assert.equal(await live.start('session', empty(0)), false);
+  assert.match(live.getSnapshot().error, /（microphone_permission_denied）/);
+  assert.doesNotMatch(live.getSnapshot().error, /private/);
+  assert.equal(f.requests.filter(r => r.operation === 'start').length, 0);
+});
+
+test('server rejection releases microphone and retains its diagnostic code', async () => {
+  const f = browserFixture();
+  f.deps.request = async operation => { if (operation === 'start') throw new LiveConnectionError('busy'); return {}; };
+  const live = new LiveConversation(f.deps);
+  assert.equal(await live.start('session', empty(0)), false);
+  assert.match(live.getSnapshot().error, /（busy）/);
+  assert.ok(f.stopped() > 0);
+});
 test('browser sends latest preparation-time placement and separates overlapping captions from playback', async () => {
   const f = browserFixture(); let resolveMic;
   f.deps.getMicrophone = () => new Promise(resolve => { resolveMic = resolve; });

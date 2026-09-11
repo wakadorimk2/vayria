@@ -1,4 +1,5 @@
 import { LIVE_CLOSE_TIMEOUT_MS, LIVE_HEARTBEAT_MS, type LiveCardContext, type LivePhase } from './liveProtocol';
+import { LiveConnectionError, liveStartFailure, type LiveStartStage } from './liveErrors';
 
 export interface LiveCaption { id: string; speaker: 'user' | 'assistant'; delta: string; start_ms: number; end_ms: number }
 export interface LiveSnapshot {
@@ -61,6 +62,7 @@ export class LiveConversation {
     this.snapshot = initial(); this.set({ phase: 'starting' });
     this.prepare();
     this.startup = setTimeout(() => { if (current()) void this.fail('音声接続が時間内に完了しませんでした。'); }, 40_000);
+    let stage: LiveStartStage = 'microphone';
     try {
       const acquisition = this.dependencies.getMicrophone();
       void acquisition.then(stream => { if (!current()) stream.getTracks().forEach(track => track.stop()); }, () => {});
@@ -69,6 +71,7 @@ export class LiveConversation {
       this.cancelMicrophoneWait = null;
       if (!current()) { microphone.getTracks().forEach(track => track.stop()); return false; }
       this.microphone = microphone;
+      stage = 'offer';
       const context = this.context!;
       this.inputAnalyser = context.createAnalyser(); this.inputAnalyser.fftSize = 1024;
       context.createMediaStreamSource(microphone).connect(this.inputAnalyser);
@@ -93,9 +96,11 @@ export class LiveConversation {
       });
       microphone.getTracks().forEach(track => peer.addTrack(track, microphone));
       await peer.setLocalDescription(await peer.createOffer());
+      stage = 'ice';
       await this.waitForIce(peer);
       if (!current()) return false;
       const requestId = this.requestId;
+      stage = 'server';
       const result = await this.dependencies.request('start', { sdp: peer.localDescription?.sdp, cards: this.cards, requestId }, sessionId);
       if (!current()) {
         // Creation can complete after stop/visibility cancellation. Close that exact admission.
@@ -104,18 +109,19 @@ export class LiveConversation {
       }
       const sdp = (result.transport as { sdp?: unknown } | undefined)?.sdp;
       if (typeof sdp !== 'string') throw new Error('invalid answer');
+      stage = 'answer';
       await peer.setRemoteDescription({ type: 'answer', sdp });
       this.measure(generation);
       return true;
-    } catch {
-      if (current()) await this.fail('GPT-Liveに接続できませんでした。設定を確認するか、既存方式へ戻してください。');
+    } catch (error) {
+      if (current()) await this.fail(liveStartFailure(error, stage));
       return false;
     }
   }
   private waitForIce(peer: RTCPeerConnection) {
     if (peer.iceGatheringState === 'complete') return Promise.resolve();
     return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => { peer.removeEventListener('icegatheringstatechange', ready); reject(new Error('ICE timeout')); }, 10_000);
+      const timeout = setTimeout(() => { peer.removeEventListener('icegatheringstatechange', ready); reject(new LiveConnectionError('live_ice_timeout')); }, 10_000);
       const ready = () => { if (peer.iceGatheringState === 'complete') { clearTimeout(timeout); peer.removeEventListener('icegatheringstatechange', ready); resolve(); } };
       peer.addEventListener('icegatheringstatechange', ready); ready();
     });

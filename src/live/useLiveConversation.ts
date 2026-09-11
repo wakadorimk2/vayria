@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { LiveConversation } from './liveConversation';
+import { readLiveResponse } from './liveErrors';
 import { publicUrl } from '../public/paths';
 import { publicActive, subscribePublic } from '../public/session';
 
@@ -12,8 +13,7 @@ export function useLiveConversation(volume: number) {
       const response = await fetch(publicUrl(`/api/live/${operation}`), { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-Vayria-Session': sessionId }, body: JSON.stringify(input),
         signal: AbortSignal.timeout(operation === 'start' ? 35_000 : 12_000), keepalive: operation === 'stop' });
-      if (!response.ok) throw new Error('Live request failed');
-      return await response.json();
+      return readLiveResponse(response);
     },
   }));
   const snapshot = useSyncExternalStore(conversation.subscribe, conversation.getSnapshot, conversation.getSnapshot);
