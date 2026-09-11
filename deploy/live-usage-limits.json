@@ -1,0 +1,4 @@
+{
+  "staging": { "sessionSeconds": 600, "visitorDay": 10, "visitorMonth": 310, "dayBudget": 500000000, "monthBudget": 3500000000 },
+  "production": { "sessionSeconds": 300, "visitorDay": 5, "visitorMonth": 155, "dayBudget": 200000000, "monthBudget": 3500000000 }
+}

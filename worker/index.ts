@@ -9,6 +9,7 @@ import { synthesizeAivisCloudSpeech } from '../server/tts/aivisCloud';
 import { RequestError } from '../server/localApiSupport';
 import { readChatRequest, readCardPreviewRequest } from '../server/chatValidation';
 import { normalizeEmotion, VOICE_STYLE_BY_EMOTION } from '../src/character/emotion';
+import { liveAvailable } from '../src/live/liveProtocol';
 export { PublicUsage };
 
 interface Env {
@@ -113,7 +114,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (input.op !== 'configure' || (input.stopped !== undefined && typeof input.stopped !== 'boolean')) throw new LimitError('invalid_request', 0, 400);
     return json(await ledger(env, 'configure', { patch: input.patch, stopped: input.stopped }));
   }
-  const known = ['/api/session', '/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts', '/api/exhibition/enroll', '/api/exhibition/next'];
+  const livePaths = ['/api/live/start', '/api/live/context', '/api/live/stop'];
+  const supportsLive = liveAvailable(base, env.REQUIRE_PREVIEW_ACCESS);
+  if (livePaths.includes(url.pathname) && !supportsLive) return json({ code: 'not_found' }, 404);
+  const known = ['/api/session', '/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts', '/api/exhibition/enroll', '/api/exhibition/next', ...livePaths];
   if (!known.includes(url.pathname)) return json({ code: 'not_found' }, 404);
   let visitor = await verify<Visitor>(cookie(request, visitorCookie), env.COOKIE_SECRET);
   if (visitor?.purpose !== 'visitor') visitor = null;
@@ -121,7 +125,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     const fresh = !visitor;
     visitor ??= { id: crypto.randomUUID(), exp: Date.now() + 90 * 86400000, purpose: 'visitor' };
     const response = json({ ...await ledger<object>(env, 'status', { visitor: visitor.id }), cookieReady: !fresh,
-      enabled: env.GENERATION_ENABLED === 'true', siteKey: env.TURNSTILE_SITE_KEY });
+      enabled: env.GENERATION_ENABLED === 'true', siteKey: env.TURNSTILE_SITE_KEY, liveAvailable: supportsLive });
     if (fresh) response.headers.set('Set-Cookie', `${visitorCookie}=${await sign(visitor, env.COOKIE_SECRET)}; Path=/; Max-Age=7776000; Secure; HttpOnly; SameSite=Strict`);
     return response;
   }
@@ -140,6 +144,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
   }
   if (url.pathname === '/api/session' && request.method === 'DELETE') return json(await ledger(env, 'end', who));
   if (request.method !== 'POST') return json({ code: 'method_not_allowed' }, 405);
+  if (livePaths.includes(url.pathname)) {
+    if (url.pathname !== '/api/live/stop' && env.GENERATION_ENABLED !== 'true') throw new LimitError('generation_stopped', 0, 503);
+    return json(await ledger(env, `live-${url.pathname.split('/').at(-1)}`, { ...who, input: await body(request) }));
+  }
   if (env.GENERATION_ENABLED !== 'true') throw new LimitError('generation_stopped', 0, 503);
   if (url.pathname === '/api/session') {
     const ip = await ipKey(request, env.IP_SECRET);

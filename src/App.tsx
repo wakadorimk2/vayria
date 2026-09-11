@@ -11,7 +11,8 @@ import {
   type FormEvent,
 } from 'react';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
-import { publicActive, publicExhibition, runPublicAction, subscribePublic } from './public/session';
+import { publicActive, publicExhibition, publicSessionId, runPublicAction, subscribePublic } from './public/session';
+import { useLiveConversation } from './live/useLiveConversation';
 import { allowExhibitionAutonomy } from './public/exhibitionHandoff';
 import { useBargeInControl } from './app/useBargeInControl';
 import { useCardAttention } from './app/useCardAttention';
@@ -421,10 +422,17 @@ export default function App() {
   const [autonomousContext, setAutonomousContext] =
     useState<AutonomousContext>(INITIAL_AUTONOMOUS_CONTEXT);
 
-  const [isAutonomousLoopEnabled, setIsAutonomousLoopEnabled] =
+  const [liveSelected, setLiveSelected] = useState(false);
+  const liveSelectedRef = useRef(false);
+  const [voiceEngineSwitching, setVoiceEngineSwitching] = useState(false);
+  const [isAutonomousLoopConfigured, setIsAutonomousLoopEnabled] =
     useState(true);
+  const isAutonomousLoopEnabled = isAutonomousLoopConfigured && !liveSelected;
   const [sessionGeneration, setSessionGeneration] = useState(0);
   const { isMuted, lastAudibleVolume, volume } = audioControl;
+  const live = useLiveConversation(isMuted ? 0 : volume);
+  const liveController = live.controller;
+  const liveMicrophoneOn = live.phase === 'starting' || live.phase === 'connected';
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public';
   const [publicAvatarBounds, setPublicAvatarBounds] = useState<AvatarScreenBounds | null>(null);
@@ -458,6 +466,9 @@ export default function App() {
     resetCards,
     zones,
   } = cardGame;
+  useEffect(() => {
+    if (liveSelected) liveController.updateCards(readCardContext());
+  }, [liveSelected, liveController, readCardContext, zones.swapRevision, zones.forcedCardId]);
   const cardPresentationPlanIdRef = useRef<string | null>(null);
   const performer = usePerformerRuntime();
   const {
@@ -704,6 +715,7 @@ export default function App() {
 
   const handleInteractionAction = useCallback(
     (decision: ConversationActionDecision) => {
+      if (liveSelectedRef.current) return;
       if (
         decision.action === 'listen' ||
         decision.action === 'backchannel' ||
@@ -776,6 +788,7 @@ export default function App() {
       // nod for the same short acknowledgement.
       const cue = decision.backchannelCue === 'uun' ? 'uun' : 'un';
       const playCue = () => {
+        if (liveSelectedRef.current) return;
         if (voiceReactionIdRef.current !== reactionId) return;
         const candidates = backchannelAudioRef.current.filter(
           (audio) => audio.cue === cue,
@@ -886,8 +899,8 @@ export default function App() {
   useEffect(() => {
     if (runtimeConfig.mode !== 'public') return;
     const stop = () => { void stopVoiceInput(); interruptCurrentTurn('router_control'); stopReaction(); playbackCoordinator.stop(); };
-    const unlock = () => { void prepare(); };
-    const start = () => { void prepare(); };
+    const unlock = () => { if (!liveSelectedRef.current) void prepare(); };
+    const start = () => { if (!liveSelectedRef.current) void prepare(); };
     window.addEventListener('vayria-public-stop', stop);
     window.addEventListener('vayria-public-start', start);
     window.addEventListener('vayria-public-prepare', unlock);
@@ -1265,6 +1278,7 @@ export default function App() {
     Boolean(voiceError);
 
   const resetSession = useCallback(() => {
+    void liveController.stop();
     const nextGeneration = sessionGenerationRef.current + 1;
     sessionGenerationRef.current = nextGeneration;
 
@@ -1314,7 +1328,7 @@ export default function App() {
     setInput('');
     setIsAutonomousLoopEnabled(true);
     setSessionGeneration(nextGeneration);
-  }, [stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetCards, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
+  }, [liveController, stopVoiceInput, clearBargeInTimer, activeBargeInSegmentRef, bargeInStateRef, stopReaction, backchannelVariantIndexRef, nonSpeechTimerRef, clearCardAttentionTimers, dragAttentionControllerRef, dragAttentionSpeedRef, cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, spatialTargetRegistry, setCardAttentionPhase, resetConversation, resetRuntime, resetCards, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, cardReactionPlanIdsRef, autonomyStateRef, setAutonomyState, dispatchBargeIn, setDucked]);
 
   useEffect(() => {
     routerResetSessionRef.current = resetSession;
@@ -1335,7 +1349,7 @@ export default function App() {
 
   const handleCardInteraction = useCallback(
     ({ element, interaction }: CardInteractionTarget) => {
-      if (!isExhibitionMode) return;
+      if (!isExhibitionMode && !liveSelectedRef.current) return;
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         return;
       }
@@ -1368,7 +1382,7 @@ export default function App() {
 
   const handleCardAttentionInput = useCallback(
     ({ interaction }: CardAttentionInput) => {
-      if (!isExhibitionMode) return;
+      if (!isExhibitionMode && !liveSelectedRef.current) return;
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         return;
       }
@@ -1445,6 +1459,7 @@ export default function App() {
   }, [routerAudioInputDeviceId]);
 
   useEffect(() => {
+    if (liveSelected) { setPhase(live.speaking ? 'speaking' : 'idle'); return; }
     if (status === 'idle' && activePlanRef.current !== null) return;
     const phase =
       status === 'thinking'
@@ -1457,7 +1472,7 @@ export default function App() {
               ? 'error'
               : 'idle';
     setPhase(phase);
-  }, [setPhase, status]);
+  }, [setPhase, status, liveSelected, live.speaking]);
 
   useEffect(() => {
     if (!runtimeConfig.routerEnabled) return;
@@ -1494,6 +1509,7 @@ export default function App() {
 
   const handleVoiceEvent = useCallback(
     (event: VoiceInputEvent) => {
+      if (liveSelectedRef.current) return;
       if (runtimeConfig.routerEnabled) {
         if (event.type === 'speech_started') {
           if (routerSnapshot.gptInputGate === 'closed') {
@@ -1918,6 +1934,13 @@ export default function App() {
 
   const handleCardInserted = useCallback(
     (result: CardSwapResult) => {
+      if (liveSelectedRef.current) {
+        activateCardSwap(result);
+        spatialTargetRegistry.refreshDefault('game');
+        scheduleCardDefaultAttention();
+        liveController.updateCards({ brainCardIds: result.brainCardIds, forcedCardId: result.forcedCardId, swapRevision: result.animationSequence });
+        return;
+      }
       if (runtimeConfig.mode === 'public') {
         if (!isMuted) void prepare();
         void runPublicAction(() => true);
@@ -1992,10 +2015,39 @@ export default function App() {
         },
       });
     },
-    [changeCardsDuringTurn, readCardContext, isVadSpeech, isSttProcessing, activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
+    [liveController, changeCardsDuringTurn, readCardContext, isVadSpeech, isSttProcessing, activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
 
+  const selectVoiceEngine = async (selected: boolean) => {
+    if (voiceEngineSwitching || selected === liveSelected) return;
+    setVoiceEngineSwitching(true);
+    liveSelectedRef.current = true; // Gate late legacy callbacks before awaiting cleanup.
+    setLiveSelected(true);
+    cancelAutonomous(); interruptCurrentTurn('router_control'); playbackCoordinator.stop(); stop(); stopReaction();
+    setPendingCardStimulus(null); setPublicTextInputOpen(false);
+    try {
+      await Promise.all([stopVoiceInput(), liveController.stop()]);
+      resetConversation(); resetRuntime(); clearReplyPresentation();
+      const cleared = createInitialAutonomyState(); autonomyStateRef.current = cleared; setAutonomyState(cleared);
+      setPublicGreetingComplete(false);
+      liveSelectedRef.current = selected; setLiveSelected(selected);
+    } finally { setVoiceEngineSwitching(false); }
+  };
+
   const handleVoiceToggle = useCallback(async () => {
+    if (liveSelectedRef.current) {
+      if (voiceEngineSwitching || live.phase === 'stopping') return;
+      if (live.phase === 'starting' || live.phase === 'connected') { await liveController.stop(); return; }
+      liveController.prepare();
+      await runPublicAction(async () => {
+        if (!liveSelectedRef.current || document.hidden) return false;
+        const started = await liveController.start(publicSessionId(), readCardContext());
+        if (!publicActive() || document.hidden || !liveSelectedRef.current) { await liveController.stop(); return false; }
+        if (started) setPublicGreetingComplete(true);
+        return started;
+      });
+      return;
+    }
     if (microphoneInputTransitionRef.current !== null) return;
 
     const transition = isVoiceInputEnabled ? 'stopping' : 'starting';
@@ -2025,6 +2077,7 @@ export default function App() {
       setMicrophoneInputTransition(null);
     }
   }, [
+    liveController, live.phase, voiceEngineSwitching, readCardContext,
     isVoiceInputEnabled,
     preloadBackchannel,
     prepare,
@@ -2053,6 +2106,7 @@ export default function App() {
   });
 
   const submitMessage = async (message: string, greeting?: true, admitted = false): Promise<boolean> => {
+    if (liveSelectedRef.current) return false;
     const text = message.trim();
     if (!text || isManualBusy || (!admitted && publicSubmitPendingRef.current)) return false;
     if (runtimeConfig.mode === 'public' && !admitted) {
@@ -2152,7 +2206,7 @@ export default function App() {
   const handleMuteToggle = () => {
     if (isMuted) {
       const restoredVolume = volume > 0 ? volume : lastAudibleVolume;
-      void prepare();
+      if (liveSelectedRef.current) liveController.prepare(); else void prepare();
       setAudioControl({
         isMuted: false,
         lastAudibleVolume: restoredVolume,
@@ -2225,7 +2279,7 @@ export default function App() {
       return;
     }
 
-    if (isMuted) void prepare();
+    if (isMuted) { if (liveSelectedRef.current) liveController.prepare(); else void prepare(); }
     setAudioControl({
       isMuted: false,
       lastAudibleVolume: nextVolume,
@@ -2504,7 +2558,7 @@ export default function App() {
           emotion={displayEmotion}
           isExhibitionMode={usesExhibitionUi}
           listeningReaction={listeningReaction}
-          mouthOpen={mouthOpen}
+          mouthOpen={liveSelected ? live.mouthOpen : mouthOpen}
           onReady={handleAvatarReady}
           onScreenBounds={runtimeConfig.mode === 'public' ? setPublicAvatarBounds : undefined}
           horizontalOffset={runtimeConfig.mode === 'public' && publicSettingsOpen ? publicSettingsLayout.avatarOffset : 0}
@@ -2528,9 +2582,9 @@ export default function App() {
           game={cardGame}
           onAskQuestion={message => { void submitMessage(message); }}
           lastReply={!conversationError ? reply : undefined}
-          isQuestionDisabled={isManualBusy || (runtimeConfig.routerEnabled && routerSnapshot.vayriaOutputGate === 'closed' && routerSnapshot.controlState !== 'human_override')}
+          isQuestionDisabled={liveSelected || isManualBusy || (runtimeConfig.routerEnabled && routerSnapshot.vayriaOutputGate === 'closed' && routerSnapshot.controlState !== 'human_override')}
           feedbackMessage={
-            conversationError
+            liveSelected ? 'カードの変化は会話の自然な間に反映されます。マイクから話しかけてください。' : conversationError
               ? '返答を続けられませんでした。もう一度聞くか、最初からやり直せます。'
               : needsPlaybackGesture
                 ? '音声の再生許可が必要です。下の「音声を再開」を押してください。'
@@ -2561,8 +2615,16 @@ export default function App() {
         ref={registerChatTarget}
       >
         <div className="conversation-copy" aria-live="polite">
-          {shouldShowReply && <p className="reply">{reply}</p>}
-          {shouldShowStatus && (
+          {liveSelected && <div className="live-captions" aria-label="GPT-Liveの字幕">
+            {(['user', 'assistant'] as const).map(speaker => <p key={speaker} className={speaker === 'assistant' ? 'reply' : 'voice-input-hint'}>
+              <span className="visually-hidden">{speaker === 'user' ? 'あなた: ' : 'Vayria: '}</span>
+              {live.captions.filter(c => c.speaker === speaker).map(c => c.delta).join('')}
+            </p>)}
+            {live.error && <p role="alert">{live.error}</p>}
+            {live.needsPlaybackGesture && <button type="button" onClick={liveController.prepare}>音声を再開</button>}
+          </div>}
+          {!liveSelected && shouldShowReply && <p className="reply">{reply}</p>}
+          {!liveSelected && shouldShowStatus && (
             <p className="status">
               {isMuted && status === 'idle'
                 ? 'ミュート中です。テキスト会話は利用できます。'
@@ -2602,7 +2664,7 @@ export default function App() {
           </label>
           <input
             autoComplete="off"
-            disabled={isManualBusy || publicSubmitPending}
+            disabled={liveSelected || isManualBusy || publicSubmitPending}
             id="message-input"
             maxLength={1000}
             onChange={(event) => setInput(event.target.value)}
@@ -2627,7 +2689,7 @@ export default function App() {
           >
             {isVoiceInputEnabled ? '🛑 聞くのを止める' : '🎙 聞く'}
           </button>
-          <button disabled={!trimmedInput || isManualBusy || publicSubmitPending} type="submit">
+          <button disabled={liveSelected || !trimmedInput || isManualBusy || publicSubmitPending} type="submit">
             {publicSubmitPending ? '確認中…' : '送信'}
           </button>
         </form>
@@ -2673,12 +2735,15 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
+          liveSelected={liveSelected}
+          voiceEngineSwitching={voiceEngineSwitching}
+          onVoiceEngineChange={selected => { void selectVoiceEngine(selected); }}
           settingsLayout={publicSettingsLayout}
           onSettingsOpenChange={setPublicSettingsOpen}
           cardsOpen={publicCardsOpen}
           textOpen={publicTextInputOpen}
           onCardsToggle={togglePublicCards}
-          greetingComplete={publicGreetingComplete}
+          greetingComplete={publicGreetingComplete || liveSelected}
           greetingBusy={isManualBusy || publicSubmitPending}
           onGreeting={() => { void submitMessage('こんにちは', true); }}
           themePreference={themePreference}
@@ -2686,10 +2751,10 @@ export default function App() {
           onThemeChange={setThemePreference}
           isMuted={isMuted}
           onMuteToggle={handleMuteToggle}
-          microphoneOn={isVoiceInputEnabled}
-          microphoneState={publicMicrophoneState}
-          microphoneNotice={voiceInput.notice}
-          microphoneLevel={displayedAudioLevel === null ? null : microphoneInputStrength}
+          microphoneOn={liveSelected ? liveMicrophoneOn : isVoiceInputEnabled}
+          microphoneState={liveSelected ? live.phase === 'starting' ? 'starting' : live.phase === 'stopping' ? 'stopping' : live.phase === 'error' ? 'error' : live.phase === 'connected' ? live.microphoneLevel > .1 ? 'speaking' : 'listening' : 'off' : publicMicrophoneState}
+          microphoneNotice={liveSelected ? undefined : voiceInput.notice}
+          microphoneLevel={liveSelected ? live.microphoneLevel : displayedAudioLevel === null ? null : microphoneInputStrength}
           onMicrophoneToggle={() => { void handleVoiceToggle(); }}
         />
       )}

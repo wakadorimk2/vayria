@@ -346,3 +346,8 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-handoff h1 { font-size: clamp(20px, 3vw, 28px); }
 .public-handoff button { min-height: 48px; padding: 12px 24px; font: inherit; }
 .public-exhibition-welcome { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 90vw; padding: 8px 16px; border-radius: 20px; background: var(--public-surface); color: var(--public-ink); pointer-events: none; }
+
+.public-live-engine { display: grid; gap: .65rem; margin-block: .5rem 1rem; }
+.public-live-engine label { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
+.live-captions { max-height: 28vh; overflow-y: auto; overflow-wrap: anywhere; }
+.live-captions p { margin-block: .4rem; }
