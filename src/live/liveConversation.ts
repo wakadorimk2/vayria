@@ -46,8 +46,12 @@ export class LiveConversation {
   private set(value: Partial<LiveSnapshot>) { this.snapshot = { ...this.snapshot, ...value }; for (const listener of this.listeners) listener(); }
   setVolume(volume: number) { this.volume = Math.max(0, Math.min(1, volume)); if (this.gain) this.gain.gain.value = this.volume; }
   prepare = () => {
-    this.context ??= this.dependencies.audio();
-    void this.context.resume().then(() => this.set({ needsPlaybackGesture: this.context?.state !== 'running' })).catch(() => this.set({ needsPlaybackGesture: true }));
+    const context = this.context ??= this.dependencies.audio();
+    void context.resume().then(() => {
+      if (this.context === context) this.set({ needsPlaybackGesture: context.state !== 'running' });
+    }).catch(() => {
+      if (this.context === context) this.set({ needsPlaybackGesture: true });
+    });
   };
   async start(sessionId: string, cards: LiveCardContext): Promise<boolean> {
     if (this.stopping || this.snapshot.phase === 'starting' || this.snapshot.phase === 'connected') return false;

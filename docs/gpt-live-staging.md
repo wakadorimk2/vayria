@@ -53,7 +53,7 @@ Live開始前に残り接続時間と15秒の終了待ち分を予約する。�
 
 | 検証 | 結果 |
 |---|---|
-| `test:public` | 122件成功。Liveの認証、競合、課金、カード、終了、管理設定を含む |
+| `test:public` | 123件成功。Liveの認証、競合、課金、カード、終了、管理設定を含む |
 | `test:voice` | 49件成功 |
 | `test:performer` | 273件成功 |
 | `test:playback` | 40件成功 |
@@ -78,3 +78,4 @@ PCとiPhone/iPadの実マイク権限、音声再生、口パク、割り込み�
 - [Sideband](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live)
 - [状態注入と委譲](https://developers.openai.com/api/docs/guides/live-delegation?delegation-mode=client)
 - [時間課金](https://developers.openai.com/api/docs/guides/voice-latency-cost?api=live)
+

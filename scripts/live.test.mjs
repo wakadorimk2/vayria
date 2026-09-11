@@ -213,6 +213,13 @@ test('stop while microphone permission is pending disposes the late microphone a
   await live.stop(); resolveMic(f.microphone); assert.equal(await starting, false);
   assert.equal(f.requests.filter(r => r.operation === 'start').length, 0); assert.ok(f.stopped() > 0);
 });
+test('late audio unlock completion does not request playback after stopping', async () => {
+  const f = browserFixture(); const context = f.deps.audio(); let rejectResume;
+  context.resume = () => new Promise((_, reject) => { rejectResume = reject; });
+  const live = new LiveConversation(f.deps); live.prepare(); await live.stop();
+  rejectResume(new Error('old context closed')); await Promise.resolve(); await Promise.resolve();
+  assert.equal(live.getSnapshot().needsPlaybackGesture, false);
+});
 test('App gates legacy callbacks, resets conversation without resetting cards, and closes hidden pages', async () => {
   const app = await readFile('src/App.tsx', 'utf8');
   for (const marker of ['(event: VoiceInputEvent) => {', '(decision: ConversationActionDecision) => {', 'const playCue = () => {']) assert.ok(app.slice(app.indexOf(marker), app.indexOf(marker) + 150).includes('liveSelectedRef.current'));
