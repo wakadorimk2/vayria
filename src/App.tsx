@@ -2577,6 +2577,7 @@ export default function App() {
         )}
         <div ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}>
         <CardGamePrototype
+          expectsCardReply={!liveSelected}
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
           key={sessionGeneration}
           game={cardGame}
@@ -2615,10 +2616,10 @@ export default function App() {
         ref={registerChatTarget}
       >
         <div className="conversation-copy" aria-live="polite">
-          {liveSelected && <div className="live-captions" aria-label="GPT-Liveの字幕">
-            {(['user', 'assistant'] as const).map(speaker => <p key={speaker} className={speaker === 'assistant' ? 'reply' : 'voice-input-hint'}>
-              <span className="visually-hidden">{speaker === 'user' ? 'あなた: ' : 'Vayria: '}</span>
-              {live.captions.filter(c => c.speaker === speaker).map(c => c.delta).join('')}
+          {liveSelected && (live.captions.length > 0 || live.error || live.needsPlaybackGesture) && <div className="live-captions" aria-label="GPT-Liveの字幕">
+            {(['user', 'assistant'] as const).map(speaker => <p key={speaker} className={`live-caption live-caption--${speaker}`}>
+              <span>{speaker === 'user' ? 'あなた: ' : 'Vayria: '}</span>
+              {Array.from(live.captions.filter(c => c.speaker === speaker).map(c => c.delta).join('')).slice(-160).join('')}
             </p>)}
             {live.error && <p role="alert">{live.error}</p>}
             {live.needsPlaybackGesture && <button type="button" onClick={liveController.prepare}>音声を再開</button>}
