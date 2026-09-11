@@ -11,8 +11,8 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 const bundle = await build({ stdin: { contents: `export * from './worker/ledger'; export * from './worker/liveSessionManager';
 export * from './worker/liveContext'; export * from './src/live/liveProtocol'; export * from './src/live/liveConversation';
-export * from './src/live/liveErrors'; export {cardPool} from './src/cards/cardPool';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node' });
-const { Ledger, initialState, LiveSessionManager, LiveConversation, LiveConnectionError, readLiveResponse, liveStartFailure, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+export * from './src/audio/iosAudioSession'; export * from './src/live/liveErrors'; export {cardPool} from './src/cards/cardPool';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node' });
+const { Ledger, initialState, LiveSessionManager, LiveConversation, IosAudioSession, LiveConnectionError, readLiveResponse, liveStartFailure, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const empty = revision => ({ swapRevision: revision, brainCardIds: [], forcedCardId: null });
 const requestId = () => crypto.randomUUID();
 function accounting() {
@@ -206,6 +206,37 @@ test('denied microphone is identified without starting a provider session', asyn
   assert.match(live.getSnapshot().error, /（microphone_permission_denied）/);
   assert.doesNotMatch(live.getSnapshot().error, /private/);
   assert.equal(f.requests.filter(r => r.operation === 'start').length, 0);
+});
+
+test('WebKit-shaped exceptions retain their names without Error inheritance', () => {
+  for (const [name, code] of [['NotAllowedError', 'microphone_permission_denied'], ['NotReadableError', 'microphone_unavailable'], ['AbortError', 'microphone_aborted'], ['InvalidStateError', 'microphone_state_failed']]) {
+    assert.match(liveStartFailure({ name, message: 'private' }, 'microphone'), new RegExp(`（${code}）`));
+    assert.doesNotMatch(liveStartFailure({ name, message: 'private' }, 'microphone'), /private/);
+  }
+});
+
+test('Live enters iOS recording mode before acquisition and restores playback on stop or failure', async () => {
+  for (const denied of [false, true]) {
+    const f = browserFixture(); let type = 'playback';
+    const session = new IosAudioSession(value => { type = value; });
+    const unregisterLegacy = session.register({ pause: async () => {}, resume: async () => false });
+    f.deps.holdRecording = () => session.holdRecording();
+    f.deps.getMicrophone = async () => {
+      assert.equal(type, 'play-and-record');
+      unregisterLegacy(); // Late legacy cleanup cannot revert an active Live session.
+      assert.equal(type, 'play-and-record');
+      if (denied) throw { name: 'NotAllowedError' };
+      return f.microphone;
+    };
+    const live = new LiveConversation(f.deps);
+    assert.equal(await live.start('session', empty(0)), !denied);
+    if (!denied) {
+      const playback = session.holdPlayback(); await playback.ready;
+      assert.equal(type, 'play-and-record'); playback.release();
+      await live.stop(); assert.ok(f.stopped() > 0);
+    }
+    assert.equal(type, 'playback');
+  }
 });
 
 test('server rejection releases microphone and retains its diagnostic code', async () => {

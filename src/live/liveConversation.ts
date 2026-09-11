@@ -9,6 +9,7 @@ export interface LiveSnapshot {
 const initial = (): LiveSnapshot => ({ phase: 'idle', error: null, captions: [], mouthOpen: 0, microphoneLevel: 0,
   speaking: false, needsPlaybackGesture: false, seconds: 0, confirmedRevision: null });
 export interface LiveBrowserDependencies {
+  holdRecording?: () => () => void;
   getMicrophone: () => Promise<MediaStream>;
   peer: () => RTCPeerConnection;
   audio: () => AudioContext;
@@ -25,6 +26,7 @@ export class LiveConversation {
   private peer: RTCPeerConnection | null = null;
   private channel: RTCDataChannel | null = null;
   private microphone: MediaStream | null = null;
+  private releaseRecording: (() => void) | null = null;
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
   private inputAnalyser: AnalyserNode | null = null;
@@ -60,10 +62,11 @@ export class LiveConversation {
     const current = () => generation === this.generation;
     this.sessionId = sessionId; this.requestId = crypto.randomUUID(); this.cards = cards; this.sentRevision = -1;
     this.snapshot = initial(); this.set({ phase: 'starting' });
-    this.prepare();
     this.startup = setTimeout(() => { if (current()) void this.fail('音声接続が時間内に完了しませんでした。'); }, 40_000);
     let stage: LiveStartStage = 'microphone';
     try {
+      this.releaseRecording = this.dependencies.holdRecording?.() ?? null;
+      this.prepare();
       const acquisition = this.dependencies.getMicrophone();
       void acquisition.then(stream => { if (!current()) stream.getTracks().forEach(track => track.stop()); }, () => {});
       const microphone = await Promise.race([acquisition, new Promise<null>(resolve => { this.cancelMicrophoneWait = () => resolve(null); })]);
@@ -224,5 +227,6 @@ export class LiveConversation {
     this.channel?.close(); this.channel = null; this.peer?.close(); this.peer = null;
     this.inputAnalyser = null; this.outputAnalyser = null; this.gain = null;
     void this.context?.close().catch(() => {}); this.context = null;
+    this.releaseRecording?.(); this.releaseRecording = null;
   }
 }

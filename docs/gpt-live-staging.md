@@ -71,13 +71,21 @@ PCとiPhone/iPadの実マイク権限、音声再生、口パク、割り込み�
 設定で「既存方式」へ戻す。確認できない接続が残る場合は「会話を終了」してから新しい会話を始める。
 配信のコミット、Worker Version、認証、実URLの照合は配信後の記録で追記する。
 
-## 公式仕様
+## iPhone接続失敗の調査
 
 2026-09-11のiPhone確認で、開始直後の接続失敗が報告された。
 同日01:57 UTCの管理APIにはLive開始記録がなかった。
 原因は未確定である。開始失敗の表示に、マイク拒否、接続準備段階、公開APIの安全なエラーコードを追加した。
 APIの応答本文とSDPは表示しない。追加後の`test:public`は126件成功した。
 型検査、lint、stagingビルドも成功した。実機での再試行とコードの確認が必要である。
+
+続く実機報告では、Chromeのマイク許可は有効だった。従来方式だけがサイトの許可画面を表示した。
+従来方式は録音前にiOSの音声モードを`play-and-record`へ変更する。Live側にはその処理がなかった。
+Live開始前に録音モードを保持し、終了時に解放するよう修正した。遅れて実行される従来方式の終了処理も、Live中の録音モードを変更しない。
+WebKitの`InvalidStateError`を含むDOM例外も、`Error`の継承に依存せず判定する。
+この症状は[W3C Audio Sessionの報告](https://github.com/w3c/audio-session/issues/46)と整合する。修正版での実機再確認は未実施である。
+
+## 公式仕様
 
 - [Liveセッション](https://developers.openai.com/api/docs/guides/live-conversations)
 - [WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live)

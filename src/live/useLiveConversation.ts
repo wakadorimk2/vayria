@@ -1,11 +1,13 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { LiveConversation } from './liveConversation';
 import { readLiveResponse } from './liveErrors';
+import { getIosAudioSession } from '../audio/iosAudioSession';
 import { publicUrl } from '../public/paths';
 import { publicActive, subscribePublic } from '../public/session';
 
 export function useLiveConversation(volume: number) {
   const [conversation] = useState(() => new LiveConversation({
+    holdRecording: () => getIosAudioSession()?.holdRecording() ?? (() => {}),
     getMicrophone: () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
     peer: () => new RTCPeerConnection(), audio: () => new AudioContext(),
     frame: callback => requestAnimationFrame(callback), cancelFrame: id => cancelAnimationFrame(id),
