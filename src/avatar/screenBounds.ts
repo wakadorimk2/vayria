@@ -4,9 +4,6 @@ export interface AvatarScreenBounds {
   viewportWidth: number;
   left: number;
   right: number;
-  headX?: number;
-  headY?: number;
-  headRadius?: number;
 }
 
 // Capture the base pose once; animations must not make the settings panel oscillate.

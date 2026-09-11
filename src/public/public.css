@@ -346,7 +346,13 @@ html[data-public-theme="dark"] { background: #292331; }
 
 .public-live-engine { display: grid; gap: .65rem; margin-block: .5rem 1rem; }
 .public-live-engine label { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
-.public-input-orb { position: fixed; z-index: 5; width: 48px; height: 48px; transform: translate(-50%, -50%); pointer-events: none; visibility: hidden; }
+.public-input-orb { width: 48px; height: 48px; pointer-events: none; }
 .public-input-orb svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .public-input-orb path { fill: var(--public-capsule); stroke: var(--public-focus); stroke-width: 2; stroke-linejoin: round; }
 .public-layout .conversation-copy > :is(.conversation-error,.playback-permission) { pointer-events: auto; }
+
+.public-layout .app-shell .conversation { left: 16px; right: 16px; }
+.public-layout .app-shell .conversation-copy { width: min(100%, 38rem); max-width: 100%; }
+.public-layout .conversation-voice-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 12px; width: 100%; font-size: clamp(0.9rem, 2.1vw, 1.2rem); min-height: max(48px, calc(2.8em + .56rem + 2px)); }
+.public-layout .conversation-input-slot { width: 48px; height: 48px; }
+.public-layout .app-shell .conversation-voice-row .reply { width: 100%; max-width: 100%; box-sizing: border-box; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }

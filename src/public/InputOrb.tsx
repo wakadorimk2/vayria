@@ -1,19 +1,18 @@
 import { useEffect, useRef } from 'react';
-import type { AvatarScreenBounds } from '../avatar/screenBounds';
 import type { MicrophoneState } from './microphoneState';
-import { inputOrbPosition, smoothInputLevel } from './inputOrbLayout';
+import { smoothInputLevel } from './inputOrbLayout';
 
-export default function InputOrb({ state, level, anchor }: { state: MicrophoneState; level: number | null; anchor: AvatarScreenBounds | null }) {
+export default function InputOrb({ state, level }: { state: MicrophoneState; level: number | null }) {
   const element = useRef<HTMLDivElement>(null);
   const path = useRef<SVGPathElement>(null);
-  const current = useRef({ state, level, anchor });
+  const current = useRef({ state, level });
   const active = !['off', 'stopping', 'error'].includes(state);
-  useEffect(() => { current.current = { state, level, anchor }; }, [state, level, anchor]);
+  useEffect(() => { current.current = { state, level }; }, [state, level]);
   useEffect(() => {
     if (!active || !element.current) return;
     const node = element.current;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-    let frame = 0, previous = 0, smoothed = 0, lastLayout = -Infinity;
+    let frame = 0, previous = 0, smoothed = 0;
     const animate = (time: number) => {
       if (document.hidden) { node.style.visibility = 'hidden'; previous = 0; frame = requestAnimationFrame(animate); return; }
       const elapsed = previous ? time - previous : 33;
@@ -31,16 +30,7 @@ export default function InputOrb({ state, level, anchor }: { state: MicrophoneSt
       });
       path.current?.setAttribute('d', points.map((point, i) => `${i ? 'L' : 'M'}${point[0].toFixed(2)},${point[1].toFixed(2)}`).join(' ') + ' Z');
       node.style.opacity = String(accepting ? .55 + amplitude * .45 : .35);
-      if (time - lastLayout > 200) {
-        lastLayout = time;
-        const obstacles = Array.from(document.querySelectorAll<HTMLElement>('.public-controls__actions, .card-zone, .conversation-copy > *, .public-entry, .public-settings-panel, .public-controls__panel'))
-          .filter(item => item.getClientRects().length && getComputedStyle(item).visibility !== 'hidden')
-          .map(item => item.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0);
-        const toolbar = document.querySelector('.public-controls__actions')?.getBoundingClientRect();
-        const position = inputOrbPosition(innerWidth, innerHeight, value.anchor, obstacles, toolbar?.top ?? innerHeight - 80);
-        node.style.visibility = position ? 'visible' : 'hidden';
-        if (position) { node.style.left = `${position.x}px`; node.style.top = `${position.y}px`; }
-      }
+      node.style.visibility = 'visible';
       frame = requestAnimationFrame(animate);
     };
     frame = requestAnimationFrame(animate);

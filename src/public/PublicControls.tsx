@@ -6,15 +6,12 @@ import type { VoiceInputNotice } from '../voice/voiceInput';
 import type { ThemePreference, ResolvedTheme } from './theme';
 import PublicSettingsPanel from './PublicSettingsPanel';
 import { microphoneStateLabels, type MicrophoneState } from './microphoneState';
-import InputOrb from './InputOrb';
-import type { AvatarScreenBounds } from '../avatar/screenBounds';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicExhibition, publicSessionId, registerPublicSessionRequest, subscribePublic, updatePublicStatus, type PublicStatus } from './session';
 import ExhibitionControls from './ExhibitionControls';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ avatarBounds = null, liveSelected = false, voiceEngineSwitching = false, onVoiceEngineChange, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
-  avatarBounds?: AvatarScreenBounds | null;
+export default function PublicControls({ liveSelected = false, voiceEngineSwitching = false, onVoiceEngineChange, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneNotice, onMicrophoneToggle }: {
   liveSelected?: boolean;
   voiceEngineSwitching?: boolean;
   onVoiceEngineChange?: (selected: boolean) => void;
@@ -33,7 +30,6 @@ export default function PublicControls({ avatarBounds = null, liveSelected = fal
   onMuteToggle: () => void;
   microphoneOn: boolean;
   microphoneState: MicrophoneState;
-  microphoneLevel: number | null;
   microphoneNotice?: VoiceInputNotice;
   onMicrophoneToggle: () => void;
 }) {
@@ -159,7 +155,6 @@ export default function PublicControls({ avatarBounds = null, liveSelected = fal
     } catch { setMessage('再生と録音を停止しました。終了の通信を確認できませんでした。'); }
   };
   return <aside className="public-controls" aria-label="会話の操作">
-    <InputOrb state={voiceEngineSwitching ? 'off' : microphoneState} level={microphoneLevel} anchor={avatarBounds} />
     <VoiceInputNotification notice={microphoneNotice} suppressed={expanded || noticeOpen} />
     {exhibition && <div className="public-exhibition-handoff">
       <button onClick={() => { cancelRequest(); window.dispatchEvent(new Event('vayria-exhibition-next')); }}>体験を終える</button>

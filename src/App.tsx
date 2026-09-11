@@ -1,3 +1,5 @@
+import InputOrb from './public/InputOrb';
+import ConversationSubtitle from './public/ConversationSubtitle';
 import { environmentStorageKey } from './storageKey';
 import { calculateSettingsLayout, type AvatarScreenBounds } from './public/settingsLayout';
 import {
@@ -2616,14 +2618,23 @@ export default function App() {
         ref={registerChatTarget}
       >
         <div className="conversation-copy" aria-live="polite">
-          {liveSelected && live.captions.some(c => c.speaker === 'assistant') && <p className="reply">
-            {Array.from(live.captions.filter(c => c.speaker === 'assistant').map(c => c.delta).join('')).slice(-160).join('')}
-          </p>}
+          {(runtimeConfig.mode === 'public') && <div className="conversation-voice-row">
+            <div className="conversation-input-slot"><InputOrb
+              state={voiceEngineSwitching ? 'off' : liveSelected ? live.phase === 'starting' ? 'starting' : live.phase === 'connected' ? 'listening' : 'off' : publicMicrophoneState}
+              level={liveSelected ? live.microphoneLevel : displayedAudioLevel === null ? null : microphoneInputStrength}
+            /></div>
+            <ConversationSubtitle key={liveSelected ? 'live' : 'legacy'}
+              captions={liveSelected ? live.captions : undefined}
+              reply={liveSelected ? undefined : reply}
+              speaking={liveSelected ? live.speaking : ttsPlaying}
+              active={!voiceEngineSwitching && (liveSelected ? live.phase === 'connected' : publicSessionActive)}
+            />
+          </div>}
           {liveSelected && live.error && <p className="conversation-error" role="alert">{live.error}</p>}
           {liveSelected && live.needsPlaybackGesture && <div className="playback-permission" role="alert">
             <p>音声の再生許可が必要です。</p><button type="button" onClick={liveController.prepare}>音声を再開</button>
           </div>}
-          {!liveSelected && shouldShowReply && <p className="reply">{reply}</p>}
+          {!(runtimeConfig.mode === 'public') && !liveSelected && shouldShowReply && <p className="reply">{reply}</p>}
           {!liveSelected && shouldShowStatus && (
             <p className="status">
               {isMuted && status === 'idle'
@@ -2735,7 +2746,6 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
-          avatarBounds={publicAvatarBounds}
           liveSelected={liveSelected}
           voiceEngineSwitching={voiceEngineSwitching}
           onVoiceEngineChange={selected => { void selectVoiceEngine(selected); }}
@@ -2755,7 +2765,6 @@ export default function App() {
           microphoneOn={liveSelected ? liveMicrophoneOn : isVoiceInputEnabled}
           microphoneState={liveSelected ? live.phase === 'starting' ? 'starting' : live.phase === 'stopping' ? 'stopping' : live.phase === 'error' ? 'error' : live.phase === 'connected' ? live.microphoneLevel > .1 ? 'speaking' : 'listening' : 'off' : publicMicrophoneState}
           microphoneNotice={liveSelected ? undefined : voiceInput.notice}
-          microphoneLevel={liveSelected ? live.microphoneLevel : displayedAudioLevel === null ? null : microphoneInputStrength}
           onMicrophoneToggle={() => { void handleVoiceToggle(); }}
         />
       )}

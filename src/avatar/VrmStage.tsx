@@ -1064,7 +1064,6 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         ).matches;
 
       let basePosePoints: Vector3[] = [];
-      let baseHead: Vector3 | null = null;
       const updateView = () => {
         const width = Math.max(container.clientWidth, 1);
         const height = Math.max(container.clientHeight, 1);
@@ -1076,17 +1075,6 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         camera.clearViewOffset();
         const bounds = projectAvatarBounds(basePosePoints, camera, container.clientWidth);
         updateView();
-        if (bounds && baseHead) {
-          camera.updateMatrixWorld(true);
-          const head = baseHead.clone().project(camera);
-          const edge = baseHead.clone().add(new Vector3(gazeModelHeight * .055, 0, 0)).project(camera);
-          const rect = container.getBoundingClientRect();
-          if (head.z >= -1 && head.z <= 1) {
-            bounds.headX = rect.left + (head.x + 1) * rect.width / 2;
-            bounds.headY = rect.top + (1 - head.y) * rect.height / 2;
-            bounds.headRadius = Math.abs(edge.x - head.x) * rect.width / 2;
-          }
-        }
         screenBoundsCallbackRef.current(bounds);
       };
       updateViewRef.current = publishBounds;
@@ -1157,9 +1145,6 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             });
             applyBasePose(vrm);
             if (screenBoundsCallbackRef.current) { vrm.update(0); basePosePoints = captureAvatarPoints(vrm.scene); }
-            baseHead = vrm.humanoid.getNormalizedBoneNode('head')?.getWorldPosition(new Vector3()) ?? null;
-            // The head bone is at the base of the skull; anchor beside the face center.
-            baseHead?.add(new Vector3(0, gazeModelHeight * .055, 0));
             idleController = new IdleController(vrm);
             idleGazeController = new IdleGazeController(
               vrm,

@@ -11,22 +11,53 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 const bundle = await build({ stdin: { contents: `export * from './worker/ledger'; export * from './worker/liveSessionManager';
 export * from './worker/liveContext'; export * from './src/live/liveProtocol'; export * from './src/live/liveConversation';
-export * from './src/public/inputOrbLayout';
+export * from './src/public/inputOrbLayout'; export * from './src/public/subtitleDisplay';
 export * from './src/audio/iosAudioSession'; export * from './src/live/liveErrors'; export {cardPool} from './src/cards/cardPool';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node' });
-const { inputOrbPosition, smoothInputLevel, Ledger, initialState, LiveSessionManager, openAiLiveDependencies, LiveConversation, IosAudioSession, LiveConnectionError, readLiveResponse, liveStartFailure, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const { SubtitleDisplay, fitsSubtitle, smoothInputLevel, Ledger, initialState, LiveSessionManager, openAiLiveDependencies, LiveConversation, IosAudioSession, LiveConnectionError, readLiveResponse, liveStartFailure, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const empty = revision => ({ swapRevision: revision, brainCardIds: [], forcedCardId: null });
 const requestId = () => crypto.randomUUID();
 
-test('input orb prefers face right, falls back left or toolbar space, and avoids occupied screens', () => {
-  const anchor = { viewportWidth: 800, left: 200, right: 600, headX: 400, headY: 200, headRadius: 70 };
-  assert.deepEqual(inputOrbPosition(800, 600, anchor, [], 520), { x: 506, y: 200 });
-  assert.deepEqual(inputOrbPosition(520, 600, anchor, [], 520), { x: 294, y: 200 });
-  const cards = [{ left: 0, top: 100, right: 800, bottom: 330 }];
-  const fallback = inputOrbPosition(800, 600, anchor, cards, 520);
-  assert.ok(fallback.y > 330 + 24);
-  assert.ok(inputOrbPosition(390, 600, null, [], 520));
-  assert.equal(inputOrbPosition(390, 600, null, [{ left: 0, top: 0, right: 390, bottom: 600 }], 520), null);
+test('subtitle expires after output silence, ignores input, and starts fresh after a pause', () => {
+  const display = new SubtitleDisplay();
+  const fit = () => true;
+  const output = { id: 'a', speaker: 'assistant', delta: 'こんにちは。', start_ms: 0, end_ms: 400 };
+  assert.equal(display.update([output], true, 0, fit), 'こんにちは。');
+  assert.equal(display.update([output], true, 2500, fit), 'こんにちは。');
+  const input = { id: 'u', speaker: 'user', delta: '秘密の入力', start_ms: 500, end_ms: 1000 };
+  assert.equal(display.update([output, input], false, 4499, fit), 'こんにちは。');
+  assert.equal(display.update([output, input], false, 4500, fit), '');
+  const next = { ...output, id: 'b', delta: '次の話。', start_ms: 3000, end_ms: 3500 };
+  assert.equal(display.update([output, input, next], true, 5000, fit), '次の話。');
+  assert.equal(display.update([output, input, next, { ...output, id: 'late' }], false, 5100, fit), '次の話。');
+  display.reset([output, input, next]);
+  assert.equal(display.update([output, input, next], false, 5200, fit), '');
 });
+
+test('subtitle pages stay within two lines and retain current output across resize', () => {
+  const display = new SubtitleDisplay();
+  const fits = text => fitsSubtitle(text, 4, part => Array.from(part).length);
+  const first = { id: 'a', speaker: 'assistant', delta: '最初です。次の文が続きます。', start_ms: 0, end_ms: 1000 };
+  const text = display.update([first], true, 0, fits);
+  assert.ok(text.length > 0 && first.delta.endsWith(text));
+  assert.ok(!text.includes('最初'));
+  assert.ok(fits(text));
+  const smaller = text => fitsSubtitle(text, 2, part => Array.from(part).length);
+  assert.ok(smaller(display.update([first], true, 100, smaller)));
+  const emoji = { ...first, id: 'b', delta: '🌸🌸🌸', start_ms: 1100, end_ms: 1200 };
+  assert.ok(!display.update([first, emoji], true, 200, smaller).includes('\ufffd'));
+  assert.equal(fitsSubtitle('ab\ncd\nef', 10, text => text.length), false);
+});
+
+test('new output delays subtitle expiry without treating a transcript as playback completion', () => {
+  const display = new SubtitleDisplay();
+  const first = { id: 'a', speaker: 'assistant', delta: '前半', start_ms: 0, end_ms: 100 };
+  const second = { ...first, id: 'b', delta: '後半', start_ms: 150, end_ms: 250 };
+  display.update([first], false, 0, () => true);
+  assert.equal(display.update([first, second], false, 1900, () => true), '前半後半');
+  assert.equal(display.update([first, second], false, 3899, () => true), '前半後半');
+  assert.equal(display.update([first, second], false, 3900, () => true), '');
+});
+
 
 test('input smoothing rejects invalid levels, limits spikes, and returns to silence', () => {
   let level = smoothInputLevel(0, 1, 33);
