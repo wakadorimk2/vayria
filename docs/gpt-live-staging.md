@@ -85,6 +85,15 @@ Live開始前に録音モードを保持し、終了時に解放するよう修�
 WebKitの`InvalidStateError`を含むDOM例外も、`Error`の継承に依存せず判定する。
 この症状は[W3C Audio Sessionの報告](https://github.com/w3c/audio-session/issues/46)と整合する。修正版での実機再確認は未実施である。
 
+## 接続後の定期停止
+
+2026-09-11 11:24 JST頃、ユーザーがiPhoneで実際に音声会話できたと報告した。
+続いて「接続状態を確認できませんでした」で停止した。管理APIの4件は終了確認済みで、カード更新番号0、3、5の確認記録もあった。
+sidebandのWebSocket作成に使った`AbortSignal.timeout(10000)`が、接続成功後も残っていた。
+ローカルWebSocketとMiniflareのDurable Objectで、タイマー満了後の切断を再現した。
+接続成功後にタイマーを解除する修正で、同じ実験の接続は維持された。接続待ちの10秒制限は維持する。
+公開APIテスト129件、型検査、lintは成功した。修正版でのiPhone連続会話は再確認が必要である。
+
 ## 公式仕様
 
 - [Liveセッション](https://developers.openai.com/api/docs/guides/live-conversations)

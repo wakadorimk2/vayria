@@ -12,9 +12,28 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 const bundle = await build({ stdin: { contents: `export * from './worker/ledger'; export * from './worker/liveSessionManager';
 export * from './worker/liveContext'; export * from './src/live/liveProtocol'; export * from './src/live/liveConversation';
 export * from './src/audio/iosAudioSession'; export * from './src/live/liveErrors'; export {cardPool} from './src/cards/cardPool';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node' });
-const { Ledger, initialState, LiveSessionManager, LiveConversation, IosAudioSession, LiveConnectionError, readLiveResponse, liveStartFailure, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const { Ledger, initialState, LiveSessionManager, openAiLiveDependencies, LiveConversation, IosAudioSession, LiveConnectionError, readLiveResponse, liveStartFailure, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const empty = revision => ({ swapRevision: revision, brainCardIds: [], forcedCardId: null });
 const requestId = () => crypto.randomUUID();
+
+test('sideband handshake timeout is cancelled after upgrade but still aborts a stalled handshake', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let signal;
+  const socket = { accept() {} };
+  const dependencies = openAiLiveDependencies('dummy', async (_url, options) => {
+    signal = options.signal;
+    return { status: 101, webSocket: socket };
+  });
+  assert.equal(await dependencies.attach('mock'), socket);
+  t.mock.timers.tick(60_000);
+  assert.equal(signal.aborted, false);
+  const stalled = openAiLiveDependencies('dummy', (_url, options) => new Promise((_, reject) => {
+    options.signal.addEventListener('abort', () => reject(new Error('handshake timeout')), { once: true });
+  }));
+  const rejected = assert.rejects(stalled.attach('mock'), /handshake timeout/);
+  t.mock.timers.tick(10_000);
+  await rejected;
+});
 function accounting() {
   const state = initialState();
   const run = fn => fn(new Ledger(state, Date.now()));

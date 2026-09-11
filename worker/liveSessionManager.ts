@@ -12,10 +12,10 @@ export interface LiveManagerDependencies {
   attach: (id: string) => Promise<Socket>;
 }
 
-export function openAiLiveDependencies(apiKey: string): LiveManagerDependencies {
+export function openAiLiveDependencies(apiKey: string, request: typeof fetch = fetch): LiveManagerDependencies {
   return {
     async create(sdp) {
-      const response = await fetch('https://api.openai.com/v1/live/sessions', {
+      const response = await request('https://api.openai.com/v1/live/sessions', {
         method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ session: { model: 'gpt-live-1', audio: { output: { voice: 'marin' } },
           store: false, delegation: { type: 'client' }, instructions: LIVE_INSTRUCTIONS }, transport: { type: 'webrtc', sdp } }),
@@ -25,12 +25,19 @@ export function openAiLiveDependencies(apiKey: string): LiveManagerDependencies 
       return await response.json();
     },
     async attach(id) {
-      const response = await fetch(`https://api.openai.com/v1/live/sessions/${encodeURIComponent(id)}/attach`, {
-        headers: { Authorization: `Bearer ${apiKey}`, Upgrade: 'websocket' }, signal: AbortSignal.timeout(10_000),
-      });
-      if (response.status !== 101 || !response.webSocket) throw new LimitError('live_control_failed', 0, 502);
-      response.webSocket.accept();
-      return response.webSocket as unknown as Socket;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await request(`https://api.openai.com/v1/live/sessions/${encodeURIComponent(id)}/attach`, {
+          headers: { Authorization: `Bearer ${apiKey}`, Upgrade: 'websocket' }, signal: controller.signal,
+        });
+        if (response.status !== 101 || !response.webSocket) throw new LimitError('live_control_failed', 0, 502);
+        response.webSocket.accept();
+        return response.webSocket as unknown as Socket;
+      } finally {
+        // Workers retains this signal after upgrade. Limit the handshake, not the conversation.
+        clearTimeout(timeout);
+      }
     },
   };
 }
