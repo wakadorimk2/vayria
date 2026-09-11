@@ -78,4 +78,3 @@ PCとiPhone/iPadの実マイク権限、音声再生、口パク、割り込み�
 - [Sideband](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live)
 - [状態注入と委譲](https://developers.openai.com/api/docs/guides/live-delegation?delegation-mode=client)
 - [時間課金](https://developers.openai.com/api/docs/guides/voice-latency-cost?api=live)
-
