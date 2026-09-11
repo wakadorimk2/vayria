@@ -191,6 +191,17 @@ test('staging visual routes pass through the real Worker entry and never invoke 
    if(enabled==='false'){assert.equal((await mode(true,0)).status,404);continue;}
    assert.deepEqual(await (await mode(false,0)).json(),{enabled:false,generation:1});
    assert.deepEqual(await (await mode(true,1)).json(),{enabled:true,generation:2});
+   const visitor=JSON.parse(Buffer.from(bootstrap.headers.get('set-cookie').split('=')[1].split('.')[0],'base64url').toString()).id;
+   const generate=async(type,concept)=>{
+    const ticket=sign({purpose:'visual',exp:Date.now()+60000,visitor,session:started.session.id,generation:2,token:crypto.randomUUID(),video:false,
+     intent:{type,concept,action:'add',modifiers:[],targetId:type==='background'?'background':'chicken-test',motion:'',motionEvidence:'',sharing:'general',regenerate:false}});
+    return post('/api/visual/generate',{ticket});
+   };
+   // Exercise the real Durable Object transport: a cache miss must remain null, not {}.
+   const chicken=await generate('prop','chicken');assert.equal(chicken.status,200);
+   const asset=await chicken.json();assert.equal(asset.type,'asset');assert.equal(asset.asset.url,'/staging/manifestation/chicken-1.png');
+   const background=await generate('background','sea');assert.equal(background.status,200);
+   assert.deepEqual(await background.json(),{type:'failed',code:'background_not_adopted'});
    assert.deepEqual(await (await mode(false,2)).json(),{enabled:false,generation:3});
    assert.equal((await mode(true,1)).status,409);
    assert.deepEqual(await (await mode(true,3)).json(),{enabled:true,generation:4});

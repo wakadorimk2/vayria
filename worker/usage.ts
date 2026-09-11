@@ -62,7 +62,8 @@ export class PublicUsage extends DurableObject {
       const next = this.run(l => l.nextAlarm());
       const previous = await this.ctx.storage.getAlarm();
       if (previous === null || next < previous) await this.ctx.storage.setAlarm(next);
-      return Response.json(result ?? {});
+      // A cache miss is null. Preserve it across the Durable Object boundary.
+      return Response.json(result === undefined ? {} : result);
     } catch (error) {
       if (error instanceof LimitError) return Response.json({ code: error.code, retryAt: error.retryAt }, { status: error.status });
       return Response.json({ code: 'usage_unavailable' }, { status: 503 });
