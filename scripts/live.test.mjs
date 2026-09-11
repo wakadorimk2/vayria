@@ -11,10 +11,31 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 const bundle = await build({ stdin: { contents: `export * from './worker/ledger'; export * from './worker/liveSessionManager';
 export * from './worker/liveContext'; export * from './src/live/liveProtocol'; export * from './src/live/liveConversation';
+export * from './src/public/inputOrbLayout';
 export * from './src/audio/iosAudioSession'; export * from './src/live/liveErrors'; export {cardPool} from './src/cards/cardPool';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node' });
-const { Ledger, initialState, LiveSessionManager, openAiLiveDependencies, LiveConversation, IosAudioSession, LiveConnectionError, readLiveResponse, liveStartFailure, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const { inputOrbPosition, smoothInputLevel, Ledger, initialState, LiveSessionManager, openAiLiveDependencies, LiveConversation, IosAudioSession, LiveConnectionError, readLiveResponse, liveStartFailure, liveCardAppends, readLiveCards, liveCostMicroYen, cardPool } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const empty = revision => ({ swapRevision: revision, brainCardIds: [], forcedCardId: null });
 const requestId = () => crypto.randomUUID();
+
+test('input orb prefers face right, falls back left or toolbar space, and avoids occupied screens', () => {
+  const anchor = { viewportWidth: 800, left: 200, right: 600, headX: 400, headY: 200, headRadius: 70 };
+  assert.deepEqual(inputOrbPosition(800, 600, anchor, [], 520), { x: 506, y: 200 });
+  assert.deepEqual(inputOrbPosition(520, 600, anchor, [], 520), { x: 294, y: 200 });
+  const cards = [{ left: 0, top: 100, right: 800, bottom: 330 }];
+  const fallback = inputOrbPosition(800, 600, anchor, cards, 520);
+  assert.ok(fallback.y > 330 + 24);
+  assert.ok(inputOrbPosition(390, 600, null, [], 520));
+  assert.equal(inputOrbPosition(390, 600, null, [{ left: 0, top: 0, right: 390, bottom: 600 }], 520), null);
+});
+
+test('input smoothing rejects invalid levels, limits spikes, and returns to silence', () => {
+  let level = smoothInputLevel(0, 1, 33);
+  assert.ok(level > 0 && level < 1);
+  for (let i = 0; i < 60; i++) level = smoothInputLevel(level, null, 33);
+  assert.ok(level < .001);
+  assert.equal(smoothInputLevel(0, NaN, 33), 0);
+  assert.equal(smoothInputLevel(0, -.5, 33), 0);
+});
 
 test('sideband handshake timeout is cancelled after upgrade but still aborts a stalled handshake', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });

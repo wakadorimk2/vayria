@@ -2611,18 +2611,17 @@ export default function App() {
       </section>
 
       <section
-        className={`conversation conversation--${status}`}
+        className={`conversation conversation--${liveSelected ? live.speaking ? 'speaking' : 'idle' : status}`}
         aria-label="Character conversation"
         ref={registerChatTarget}
       >
         <div className="conversation-copy" aria-live="polite">
-          {liveSelected && (live.captions.length > 0 || live.error || live.needsPlaybackGesture) && <div className="live-captions" aria-label="GPT-Liveの字幕">
-            {(['user', 'assistant'] as const).map(speaker => <p key={speaker} className={`live-caption live-caption--${speaker}`}>
-              <span>{speaker === 'user' ? 'あなた: ' : 'Vayria: '}</span>
-              {Array.from(live.captions.filter(c => c.speaker === speaker).map(c => c.delta).join('')).slice(-160).join('')}
-            </p>)}
-            {live.error && <p role="alert">{live.error}</p>}
-            {live.needsPlaybackGesture && <button type="button" onClick={liveController.prepare}>音声を再開</button>}
+          {liveSelected && live.captions.some(c => c.speaker === 'assistant') && <p className="reply">
+            {Array.from(live.captions.filter(c => c.speaker === 'assistant').map(c => c.delta).join('')).slice(-160).join('')}
+          </p>}
+          {liveSelected && live.error && <p className="conversation-error" role="alert">{live.error}</p>}
+          {liveSelected && live.needsPlaybackGesture && <div className="playback-permission" role="alert">
+            <p>音声の再生許可が必要です。</p><button type="button" onClick={liveController.prepare}>音声を再開</button>
           </div>}
           {!liveSelected && shouldShowReply && <p className="reply">{reply}</p>}
           {!liveSelected && shouldShowStatus && (
@@ -2632,7 +2631,7 @@ export default function App() {
                 : conversationStatusLabel}
             </p>
           )}
-          {needsPlaybackGesture && (
+          {!liveSelected && needsPlaybackGesture && (
             <div className="playback-permission" role="alert">
               <p>音声の再生許可が必要です。</p>
               <button
@@ -2736,6 +2735,7 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
+          avatarBounds={publicAvatarBounds}
           liveSelected={liveSelected}
           voiceEngineSwitching={voiceEngineSwitching}
           onVoiceEngineChange={selected => { void selectVoiceEngine(selected); }}

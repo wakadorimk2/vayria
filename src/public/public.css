@@ -43,8 +43,6 @@
 .public-controls__progress, .public-controls__error { position: absolute; right: 3px; top: 3px; width: 12px; height: 12px; }
 .public-controls__progress { border: 2px solid rgb(255 255 255 / 25%); border-top-color: white; border-radius: 50%; animation: public-microphone-progress 1s linear infinite; }
 .public-controls__error { border-radius: 50%; background: #f3c3cd; color: #341725; font-size: 11px; font-weight: bold; line-height: 12px; }
-.public-controls__level { position: absolute; bottom: 3px; display: flex; height: 7px; align-items: center; gap: 2px; }
-.public-controls__level i { display: block; width: 2px; height: calc(2px + var(--input-level) * 5px); background: currentColor; border-radius: 1px; }
 @keyframes public-microphone-progress { to { transform: rotate(360deg); } }
 .public-layout .public-card-panel { display: contents; }
 .public-layout .public-card-panel[data-open="false"] .card-prototype { visibility: hidden; pointer-events: none; }
@@ -106,7 +104,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .public-controls__progress { animation: none; }
-  .public-controls__level i { height: 5px; }
   .public-controls .public-controls__actions button { transition: none; }
   .public-controls .public-controls__actions button:active { transform: none; }
 }
@@ -349,7 +346,7 @@ html[data-public-theme="dark"] { background: #292331; }
 
 .public-live-engine { display: grid; gap: .65rem; margin-block: .5rem 1rem; }
 .public-live-engine label { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
-.live-captions { max-height: 28vh; overflow-y: auto; overflow-wrap: anywhere; }
-.live-captions p { margin-block: .4rem; }
-.public-layout .live-captions { pointer-events: auto; max-width: min(82vw, 34rem); padding: .5rem .8rem; border-radius: 12px; background: var(--public-capsule); color: var(--public-ink); white-space: pre-wrap; }
-.live-caption--user { font-size: .85em; }
+.public-input-orb { position: fixed; z-index: 5; width: 48px; height: 48px; transform: translate(-50%, -50%); pointer-events: none; visibility: hidden; }
+.public-input-orb svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.public-input-orb path { fill: var(--public-capsule); stroke: var(--public-focus); stroke-width: 2; stroke-linejoin: round; }
+.public-layout .conversation-copy > :is(.conversation-error,.playback-permission) { pointer-events: auto; }
