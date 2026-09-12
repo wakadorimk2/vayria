@@ -219,3 +219,42 @@ test('staging visual routes pass through the real Worker entry and never invoke 
   }finally{await mf.dispose();}
  }
 });
+
+
+test('visual decision is signed before speech, survives malformed tail, and is issued only once', async()=>{
+ const isolated=await build({entryPoints:['worker/index.ts'],bundle:true,write:false,format:'esm',platform:'node',target:'es2023',plugins:[{name:'ledger-stub',setup(b){b.onLoad({filter:/worker[\\/]usage\.ts$/},()=>({contents:'export class PublicUsage {}',loader:'ts'}));}}]});
+ const {mkdir,writeFile}=await import('node:fs/promises');await mkdir('node_modules/.tmp/visual-worker',{recursive:true});await writeFile('node_modules/.tmp/visual-worker/index.mjs',isolated.outputFiles[0].text);
+ const {default:worker}=await import('../node_modules/.tmp/visual-worker/index.mjs');
+ const secret='visual-test-'.repeat(4),sign=value=>{const p=Buffer.from(JSON.stringify(value)).toString('base64url');return p+'.'+createHmac('sha256',secret).update(p).digest('base64url');};
+ const calls=[];let scenario='complete',permission=true,providerCalls=0;
+ const intent={type:'prop',action:'add',concept:'ball',modifiers:[],targetId:'',motion:'',motionEvidence:'',sharing:'general',regenerate:false};
+ const env={COOKIE_SECRET:secret,PUBLIC_BASE_PATH:'/staging',MANIFESTATION_ENABLED:'true',GENERATION_ENABLED:'true',OPENAI_API_KEY:'mock',AIVIS_API_KEY:'mock',AIVIS_MODEL_UUID:'mock',USAGE:{idFromName:()=>'',get:()=>({fetch:async(u,init)=>{const b=JSON.parse(init.body);calls.push(b.op);if(b.op==='visualPermission')return Response.json({enabled:permission,generation:1});return Response.json({limits:{usdJpy:150},expires:Date.now()+60000});}})}};
+ const previous=globalThis.fetch;
+ globalThis.fetch=async(url,init)=>{
+  providerCalls++;const request=JSON.parse(init.body);const props=request.text.format.schema.properties;
+  const streaming=Boolean(props.deliveryHeader);
+  assert.deepEqual((streaming?props.deliveryHeader.properties:props).visualIntent.properties.type.enum,scenario==='negative'?['none','prop','background','effect']:['prop']);
+  const visual=['invalid','negative'].includes(scenario)?{...intent,type:'none'}:intent;
+  const header={visualIntent:visual,emotion:'neutral',speechAct:'answer',expressionLevel:'low',...(props.deliveryHeader?.properties.voiceAction?{voiceAction:'take_floor',backchannelCue:'none'}:{})};
+  const full=streaming?{deliveryHeader:header,speechLead:'',speechUnits:['ボールを出してみるね。'],activatedCards:['chicken']}:{visualIntent:visual,text:'ボールを出してみるね。',emotion:'neutral',speechAct:'answer',expressionLevel:'low',activatedCards:['chicken']};
+  const text=JSON.stringify(full);const delta=scenario==='tail'?text.slice(0,text.indexOf(',"activatedCards"')):text;
+  const events=[{type:'response.output_text.delta',delta},{type:'response.completed',response:{model:'gpt-5-nano',usage:{input_tokens:10,output_tokens:10},service_tier:'default'}}];
+  return new Response(events.map(x=>'data: '+JSON.stringify(x)+'\n\n').join(''),{headers:{'Content-Type':'text/event-stream'}});
+ };
+ const request=(stream,mode='manual')=>new Request('https://test/staging/api/chat',{method:'POST',headers:{Origin:'https://test',Cookie:'__Host-vayria-staging='+sign({purpose:'visitor',id:'v',exp:Date.now()+60000}),'X-Vayria-Session':'s','X-Vayria-Visual-Generation':'1','X-Performer-Turn-Id':'event-1'},body:JSON.stringify({mode,message:scenario==='negative'?'ボールを出さないで':'ボールを出して',history:[],recentExpressionLevels:[],forcedCardId:null,brainCardIds:['chicken','suspicious','sleepy','rain','gigantic'],performanceContext:{callbackTendency:0,fragmentation:0,semanticBiases:[]},streamSpeech:stream,earlySpeechLead:false})});
+ try{
+  for(scenario of ['complete','tail','invalid']){
+   const before=providerCalls;const r=await worker.fetch(request(true),env);assert.equal(r.status,200);
+   const events=(await r.text()).trim().split('\n').map(JSON.parse);
+   assert.equal(events[0].type,'visual_decision',JSON.stringify(events));assert.equal(events[0].eventId,'event-1');
+   const done=events.find(e=>e.type==='done');assert.ok(done,JSON.stringify(events));
+   if(scenario==='invalid'){assert.equal(events[0].response.visualDecision,'invalid');assert.equal(events.some(e=>e.type==='speech_unit'),false);}
+   else {assert.ok(events[0].response.visualTicket);assert.equal(done.response.visualTicket,events[0].response.visualTicket);assert.equal(events[1].type,'speech_unit');}
+   assert.equal(providerCalls-before,1,'No decision-only call or regeneration on tail failure');
+  }
+  scenario='complete';const result=await (await worker.fetch(request(false),env)).json();assert.ok(result.visualTicket);assert.ok(result.text);
+  const voice=(await (await worker.fetch(request(true,'voice'),env)).text()).trim().split('\n').map(JSON.parse);assert.ok(voice[0].response.visualTicket);assert.equal(voice[1].type,'speech_unit');
+  scenario='negative';const negative=(await (await worker.fetch(request(true,'voice'),env)).text()).trim().split('\n').map(JSON.parse);assert.equal(negative[0].response.visualDecision,'none');assert.equal(negative[0].response.visualTicket,undefined);
+  assert.equal(calls.includes('visualReserve'),false,'Decision alone never reserves image costs');
+ }finally{globalThis.fetch=previous;}
+});

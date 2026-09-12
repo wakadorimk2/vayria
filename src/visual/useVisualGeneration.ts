@@ -7,7 +7,7 @@ import { setVisualAccess } from './access';
 import { VisualSession } from './session';
 import type { VisualAsset } from './types';
 export function useVisualGeneration(){
-  const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
+  const [busy,setBusy]=useState(false);
   const [client]=useState(()=>{
     let serial=Promise.resolve();let revision=0;
     const runtime=new VisualSession({now:Date.now,release:asset=>releasePrepared(asset.url),
@@ -48,6 +48,6 @@ export function useVisualGeneration(){
     const timer=setInterval(()=>client.runtime.tick(),100);
     return()=>{window.removeEventListener('vayria-public-start',off);window.removeEventListener('vayria-public-stop',off);clearInterval(timer);setVisualAccess(null);client.runtime.reset();};
   },[client]);
-  const toggle=async()=>{if(busy)return;setBusy(true);try{if(!snapshot.enabled&&!await requestPublicSession())return;await client.mode(!snapshot.enabled);setMessage(client.runtime.getSnapshot().enabled?'生成モード ON。カードや会話に応じて背景・小物が変化します。':'生成モード OFF。新しい変化を止めました。');}catch(error){setMessage(visualModeErrorMessage(error));}finally{setBusy(false);}};
-  return{runtime:client.runtime,snapshot,busy,message,toggle,reset:client.reset};
+  const toggle=async()=>{if(busy)return;setBusy(true);try{if(!snapshot.enabled&&!await requestPublicSession())return;await client.mode(!snapshot.enabled);client.runtime.modeNotice(client.runtime.getSnapshot().enabled?'生成モード ON。カードや会話に応じて背景・小物が変化します。':'生成モード OFF。新しい変化を止めました。');}catch(error){client.runtime.modeNotice(visualModeErrorMessage(error));}finally{setBusy(false);}};
+  return{runtime:client.runtime,snapshot,busy,message:snapshot.notification?.message??'',toggle,reset:client.reset};
 }

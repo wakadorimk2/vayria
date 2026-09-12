@@ -895,6 +895,7 @@ export default function App() {
     programContext,
     getPerformerStateContext,
     onPerformanceCue: handlePerformanceCue,
+    onVisualStatus: (eventId, code, generation) => visual.runtime.status(eventId, code, generation),
     onVisualIntent: (eventId, intent, ticket, generation) => {
       if (runtimeConfig.mode === 'public' && runtimeConfig.manifestationEnabled) visual.runtime.dispatch(eventId, intent, ticket, generation);
     },

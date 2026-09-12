@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 const dir='node_modules/.tmp/visual';await mkdir(dir,{recursive:true});
-const result=await build({stdin:{contents:'export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
+const result=await build({stdin:{contents:'export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/decision"; export * from "./src/visual/notice"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
 await writeFile(dir+'/test.mjs',result.outputFiles[0].text);
 const {Ledger,initialState,readVisualIntent,cacheDecision,assetDescriptionKey,permitsVideo,VisualSession,sharedVisual,inspectVisualPng}=await import('../'+dir+'/test.mjs');
 const intent={type:'prop',action:'add',concept:'chicken',modifiers:[],targetId:'target',motion:'',motionEvidence:'',sharing:'general',regenerate:false};
@@ -111,4 +111,37 @@ test('mode failures expose only safe codes and distinguish connection, session, 
  assert.match(visualModeErrorMessage(new VisualModeError(401,'session_expired')),/有効期限/);
  assert.match(visualModeErrorMessage(new VisualModeError(404,'not_found')),/利用できません/);
  assert.equal(new VisualModeError(500,'private response data').code,'unknown');
+});
+
+
+test('explicit current object requests constrain decisions without forcing negation or ambiguous targets', async()=>{
+ const {explicitVisualSubject,visualDecisionSchema,validVisualDecision}=await import('../'+dir+'/test.mjs');
+ for(const text of ['ボールを出して','肉を出してください','プリンを作って！','紫色の飛行船を召喚して'])assert.ok(explicitVisualSubject(text));
+ for(const text of ['ボールを出さないで','昨日ボールを出してと言った','「ボールを出して」って言った','もしボールを出してくれたら','ボールが好き','それを出して','何かを出して'])assert.equal(explicitVisualSubject(text),null,text);
+ assert.deepEqual(visualDecisionSchema(true).properties.type.enum,['prop']);
+ assert.equal(validVisualDecision({...intent,type:'none'},true),null);
+ assert.ok(validVisualDecision({...intent,type:'none'},false));
+});
+
+test('notifications expire, keep newest request priority, and ignore old permission generations',async()=>{
+ let now=0;const s=new VisualSession({now:()=>now,prepare:async()=>{},generate:async()=>{}});s.permission(true,1);
+ s.status('a','deciding',1);assert.match(s.getSnapshot().notification.message,/確認/);
+ s.status('b','queued',1);s.status('a','provider_rejected',1);assert.equal(s.getSnapshot().notification.id,'b');
+ s.status('b','provider_rejected',1);assert.match(s.getSnapshot().notification.message,/受け付け/);
+ now=6001;s.tick();assert.equal(s.getSnapshot().notification,undefined);
+ s.permission(false,2);s.status('b','generating',1);assert.equal(s.getSnapshot().notification,undefined);
+});
+
+test('prepared candidates do not replace visible state until first display; failed placement keeps old object',async()=>{
+ const s=new VisualSession({now:()=>100,prepare:async()=>{},generate:async(j,signal,accept)=>accept({...asset,id:j.id})});s.permission(true,1);
+ s.dispatch('old',intent,'t',1);await flush();assert.equal(s.getSnapshot().objects.length,0);s.visible('target');
+ s.dispatch('new',intent,'t2',1);await flush();assert.equal(s.getSnapshot().objects[0].asset.id,'old');
+ s.placementFailed('target');assert.equal(s.getSnapshot().objects[0].asset.id,'old');assert.match(s.getSnapshot().notification.message,/空き領域/);
+});
+
+test('safe failure messages never echo provider text and distinguish limits, inspection, and timeouts',async()=>{
+ const {visualFailureMessage:f}=await import('../'+dir+'/test.mjs');
+ assert.match(f('manifestation_budget'),/上限/);assert.match(f('background_not_adopted'),/休止/);
+ assert.match(f('alpha_quality'),/検査/);assert.match(f('timeout'),/待機時間/);
+ assert.doesNotMatch(f('https://secret.example/?key=private'),/secret|private/);
 });

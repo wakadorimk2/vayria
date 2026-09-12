@@ -178,12 +178,17 @@ async function handle(request: Request, env: Env): Promise<Response> {
     ticket = await verify<Ticket>(String(input.ticket ?? ''), env.COOKIE_SECRET);
     if (!ticket || ticket.purpose !== 'tts' || ticket.visitor !== visitor.id || ticket.session !== id) throw new LimitError('invalid_ticket', 0, 403);
   }
-  const attachVisual = async (response: Awaited<ReturnType<typeof generate>>) => {
+  let visualAttachment: Promise<Record<string, unknown>> | undefined;
+  const attachVisual = async (response: { visualIntent?: unknown }) => {
+    visualAttachment ??= resolveAttachment(response);
+    return { ...response, ...await visualAttachment };
+  };
+  const resolveAttachment = async (response: { visualIntent?: unknown }): Promise<Record<string, unknown>> => {
     const intent = readVisualIntent('visualIntent' in response ? response.visualIntent : undefined);
-    if (!visualEnabled || !intent || intent.type === 'none') return { ...response, visualDecision: !visualEnabled ? 'disabled' : !intent ? 'invalid' : 'none' };
+    if (!visualEnabled || !intent || intent.type === 'none') return { visualGeneration: visualPermission.generation, visualDecision: !visualEnabled ? 'disabled' : !intent ? 'invalid' : 'none' };
     const current = await ledger<{enabled:boolean;generation:number}>(env, 'visualPermission', who);
-    if (!current.enabled || current.generation !== visualPermission.generation) return { ...response, visualIntent: undefined };
-    return visualTicket({ ...response, visualIntent: intent }, env, visitor.id, id, current.generation, permitsVideo(intent, String(input.message ?? '')));
+    if (!current.enabled || current.generation !== visualPermission.generation) return { visualGeneration: visualPermission.generation, visualDecision: 'cancelled', visualIntent: undefined };
+    return visualTicket({ visualIntent: intent }, env, visitor.id, id, current.generation, permitsVideo(intent, String(input.message ?? '')));
   };
   const preview = url.pathname === '/api/card-preview';
   const cardReaction = input.mode === 'autonomous' && typeof input.forcedCardId === 'string' &&
@@ -254,7 +259,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
           void (async () => {
             try {
               const response = await llmExecutionScope.run(execution, () => generate(input, false, env.OPENAI_API_KEY,
-                AbortSignal.any([signal, abort.signal]), { onStateRejected() { rejected = true; }, onDeliveryMetadataRejected() { rejected = true; }, onSpeechUnit(_index, text, candidate) {
+                AbortSignal.any([signal, abort.signal]), { onVisualDecision(intent) {
+                  queue = queue.then(async () => { send({ type: 'visual_decision', eventId: request.headers.get('X-Performer-Turn-Id') ?? job, response: await attachVisual({ visualIntent: intent }) }); });
+                  void queue.catch(() => abort.abort());
+                }, onStateRejected() { rejected = true; }, onDeliveryMetadataRejected() { rejected = true; }, onSpeechUnit(_index, text, candidate) {
                   generation.firstSpeechUnit();
                   for (const unit of splitSpeechAtBoundaries(text)) {
                     const index = emittedUnitCount++;
@@ -265,7 +273,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
                 } }, generation, visualEnabled));
               await queue;
               send({ type: 'state', internalDelta: 'internalDelta' in response ? response.internalDelta : { reasonUpdates: [] }, rejected });
-              send({ type: 'done', response: await attachVisual(response) });
+              send({ type: 'done', response: { ...response, ...await attachVisual('visualIntent' in response ? response : {}) } });
               outcome = 'complete';
             } catch (error) {
               if (error instanceof LimitError) outcome = error.code;
@@ -284,7 +292,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     finally { generation.finish(); Object.assign(measurements, generation.values); }
     const text = 'text' in response && typeof response.text === 'string' ? response.text : '';
     const ttsTickets = !preview && text ? await Promise.all(splitSpeechAtBoundaries(text).map(async unit => ({ text: unit, ttsTicket: await issue(unit, response.emotion) }))) : [];
-    const result = json({ ...await attachVisual(response), ttsTicket: text ? await issue(text, response.emotion) : undefined, ...(ttsTickets.length ? { ttsTickets } : {}) });
+    const result = json({ ...response, ...await attachVisual('visualIntent' in response ? response : {}), ttsTicket: text ? await issue(text, response.emotion) : undefined, ...(ttsTickets.length ? { ttsTickets } : {}) });
     outcome = 'complete'; return result;
   } catch (error) { if (error instanceof LimitError) outcome = error.code; throw error;
   } finally { if (!streaming) await ledger(env, 'finish', { job, measurements, code: request.signal.aborted ? 'cancelled' : signal.aborted ? 'timeout' : outcome }).catch(() => {}); }

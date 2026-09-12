@@ -777,6 +777,7 @@ export interface GeneratedChatResponse {
 }
 
 export interface StreamingReplyCallbacks {
+  onVisualDecision?: (intent: unknown) => void;
   onSpeechUnit: (
     index: number,
     unit: string,

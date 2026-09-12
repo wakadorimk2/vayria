@@ -10,11 +10,14 @@ function VisualVideo({object,runtime}:{object:VisualObject;runtime:VisualSession
   useEffect(()=>{
     const video=preparedVideos.get(object.asset.url),ctx=ref.current?.getContext('2d',{willReadFrequently:true});if(!video||!ctx)return;
     const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;let frame=0;
-    const draw=()=>{ctx.drawImage(video,0,0,256,256);const image=ctx.getImageData(0,0,256,256);keyGreen(image.data);ctx.putImageData(image,0,0);runtime.visible(object.id);if(!reduced)frame=requestAnimationFrame(draw);};
+    const draw=()=>{ctx.drawImage(video,0,0,256,256);const image=ctx.getImageData(0,0,256,256);keyGreen(image.data);ctx.putImageData(image,0,0);runtime.visible(object.id,object.asset.id);if(!reduced)frame=requestAnimationFrame(draw);};
     if(!reduced)void video.play().catch(()=>{});frame=requestAnimationFrame(draw);
     return()=>{cancelAnimationFrame(frame);video.pause();};
-  },[object.asset.url,object.id,runtime]);
+  },[object.asset.url,object.asset.id,object.id,runtime]);
   return <canvas ref={ref} width={256} height={256} role="img" aria-label={object.asset.concept}/>;
+}
+function Unplaced({runtime,id,assetId}:{runtime:VisualSession;id:string;assetId:string}){
+  useEffect(()=>{runtime.placementFailed(id,assetId);},[runtime,id,assetId]);return null;
 }
 export function VisualStage({runtime,snapshot,stage}:{runtime:VisualSession;snapshot:VisualSnapshot;stage:RefObject<VrmStageHandle|null>}){
   const root=useRef<HTMLDivElement>(null);const {layout}=useWorldLayout(root,stage,runtime);const occupied:WorldRect[]=[];
@@ -23,13 +26,14 @@ export function VisualStage({runtime,snapshot,stage}:{runtime:VisualSession;snap
     return null;};
   const style=(r:WorldRect)=>({left:`${r.x*100}%`,top:`${r.y*100}%`,width:`${r.width*100}%`,height:`${r.height*100}%`});
   return <>
-    {snapshot.background&&<img className="visual-background" src={snapshot.background.asset.url} alt="" onLoad={()=>runtime.visible('background')}/>}
+    {snapshot.ready?.filter(o=>o.id==='background').map(o=><img key={o.asset.id} className="visual-background" src={o.asset.url} alt="" onLoad={()=>runtime.visible('background',o.asset.id)}/>)}
+    {snapshot.background&&<img className="visual-background" src={snapshot.background.asset.url} alt="" onLoad={()=>runtime.visible('background',snapshot.background!.asset.id)}/>}
     <div className="visual-layer" ref={root}>
-      {[...snapshot.objects].sort((a,b)=>b.at-a.at).map((object,index)=>{
+      {[...snapshot.objects.filter(o=>!snapshot.ready?.some(r=>r.id===o.id)),...(snapshot.ready??[]).filter(o=>o.id!=='background')].sort((a,b)=>b.at-a.at).map((object,index)=>{
         const age=snapshot.now-object.at,rect=placement((index===0?1:.7)*(age>=30000?.6:age>=15000?.8:1)*(object.effects.includes('grow')?1.4:1));
-        if(!rect)return null;
+        if(!rect)return object.visible?null:<Unplaced key={object.id} id={object.id} assetId={object.asset.id} runtime={runtime}/>;
         return <div key={object.id} className={'visual-object '+object.effects.map(e=>'visual-effect-'+e).join(' ')} style={{...style(rect),opacity:age>=30000?.4:1}}>
-          {object.asset.kind==='video'?<VisualVideo object={object} runtime={runtime}/>:<img src={object.asset.url} alt={object.asset.concept} onLoad={()=>runtime.visible(object.id)}/>}
+          {object.asset.kind==='video'?<VisualVideo object={object} runtime={runtime}/>:<img src={object.asset.url} alt={object.asset.concept} onLoad={()=>runtime.visible(object.id,object.asset.id)}/>}
         </div>;
       })}
       {snapshot.pending.filter(j=>j.intent.type==='prop'&&!snapshot.objects.some(o=>o.id===j.target)).slice(0,3).map(job=>{
