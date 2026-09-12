@@ -7,6 +7,138 @@
   text-rendering: optimizeLegibility;
 }
 
+/* Exhibition starts with the performer. Cards remain an optional interaction. */
+.app-shell[data-exhibition-experience="true"][data-exhibition-cards="closed"] .card-prototype {
+  display: none;
+}
+
+.exhibition-invitation {
+  position: absolute;
+  z-index: 5;
+  bottom: 1rem;
+  left: 1rem;
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.exhibition-invitation button {
+  min-height: 44px;
+  padding: 0.6rem 1rem;
+  border: 1px solid #b5a1b6;
+  border-radius: 2rem;
+  background: #211d32;
+  color: #f4f2ed;
+  cursor: pointer;
+}
+
+.exhibition-invitation button[aria-pressed="true"] {
+  background: #59425d;
+}
+
+.exhibition-invitation button:focus-visible {
+  outline: 2px solid #f4f2ed;
+  outline-offset: 3px;
+}
+
+.exhibition-invitation button:disabled { opacity: 0.5; cursor: default; }
+.exhibition-invitation .exhibition-call { border-color: #dfc58c; color: #ffe6b1; }
+
+.exhibition-operator {
+  position: absolute;
+  z-index: 7;
+  right: 1.25rem;
+  top: 4rem;
+  color: #e1d8e5;
+  font-size: 0.8rem;
+}
+.exhibition-operator summary {
+  width: fit-content;
+  margin-left: auto;
+  padding: 0.65rem;
+  cursor: pointer;
+  border-radius: 0.6rem;
+  background: #211d32;
+}
+.exhibition-operator__body {
+  width: min(22rem, calc(100vw - 2.5rem));
+  max-height: calc(100dvh - 9rem);
+  overflow-y: auto;
+  padding: 1rem;
+  border: 1px solid #88718a;
+  border-radius: 0.8rem;
+  background: #211d32;
+  line-height: 1.6;
+}
+.exhibition-operator button {
+  min-height: 44px;
+  border: 1px solid #dfc58c;
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #3c3047;
+  color: #fff0cc;
+  cursor: pointer;
+}
+.exhibition-operator__hint { color: #c4b9cb; font-size: 0.75rem; }
+.exhibition-operator__error { overflow-wrap: anywhere; color: #ffc5c4; }
+.message-form select {
+  min-height: 44px;
+  padding: 0.5rem;
+  background: #211d32;
+  color: #f4f2ed;
+  border: 1px solid #b5a1b6;
+  border-radius: 0.6rem;
+}
+
+.app-shell[data-exhibition-experience="true"] .conversation .reply {
+  display: block;
+  max-height: 24dvh;
+  max-width: 52rem;
+  overflow-y: auto;
+  -webkit-line-clamp: unset;
+  line-height: 1.5;
+  background: rgb(20 17 32 / 90%);
+  pointer-events: auto;
+}
+.app-shell[data-exhibition-experience="true"] .conversation .status {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.35rem 0.8rem;
+  border-radius: 0.5rem;
+  font-size: clamp(0.85rem, 1.5vw, 1rem);
+  color: #e9e0ed;
+  background: rgb(20 17 32 / 80%);
+}
+
+.app-shell[data-exhibition-experience="true"][data-exhibition-text="open"] .message-form {
+  display: flex;
+  pointer-events: auto;
+}
+
+.app-shell[data-exhibition-experience="true"][data-exhibition-cards="closed"] .conversation {
+  bottom: 5.5rem;
+}
+
+.app-shell[data-exhibition-experience="true"][data-exhibition-cards="open"] .exhibition-invitation {
+  top: 5rem;
+  bottom: auto;
+}
+
+.app-shell[data-exhibition-experience="true"][data-exhibition-cards="open"] .exhibition-copy__hint {
+  visibility: hidden;
+}
+
+@media (max-width: 600px) {
+  .exhibition-invitation { gap: 0.4rem; }
+  .exhibition-invitation button { padding-inline: 0.65rem; font-size: 0.8rem; }
+  .app-shell[data-exhibition-experience="true"][data-exhibition-text="open"] .message-form {
+    flex-wrap: wrap;
+  }
+  .app-shell[data-exhibition-experience="true"][data-exhibition-cards="closed"] .conversation { bottom: 8.5rem; }
+  .exhibition-invitation { right: 1rem; }
+  .message-form input { min-width: 0; flex-basis: 65%; }
+}
+
 /* Exhibition guidance follows selection, then moves attention to the response. */
 .exhibition-participation {
   position: absolute;

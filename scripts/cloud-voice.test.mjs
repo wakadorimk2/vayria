@@ -5,13 +5,14 @@ import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
 const outfile = resolve('node_modules/.tmp/cloud-voice-test/adapter.mjs');
-await build({ stdin: { contents: 'export { createCloudVoiceAdapter } from "./src/voice/cloudVoiceAdapter"; export { getIosAudioSession } from "./src/audio/iosAudioSession";', resolveDir: process.cwd() }, outfile, bundle: true, platform: 'browser', format: 'esm', plugins: [{ name: 'session-fixture', setup(build) {
+await build({ stdin: { contents: 'export { createCloudVoiceAdapter } from "./src/voice/cloudVoiceAdapter"; export { getIosAudioSession } from "./src/audio/iosAudioSession"; export { configureExhibition, readAudioObservations } from "./src/public/exhibition";', resolveDir: process.cwd() }, outfile, bundle: true, platform: 'browser', format: 'esm', plugins: [{ name: 'session-fixture', setup(build) {
   build.onResolve({ filter: /public\/session$/ }, () => ({ path: 'session', namespace: 'fixture' }));
   build.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const publicActive = () => globalThis.cloudVoiceFixture.active; export const publicFetch = (...args) => globalThis.cloudVoiceFixture.fetch(...args);' }));
 } }] });
-const { createCloudVoiceAdapter, getIosAudioSession } = await import(pathToFileURL(outfile));
+const { createCloudVoiceAdapter, getIosAudioSession, configureExhibition, readAudioObservations } = await import(pathToFileURL(outfile));
 const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 function fixture(ios = false, initialPacket = true) {
+  configureExhibition('normal');
   const events = [], requests = [], tracks = [], nodes = [], contexts = [];
   let captureFailure = false;
   let captureWait = null;
@@ -355,6 +356,53 @@ test('iPhone discards a late microphone acquisition after a new playback or manu
     }
     f.adapter.dispose(); await settle();
   }
+});
+
+for (const mode of ['duplex_auto', 'duplex_record']) test(`exhibition ${mode}: recording survives playback and transcriptions stay ordered`, async () => {
+  const f = fixture(true); configureExhibition('exhibition', mode);
+  await f.adapter.start(); f.adapter.setTtsPlaying(true);
+  const hold = getIosAudioSession().holdPlayback(); await hold.ready;
+  assert.equal(f.tracks[0].stopped, false);
+  assert.equal(navigator.audioSession.type, mode === 'duplex_auto' ? 'auto' : 'play-and-record');
+  f.utterance(); await settle(); f.utterance(); await settle();
+  assert.equal(f.requests.length, 1);
+  f.requests[0].resolve(Response.json({ text: 'first human' })); await settle();
+  assert.equal(f.requests.length, 2);
+  f.requests[1].resolve(Response.json({ text: 'second human' })); await settle();
+  assert.deepEqual(f.events.filter(e => e.type === 'utterance_finalized').map(e => e.text), ['first human', 'second human']);
+  assert(!JSON.stringify(readAudioObservations()).includes('human'));
+  hold.release(); await f.adapter.stop(); f.adapter.dispose(); configureExhibition('normal');
+});
+test('exhibition queued transcription is discarded on stop and overflow stops capture', async () => {
+  const f = fixture(); configureExhibition('exhibition', 'duplex_auto'); await f.adapter.start();
+  for (let i = 0; i < 5; i++) { f.utterance(); await settle(); }
+  assert(f.tracks.every(t => t.stopped));
+  assert(readAudioObservations().some(e => e.event === 'queue_overflow'));
+  f.requests[0].resolve(Response.json({ text: 'late' })); await settle();
+  assert(!f.events.some(e => e.type === 'utterance_finalized'));
+  f.adapter.dispose(); configureExhibition('normal');
+});
+
+for (const stopDuringRecovery of [false, true]) test(`duplex queued speech respects recovery and cancellation: stop=${stopDuringRecovery}`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const f = fixture(true); configureExhibition('exhibition', 'duplex_auto');
+  await f.adapter.start(); f.adapter.setTtsPlaying(true);
+  const hold = getIosAudioSession().holdPlayback(); await hold.ready;
+  f.utterance(); await settle(); f.utterance(); await settle();
+  assert.equal(f.requests.length, 1);
+  f.requests[0].resolve(Response.json({ code: 'network_error' }, { status: 503 })); await settle();
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.events.at(-1).recoverable, true);
+  assert.ok(f.events.at(-1).segmentId);
+  if (stopDuringRecovery) await f.adapter.stop();
+  t.mock.timers.tick(1000); await settle();
+  assert.equal(f.requests.length, stopDuringRecovery ? 1 : 2);
+  if (!stopDuringRecovery) {
+    f.requests[1].resolve(Response.json({ text: 'queued human' })); await settle();
+    assert.equal(f.events.at(-1).text, 'queued human');
+    assert.equal(f.tracks[0].stopped, false);
+  }
+  hold.release(); f.adapter.dispose(); configureExhibition('normal'); await settle();
 });
 
 for (const stage of ['headers', 'body']) test(`stalled transcription ${stage} times out, ignores late text and accepts new speech`, async t => {

@@ -1,3 +1,4 @@
+import type { PublicExperience } from './exhibition';
 import { publicUrl } from './paths';
 import type { SettingsLayout } from './settingsLayout';
 import { publicErrorMessage } from './errors';
@@ -12,7 +13,7 @@ import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicEx
 import ExhibitionControls from './ExhibitionControls';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+export default function PublicControls({ experience, onExperienceChange, experiencePending, exhibitionTools, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
   settingsLayout: SettingsLayout;
   onSettingsOpenChange: (open: boolean) => void;
   cardsOpen: boolean;
@@ -21,6 +22,10 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
   greetingComplete: boolean;
   greetingBusy: boolean;
   onGreeting: () => void;
+  experience: PublicExperience;
+  onExperienceChange: (value: PublicExperience) => void;
+  experiencePending: boolean;
+  exhibitionTools?: React.ReactNode;
   themePreference: ThemePreference;
   resolvedTheme: ResolvedTheme;
   onThemeChange: (theme: ThemePreference) => void;
@@ -50,6 +55,10 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
   const startAbort = useRef<AbortController | null>(null);
   const finishRequest = useCallback((success: boolean) => { request.current?.resolve(success); request.current = null; setRequested(false); }, []);
   const cancelRequest = useCallback(() => { cancelPublicAction(); startAbort.current?.abort(); startAbort.current = null; setPending(false); setToken(''); finishRequest(false); }, [finishRequest]);
+  useEffect(() => {
+    window.addEventListener('vayria-exhibition-reset', cancelRequest);
+    return () => window.removeEventListener('vayria-exhibition-reset', cancelRequest);
+  }, [cancelRequest]);
   const [manual, setManual] = useState(false);
   const [expanded, setExpanded] = useState(false);
   useEffect(() => { onSettingsOpenChange(expanded); }, [expanded, onSettingsOpenChange]);
@@ -203,6 +212,10 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
         </svg>
       </label>)}
     </fieldset>
+    <label className="public-conversation-choice">会話設定 <select value={experience} disabled={experiencePending} onChange={event => onExperienceChange(event.target.value as PublicExperience)}>
+      <option value="normal">通常</option><option value="exhibition">三者会話（展示用・試作）</option>
+    </select></label>
+    {exhibitionTools}
     <h3>利用状況</h3>
     <p aria-live="polite">{active ? '会話中です。' : status?.enabled === false || status?.stopped ? '現在は会話を休止しています。' : '会話は開始していません。'} {status && !status.exhibition && `残り: 本日${status.remainingDay}回・今月${status.remainingMonth}回`}</p>
     {active && !status?.exhibition && <button onClick={() => void end()}>会話を終了</button>}

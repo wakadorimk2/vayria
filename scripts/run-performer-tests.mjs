@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const testFiles = [
+  resolve('node_modules/.tmp/performer-test/scripts/viewer-arrival.test.js'),
   resolve('node_modules/.tmp/performer-test/scripts/conversation-runtime.test.js'),
   resolve('node_modules/.tmp/performer-test/scripts/card-preview-api.test.js'),
   resolve('node_modules/.tmp/performer-test/scripts/local-api-capture.test.js'),

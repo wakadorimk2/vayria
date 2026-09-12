@@ -1,11 +1,11 @@
-export const PROGRAM_FORMATS = ['card_impression'] as const;
+export const PROGRAM_FORMATS = ['card_impression', 'live_conversation'] as const;
 export type ProgramFormat = (typeof PROGRAM_FORMATS)[number];
 
-export const PROGRAM_PARTICIPANT_ROLES = ['viewer_directed'] as const;
+export const PROGRAM_PARTICIPANT_ROLES = ['viewer_directed', 'shared_microphone_group'] as const;
 export type ProgramParticipantRole =
   (typeof PROGRAM_PARTICIPANT_ROLES)[number];
 
-export const PROGRAM_OBJECTIVES = ['notice_card_change'] as const;
+export const PROGRAM_OBJECTIVES = ['notice_card_change', 'converse_freely'] as const;
 export type ProgramObjective = (typeof PROGRAM_OBJECTIVES)[number];
 
 export const PROGRAM_PHASES = [
@@ -43,9 +43,9 @@ export function isProgramContext(value: unknown): value is ProgramContext {
   const record = value as Record<string, unknown>;
   return (
     Object.keys(record).length === 4 &&
-    record.format === DEFAULT_PROGRAM_CONTEXT.format &&
-    record.participantRole === DEFAULT_PROGRAM_CONTEXT.participantRole &&
-    record.objective === DEFAULT_PROGRAM_CONTEXT.objective &&
+    ((record.format === 'card_impression' && record.objective === 'notice_card_change') ||
+      (record.format === 'live_conversation' && record.objective === 'converse_freely')) &&
+    (record.participantRole === 'viewer_directed' || record.participantRole === 'shared_microphone_group') &&
     isProgramPhase(record.phase)
   );
 }

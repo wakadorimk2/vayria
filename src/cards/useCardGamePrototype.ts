@@ -140,9 +140,11 @@ export function useCardGamePrototype(unlimitedInterference = false) {
   }, [updateZones]);
 
   const resetCards = useCallback(() => {
-    updateZones(() => ({ ...createInitialState(), swapRevision: ++swapSequenceRef.current }));
+    const initial = { ...createInitialState(), swapRevision: ++swapSequenceRef.current };
+    updateZones(() => initial);
     setSelectedBrainCardId(null);
     setSelectedHandCardId(null);
+    return initial;
   }, [updateZones]);
 
   const beginReply = useCallback(() => {

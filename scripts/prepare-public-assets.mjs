@@ -20,3 +20,12 @@ for (const asset of manifest.assets) {
 await writeFile(join(root, 'avatar/motions/manifest.json'), JSON.stringify(manifest));
 await copyFile('public/vayria-icon.png', join(root, 'vayria-icon.png'));
 console.log(`Public assets: VRM ${(vrm.length / 1048576).toFixed(1)} MiB; ${manifest.assets.length} registered motions.`);
+
+// Camera attention remains opt-in, but its local inference assets must be deployable.
+for (const file of ['face_landmarker.task', 'wasm/vision_wasm_internal.js', 'wasm/vision_wasm_internal.wasm',
+  'wasm/vision_wasm_nosimd_internal.js', 'wasm/vision_wasm_nosimd_internal.wasm',
+  'wasm/vision_wasm_module_internal.js', 'wasm/vision_wasm_module_internal.wasm']) {
+  const destination = join(root, 'attention', file);
+  await mkdir(join(root, 'attention', file.startsWith('wasm/') ? 'wasm' : ''), { recursive: true });
+  await copyFile(join('public/attention', file), destination);
+}

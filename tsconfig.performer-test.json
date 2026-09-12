@@ -19,6 +19,7 @@
     "server/streamingSpeech.ts",
     "src/character/emotion.ts",
     "src/character/identity.ts",
+    "scripts/viewer-arrival.test.ts",
     "src/cards/cardDropReaction.ts",
     "src/cards/cardDropPreview.ts",
     "src/cards/cardMotionAssets.ts",

@@ -31,6 +31,7 @@ let enrolled = true;
 let epoch = 1, session = null, failHandoff = false, failStatus = false, usedYen = 0, handoffs = [], generations = [], microphoneAcquisitions = 0;
 let delayedReply;
 let delayManual = true;
+let releaseSharedReply;
 const replyGate = new Promise(done => { delayedReply = done; });
 const wav = Buffer.alloc(44 + 16000 * 5 * 2);
 wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16);
@@ -87,6 +88,8 @@ await page.route('**/*', async route => {
       const input = request.postDataJSON();
       if (input.mode === 'autonomous') return json({ code: 'generation_failed' }, 503);
       if (delayManual) await replyGate;
+      if (input.message === '判断中の交代') await new Promise(done => { releaseSharedReply = done; });
+      if (input.message === 'うん') return json({ interactionAction: 'listen', backchannelCue: 'none', text: '', emotion: 'neutral', activatedCards: [], speechAct: null, expressionLevel: null });
       return json({ interactionAction: 'take_floor', backchannelCue: 'none', text: '模擬の返答です。', emotion: 'neutral',
         activatedCards: [input.brainCardIds[0]], speechAct: 'answer', expressionLevel: 'low', internalDelta: { reasonUpdates: [] }, ttsTicket: 'mock-ticket' }).catch(() => {});
     }
@@ -156,12 +159,64 @@ try {
   await page.getByRole('button', { name: '体験を終える', exact: true }).click();
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.exhibitTracks.every(t => t.readyState === 'ended')), true);
+  // Handoff remounts the avatar. Its playback-port replacement intentionally cancels old work.
+  await page.getByText('VRM を読み込んでいます…', { exact: true }).waitFor({ state: 'detached', timeout: 90000 });
   await page.getByRole('button', { name: '挨拶してみる', exact: true }).click();
   await page.getByText('文字・マイク・カードから続けられます', { exact: true }).waitFor();
   assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).greeting === true));
   await page.getByRole('button', { name: '体験を終える', exact: true }).click();
   await page.getByRole('button', { name: '挨拶してみる', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'カードで遊ぶ', exact: true }).getAttribute('aria-expanded'), 'false');
+  // Shared conversation remains a setting, independent of registration and its budget.
+  const openSettings = async () => { await page.getByRole('button', { name: '設定', exact: true }).click(); };
+  await openSettings();
+  await page.getByLabel('会話設定').selectOption('exhibition');
+  await page.getByText('三者会話の操作・音声比較', { exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.public-conversation-tools button')?.disabled === false, null, { timeout: 90000 });
+  assert.equal(await page.getByRole('button', { name: '次の参加者へ', exact: true }).count(), 0);
+  for (const size of [{ width: 1024, height: 1366 }, { width: 1366, height: 1024 }]) {
+    await page.setViewportSize(size);
+    await page.screenshot({ path: resolve(output, `shared-settings-${size.width}.png`) });
+    const panel = await page.locator('#public-session-panel').boundingBox();
+    assert.ok(panel && panel.x >= 0 && panel.x + panel.width <= size.width);
+  }
+  await page.getByRole('button', { name: '音声をミュートする', exact: true }).click();
+  await page.getByRole('button', { name: '閉じる', exact: true }).click();
+  await page.getByRole('button', { name: '文字で話す', exact: true }).click();
+  await page.getByLabel('入力の宛先').selectOption('room');
+  const sendRoom = async text => {
+    await input.fill(text);
+    await page.getByRole('button', { name: '送信', exact: true }).click();
+    await page.waitForResponse(r => r.url().endsWith('/api/chat'));
+  };
+  await sendRoom('うん');
+  await page.waitForTimeout(300);
+  const ttsBefore = generations.filter(g => g.path === '/api/tts').length;
+  await sendRoom('どう思う？');
+  await page.locator('.conversation .reply').filter({ hasText: '模擬の返答です。' }).waitFor();
+  const sharedRequest = JSON.parse(generations.filter(g => g.path === '/api/chat').at(-1).body);
+  assert.equal(sharedRequest.programContext.participantRole, 'shared_microphone_group');
+  assert.equal(sharedRequest.streamSpeech, false);
+  assert.ok(sharedRequest.history.some(h => h.content === 'うん'));
+  assert.equal(generations.filter(g => g.path === '/api/tts').length, ttsBefore);
+  await openSettings();
+  await page.getByRole('button', { name: 'Vayriaに振る', exact: true }).click();
+  await page.waitForResponse(r => r.url().endsWith('/api/chat'));
+  assert.equal(JSON.parse(generations.filter(g => g.path === '/api/chat').at(-1).body).mode, 'voice');
+  await page.getByRole('button', { name: '閉じる', exact: true }).click();
+  await input.fill('判断中の交代');
+  await page.getByRole('button', { name: '送信', exact: true }).click();
+  await page.waitForRequest(r => r.url().endsWith('/api/chat'));
+  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
+  releaseSharedReply?.();
+  await page.waitForTimeout(1000);
+  assert.equal(await page.locator('.conversation .reply').count(), 0);
+  assert.equal(await page.evaluate(() => window.exhibitTracks.every(t => t.readyState === 'ended')), true);
+  await openSettings();
+  assert.equal(await page.getByLabel('会話設定').inputValue(), 'exhibition');
+  await page.getByLabel('会話設定').selectOption('normal');
+  await page.getByRole('button', { name: '閉じる', exact: true }).click();
   usedYen = 8000;
   await page.waitForTimeout(16000);
   await page.getByRole('button', { name: '設定：展示予算の通知あり', exact: true }).click();
@@ -205,10 +260,25 @@ try {
     assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('vayria-exhibition-handoff')).requestId), 'production-only');
     await rootPage.close();
   }
+  // A non-enrolled prototype uses local reset and must also stop comparison audio.
+  enrolled = false; session = null; failStatus = false;
+  await page.goto(base + mount + '/');
+  await page.getByRole('button', { name: '設定', exact: true }).click();
+  await page.getByLabel('会話設定').selectOption('exhibition');
+  await page.getByText('三者会話の操作・音声比較', { exact: true }).click();
+  await page.getByText('音声比較と診断', { exact: true }).click();
+  await page.getByLabel('比較用の音声ファイル').setInputFiles({ name: 'comparison.wav', mimeType: 'audio/wav', buffer: wav });
+  await page.getByRole('button', { name: 'マイクなしで比較再生', exact: true }).click();
+  await page.waitForFunction(() => window.exhibitSources.some(s => s.started && !s.stopped && !s.ended));
+  await page.getByRole('button', { name: '次の参加者へ', exact: true }).click();
+  await page.getByText('新しい会話を始められます', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.exhibitSources.filter(s => s.started).every(s => s.stopped || s.ended)), true);
+  assert.equal(await page.getByRole('button', { name: 'マイクなしで比較再生', exact: true }).isDisabled(), true);
+  assert.equal(await page.evaluate(() => window.exhibitTracks.length), 0);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
+  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests'] : []), 'local-comparison-reset', 'shared-listen-history', 'shared-muted-subtitle', 'shared-handoff-invalidates-reply', 'shared-explicit-invitation', 'registered-settings-preserved', 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
 } catch (error) {
   console.error(JSON.stringify({ generations, errors, ui: await page.locator('body').innerText(), sources: await page.evaluate(() => window.exhibitSources) }));
   await page.screenshot({ path: resolve(output, 'failure.png') });
   throw error;
-} finally { delayedReply(); await browser.close(); await new Promise(done => server.close(done)); }
+} finally { delayedReply(); releaseSharedReply?.(); await browser.close(); await new Promise(done => server.close(done)); }

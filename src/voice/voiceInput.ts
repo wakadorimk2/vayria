@@ -38,7 +38,7 @@ export type VoiceInputEvent =
       at: number;
     } & VoiceSpeakerMetadata)
   | { type: 'recognition_stopped'; at: number }
-  | { type: 'recognition_failed'; code: string; at: number; recoverable?: boolean; retryAt?: number };
+  | { type: 'recognition_failed'; code: string; segmentId?: string; at: number; recoverable?: boolean; retryAt?: number };
 
 /** A voice-only notice; it never replaces conversation or card content. */
 export interface VoiceInputNotice {
