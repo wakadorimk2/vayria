@@ -56,7 +56,7 @@ export function VisualStage({runtime,snapshot,stage}:{runtime:VisualSession;snap
         const motionBounds=visualMotionBounds(rect,layout,object.effects);
         const motionFits=fitsVisualRect(layout,motionBounds,occupied);
         occupied.push(motionFits?motionBounds:rect);
-        const effects=motionFits?object.effects:object.effects.filter(e=>e!=='float'&&e!=='rotate');
+        const effects=motionFits?object.effects:object.effects.filter(e=>!['float','rotate','sway','bob','slide'].includes(e));
         return <div key={object.id} className={'visual-object '+effects.map(e=>'visual-effect-'+e).join(' ')} style={{...style(rect),opacity:age>=30000?.4:1}}>
           {object.asset.kind==='video'&&!object.visible&&object.asset.source&&<img style={{position:'absolute',inset:0}} src={object.asset.source.url} alt=""/>}
           {object.asset.kind==='video'?<VisualVideo object={object} runtime={runtime}/>:<img src={object.asset.url} alt={object.asset.concept} onLoad={()=>runtime.visible(object.id,object.asset.id)}/>}

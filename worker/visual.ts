@@ -1,5 +1,5 @@
 import { isWorldLayout } from '../src/world/worldLayout';
-import { VISUAL_EFFECTS, readVisualIntent, cacheDecision, assetDescriptionKey, type VisualIntent, type VisualAsset } from '../src/visual/types';
+import { VISUAL_EFFECTS, normalizeVisualIntent, legacyVisualIntents, legacyAssetDescriptionKey, readVisualIntent, cacheDecision, assetDescriptionKey, type VisualIntent, type VisualAsset } from '../src/visual/types';
 import { sign, verify, boundedBody } from './security';
 import { LimitError } from './ledger';
 import { generateVisualImage, callVisualProvider, safeVisualMediaUrl, type ProviderContext, type VisualProvider } from './visualProvider';
@@ -15,6 +15,7 @@ const json = (value: unknown, status = 200) => Response.json(value, { status, he
 const stock: Record<string,string> = { chicken:'chicken-1', '鶏':'chicken-1', egg:'egg', '卵':'egg', feather:'feather', '羽根':'feather', bat:'bat', 'バット':'bat' };
 export async function visualTicket(response: { visualIntent?: unknown }, env: VisualEnv, visitor: string, session: string, generation: number, video: boolean, eventId?:string) {
   const intent = readVisualIntent(response.visualIntent); if (!intent || intent.type === 'none') return { ...response, visualIntent: undefined };
+  const normalized=normalizeVisualIntent(intent);if(!normalized.motion&&intent.motion){intent.modifiers=normalized.modifiers;video=false;}
   if (!video) { intent.motion = ''; intent.motionEvidence = ''; }
   const token = crypto.randomUUID();
   if (intent.type === 'background') intent.targetId = 'background';
@@ -79,126 +80,144 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
   const permission=await ledger<{enabled:boolean;generation:number}>('visualPermission',who);
   if(!permission.enabled||permission.generation!==ticket.generation)throw new LimitError('visual_disabled',0,409);
   if(path==='/api/visual/diagnostic')return json(await ledger('visualDiagnostic',{...who,generation:ticket.generation,eventId:ticket.eventId??ticket.token,records:b.records}));
-  const intent=readVisualIntent(ticket.intent);if(!intent||intent.type==='none')throw new LimitError('invalid_request',0,400);
+  const rawIntent=readVisualIntent(ticket.intent);const intent=rawIntent&&normalizeVisualIntent(rawIntent);if(!intent||intent.type==='none')throw new LimitError('invalid_request',0,400);
   const args={...who,generation:ticket.generation,token:ticket.token};
   if(path==='/api/visual/cancel'||intent.action==='cancel'){await ledger('visualCancel',{...args,token:intent.action==='cancel'?undefined:ticket.token,target:intent.targetId});return json({type:'cancel',targetId:intent.targetId});}
   if(ticket.video && env.VISUAL_VIDEO_ENABLED!=='true')return json({type:'failed',code:'video_disabled'});
   if(intent.type==='effect')return json({type:'effect',intent});
   intent.modifiers=intent.modifiers.filter(m=>!VISUAL_EFFECTS.includes(m as typeof VISUAL_EFFECTS[number]));
-  const portrait=b.portrait===true, scope=sharedVisual(intent)&&!b.source?'shared':session;
-  const baseIntent={...intent,motion:'',motionEvidence:''};
-  const baseKey=await digest(scope+assetDescriptionKey(baseIntent,portrait));
-  let source:VisualAsset|null=null;
-  if(ticket.video && b.source && intent.action==='replace') {
+  const lookupStarted=performance.now(),portrait=b.portrait===true;
+  let scope=sharedVisual(intent)?'shared':session,source:VisualAsset|null=null;
+  const builtin=stock[intent.concept.toLowerCase()];
+  const stockSource=():VisualAsset=>({id:'stock-'+builtin,url:'/manifestation/'+builtin+'.png',kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'});
+  if(ticket.video&&b.source&&intent.action==='replace'){
     const candidate=b.source.source??b.source;
     if(typeof candidate.url!=='string')throw new LimitError('invalid_source',0,400);
     if(candidate.url.startsWith('/staging/api/visual/media/')){
       const u=new URL(candidate.url,'https://local');
       const proof=await verify<{exp:number;purpose:string;visitor:string;session:string;key:string}>(u.searchParams.get('ticket')??'',env.COOKIE_SECRET);
       if(!proof||proof.purpose!=='visual-media'||proof.visitor!==visitor||proof.session!==session||proof.key!==u.pathname.split('/').pop())throw new LimitError('invalid_source',0,403);
-      source={id:proof.key,url:proof.key,kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:proof.exp,scope:session};
-    }else if(candidate.url==='/staging/manifestation/'+stock[intent.concept.toLowerCase()]+'.png')source={id:'stock-'+stock[intent.concept.toLowerCase()],url:candidate.url.replace('/staging',''),kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'};
-    else throw new LimitError('invalid_source',0,400);
+      source=await ledger<VisualAsset|null>('visualReplay',{...args,key:proof.key});
+      if(!source||source.kind!=='image')throw new LimitError('invalid_source',0,403);
+    }else if(builtin&&candidate.url==='/staging/manifestation/'+builtin+'.png')source=stockSource();
+    else throw new LimitError('invalid_source',0,403);
+    if(source.scope!=='shared')scope=session;
   }
-  source??=ticket.video?await ledger<VisualAsset|null>('visualLookup',{...args,key:baseKey}):null;
-  const key=ticket.video?await digest(scope+assetDescriptionKey(intent,portrait)+':video-v2:'+(source?.id??'new')):baseKey;
-
-  const cached=await ledger<VisualAsset|null>('visualLookup',{...args,key});
+  const baseIntent={...intent,motion:'',motionEvidence:''};
+  const baseKey=await digest(scope+assetDescriptionKey(baseIntent,portrait));
+  const legacyKeys=async(video:boolean)=>[...new Set(await Promise.all(legacyVisualIntents({...rawIntent!,...(video?{}:{motion:'',motionEvidence:''})}).flatMap(i=>video
+    ? [source?.id,'new'].filter((v):v is string=>!!v).map(id=>digest(scope+legacyAssetDescriptionKey(i,portrait)+':video-v2:'+id))
+    : [digest(scope+legacyAssetDescriptionKey(i,portrait))])))].slice(0,80);
+  const lookup=(key:string)=>ledger<VisualAsset|null>('visualLookup',{...args,key});
+  const findBase=async()=>{
+    const direct=await lookup(baseKey);if(direct)return direct;
+    const old=await ledger<{key:string;asset:VisualAsset}|null>('visualLookupAny',{...args,keys:await legacyKeys(false)});
+    if(!old||old.asset.kind!=='image')return null;
+    return ledger<VisualAsset>('visualAlias',{...args,key:baseKey,fromKey:old.key});
+  };
+  source??=await findBase();
+  if(!source&&builtin&&!intent.modifiers.length)source=stockSource();
+  const videoKey=()=>digest(scope+assetDescriptionKey(intent,portrait)+':video-v3:h3-480-fast:key-v1:'+source!.id);
+  let key=ticket.video&&source?await videoKey():baseKey;
+  let cached=ticket.video?(source?await lookup(key):null):source;
+  if(ticket.video&&!cached){
+    const old=await ledger<{key:string;asset:VisualAsset}|null>('visualLookupAny',{...args,keys:await legacyKeys(true)});
+    if(old?.asset.kind==='video'&&old.asset.source&&(!source||source.id===old.asset.source.id)){
+      source??=old.asset.source;key=await videoKey();cached=await ledger<VisualAsset>('visualAlias',{...args,key,fromKey:old.key});
+    }
+  }
   const resolve=async(asset:VisualAsset):Promise<VisualAsset>=>{
     if(asset.url.startsWith('/manifestation/'))return {...asset,url:'/staging'+asset.url};
     const signed=await sign({purpose:'visual-media',visitor,session,key:asset.id,exp:Math.min(asset.expiresAt,Date.now()+900000)},env.COOKIE_SECRET);
     return {...asset,url:'/staging/api/visual/media/'+asset.id+'?ticket='+encodeURIComponent(signed),...(asset.source?{source:await resolve(asset.source)}:{})};
   };
-  const builtin=stock[intent.concept.toLowerCase()];
-  if(intent.type==='prop'&&!cached&&builtin&&!intent.modifiers.length&&!ticket.video){
-    return json({type:'asset',asset:{id:ticket.token,url:'/staging/manifestation/'+builtin+'.png',kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'}});
+  const timings:Record<string,number>={cacheLookup:performance.now()-lookupStarted,cacheHit:cached?1:0,cacheMiss:cached?0:1,explicitRefresh:intent.regenerate?1:0,...(!cached?{[source?'cacheMiss.variant':'cacheMiss.source']:1}:{})};
+  if((cached&&cacheDecision(cached,Date.now(),intent.regenerate)==='reuse')||b.cacheOnly===true){
+    // Cache-only never claims, reserves, or submits a provider request.
+    const record=ledger('visualFinish',{...args,code:cached?'cache_reuse':'cache_miss',timings,eventId:ticket.eventId}).catch(()=>{});
+    if(ctx)ctx.waitUntil(record);else await record;
+    return cached?json({type:'asset',asset:await resolve(cached),cache:true,timings}):json({type:'failed',code:'cache_miss',timings});
   }
-  const decision=cacheDecision(cached,Date.now(),intent.regenerate);
-  if(cached&&decision==='reuse')return json({type:'asset',asset:await resolve(cached),cache:true});
-  if(b.cacheOnly===true)return cached?json({type:'asset',asset:await resolve(cached),cache:true}):json({type:'failed',code:'cache_miss'});
   if(intent.type==='background'&&env.VISUAL_BACKGROUND_ENABLED!=='true')return json({type:'failed',code:'background_not_adopted'});
   if(!env.VISUAL_ASSETS)throw new LimitError('storage_unconfigured',0,503);
   const duration=Math.min(intent.type==='background'?60000:30000,Number.isFinite(b.remainingMs)&&b.remainingMs>0?b.remainingMs:Number.MAX_SAFE_INTEGER);
-  const claim=await ledger<{owner:boolean}>('visualStart',{...args,key,target:intent.targetId,duration});
+  // A request owns its cancellation lifetime; shared stage claims own preparation.
+  await ledger('visualStart',{...args,key:'request:'+ticket.token,target:intent.targetId,duration});
   let disconnected=false;
-  const abort=new AbortController(); const signal=AbortSignal.any([request.signal,abort.signal,AbortSignal.timeout(duration)]);
+  const abort=new AbortController(),signal=AbortSignal.any([request.signal,abort.signal,AbortSignal.timeout(duration)]);
   return new Response(new ReadableStream<Uint8Array>({
     async start(controller){
-      const timings:Record<string,number>={};const start=performance.now();let code='failed';
+      const start=performance.now();let code='failed';
       const emit=(value:object)=>{if(!disconnected)controller.enqueue(new TextEncoder().encode(JSON.stringify(value)+'\n'));};
-      try {
-        if(cached)emit({type:'asset',asset:await resolve(cached),cache:true});
-        if(!claim.owner){
-          while(!signal.aborted){await new Promise(r=>setTimeout(r,200));const asset=await ledger<VisualAsset|null>('visualLookup',{...args,key});if(asset&&asset.createdAt>(cached?.createdAt??0)){emit({type:'asset',asset:await resolve(asset)});code='shared_cache';return;}}
-          signal.throwIfAborted();
+      const share=async<T extends {id:string}>(stage:string,stageKey:string,get:()=>Promise<T|null>,create:()=>Promise<T>,previous?:string):Promise<T>=>{
+        const usable=(v:T|null)=>v&&v.id!==previous;
+        let value=await get();if(usable(value)){timings[stage+'.cacheHit']=1;return value!;}
+        const claim=await ledger<{owner:boolean;token:string}>('visualClaim',{...args,key:stageKey});
+        if(claim.owner){value=await get();if(usable(value)){timings[stage+'.cacheHit']=1;return value!;}return create();}
+        timings[stage+'.joined']=1;
+        while(!signal.aborted){
+          value=await get();if(usable(value))return value!;
+          if(!await ledger<boolean>('visualClaimActive',{...args,key:stageKey,token:claim.token}))throw new Error('shared_preparation_failed');
+          await new Promise(r=>setTimeout(r,100));
         }
+        signal.throwIfAborted();throw new Error('aborted');
+      };
+      try{
+        if(cached)emit({type:'asset',asset:await resolve(cached),cache:true});
         const provider:VisualProvider=env.VISUAL_IMAGE_PROVIDER==='runware'?'runware':'fal';
         const context:ProviderContext={provider,falKey:env.FAL_KEY,runwareKey:env.RUNWARE_API_KEY,signal,timings,layout:isWorldLayout(b.layout)?b.layout:undefined,
           reserve:async(step,cost)=>{if(env.GENERATION_ENABLED!=='true')throw new Error('generation_stopped');await ledger('visualReserve',{...args,step,cost});}};
-        let url:string, keyColor:'green'|'blue'|undefined;
-        if(ticket.video){
-          if(!source){
-            if(builtin&&!intent.modifiers.length)source={id:'stock-'+builtin,url:'/manifestation/'+builtin+'.png',kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'};
-            else {
-              const baseUrl=await generateVisualImage(context,baseIntent,portrait);
-              const response=await fetch(safeVisualMediaUrl(baseUrl),{signal,redirect:'manual'});
-              if(!response.ok)throw new Error('media_failed');
-              const bytes=await boundedBody(response as unknown as Request,12000000);
-              const dimensions=await inspectVisualPng(new Uint8Array(bytes),true);
-              const now=Date.now(),id=(scope==='shared'?'s-':'p-')+await digest(baseKey+now+ticket.token);
-              const expiresAt=now+(scope==='shared'?30:1)*86400000;
-              await env.VISUAL_ASSETS!.put(id,bytes,{httpMetadata:{contentType:'image/png'},customMetadata:{expiresAt:String(expiresAt),scope:scope==='shared'?'shared':'private'}});
-              source={id,url:id,kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:now,expiresAt,scope,width:dimensions.width,height:dimensions.height};
-              await ledger('visualPublish',{...args,asset:source,key:baseKey});
-            }
-          }
-          emit({type:'asset',asset:await resolve(source)});
-          const inputStarted=performance.now();
-          const inputKey='input-'+await digest(source.id+':key-v1');
-          const cachedInput=await env.VISUAL_ASSETS!.get(inputKey);
-          let input:{bytes:Uint8Array;keyColor:'green'|'blue'};
-          if(cachedInput&&['green','blue'].includes(cachedInput.customMetadata?.keyColor??'')){
-            input={bytes:new Uint8Array(await cachedInput.arrayBuffer()),keyColor:cachedInput.customMetadata!.keyColor as 'green'|'blue'};
-          }else{
-            const original=source.url.startsWith('/manifestation/')?await env.ASSETS.fetch(new Request('https://assets'+source.url)):await env.VISUAL_ASSETS!.get(source.id);
+        const save=async(url:string,video:boolean,destination:string,keyColor?:'green'|'blue'):Promise<VisualAsset>=>{
+          const fetchStarted=performance.now(),response=await fetch(safeVisualMediaUrl(url),{signal,redirect:'manual'});
+          if(!response.ok||!response.headers.get('Content-Type')?.includes(video?'video/mp4':'image/png'))throw new Error('media_type');
+          const bytes=await boundedBody(response as unknown as Request,video?32000000:12000000);
+          const dimensions=video?undefined:await inspectVisualPng(new Uint8Array(bytes),intent.type==='prop');
+          const now=Date.now(),id=(scope==='shared'?'s-':'p-')+await digest(destination+now+ticket.token),expiresAt=now+(scope==='shared'?30:1)*86400000;
+          await env.VISUAL_ASSETS!.put(id,bytes,{httpMetadata:{contentType:video?'video/mp4':'image/png'},customMetadata:{expiresAt:String(expiresAt),scope:scope==='shared'?'shared':'private'}});
+          const asset:VisualAsset={id,url:id,kind:video?'video':'image',composite:video?'green-key':intent.type==='prop'?'alpha':'opaque',type:intent.type as 'prop'|'background',concept:intent.concept,createdAt:now,expiresAt,scope,...(video?{keyColor,source:source??undefined}:{width:dimensions?.width,height:dimensions?.height})};
+          await ledger('visualPublish',{...args,asset,key:destination});timings[video?'videoStorage':'imageStorage']=performance.now()-fetchStarted;return asset;
+        };
+        const baseStarted=performance.now();
+        if(!ticket.video||!source)source=await share('base',baseKey,()=>lookup(baseKey),async()=>save(await generateVisualImage(context,baseIntent,portrait),false,baseKey),!ticket.video&&intent.regenerate?cached?.id:undefined);
+        timings.basePreparation=performance.now()-baseStarted;
+        if(!ticket.video){emit({type:'asset',asset:await resolve(source!)});code='complete';return;}
+        key=await videoKey();
+        emit({type:'asset',asset:await resolve(source!)});
+        const result=await share('video',key,()=>lookup(key),async()=>{
+          const inputStarted=performance.now(),inputKey='input-'+await digest(source!.id+':key-v1');
+          const getInput=async()=>{
+            const stored=await env.VISUAL_ASSETS!.get(inputKey);
+            if(!stored||!['green','blue'].includes(stored.customMetadata?.keyColor??'')||!Number.isFinite(Number(stored.customMetadata?.expiresAt))||Number(stored.customMetadata?.expiresAt)<=Date.now())return null;
+            return {id:inputKey,bytes:new Uint8Array(await stored.arrayBuffer()),keyColor:stored.customMetadata!.keyColor as 'green'|'blue'};
+          };
+          const input=await share('input',inputKey,getInput,async()=>{
+            const original=source!.url.startsWith('/manifestation/')?await env.ASSETS.fetch(new Request('https://assets'+source!.url)):await env.VISUAL_ASSETS!.get(source!.id);
             if(!original)throw new Error('source_invalid');
-            input=await videoSourcePng(new Uint8Array(await original.arrayBuffer()));
-            await env.VISUAL_ASSETS!.put(inputKey,input.bytes,{httpMetadata:{contentType:'image/png'},customMetadata:{keyColor:input.keyColor,expiresAt:String(Date.now()+(scope==='shared'?30:1)*86400000),scope:scope==='shared'?'shared':'private'}});
-          }
-          keyColor=input.keyColor;timings.sourcePreparation=performance.now()-inputStarted;
-          const result=await callVisualProvider({...context,provider:'fal'},'video',{image_url:'data:image/png;base64,'+Buffer.from(input.bytes).toString('base64'),prompt:`Locked camera. One ${intent.concept} performing this action: ${intent.motion}. Preserve the source appearance. Full silhouette stays inside the frame with a generous margin. Uniform saturated ${keyColor} background. No cuts, text, extra subjects, floor or shadows.`,duration:5,resolution:'480P',prompt_expansion_mode:'fast',enable_safety_checker:true});
-          url=String((result.video as {url?:string})?.url);
-        }else url=await generateVisualImage(context,intent,portrait);
-        if(ticket.video&&ctx){
+            const value=await videoSourcePng(new Uint8Array(await original.arrayBuffer()));
+            await ledger('visualPermission',who).then(p=>{const v=p as {enabled:boolean;generation:number};if(!v.enabled||v.generation!==ticket.generation)throw new Error('visual_disabled');});
+            await env.VISUAL_ASSETS!.put(inputKey,value.bytes,{httpMetadata:{contentType:'image/png'},customMetadata:{keyColor:value.keyColor,expiresAt:String(Math.min(source!.expiresAt,Date.now()+(scope==='shared'?30:1)*86400000)),scope:scope==='shared'?'shared':'private'}});
+            return {id:inputKey,...value};
+          });
+          timings.sourcePreparation=performance.now()-inputStarted;
+          const response=await callVisualProvider({...context,provider:'fal'},'video',{image_url:'data:image/png;base64,'+Buffer.from(input.bytes).toString('base64'),prompt:`Locked camera. One ${intent.concept} performing this action: ${intent.motion}. Preserve the source appearance. Full silhouette stays inside the frame with a generous margin. Uniform saturated ${input.keyColor} background. No cuts, text, extra subjects, floor or shadows.`,duration:5,resolution:'480P',prompt_expansion_mode:'fast',enable_safety_checker:true});
+          const url=String((response.video as {url?:string})?.url);
+          if(!ctx)return save(url,true,key,input.keyColor);
           const now=Date.now(),id=(scope==='shared'?'s-':'p-')+await digest(key+now+ticket.token),expiresAt=now+900000;
           await ledger('visualMediaRegister',{...args,key:id,url:safeVisualMediaUrl(url)});
-          const asset:VisualAsset={id,url:id,kind:'video',composite:'green-key',type:'prop',concept:intent.concept,createdAt:now,expiresAt,scope,keyColor,source:source??undefined};
-          await ledger('visualPublish',{...args,asset});timings.ready=performance.now()-start;
-          emit({type:'asset',asset:await resolve(asset)});code='complete';
-          const storageStarted=performance.now();const storageTimings:Record<string,number>={};
+          const asset:VisualAsset={id,url:id,kind:'video',composite:'green-key',type:'prop',concept:intent.concept,createdAt:now,expiresAt,scope,keyColor:input.keyColor,source:source!};
+          await ledger('visualPublish',{...args,asset,key});
+          const storageStarted=performance.now();
           ctx.waitUntil((async()=>{
-            const response=await fetch(safeVisualMediaUrl(url),{signal:AbortSignal.timeout(25000),redirect:'manual'});
-            if(!response.ok||!response.headers.get('Content-Type')?.includes('video/mp4'))throw new Error('media_type');
-            const bytes=await boundedBody(response as unknown as Request,32000000);
-            storageTimings.fetchMs=performance.now()-storageStarted;
+            const media=await fetch(safeVisualMediaUrl(url),{signal:AbortSignal.timeout(25000),redirect:'manual'});
+            if(!media.ok||!media.headers.get('Content-Type')?.includes('video/mp4'))throw new Error('media_type');
+            const bytes=await boundedBody(media as unknown as Request,32000000),fetchMs=performance.now()-storageStarted;
             await env.VISUAL_ASSETS!.put(id,bytes,{httpMetadata:{contentType:'video/mp4'},customMetadata:{expiresAt:String(now+(scope==='shared'?30:1)*86400000),scope:scope==='shared'?'shared':'private'}});
-            storageTimings.totalMs=performance.now()-storageStarted;await ledger('visualMediaSaved',{...who,key:id,enabled:true,timings:storageTimings,eventId:ticket.eventId});
+            await ledger('visualMediaSaved',{...who,key:id,enabled:true,timings:{fetchMs,totalMs:performance.now()-storageStarted},eventId:ticket.eventId});
           })().catch(()=>ledger('visualMediaSaved',{...who,key:id,enabled:false,eventId:ticket.eventId,timings:{totalMs:performance.now()-storageStarted}}).catch(()=>{})));
-          return;
-        }
-        const media=await fetch(safeVisualMediaUrl(url),{signal,redirect:'manual'});
-        if(!media.ok)throw new Error('media_failed');
-        const video=ticket.video;
-        if(!media.headers.get('Content-Type')?.includes(video?'video/mp4':'image/png'))throw new Error('media_type');
-        const bytes=await boundedBody(media as unknown as Request,video?32000000:12000000);
-        const dimensions=!video?await inspectVisualPng(new Uint8Array(bytes),intent.type==='prop'):undefined;
-        const now=Date.now(), id=(scope==='shared'?'s-':'p-')+await digest(key+now+ticket.token), expiresAt=now+(scope==='shared'?30:1)*86400000;
-        await ledger('visualPermission',who).then(p=>{const value=p as {enabled:boolean;generation:number};if(!value.enabled||value.generation!==ticket.generation)throw new Error('visual_disabled');});
-        await env.VISUAL_ASSETS!.put(id,bytes,{httpMetadata:{contentType:video?'video/mp4':'image/png'},customMetadata:{expiresAt:String(expiresAt),scope:scope==='shared'?'shared':'private'}});
-        const asset:VisualAsset={id,url:id,kind:video?'video':'image',composite:video?'green-key':intent.type==='prop'?'alpha':'opaque',type:intent.type as 'prop'|'background',concept:intent.concept,createdAt:now,expiresAt,scope,...(video?{keyColor,source:source??undefined}:{width:dimensions?.width,height:dimensions?.height})};
-        await ledger('visualPublish',{...args,asset});timings.ready=performance.now()-start;
-        emit({type:'asset',asset:await resolve(asset)});code='complete';
-      }catch(error){code=error instanceof Error?/^[\w-]{1,60}$/.test(error.message)?error.message:'visual_failed':'visual_failed';emit({type:'failed',code});}
+          return asset;
+        },intent.regenerate?cached?.id:undefined);
+        timings.ready=performance.now()-start;emit({type:'asset',asset:await resolve(result)});code='complete';
+      }catch(error){code=error instanceof Error&&/^[\w-]{1,60}$/.test(error.message)?error.message:'visual_failed';emit({type:'failed',code});}
       finally{timings.total=performance.now()-start;await ledger('visualFinish',{...args,code,timings,eventId:ticket.eventId}).catch(()=>{});if(!disconnected)controller.close();}
     },cancel(){disconnected=true;abort.abort();}
   }),{headers:{'Content-Type':'application/x-ndjson','Cache-Control':'no-store'}});

@@ -119,3 +119,14 @@ Runware新規画像経路は予算を優先して各1回で終了した。誤っ
 最終の保守的予約総額は9.825米ドル。残り0.175米ドル。追加の有料比較は実行しない。
 全 `npm test`、型検査、lint、ビルドは成功。ビルドには既存の500kB超チャンク警告が残る。
 公開・push・mergeはしていない。
+
+
+## Cache reuse and request coalescing (2026-09-12)
+
+The visual route resolves the source image before it builds the video key. The key includes the source ID, exact normalized action, and compositing version. Image preparation and chroma input have separate claims. Concurrent image and video requests share image generation and background removal. Cancellation ends the owner claim; waiting requests do not automatically resubmit paid work.
+
+Shared assets remain reusable until their fixed 30-day expiry. Private assets retain their 24-hour expiry. Explicit refresh can replace an asset within 24 hours. A failed refresh preserves the unexpired asset. Exact verified legacy keys can acquire a new alias without changing asset dates. Colors, shapes and different articulated actions remain distinct.
+
+Mock-provider verification: two simultaneous identical video requests send one image, one removal, and one video request (3 total, versus 6 without coalescing). A repeated resolved video sends 0 paid requests. A new action on the same image sends only 1 video request and reuses the chroma input. These are deterministic API-count results, not production billing or latency measurements.
+
+Metrics distinguish cache lookup, source preparation, input preparation, provider request counts and joined claims. Cache misses distinguish missing source and missing variant. Existing browser diagnostics measure first frames separately. Reservations are not confirmed provider charges. No new paid generation is used to validate this change. Production display time and actual billed savings remain unmeasured.

@@ -19,3 +19,9 @@
 /* Keep captions and interactive panels above props, including during re-layout. */
 .public-layout .app-shell .conversation { z-index:20; }
 .public-layout .public-card-panel .card-prototype { z-index:20; }
+
+.visual-effect-sway { animation:visual-sway 2s ease-in-out infinite; }
+.visual-effect-bob { animation:visual-float 1.4s ease-in-out infinite; }
+.visual-effect-slide { animation:visual-slide 3s ease-in-out infinite; }
+@keyframes visual-sway { 25% {translate:-4px 0} 75% {translate:4px 0} }
+@keyframes visual-slide { 50% {translate:8px 0} }

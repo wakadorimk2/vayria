@@ -28,7 +28,7 @@ export function fitsVisualRect(layout:WorldLayout,rect:WorldRect,occupied:WorldR
 export function visualMotionBounds(rect:WorldRect,layout:WorldLayout,effects:readonly string[]){
  const width=rect.width*layout.width,height=rect.height*layout.height;
  const diameter=effects.includes('rotate')?Math.hypot(width,height):0;
- const w=Math.max(width,diameter)/layout.width,h=(Math.max(height,diameter)+(effects.includes('float')?8:0))/layout.height;
+ const w=(Math.max(width,diameter)+(effects.some(e=>e==='slide'||e==='sway')?16:0))/layout.width,h=(Math.max(height,diameter)+(effects.some(e=>e==='float'||e==='bob')?8:0))/layout.height;
  return {x:rect.x+(rect.width-w)/2,y:rect.y+(rect.height-h)/2,width:w,height:h};
 }
 /** Keep valid placements; promote to chest only after the preferred rect settles. */

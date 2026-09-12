@@ -36,7 +36,7 @@ test('same cache claim is shared, target replacement cancels only that target, p
  l.visualPublish('v','s',1,'c',{...asset,scope:'s'});l.start('v2','ip2','s2');l.visualMode('v2','s2',true,0);assert.equal(l.visualLookup('v2','s2',1,'two'),null);
 });
 test('cache periods, shape keys, explicit video evidence, and conservative sharing',()=>{
- assert.equal(cacheDecision(asset,1001,true),'reuse');assert.equal(cacheDecision(asset,86400000+1000,false),'reuse');assert.equal(cacheDecision(asset,86400000+1000,true),'refresh');assert.equal(cacheDecision(asset,7*86400000+1000,false),'refresh');
+ assert.equal(cacheDecision(asset,1001,true),'refresh');assert.equal(cacheDecision(asset,86400000+1000,false),'reuse');assert.equal(cacheDecision(asset,86400000+1000,true),'refresh');assert.equal(cacheDecision(asset,7*86400000+1000,false),'reuse');
  assert.equal(assetDescriptionKey(intent,false),assetDescriptionKey({...intent,modifiers:['grow','sparkle']},false));
  assert.notEqual(assetDescriptionKey(intent,false),assetDescriptionKey({...intent,modifiers:['transparent']},false));
  assert.equal(permitsVideo({...intent,motion:'walk',motionEvidence:'歩いて'},'鶏に歩いてほしい'),true);assert.equal(permitsVideo({...intent,motion:'walk',motionEvidence:'歩いて'},'鶏いる？'),false);
@@ -67,7 +67,7 @@ test('PNG inspection accepts bundled alpha assets and rejects nontransparent sou
 
 test('signed routes reject OFF, stale permits and another session; stock uses no paid request',async()=>{
  const {l}=setup();const calls=[];
- const bridge=async(op,b)=>{calls.push(op);switch(op){case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualMode':return l.visualMode(b.visitor,b.id,b.enabled,b.generation);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualCancel':return l.visualCancel(b.visitor,b.id,b.generation,b.target,b.token);default:throw new Error('Unexpected '+op);}};
+ const bridge=async(op,b)=>{calls.push(op);switch(op){case 'visualLookupAny':return l.visualLookupAny(b.visitor,b.id,b.generation,b.keys);case 'visualAlias':return l.visualAlias(b.visitor,b.id,b.generation,b.key,b.fromKey);case 'visualClaim':return l.visualClaim(b.visitor,b.id,b.generation,b.token,b.key);case 'visualClaimActive':return l.visualClaimActive(b.visitor,b.id,b.generation,b.key,b.token);case 'visualReplay':return l.visualReplay(b.visitor,b.id,b.generation,b.key);case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualMode':return l.visualMode(b.visitor,b.id,b.enabled,b.generation);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualCancel':return l.visualCancel(b.visitor,b.id,b.generation,b.target,b.token);default:throw new Error('Unexpected '+op);}};
  const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');
  const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',COOKIE_SECRET:'test-secret-'.repeat(4),GENERATION_ENABLED:'true'};
  const response=await visualTicket({visualIntent:intent},env,'v','s',1,false);
@@ -89,7 +89,7 @@ test('cancel targets its old job, not a newer job for the same object',()=>{
 
 test('real route pipeline reserves image and removal, inspects PNG, stores privately and reuses shared cache',async()=>{
  const {l}=setup();l.visualMode('v','s',true,0);const ops=[];
- const bridge=async(op,b)=>{ops.push(op);switch(op){case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualStart':return l.visualStart(b.visitor,b.id,b.generation,b.token,b.key,b.target,b.duration);case 'visualReserve':return l.visualReserve(b.visitor,b.id,b.generation,b.token,b.step,b.cost);case 'visualPublish':return l.visualPublish(b.visitor,b.id,b.generation,b.token,b.asset);case 'visualFinish':return l.visualFinish(b.visitor,b.id,b.token,b.code,b.timings);default:throw new Error('Unexpected '+op);}};
+ const bridge=async(op,b)=>{ops.push(op);switch(op){case 'visualLookupAny':return l.visualLookupAny(b.visitor,b.id,b.generation,b.keys);case 'visualAlias':return l.visualAlias(b.visitor,b.id,b.generation,b.key,b.fromKey);case 'visualClaim':return l.visualClaim(b.visitor,b.id,b.generation,b.token,b.key);case 'visualClaimActive':return l.visualClaimActive(b.visitor,b.id,b.generation,b.key,b.token);case 'visualReplay':return l.visualReplay(b.visitor,b.id,b.generation,b.key);case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualStart':return l.visualStart(b.visitor,b.id,b.generation,b.token,b.key,b.target,b.duration);case 'visualReserve':return l.visualReserve(b.visitor,b.id,b.generation,b.token,b.step,b.cost);case 'visualPublish':return l.visualPublish(b.visitor,b.id,b.generation,b.token,b.asset,b.key);case 'visualFinish':return l.visualFinish(b.visitor,b.id,b.token,b.code,b.timings);default:throw new Error('Unexpected '+op);}};
  const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');const png=await readFile('public/manifestation/chicken-1.png');let puts=0,submits=0;
  const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',COOKIE_SECRET:'test-secret-'.repeat(4),GENERATION_ENABLED:'true',FAL_KEY:'dummy',VISUAL_ASSETS:{put:async()=>puts++}};
  const original=globalThis.fetch;
@@ -191,7 +191,7 @@ test('robot video emits its own image first and reserves each provider request o
  const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');const {l}=setup();l.visualMode('v','s',true,0);
  const png=await readFile('public/manifestation/chicken-1.png'),store=new Map();let videoInput;
  const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',COOKIE_SECRET:'test-secret-'.repeat(4),GENERATION_ENABLED:'true',VISUAL_VIDEO_ENABLED:'true',FAL_KEY:'dummy',VISUAL_ASSETS:{put:async(id,bytes)=>store.set(id,bytes),get:async id=>store.has(id)?new Response(store.get(id)):null}};
- const bridge=async(op,b)=>{switch(op){case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualStart':return l.visualStart(b.visitor,b.id,b.generation,b.token,b.key,b.target,b.duration);case 'visualReserve':return l.visualReserve(b.visitor,b.id,b.generation,b.token,b.step,b.cost);case 'visualPublish':return l.visualPublish(b.visitor,b.id,b.generation,b.token,b.asset,b.key);case 'visualFinish':return l.visualFinish(b.visitor,b.id,b.token,b.code,b.timings);default:throw new Error(op)}};
+ const bridge=async(op,b)=>{switch(op){case 'visualLookupAny':return l.visualLookupAny(b.visitor,b.id,b.generation,b.keys);case 'visualAlias':return l.visualAlias(b.visitor,b.id,b.generation,b.key,b.fromKey);case 'visualClaim':return l.visualClaim(b.visitor,b.id,b.generation,b.token,b.key);case 'visualClaimActive':return l.visualClaimActive(b.visitor,b.id,b.generation,b.key,b.token);case 'visualReplay':return l.visualReplay(b.visitor,b.id,b.generation,b.key);case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualStart':return l.visualStart(b.visitor,b.id,b.generation,b.token,b.key,b.target,b.duration);case 'visualReserve':return l.visualReserve(b.visitor,b.id,b.generation,b.token,b.step,b.cost);case 'visualPublish':return l.visualPublish(b.visitor,b.id,b.generation,b.token,b.asset,b.key);case 'visualFinish':return l.visualFinish(b.visitor,b.id,b.token,b.code,b.timings);default:throw new Error(op)}};
  const previous=globalThis.fetch;globalThis.fetch=async(url,init)=>{
  const u=new URL(url);
  if(u.hostname==='api.fal.ai')return Response.json({prices:[{endpoint_id:u.searchParams.get('endpoint_id'),unit_price:.0001,unit:u.searchParams.get('endpoint_id').includes('video')?'seconds':u.searchParams.get('endpoint_id').includes('birefnet')?'compute seconds':'megapixels',currency:'USD'}]});
@@ -244,8 +244,8 @@ test('cache-only video probe never reserves or generates on a miss',async()=>{
  const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');
  const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',VISUAL_VIDEO_ENABLED:'true',COOKIE_SECRET:'test-secret-'.repeat(4)};
  const signed=await visualTicket({visualIntent:{...intent,motion:'move',motionEvidence:'動く'}},env,'v','s',1,true,'event');
- const calls=[];const response=await visualRoute(new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket,cacheOnly:true})}),env,'v','s',async op=>{calls.push(op);if(op==='visualPermission')return {enabled:true,generation:1};if(op==='visualLookup')return null;throw new Error('paid path');});
- assert.deepEqual(await response.json(),{type:'failed',code:'cache_miss'});assert.ok(calls.every(op=>['visualPermission','visualLookup'].includes(op)));
+ const calls=[];const response=await visualRoute(new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket,cacheOnly:true})}),env,'v','s',async op=>{calls.push(op);if(op==='visualPermission')return {enabled:true,generation:1};if(op==='visualLookup'||op==='visualLookupAny')return null;throw new Error('paid path');});
+ assert.equal((await response.json()).code,'cache_miss');assert.ok(calls.every(op=>['visualPermission','visualLookup','visualLookupAny','visualFinish'].includes(op)));
 });
 
 test('metadata-only preload advances by play before loadeddata',async()=>{
@@ -276,7 +276,7 @@ test('video is delivered before asynchronous R2 persistence',async()=>{
  const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');const {l}=setup();l.visualMode('v','s',true,0);
  const png=await readFile('public/manifestation/chicken-1.png'),store=new Map();let videoInput;
  const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',COOKIE_SECRET:'test-secret-'.repeat(4),GENERATION_ENABLED:'true',VISUAL_VIDEO_ENABLED:'true',FAL_KEY:'dummy',VISUAL_ASSETS:{put:async(id,bytes)=>store.set(id,bytes),get:async id=>store.has(id)?new Response(store.get(id)):null}};
- const bridge=async(op,b)=>{switch(op){case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualStart':return l.visualStart(b.visitor,b.id,b.generation,b.token,b.key,b.target,b.duration);case 'visualReserve':return l.visualReserve(b.visitor,b.id,b.generation,b.token,b.step,b.cost);case 'visualPublish':return l.visualPublish(b.visitor,b.id,b.generation,b.token,b.asset,b.key);case 'visualMediaRegister':return l.visualMediaRegister(b.visitor,b.id,b.generation,b.key,b.url);case 'visualMediaSaved':return l.visualMediaSaved(b.visitor,b.id,b.key,b.enabled);case 'visualFinish':return l.visualFinish(b.visitor,b.id,b.token,b.code,b.timings);default:throw new Error(op)}};
+ const bridge=async(op,b)=>{switch(op){case 'visualLookupAny':return l.visualLookupAny(b.visitor,b.id,b.generation,b.keys);case 'visualAlias':return l.visualAlias(b.visitor,b.id,b.generation,b.key,b.fromKey);case 'visualClaim':return l.visualClaim(b.visitor,b.id,b.generation,b.token,b.key);case 'visualClaimActive':return l.visualClaimActive(b.visitor,b.id,b.generation,b.key,b.token);case 'visualReplay':return l.visualReplay(b.visitor,b.id,b.generation,b.key);case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualStart':return l.visualStart(b.visitor,b.id,b.generation,b.token,b.key,b.target,b.duration);case 'visualReserve':return l.visualReserve(b.visitor,b.id,b.generation,b.token,b.step,b.cost);case 'visualPublish':return l.visualPublish(b.visitor,b.id,b.generation,b.token,b.asset,b.key);case 'visualMediaRegister':return l.visualMediaRegister(b.visitor,b.id,b.generation,b.key,b.url);case 'visualMediaSaved':return l.visualMediaSaved(b.visitor,b.id,b.key,b.enabled);case 'visualFinish':return l.visualFinish(b.visitor,b.id,b.token,b.code,b.timings);default:throw new Error(op)}};
  const previous=globalThis.fetch;globalThis.fetch=async(url,init)=>{
  const u=new URL(url);
  if(u.hostname==='api.fal.ai')return Response.json({prices:[{endpoint_id:u.searchParams.get('endpoint_id'),unit_price:.0001,unit:u.searchParams.get('endpoint_id').includes('video')?'seconds':u.searchParams.get('endpoint_id').includes('birefnet')?'compute seconds':'megapixels',currency:'USD'}]});
@@ -364,4 +364,56 @@ test('video arriving during UI hold inherits visible time and waits for actual d
  await accept({...asset,id:'base'});s.visible('target');now=2100;s.hold('target');
  await accept({...asset,id:'movie',kind:'video'});assert.equal(s.getSnapshot().ready[0].held,true);assert.equal(s.getSnapshot().ready[0].displayedMs,2000);assert.equal(notices.length,1);
  now=5100;s.visible('target','movie');assert.equal(s.getSnapshot().objects[0].displayedMs,2000);assert.equal(notices.length,2);finish();await flush();
+});
+
+async function cacheHarness(run){
+ const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');const {l,state}=setup();l.visualMode('v','s',true,0);
+ const png=await readFile('public/manifestation/chicken-1.png'),store=new Map(),counts={image:0,mask:0,video:0,input:0};
+ const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',COOKIE_SECRET:'test-secret-'.repeat(4),GENERATION_ENABLED:'true',VISUAL_VIDEO_ENABLED:'true',FAL_KEY:'dummy',ASSETS:{fetch:async()=>new Response(png)},VISUAL_ASSETS:{put:async(id,bytes,options)=>{if(id.startsWith('input-'))counts.input++;store.set(id,{bytes,options});},get:async id=>{const v=store.get(id);return v?{arrayBuffer:async()=>new Response(v.bytes).arrayBuffer(),customMetadata:v.options.customMetadata}:null;}}};
+ const bridge=async(op,b)=>{const a=[b.visitor,b.id];switch(op){
+ case 'visualPermission':return l.visualPermission(...a);case 'visualLookup':return l.visualLookup(...a,b.generation,b.key);case 'visualLookupAny':return l.visualLookupAny(...a,b.generation,b.keys);case 'visualAlias':return l.visualAlias(...a,b.generation,b.key,b.fromKey);case 'visualReplay':return l.visualReplay(...a,b.generation,b.key);case 'visualClaim':return l.visualClaim(...a,b.generation,b.token,b.key);case 'visualClaimActive':return l.visualClaimActive(...a,b.generation,b.key,b.token);case 'visualStart':return l.visualStart(...a,b.generation,b.token,b.key,b.target,b.duration);case 'visualReserve':return l.visualReserve(...a,b.generation,b.token,b.step,b.cost);case 'visualPublish':return l.visualPublish(...a,b.generation,b.token,b.asset,b.key);case 'visualFinish':return l.visualFinish(...a,b.token,b.code,b.timings);default:throw new Error(op);}};
+ let number=0,fail=false;const previous=globalThis.fetch;globalThis.fetch=async(url,init)=>{
+ const u=new URL(url);if(u.hostname==='api.fal.ai')return Response.json({prices:[{endpoint_id:u.searchParams.get('endpoint_id'),unit_price:.0001,unit:u.searchParams.get('endpoint_id').includes('video')?'seconds':u.searchParams.get('endpoint_id').includes('birefnet')?'compute seconds':'megapixels',currency:'USD'}]});
+ if(u.hostname==='fal.media')return new Response(u.pathname.endsWith('mp4')?'movie':png,{headers:{'Content-Type':u.pathname.endsWith('mp4')?'video/mp4':'image/png'}});
+ if(init?.method==='POST'){const stage=u.pathname.includes('video')?'video':u.pathname.includes('birefnet')?'mask':'image';counts[stage]++;await new Promise(r=>setTimeout(r,20));if(fail)return new Response('',{status:503});return Response.json({status_url:'https://queue.fal.run/status',response_url:'https://queue.fal.run/result'});}
+ if(u.pathname==='/status')return Response.json({status:'COMPLETED'});
+ return Response.json({video:{url:'https://fal.media/result.mp4'},images:[{url:'https://fal.media/result.png'}],image:{url:'https://fal.media/result.png'}});
+ };
+ const request=async(patch={},extra={})=>{const i={...intent,concept:'crab',targetId:'target-'+(++number),...patch};const signed=await visualTicket({visualIntent:i},env,'v','s',1,permitsVideo(i,i.motionEvidence));const res=await visualRoute(new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket,...extra})}),env,'v','s',bridge);return (await res.text()).trim().split('\n').map(JSON.parse);};
+ try{await run({request,counts,l,state,store,fail:()=>{fail=true;}});}finally{globalThis.fetch=previous;}
+}
+test('resolved source makes repeated video a hit; changing motion reuses image, mask and input',()=>cacheHarness(async({request,counts})=>{
+ const first=await request({motion:'walk',motionEvidence:'walk'});assert.equal(first.at(-1).asset?.kind,'video',JSON.stringify(first));assert.deepEqual(counts,{image:1,mask:1,video:1,input:1});
+ const again=await request({concept:'カニ',motion:'walking',motionEvidence:'walking'});assert.equal(again.at(-1).asset.id,first.at(-1).asset.id);assert.deepEqual(counts,{image:1,mask:1,video:1,input:1});
+ const other=await request({motion:'dance',motionEvidence:'dance'});assert.equal(other.at(-1).asset.kind,'video');assert.deepEqual(counts,{image:1,mask:1,video:2,input:1});
+ const reference=await request({action:'replace',motion:'walk',motionEvidence:'walk'},{source:first.at(-1).asset.source});assert.equal(reference.at(-1).asset.id,first.at(-1).asset.id);assert.deepEqual(counts,{image:1,mask:1,video:2,input:1});
+}));
+test('concurrent image and video share source generation and mask',()=>cacheHarness(async({request,counts})=>{
+ const results=await Promise.all([request(),request({motion:'walk',motionEvidence:'walk'})]);assert.ok(results.every(r=>r.at(-1).type==='asset'),JSON.stringify(results));assert.deepEqual(counts,{image:1,mask:1,video:1,input:1});
+}));
+test('concurrent identical videos share all paid stages',()=>cacheHarness(async({request,counts})=>{
+ const results=await Promise.all([request({motion:'walk',motionEvidence:'walk'}),request({motion:'walking',motionEvidence:'walking'})]);assert.ok(results.every(r=>r.at(-1).asset?.kind==='video'),JSON.stringify(results));assert.equal(results[0].at(-1).asset.id,results[1].at(-1).asset.id);assert.deepEqual(counts,{image:1,mask:1,video:1,input:1});
+}));
+test('refresh within 24h creates a version; refresh failure keeps unexpired asset',()=>cacheHarness(async({request,counts,fail})=>{
+ const a=(await request()).at(-1).asset;const b=(await request({regenerate:true})).at(-1).asset;assert.notEqual(a.id,b.id);assert.deepEqual(counts,{image:2,mask:2,video:0,input:0});fail();const failure=await request({regenerate:true});assert.equal(failure[0].asset.id,b.id);assert.equal(failure.at(-1).type,'failed');const reused=await request();assert.equal(reused.at(-1).asset.id,b.id);
+}));
+test('exact aliases preserve colors, shapes and real motion; light motion needs image only',async()=>{
+ const {normalizeVisualIntent}=await import('../'+dir+'/test.mjs');assert.equal(assetDescriptionKey({...intent,motion:'walking'},false),assetDescriptionKey({...intent,concept:'鶏',motion:'歩く'},false));
+ assert.notEqual(assetDescriptionKey({...intent,modifiers:['red']},false),assetDescriptionKey({...intent,modifiers:['blue']},false));
+ for(const motion of ['walk','run','dance','dribble'])assert.equal(normalizeVisualIntent({...intent,motion}).motion,motion);
+ await cacheHarness(async({request,counts})=>{const r=await request({motion:'swaying',motionEvidence:'swaying'});assert.equal(r.at(-1).asset.kind,'image');assert.deepEqual(counts,{image:1,mask:1,video:0,input:0});});
+});
+test('reuse lifetime is fixed through 24h and 7d, ends at 30d, and private at 24h',()=>{
+ for(const days of [0,1,7,29])assert.equal(cacheDecision({...asset,createdAt:0,expiresAt:30*86400000},days*86400000,false),'reuse');assert.equal(cacheDecision({...asset,expiresAt:30*86400000},30*86400000,false),'miss');assert.equal(cacheDecision({...asset,scope:'s',expiresAt:86400000},86400000,false),'miss');
+});
+
+test('verified legacy video migrates without paid requests or changing expiry',()=>cacheHarness(async({request,counts,state})=>{
+ const {legacyAssetDescriptionKey}=await import('../'+dir+'/test.mjs');const movie=(await request({motion:'walking',motionEvidence:'walking'})).at(-1).asset;
+ const cache=state.visual.cache;const stored=Object.values(cache).find(a=>a.id===movie.id);for(const [k,a] of Object.entries(cache))if(a.kind==='video')delete cache[k];
+ const key=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('shared'+legacyAssetDescriptionKey({...intent,concept:'crab',motion:'walking'},false)+':video-v2:new'))).toString('hex');cache[key]=stored;
+ const expiry=stored.expiresAt;const replay=await request({motion:'walk',motionEvidence:'walk'},{cacheOnly:true});assert.equal(replay.at(-1).asset.id,movie.id);assert.equal(replay.at(-1).asset.expiresAt,expiry);assert.deepEqual(counts,{image:1,mask:1,video:1,input:1});assert.ok(Object.values(cache).filter(a=>a.id===movie.id).length>=2);
+}));
+test('stage claims survive restart and cancellation cannot fund a follow-up step',()=>{
+ const {l,state}=setup();l.visualMode('v','s',true,0);l.visualStart('v','s',1,'owner','r1','a',30000);l.visualStart('v','s',1,'waiter','r2','b',30000);assert.equal(l.visualClaim('v','s',1,'owner','base').owner,true);assert.equal(l.visualClaim('v','s',1,'waiter','base').owner,false);
+ const restored=new Ledger(JSON.parse(JSON.stringify(state)),2000);assert.equal(restored.visualClaimActive('v','s',1,'base','owner'),true);restored.visualCancel('v','s',1,'a','owner');assert.equal(restored.visualClaimActive('v','s',1,'base','owner'),false);assert.throws(()=>restored.visualReserve('v','s',1,'owner','mask',50000),/job_expired/);assert.equal(restored.report().manifestation.reservedUsd,0);
 });

@@ -22,7 +22,7 @@ export class PublicUsage extends DurableObject {
   async alarm() { const next = this.run(l => l.nextAlarm()); await this.ctx.storage.setAlarm(next); }
   async fetch(request: Request) {
     try {
-      const b = await request.json() as { url:string; records: unknown[]; eventId: string; enabled: boolean; generation: number; key: string; duration: number; step: string; cost: number; asset: VisualAsset; manifestationEvent: InputEvent; token: string; target: string; timings: Record<string, number>; op: string; visitor: string; ip: string; id: string; kind: Kind;
+      const b = await request.json() as { keys:string[]; fromKey:string; url:string; records: unknown[]; eventId: string; enabled: boolean; generation: number; key: string; duration: number; step: string; cost: number; asset: VisualAsset; manifestationEvent: InputEvent; token: string; target: string; timings: Record<string, number>; op: string; visitor: string; ip: string; id: string; kind: Kind;
         job: string; amount: number; ticket: string; charge: string; patch: Partial<Limits>; stopped?: boolean; code: string; measurements?: Measurements;
         event: string; starts: number; expires: number; budget: number; hash: string; epoch: number; requestId: string };
       const result = this.run(l => {
@@ -34,6 +34,10 @@ export class PublicUsage extends DurableObject {
           case 'visualMode': return l.visualMode(b.visitor, b.id, b.enabled, b.generation);
           case 'visualReplay': return l.visualReplay(b.visitor,b.id,b.generation,b.key);
           case 'visualLookup': return l.visualLookup(b.visitor, b.id, b.generation, b.key);
+          case 'visualLookupAny': return l.visualLookupAny(b.visitor,b.id,b.generation,b.keys);
+          case 'visualAlias': return l.visualAlias(b.visitor,b.id,b.generation,b.key,b.fromKey);
+          case 'visualClaim': return l.visualClaim(b.visitor,b.id,b.generation,b.token,b.key);
+          case 'visualClaimActive': return l.visualClaimActive(b.visitor,b.id,b.generation,b.key,b.token);
           case 'visualStart': return l.visualStart(b.visitor, b.id, b.generation, b.token, b.key, b.target, b.duration);
           case 'visualReserve': return l.visualReserve(b.visitor, b.id, b.generation, b.token, b.step, b.cost);
           case 'visualPublish': return l.visualPublish(b.visitor, b.id, b.generation, b.token, b.asset, b.key);

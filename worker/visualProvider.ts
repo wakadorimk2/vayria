@@ -55,6 +55,7 @@ export async function callVisualProvider(c: ProviderContext, stage: 'image'|'mas
   if(c.provider==='fal')await verifyFalPrice(c,model,stage==='mask'?.0016:stage==='video'?.025:.005,stage==='image'?/^(megapixels?|MP)$/i:stage==='mask'?/^compute seconds?$/:/^(video )?seconds?$/);
   else await verifyRunwarePrice(c,stage);
   await c.reserve(stage, stage === 'video' ? 125000 : stage === 'mask' ? 50000 : 10000);
+  c.timings[stage+'.requests']=(c.timings[stage+'.requests']??0)+1;
   mark('submit');
   if (c.provider === 'fal') {
     if (!c.falKey) throw new Error('provider_unconfigured');

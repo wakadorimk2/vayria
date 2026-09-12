@@ -333,9 +333,13 @@ export class Ledger {
     const asset = this.visualState().cache[key];
     return asset && asset.expiresAt > this.now && (asset.scope === 'shared' || asset.scope === id) ? asset : null;
   }
+  visualLookupAny(visitor:string,id:string,generation:number,keys:string[]){
+    if(!Array.isArray(keys)||keys.length>80)throw new LimitError('invalid_request',0,400);
+    for(const key of keys){const asset=this.visualLookup(visitor,id,generation,key);if(asset)return {key,asset};}return null;
+  }
   visualReplay(visitor:string,id:string,generation:number,key:string){
     this.visualAllowed(visitor,id,generation);
-    return Object.values(this.visualState().cache).find(a=>a.id===key&&a.expiresAt>this.now&&(a.scope==='shared'||a.scope===id))??null;
+    return Object.values(this.visualState().cache).flatMap(a=>a.source?[a,a.source]:[a]).find(a=>a.id===key&&a.expiresAt>this.now&&(a.scope==='shared'||a.scope===id))??null;
   }
   visualStart(visitor: string, id: string, generation: number, token: string, key: string, target: string, duration: number) {
     const session = this.visualAllowed(visitor, id, generation), v = this.visualState();
@@ -349,6 +353,21 @@ export class Ledger {
     v.jobs[token] = { session: id, generation, key, target, expires: Math.min(session.expires, this.now + Math.min(duration, 60000)), finished: false };
     v.claims[key] = token;
     return { owner: true };
+  }
+  visualClaim(visitor:string,id:string,generation:number,token:string,key:string){
+    this.visualAllowed(visitor,id,generation);const v=this.visualState(),job=v.jobs[token];
+    if(!job||job.session!==id||job.generation!==generation||job.finished||job.expires<=this.now)throw new LimitError('job_expired',0,409);
+    const owner=v.jobs[v.claims[key]];
+    if(owner&&!owner.finished&&owner.expires>this.now&&v.claims[key]!==token)return {owner:false,token:v.claims[key]};
+    v.claims[key]=token;return {owner:true,token};
+  }
+  visualClaimActive(visitor:string,id:string,generation:number,key:string,token:string){
+    this.visualAllowed(visitor,id,generation);const v=this.visualState(),owner=v.jobs[token];
+    return !!owner&&v.claims[key]===token&&!owner.finished&&owner.expires>this.now;
+  }
+  visualAlias(visitor:string,id:string,generation:number,key:string,fromKey:string){
+    const asset=this.visualLookup(visitor,id,generation,fromKey);if(!asset)return null;
+    this.visualState().cache[key]=asset;return asset;
   }
   visualReserve(visitor: string, id: string, generation: number, token: string, step: string, cost: number) {
     const session = this.visualAllowed(visitor, id, generation), job = this.visualState().jobs[token], m = this.manifestationState();
@@ -386,7 +405,7 @@ export class Ledger {
     this.session(visitor,id);
     const ref=this.state.visualMedia?.[key];if(!ref||ref.session!==id)throw new LimitError('invalid_media',0,403);
     for(const asset of Object.values(this.visualState().cache))if(asset.id===key){
-      if(success)asset.expiresAt=this.now+(asset.scope==='shared'?30:1)*86400000;
+      if(success)asset.expiresAt=asset.createdAt+(asset.scope==='shared'?30:1)*86400000;
       // On failure the short-lived relay remains usable until its reference expires.
     }
     this.manifestationState().metrics.push({eventId,code:success?'media_saved':'media_save_failed',timings:Object.fromEntries(Object.entries(timings).filter(([k,n])=>/^[a-zA-Z.]+$/.test(k)&&Number.isFinite(n)&&n>=0))});
