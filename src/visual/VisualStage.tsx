@@ -20,10 +20,11 @@ function VisualVideo({object,runtime}:{object:VisualObject;runtime:VisualSession
     const draw=()=>{if(stopped)return;
       try {const sample=Math.floor(video.currentTime);if(sample!==checked&&!videoInspectionVersions.has(object.asset.id)){inspectVideoFrame(video,object.asset.keyColor);checked=sample;if(video.currentTime>=video.duration*.75){videoInspectionVersions.set(object.asset.id,1);if(videoInspectionVersions.size>100)videoInspectionVersions.delete(videoInspectionVersions.keys().next().value!);}}}
       catch(error){fail(error instanceof Error?error.message:'key_quality');return;}
-      clearTimeout(watchdog);watchdog=setTimeout(()=>fail('video_frame_stalled'),4000);
+      const advancing=progress.advancing(video.currentTime);
+      if(advancing){clearTimeout(watchdog);watchdog=setTimeout(()=>fail('video_frame_stalled'),4000);}
 ctx.drawImage(video,0,0,canvas.width,canvas.height);const image=ctx.getImageData(0,0,canvas.width,canvas.height);keyGreen(image.data,object.asset.keyColor);ctx.putImageData(image,0,0);
       if(reduced){runtime.mediaStage(id,'video_reduced_motion');runtime.placementFailed(object.id,object.asset.id,'video_reduced_motion');return;}
-      if(!confirmed&&progress.advancing(video.currentTime)){confirmed=true;runtime.mediaStage(id,'frames_advancing');runtime.visible(object.id,object.asset.id);}
+      if(!confirmed&&advancing){confirmed=true;runtime.mediaStage(id,'frames_advancing');runtime.visible(object.id,object.asset.id);}
       schedule();
     };
     if(reduced)schedule();

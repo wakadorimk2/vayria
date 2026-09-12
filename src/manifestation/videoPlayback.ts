@@ -26,6 +26,7 @@ export class VideoFrameProgress {
   advancing(time:number) {
     if(!Number.isFinite(time))return false;
     if(this.first===null){this.first=time;return false;}
-    return Math.abs(time-this.first)>.02;
+    if(Math.abs(time-this.first)<=.02)return false;
+    this.first=time;return true;
   }
 }

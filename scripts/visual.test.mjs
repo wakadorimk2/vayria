@@ -226,7 +226,7 @@ test('video media stages distinguish loading, seek, play refusal and abort',asyn
  const wait=waitVideoEvent(video,'loadeddata',new AbortController().signal,50,'timeout');video.dispatchEvent(new Event('error'));await assert.rejects(wait,/video_load_failed/);
  video.play=()=>Promise.reject(new DOMException('blocked','NotAllowedError'));await assert.rejects(playVideo(video,new AbortController().signal),/video_play_rejected/);
  video.play=()=>new Promise(()=>{});const controller=new AbortController();const pending=playVideo(video,controller.signal);controller.abort();await assert.rejects(pending,/aborted/);
- const frames=new VideoFrameProgress();assert.equal(frames.advancing(0),false);assert.equal(frames.advancing(0),false);assert.equal(frames.advancing(.1),true);
+ const frames=new VideoFrameProgress();assert.equal(frames.advancing(0),false);assert.equal(frames.advancing(0),false);assert.equal(frames.advancing(.1),true);assert.equal(frames.advancing(.1),false);
 });
 test('diagnostics retain only safe bounded stages and reject stale permission',()=>{
  const {l}=setup();l.visualMode('v','s',true,0);
@@ -292,5 +292,3 @@ test('video is delivered before asynchronous R2 persistence',async()=>{
  assert.ok(events.every(e=>e.asset.concept==='robot'));assert.match(videoInput.prompt,/robot/);assert.doesNotMatch(videoInput.prompt,/chicken/);assert.ok(events[1].asset.source);assert.equal(l.report().manifestation.reservedUsd,.185);assert.equal(background.length,1);await Promise.all(background);
  }finally{globalThis.fetch=previous}
 });
-
-
