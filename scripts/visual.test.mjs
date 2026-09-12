@@ -219,6 +219,12 @@ test('explicit articulated action is required in the same response schema',async
 });
 
 const {waitVideoEvent,playVideo,VideoFrameProgress,readVisualDiagnostic}=await import('../'+dir+'/test.mjs');
+test('plain canonical requests do not invent appearance or private scope',async()=>{
+ const {visualDecisionSchema}=await import('../'+dir+'/test.mjs');
+ const schema=visualDecisionSchema(true,'鶏','歩く鶏を出して');
+ assert.equal(schema.properties.modifiers.maxItems,0);assert.deepEqual(schema.properties.sharing.enum,['general']);assert.deepEqual(schema.properties.motion.enum,['walk']);
+ const custom=visualDecisionSchema(true,'赤い鶏','歩く赤い鶏を出して');assert.equal(custom.properties.modifiers.maxItems,6);
+});
 test('initial play can take over four seconds and has its own timeout code',async(t)=>{
  t.mock.timers.enable({apis:['setTimeout']});
  let start;const video={pause(){},play:()=>new Promise(r=>start=r)};

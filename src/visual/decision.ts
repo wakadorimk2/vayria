@@ -26,9 +26,13 @@ export function canonicalVisualSubject(subject?: string | null): string | null {
 
 export function visualDecisionSchema(required: boolean, subject?: string | null, motionInput?: string) {
   const canonical = canonicalVisualSubject(subject);
+  const motion=motionInput&&/^(歩く|走る|踊る|ダンスする)/.exec(motionInput)?.[1];
+  const actionMotion=motion?({'歩く':'walk','走る':'run','踊る':'dance','ダンスする':'dance'} as Record<string,string>)[motion]:undefined;
   return required ? { ...visualIntentSchema, properties: { ...visualIntentSchema.properties,
     type: { type: 'string', enum: ['prop'] }, action: { type: 'string', enum: motionInput ? ['add','replace'] : ['add'] },
     ...(motionInput ? {motion:{type:'string',minLength:1,maxLength:120},motionEvidence:{type:'string',enum:[motionInput]}}:{}),
+    ...(actionMotion?{motion:{type:'string',enum:[actionMotion]}}:{}),
+    ...(canonical?{modifiers:{type:'array',items:{type:'string'},maxItems:0},sharing:{type:'string',enum:['general']}}:{}),
     concept: canonical ? { type: 'string', enum: [canonical] } : { type: 'string', minLength: 1, pattern: '^[A-Za-z][A-Za-z0-9 ,\\x27-]*$' },
   } } : visualIntentSchema;
 }
