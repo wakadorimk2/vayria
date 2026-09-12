@@ -3,7 +3,7 @@ export const VISUAL_STAGES = [
   'image_received','video_received','metadata','loaded_data','seek_started','seek_complete',
   'key_passed','play_requested','play_started','frames_advancing','first_display','first_video_display',
   'video_loading_timeout','video_load_failed','video_seek_timeout','video_play_rejected',
-  'video_play_failed','video_frame_stalled','key_quality','video_reduced_motion','timeout',
+  'video_play_failed','video_start_timeout','video_first_frame_timeout','video_frame_stalled','key_quality','video_reduced_motion','timeout',
   'placement_held','placement_resumed','placement_shown','placement_unavailable','aborted','failed',
 ] as const;
 export type VisualStageCode = typeof VISUAL_STAGES[number];

@@ -12,7 +12,7 @@ export function keyGreen(data: Uint8ClampedArray, keyColor: 'green' | 'blue' = '
     if (g > 80 && excess > 20) { data[i + 3] = Math.round(255 * alpha); data[i + k] = Math.min(g, Math.max(r, b) + 20); }
   }
 }
-export async function prepareObject(media: GeneratedObject, signal: AbortSignal) {
+export async function prepareObject(media: GeneratedObject, signal: AbortSignal, deadline=Date.now()+30000) {
   const origin = media.trace ? (media.trace.browserOrigin ??= performance.now()) : performance.now();
   const mark = (name: string) => { if (media.trace) media.trace.browser[name] = performance.now() - origin; };
   mark('mediaPrepareStart');
@@ -31,8 +31,8 @@ export async function prepareObject(media: GeneratedObject, signal: AbortSignal)
     mark('mediaRequestStart');video.src=media.url;
     // iOS may preload metadata only. Start muted decoding before waiting for a frame.
     media.onMediaStage?.('play_requested');
-    await playVideo(video,signal);media.onMediaStage?.('play_started');
-    if(video.readyState<2)await waitVideoEvent(video,'loadeddata',signal,10000,'video_loading_timeout');
+    await playVideo(video,signal,deadline-Date.now());media.onMediaStage?.('play_started');
+    if(video.readyState<2)await waitVideoEvent(video,'loadeddata',signal,Math.max(1,deadline-Date.now()),'video_first_frame_timeout');
     signal.throwIfAborted();media.onMediaStage?.('loaded_data');
     inspectVideoFrame(video,media.keyColor);
     media.onMediaStage?.('key_passed');

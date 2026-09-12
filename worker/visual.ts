@@ -91,7 +91,8 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
   let scope=sharedVisual(intent)?'shared':session,source:VisualAsset|null=null;
   const builtin=stock[intent.concept.toLowerCase()];
   const stockSource=():VisualAsset=>({id:'stock-'+builtin,url:'/manifestation/'+builtin+'.png',kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'});
-  if(ticket.video&&b.source&&intent.action==='replace'){
+  if(ticket.video&&intent.action==='replace'&&intent.targetId&&!b.source)throw new LimitError('source_unavailable',0,409);
+  if(ticket.video&&b.source){
     const candidate=b.source.source??b.source;
     if(typeof candidate.url!=='string')throw new LimitError('invalid_source',0,400);
     if(candidate.url.startsWith(base+'/api/visual/media/')){
@@ -102,7 +103,9 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
       if(!source||source.kind!=='image')throw new LimitError('invalid_source',0,403);
     }else if(builtin&&candidate.url===base+'/manifestation/'+builtin+'.png')source=stockSource();
     else throw new LimitError('invalid_source',0,403);
-    if(source.scope!=='shared')scope=session;
+    // A verified existing source keeps its server-owned scope for motion-only edits.
+    if(!intent.modifiers.length&&normalizeVisualIntent({...intent,concept:source.concept}).concept===intent.concept)scope=source.scope==='shared'?'shared':session;
+    else if(source.scope!=='shared')scope=session;
   }
   const baseIntent={...intent,motion:'',motionEvidence:''};
   const baseKey=await digest(scope+assetDescriptionKey(baseIntent,portrait));

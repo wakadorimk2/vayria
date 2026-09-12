@@ -219,6 +219,23 @@ test('explicit articulated action is required in the same response schema',async
 });
 
 const {waitVideoEvent,playVideo,VideoFrameProgress,readVisualDiagnostic}=await import('../'+dir+'/test.mjs');
+test('initial play can take over four seconds and has its own timeout code',async(t)=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ let start;const video={pause(){},play:()=>new Promise(r=>start=r)};
+ const pending=playVideo(video,new AbortController().signal,10000);
+ t.mock.timers.tick(5000);start();await pending;
+ const expired=playVideo(video,new AbortController().signal,1000);
+ const rejected=assert.rejects(expired,/video_start_timeout/);t.mock.timers.tick(1001);await rejected;
+});
+test('queued target retains its source after the displayed object retires',async()=>{
+ let now=0;const calls=[];const session=new VisualSession({now:()=>now,prepare:async()=>{},generate:(job,signal,accept)=>new Promise(resolve=>calls.push({job,accept,resolve}))});
+ session.permission(true,1);session.dispatch('base',intent,'t',1);await calls[0].accept(asset);calls[0].resolve();await flush();session.visible('target');
+ session.dispatch('busy1',{...intent,targetId:'b1'},'t',1);session.dispatch('busy2',{...intent,targetId:'b2'},'t',1);
+ session.dispatch('motion',{...intent,action:'replace',motion:'walk'},'t',1);
+ assert.equal(session.getSnapshot().pending.at(-1).source.id,asset.id);
+ now=46000;session.tick();assert.equal(session.getSnapshot().objects.length,0);
+ assert.equal(calls.length,3);calls.slice(1).forEach(c=>c.resolve());await flush();
+});
 test('video media stages distinguish loading, seek, play refusal and abort',async()=>{
  const video=new EventTarget();video.pause=()=>{};
  await assert.rejects(waitVideoEvent(video,'loadeddata',new AbortController().signal,5,'video_loading_timeout'),/video_loading_timeout/);
@@ -387,6 +404,10 @@ test('resolved source makes repeated video a hit; changing motion reuses image, 
  const again=await request({concept:'カニ',motion:'walking',motionEvidence:'walking'});assert.equal(again.at(-1).asset.id,first.at(-1).asset.id);assert.deepEqual(counts,{image:1,mask:1,video:1,input:1});
  const other=await request({motion:'dance',motionEvidence:'dance'});assert.equal(other.at(-1).asset.kind,'video');assert.deepEqual(counts,{image:1,mask:1,video:2,input:1});
  const reference=await request({action:'replace',motion:'walk',motionEvidence:'walk'},{source:first.at(-1).asset.source});assert.equal(reference.at(-1).asset.id,first.at(-1).asset.id);assert.deepEqual(counts,{image:1,mask:1,video:2,input:1});
+}));
+test('explicit missing source never generates a replacement',()=>cacheHarness(async({request,counts})=>{
+ await assert.rejects(request({action:'replace',motion:'walk',motionEvidence:'walk'}),/source_unavailable/);
+ assert.deepEqual(counts,{image:0,mask:0,video:0,input:0});
 }));
 test('concurrent image and video share source generation and mask',()=>cacheHarness(async({request,counts})=>{
  const results=await Promise.all([request(),request({motion:'walk',motionEvidence:'walk'})]);assert.ok(results.every(r=>r.at(-1).type==='asset'),JSON.stringify(results));assert.deepEqual(counts,{image:1,mask:1,video:1,input:1});
