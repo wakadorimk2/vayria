@@ -29,7 +29,7 @@ export function sharedVisual(intent: VisualIntent) {
   const modifiers = /^(giant|small|transparent|crystal|red|blue|white|gold|wooden|round|sparkling|rain|snow|巨大|小さい|透明|水晶|赤|青|白|金色|雨|雪)$/i;
   return intent.sharing === 'general' && subjects.test(intent.concept) && intent.modifiers.every(m=>modifiers.test(m)||VISUAL_EFFECTS.includes(m as typeof VISUAL_EFFECTS[number]));
 }
-export async function visualRoute(request: Request, env: VisualEnv, visitor: string, session: string, ledger: VisualLedger) {
+export async function visualRoute(request: Request, env: VisualEnv, visitor: string, session: string, ledger: VisualLedger, ctx?: ExecutionContext) {
   if (env.MANIFESTATION_ENABLED !== 'true' || env.PUBLIC_BASE_PATH !== '/staging') throw new LimitError('not_found',0,404);
   const path = new URL(request.url).pathname, who = { visitor, id:session };
   if (path === '/api/visual/mode' && request.method === 'POST') {
@@ -37,16 +37,39 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
     if (typeof b.enabled !== 'boolean' || !Number.isSafeInteger(b.generation)) throw new LimitError('invalid_request',0,400);
     return json(await ledger('visualMode',{...who,enabled:b.enabled,generation:b.generation}));
   }
+  if(path==='/api/visual/replay'&&request.method==='POST'){
+    const b=JSON.parse(new TextDecoder().decode(await boundedBody(request,1024)));
+    if(typeof b.assetId!=='string'||!/^([sp]-)[a-f0-9]{64}$/.test(b.assetId)||!Number.isSafeInteger(b.generation))throw new LimitError('invalid_request',0,400);
+    const asset=await ledger<VisualAsset|null>('visualReplay',{...who,key:b.assetId,generation:b.generation});
+    if(!asset)throw new LimitError('not_found',0,404);
+    const resolveReplay=async(a:VisualAsset):Promise<VisualAsset>=>{
+      if(a.url.startsWith('/manifestation/'))return {...a,url:'/staging'+a.url};
+      const ticket=await sign({purpose:'visual-media',visitor,session,key:a.id,exp:Math.min(a.expiresAt,Date.now()+900000)},env.COOKIE_SECRET);
+      return {...a,url:'/staging/api/visual/media/'+a.id+'?ticket='+encodeURIComponent(ticket),source:a.source?await resolveReplay(a.source):undefined};
+    };
+    return json({type:'asset',asset:await resolveReplay(asset),cache:true});
+  }
   if (path.startsWith('/api/visual/media/') && request.method === 'GET') {
     const ticket = await verify<{exp:number;purpose:string;visitor:string;session:string;key:string}>(new URL(request.url).searchParams.get('ticket')??'',env.COOKIE_SECRET);
     if (!ticket || ticket.purpose!=='visual-media' || ticket.visitor!==visitor || ticket.key!==path.split('/').pop()) throw new LimitError('invalid_ticket',0,403);
     await ledger('visualPermission',{visitor,id:ticket.session}); // Existing displayed media remains readable after OFF.
     const range=request.headers.get('Range');
     if(range&&!/^bytes=(?:\d+-\d*|-\d+)$/.test(range))return new Response(null,{status:416});
+    const head=range&&env.VISUAL_ASSETS?.head?await env.VISUAL_ASSETS.head(ticket.key):null;
+    if(head&&range){const match=/^bytes=(\d*)-(\d*)$/.exec(range)!;const start=match[1]?Number(match[1]):Math.max(0,head.size-Number(match[2]));const end=match[1]&&match[2]?Number(match[2]):head.size-1;
+      if(start>=head.size||end<start||(!match[1]&&Number(match[2])===0))return new Response(null,{status:416,headers:{'Content-Range':`bytes */${head.size}`,'Content-Length':'0'}});}
     const asset=await env.VISUAL_ASSETS?.get(ticket.key,{range:request.headers});
-    if(!asset)throw new LimitError('not_found',0,404);
-    const headers=new Headers({'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Accept-Ranges':'bytes'});asset.writeHttpMetadata(headers);
-    if(asset.range && 'offset' in asset.range && 'length' in asset.range){headers.set('Content-Range',`bytes ${asset.range.offset}-${asset.range.offset!+asset.range.length!-1}/${asset.size}`);return new Response(asset.body,{status:206,headers});}
+    if(!asset){
+      const ref=await ledger<{url:string}|null>('visualMediaLookup',{visitor,id:ticket.session,key:ticket.key});
+      if(!ref)throw new LimitError('not_found',0,404);
+      const upstream=await fetch(safeVisualMediaUrl(ref.url),{headers:range?{Range:range}:{},redirect:'manual',signal:request.signal});
+      if(![200,206,416].includes(upstream.status))throw new LimitError('media_failed',0,502);
+      const headers=new Headers({'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Accept-Ranges':'bytes'});
+      for(const name of ['Content-Type','Content-Length','Content-Range']){const value=upstream.headers.get(name);if(value)headers.set(name,value);}
+      return new Response(upstream.body,{status:upstream.status,headers});
+    }
+    const headers=new Headers({'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Accept-Ranges':'bytes','Content-Length':String(asset.size)});asset.writeHttpMetadata(headers);
+    if(asset.range && 'offset' in asset.range && 'length' in asset.range){headers.set('Content-Length',String(asset.range.length));headers.set('Content-Range',`bytes ${asset.range.offset}-${asset.range.offset!+asset.range.length!-1}/${asset.size}`);return new Response(asset.body,{status:206,headers});}
     return new Response(asset.body,{headers});
   }
   if(!['/api/visual/generate','/api/visual/cancel','/api/visual/diagnostic'].includes(path)||request.method!=='POST')throw new LimitError('not_found',0,404);
@@ -130,14 +153,39 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
             }
           }
           emit({type:'asset',asset:await resolve(source)});
-          const original=source.url.startsWith('/manifestation/')
-            ?await env.ASSETS.fetch(new Request('https://assets'+source.url))
-            :await env.VISUAL_ASSETS!.get(source.id);
-          if(!original)throw new Error('source_invalid');
-          const input=await videoSourcePng(new Uint8Array(await original.arrayBuffer()));keyColor=input.keyColor;
+          const inputStarted=performance.now();
+          const inputKey='input-'+await digest(source.id+':key-v1');
+          const cachedInput=await env.VISUAL_ASSETS!.get(inputKey);
+          let input:{bytes:Uint8Array;keyColor:'green'|'blue'};
+          if(cachedInput&&['green','blue'].includes(cachedInput.customMetadata?.keyColor??'')){
+            input={bytes:new Uint8Array(await cachedInput.arrayBuffer()),keyColor:cachedInput.customMetadata!.keyColor as 'green'|'blue'};
+          }else{
+            const original=source.url.startsWith('/manifestation/')?await env.ASSETS.fetch(new Request('https://assets'+source.url)):await env.VISUAL_ASSETS!.get(source.id);
+            if(!original)throw new Error('source_invalid');
+            input=await videoSourcePng(new Uint8Array(await original.arrayBuffer()));
+            await env.VISUAL_ASSETS!.put(inputKey,input.bytes,{httpMetadata:{contentType:'image/png'},customMetadata:{keyColor:input.keyColor,expiresAt:String(Date.now()+(scope==='shared'?30:1)*86400000),scope:scope==='shared'?'shared':'private'}});
+          }
+          keyColor=input.keyColor;timings.sourcePreparation=performance.now()-inputStarted;
           const result=await callVisualProvider({...context,provider:'fal'},'video',{image_url:'data:image/png;base64,'+Buffer.from(input.bytes).toString('base64'),prompt:`Locked camera. One ${intent.concept} performing this action: ${intent.motion}. Preserve the source appearance. Full silhouette stays inside the frame with a generous margin. Uniform saturated ${keyColor} background. No cuts, text, extra subjects, floor or shadows.`,duration:5,resolution:'480P',prompt_expansion_mode:'fast',enable_safety_checker:true});
           url=String((result.video as {url?:string})?.url);
         }else url=await generateVisualImage(context,intent,portrait);
+        if(ticket.video&&ctx){
+          const now=Date.now(),id=(scope==='shared'?'s-':'p-')+await digest(key+now+ticket.token),expiresAt=now+900000;
+          await ledger('visualMediaRegister',{...args,key:id,url:safeVisualMediaUrl(url)});
+          const asset:VisualAsset={id,url:id,kind:'video',composite:'green-key',type:'prop',concept:intent.concept,createdAt:now,expiresAt,scope,keyColor,source:source??undefined};
+          await ledger('visualPublish',{...args,asset});timings.ready=performance.now()-start;
+          emit({type:'asset',asset:await resolve(asset)});code='complete';
+          const storageStarted=performance.now();const storageTimings:Record<string,number>={};
+          ctx.waitUntil((async()=>{
+            const response=await fetch(safeVisualMediaUrl(url),{signal:AbortSignal.timeout(25000),redirect:'manual'});
+            if(!response.ok||!response.headers.get('Content-Type')?.includes('video/mp4'))throw new Error('media_type');
+            const bytes=await boundedBody(response as unknown as Request,32000000);
+            storageTimings.fetchMs=performance.now()-storageStarted;
+            await env.VISUAL_ASSETS!.put(id,bytes,{httpMetadata:{contentType:'video/mp4'},customMetadata:{expiresAt:String(now+(scope==='shared'?30:1)*86400000),scope:scope==='shared'?'shared':'private'}});
+            storageTimings.totalMs=performance.now()-storageStarted;await ledger('visualMediaSaved',{...who,key:id,enabled:true,timings:storageTimings,eventId:ticket.eventId});
+          })().catch(()=>ledger('visualMediaSaved',{...who,key:id,enabled:false,eventId:ticket.eventId,timings:{totalMs:performance.now()-storageStarted}}).catch(()=>{})));
+          return;
+        }
         const media=await fetch(safeVisualMediaUrl(url),{signal,redirect:'manual'});
         if(!media.ok)throw new Error('media_failed');
         const video=ticket.video;

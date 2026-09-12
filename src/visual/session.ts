@@ -37,8 +37,12 @@ export class VisualSession {
   mediaStage(id:string,stage:string){this.deps.diagnostic?.(stage,id,this.deps.now()-(this.inputTimes.get(this.snapshot.ready?.find(o=>o.eventId===id)?.id??id)??this.deps.now()));}
   modeNotice(message:string){this.notificationOrder=++this.order;this.publish({notification:{id:'mode',message,order:this.order,until:this.deps.now()+6000}});}
   placementFailed(id:string,assetId?:string,code='placement_unavailable'){
-    const object=this.snapshot.ready?.find(o=>o.id===id);if(!object||(assetId&&object.asset.id!==assetId))return;
+    const object=this.snapshot.ready?.find(o=>o.id===id)??this.snapshot.objects.find(o=>o.id===id);if(!object||(assetId&&object.asset.id!==assetId))return;
     this.deps.release?.(object.asset);
+    if(object.visible&&object.asset.kind==='video'){
+      const source=object.asset.source;
+      this.publish({objects:source?this.snapshot.objects.map(o=>o===object?{...object,asset:source,visible:true}:o):this.snapshot.objects.filter(o=>o!==object)});
+    }
     this.publish({ready:this.snapshot.ready?.filter(o=>o!==object),outcomes:[...this.snapshot.outcomes,'小物は配置できなかった。表示済みの対象は維持した。'].slice(-8)});
     this.status(object.eventId??id,code,this.snapshot.generation);
     this.deps.diagnostic?.(code,object.eventId??id,0);
@@ -46,7 +50,8 @@ export class VisualSession {
   permission(enabled:boolean,generation:number){
     for(const job of this.snapshot.pending){job.controller?.abort();void this.deps.cancel?.(job.ticket).catch(()=>{});}
     for(const o of this.snapshot.ready??[])this.deps.release?.(o.asset);
-    this.publish({enabled,generation,pending:[],ready:[],notification:undefined,outcomes:!enabled&&this.snapshot.pending.length?[...this.snapshot.outcomes,'保留中の生成を取り消した。表示済みの対象は維持した。'].slice(-8):this.snapshot.outcomes});
+    const objects=this.snapshot.objects.map(o=>{if(!enabled&&o.asset.kind==='video'&&o.asset.source){this.deps.release?.(o.asset);return {...o,asset:o.asset.source};}return o;});
+    this.publish({enabled,generation,objects,pending:[],ready:[],notification:undefined,outcomes:!enabled&&this.snapshot.pending.length?[...this.snapshot.outcomes,'保留中の生成を取り消した。表示済みの対象は維持した。'].slice(-8):this.snapshot.outcomes});
   }
   reset(){this.permission(false,this.snapshot.generation);this.accepted.clear();this.notices.clear();this.orders.clear();for(const o of [...this.snapshot.objects,...(this.snapshot.background?[this.snapshot.background]:[])])this.deps.release?.(o.asset);this.publish({objects:[],background:null,history:[],outcomes:[]});}
   dispatch(id:string,intent:VisualIntent,ticket:string,generation:number){
@@ -87,7 +92,7 @@ export class VisualSession {
         const object:VisualObject={id:job.target,eventId:job.id,asset,at:this.deps.now(),visible:false,effects:[...new Set([...(old?.effects??[]),...job.intent.modifiers.filter(m=>VISUAL_EFFECTS.includes(m as VisualEffect)) as VisualEffect[]])]};
         this.publish({ready:[...(this.snapshot.ready??[]).filter(o=>o.id!==object.id),object]});
         this.deps.diagnostic?.('asset_prepared',job.id,this.deps.now()-job.at);
-      }).catch(error=>{if(this.current(job,generation)){this.status(job.id,error instanceof Error?error.message:'failed',generation);this.publish({outcomes:[...this.snapshot.outcomes,'生成の更新に失敗した。現在の表示は維持した。'].slice(-8)});this.deps.diagnostic?.(error instanceof Error&&/^[\w-]+$/.test(error.message)?error.message:'failed',job.id,this.deps.now()-job.at);}})
+      }).catch(error=>{if(this.current(job,generation)){this.status(job.id,error instanceof Error?error.message:'failed',generation);this.publish({outcomes:[...this.snapshot.outcomes,'今回の生成は失敗した。以前から表示中の対象はそのまま残っている。'].slice(-8)});this.deps.diagnostic?.(error instanceof Error&&/^[\w-]+$/.test(error.message)?error.message:'failed',job.id,this.deps.now()-job.at);}})
         .finally(()=>{this.active--;this.publish({pending:this.snapshot.pending.filter(j=>j!==job)});this.pump();});
     }
   }

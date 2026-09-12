@@ -90,3 +90,16 @@ Runware参照: https://content.runware.ai/models/runware%3A400%404/pricing と h
 - 検証用 `cacheOnly: true` はキャッシュ未存在時に `cache_miss` を返す。生成枠を予約しない。通常動作には指定しない。
 - 自動検証: 公開146件、小物17件、配信20件、型検査、lint、ステージングビルド成功。
 - iPhoneの原因確定は診断導入後の同一文言による実機照合が必要。Safariが原因とはまだ断定していない。有料再生成は行わない。
+
+
+### iPhone playback and media latency repair
+
+Muted playback now starts decoding before waiting for loadeddata. The first frame is checked before display. Later frames are checked during playback; a failed frame restores the source image. Decoded-frame callbacks drive canvas rendering where available. Inspection version 1 is cached per asset in browser memory; other browsers still inspect the asset. OFF restores the source image.
+
+The Worker publishes an authenticated short-lived media reference before R2 storage completes. Range responses use the provider while storage is pending, then R2. Failed storage preserves the temporary relay. Only server-registered URLs are relayed. Source preparation images are cached by source asset version. The authenticated POST /api/visual/replay endpoint accepts assetId and generation and never calls a generation provider.
+
+The ledger now has manifestationMicrousd (default 5000000). Staging may be configured to 10000000 without clearing prior reservations. Production defaults remain unchanged.
+
+Concurrent chat no longer deletes queued speech tickets. TTS expiry, signature failure, session mismatch and local missing tickets have separate codes. Dance wording and shrimp/crab/mandarin aliases constrain explicit requests.
+
+Device acceptance and latency measurements remain separate from automated checks. No iPhone success is inferred from desktop playback.

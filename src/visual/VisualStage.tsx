@@ -3,7 +3,7 @@ import { useEffect, useRef, type RefObject } from 'react';
 import type { VrmStageHandle } from '../avatar/VrmStage';
 import { useWorldLayout } from '../world/useWorldLayout';
 import { placeWorldProp, type WorldRect } from '../world/worldLayout';
-import { preparedVideos, keyGreen } from '../manifestation/media';
+import { preparedVideos, keyGreen, inspectVideoFrame, videoInspectionVersions } from '../manifestation/media';
 import type { VisualObject, VisualSession, VisualSnapshot } from './session';
 import './visual.css';
 function VisualVideo({object,runtime}:{object:VisualObject;runtime:VisualSession}){
@@ -15,14 +15,20 @@ function VisualVideo({object,runtime}:{object:VisualObject;runtime:VisualSession
     const canvas=ref.current!;canvas.width=Math.min(video.videoWidth,768);canvas.height=Math.round(canvas.width*video.videoHeight/video.videoWidth);
     const fail=(code:string)=>{if(stopped)return;runtime.mediaStage(id,code);runtime.placementFailed(object.id,object.asset.id,code);};
     let watchdog:ReturnType<typeof setTimeout>|undefined;
-    const draw=()=>{if(stopped)return;ctx.drawImage(video,0,0,canvas.width,canvas.height);const image=ctx.getImageData(0,0,canvas.width,canvas.height);keyGreen(image.data,object.asset.keyColor);ctx.putImageData(image,0,0);
+    let checked=-1;
+    const schedule=()=>{if('requestVideoFrameCallback' in video)frame=video.requestVideoFrameCallback(draw);else frame=requestAnimationFrame(draw);};
+    const draw=()=>{if(stopped)return;
+      try {const sample=Math.floor(video.currentTime);if(sample!==checked&&!videoInspectionVersions.has(object.asset.id)){inspectVideoFrame(video,object.asset.keyColor);checked=sample;if(video.currentTime>=video.duration*.75){videoInspectionVersions.set(object.asset.id,1);if(videoInspectionVersions.size>100)videoInspectionVersions.delete(videoInspectionVersions.keys().next().value!);}}}
+      catch(error){fail(error instanceof Error?error.message:'key_quality');return;}
+      clearTimeout(watchdog);watchdog=setTimeout(()=>fail('video_frame_stalled'),4000);
+ctx.drawImage(video,0,0,canvas.width,canvas.height);const image=ctx.getImageData(0,0,canvas.width,canvas.height);keyGreen(image.data,object.asset.keyColor);ctx.putImageData(image,0,0);
       if(reduced){runtime.mediaStage(id,'video_reduced_motion');runtime.placementFailed(object.id,object.asset.id,'video_reduced_motion');return;}
-      if(!confirmed&&progress.advancing(video.currentTime)){confirmed=true;clearTimeout(watchdog);runtime.mediaStage(id,'frames_advancing');runtime.visible(object.id,object.asset.id);}
-      frame=requestAnimationFrame(draw);
+      if(!confirmed&&progress.advancing(video.currentTime)){confirmed=true;runtime.mediaStage(id,'frames_advancing');runtime.visible(object.id,object.asset.id);}
+      schedule();
     };
-    if(reduced)frame=requestAnimationFrame(draw);
-    else {runtime.mediaStage(id,'play_requested');void playVideo(video,signal.signal).then(()=>{if(stopped)return;runtime.mediaStage(id,'play_started');watchdog=setTimeout(()=>fail('video_frame_stalled'),4000);frame=requestAnimationFrame(draw);}).catch(error=>fail(error instanceof Error?error.message:'video_play_failed'));}
-    return()=>{stopped=true;signal.abort();clearTimeout(watchdog);cancelAnimationFrame(frame);video.pause();};
+    if(reduced)schedule();
+    else {runtime.mediaStage(id,'play_requested');void playVideo(video,signal.signal).then(()=>{if(stopped)return;runtime.mediaStage(id,'play_started');watchdog=setTimeout(()=>fail('video_frame_stalled'),4000);schedule();}).catch(error=>fail(error instanceof Error?error.message:'video_play_failed'));}
+    return()=>{stopped=true;signal.abort();clearTimeout(watchdog);if('cancelVideoFrameCallback' in video)video.cancelVideoFrameCallback(frame);else cancelAnimationFrame(frame);video.pause();};
   },[object.asset.url,object.asset.id,object.asset.keyColor,object.id,object.eventId,runtime]);
   return <canvas style={{position:'relative'}} ref={ref} width={256} height={256} role="img" aria-label={object.asset.concept}/>;
 }

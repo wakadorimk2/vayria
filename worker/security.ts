@@ -10,14 +10,14 @@ export async function sign(value: object, secret: string) {
   const body = base64(encoder.encode(JSON.stringify(value)));
   return body + '.' + base64(new Uint8Array(await crypto.subtle.sign('HMAC', await key(secret), encoder.encode(body))));
 }
-export async function verify<T extends { exp: number }>(token: string, secret: string): Promise<T | null> {
+export async function verify<T extends { exp: number }>(token: string, secret: string, allowExpired = false): Promise<T | null> {
   try {
     if (token.length > 12000) return null;
     const [body, signature, extra] = token.split('.');
     if (extra || !body || !signature) return null;
     if (!await crypto.subtle.verify('HMAC', await key(secret), decode(signature), encoder.encode(body))) return null;
     const value = JSON.parse(new TextDecoder().decode(decode(body))) as T;
-    return Number.isFinite(value.exp) && value.exp > Date.now() ? value : null;
+    return Number.isFinite(value.exp) && (allowExpired || value.exp > Date.now()) ? value : null;
   } catch { return null; }
 }
 export function cookie(request: Request, name: string) {

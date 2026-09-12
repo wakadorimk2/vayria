@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 const dir='node_modules/.tmp/visual';await mkdir(dir,{recursive:true});
-const result=await build({stdin:{contents:'export * from "./src/manifestation/videoPlayback"; export * from "./src/visual/diagnostics"; export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/decision"; export * from "./src/visual/notice"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
+const result=await build({stdin:{contents:'export * from "./src/manifestation/media"; export * from "./src/manifestation/videoPlayback"; export * from "./src/visual/diagnostics"; export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/decision"; export * from "./src/visual/notice"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
 await writeFile(dir+'/test.mjs',result.outputFiles[0].text);
 const {Ledger,initialState,readVisualIntent,cacheDecision,assetDescriptionKey,permitsVideo,VisualSession,sharedVisual,inspectVisualPng}=await import('../'+dir+'/test.mjs');
 const intent={type:'prop',action:'add',concept:'chicken',modifiers:[],targetId:'target',motion:'',motionEvidence:'',sharing:'general',regenerate:false};
@@ -247,3 +247,50 @@ test('cache-only video probe never reserves or generates on a miss',async()=>{
  const calls=[];const response=await visualRoute(new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket,cacheOnly:true})}),env,'v','s',async op=>{calls.push(op);if(op==='visualPermission')return {enabled:true,generation:1};if(op==='visualLookup')return null;throw new Error('paid path');});
  assert.deepEqual(await response.json(),{type:'failed',code:'cache_miss'});assert.ok(calls.every(op=>['visualPermission','visualLookup'].includes(op)));
 });
+
+test('metadata-only preload advances by play before loadeddata',async()=>{
+ const {prepareObject,preparedVideos,releasePrepared}=await import('../'+dir+'/test.mjs');
+ const previous=globalThis.document;const video=Object.assign(new EventTarget(),{readyState:1,videoWidth:128,videoHeight:128,duration:5,currentTime:0,pause(){},removeAttribute(){},load(){},async play(){this.readyState=2;}});
+ const data=new Uint8ClampedArray(128*128*4);for(let p=0;p<128*128;p++){data[p*4+1]=255;data[p*4+3]=255;if(p%128>40&&p%128<85&&p/128>40&&p/128<85)data[p*4]=data[p*4+2]=255;}
+ globalThis.document={createElement:tag=>tag==='video'?video:{getContext:()=>({drawImage(){},getImageData:()=>({data:data.slice()})})}};
+ const url='/staging/api/visual/media/s-abcdef?ticket=abc';try{await prepareObject({url,kind:'video',timings:{}},new AbortController().signal);assert.equal(preparedVideos.get(url),video);releasePrepared(url);}finally{globalThis.document=previous;}
+});
+test('ten dollar configuration preserves existing spend and the default five dollar ceiling',()=>{
+ const {l,state}=setup();state.manifestation={reservedMicrousd:3070000,requests:{},events:{},jobs:{},metrics:[]};
+ l.configure({manifestationMicrousd:10000000});assert.equal(l.report().manifestation.reservedUsd,3.07);assert.equal(l.report().manifestation.limitUsd,10);
+ const restored=new Ledger(JSON.parse(JSON.stringify(state)),2000);assert.equal(restored.report().manifestation.limitUsd,10);
+ assert.equal(setup().l.report().manifestation.limitUsd,5);
+});
+test('dance and crustacean subjects are distinct and explicit',async()=>{
+ const {explicitMotionSubject,visualDecisionSchema,validVisualDecision}=await import('../'+dir+'/test.mjs');
+ for(const [input,subject,concept] of [['ダンスするみかんを出して','みかん','mandarin orange'],['歩くエビを出して','エビ','shrimp'],['歩くカニを出して','カニ','crab']]){
+ assert.equal(explicitMotionSubject(input),subject);assert.deepEqual(visualDecisionSchema(true,subject,input).properties.concept.enum,[concept]);
+ assert.equal(validVisualDecision({...intent,concept:'chicken',motion:'walk',motionEvidence:input},true,subject,input),null);}
+});
+test('expired relay and private replay cannot cross sessions',()=>{
+ const {l,state}=setup();l.visualMode('v','s',true,0);l.visualMediaRegister('v','s',1,'asset','https://fal.media/video.mp4');assert.ok(l.visualMediaLookup('v','s','asset'));
+ assert.throws(()=>l.visualMediaRegister('v','s',1,'other','https://attacker.example/a'),/invalid_media/);
+ state.visualMedia.asset.expires=999;assert.equal(l.visualMediaLookup('v','s','asset'),null);
+});
+test('video is delivered before asynchronous R2 persistence',async()=>{
+ const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');const {l}=setup();l.visualMode('v','s',true,0);
+ const png=await readFile('public/manifestation/chicken-1.png'),store=new Map();let videoInput;
+ const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',COOKIE_SECRET:'test-secret-'.repeat(4),GENERATION_ENABLED:'true',VISUAL_VIDEO_ENABLED:'true',FAL_KEY:'dummy',VISUAL_ASSETS:{put:async(id,bytes)=>store.set(id,bytes),get:async id=>store.has(id)?new Response(store.get(id)):null}};
+ const bridge=async(op,b)=>{switch(op){case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualStart':return l.visualStart(b.visitor,b.id,b.generation,b.token,b.key,b.target,b.duration);case 'visualReserve':return l.visualReserve(b.visitor,b.id,b.generation,b.token,b.step,b.cost);case 'visualPublish':return l.visualPublish(b.visitor,b.id,b.generation,b.token,b.asset,b.key);case 'visualMediaRegister':return l.visualMediaRegister(b.visitor,b.id,b.generation,b.key,b.url);case 'visualMediaSaved':return l.visualMediaSaved(b.visitor,b.id,b.key,b.enabled);case 'visualFinish':return l.visualFinish(b.visitor,b.id,b.token,b.code,b.timings);default:throw new Error(op)}};
+ const previous=globalThis.fetch;globalThis.fetch=async(url,init)=>{
+ const u=new URL(url);
+ if(u.hostname==='api.fal.ai')return Response.json({prices:[{endpoint_id:u.searchParams.get('endpoint_id'),unit_price:.0001,unit:u.searchParams.get('endpoint_id').includes('video')?'seconds':u.searchParams.get('endpoint_id').includes('birefnet')?'compute seconds':'megapixels',currency:'USD'}]});
+ if(u.hostname==='fal.media')return new Response(u.pathname.endsWith('mp4')?'mock-video':png,{headers:{'Content-Type':u.pathname.endsWith('mp4')?'video/mp4':'image/png'}});
+ if(init?.method==='POST'){const video=u.pathname.includes('video');if(video)videoInput=JSON.parse(init.body);return Response.json({status_url:'https://queue.fal.run/status',response_url:'https://queue.fal.run/'+(video?'video':'image')});}
+ if(u.pathname==='/status')return Response.json({status:'COMPLETED'});
+ return Response.json({video:{url:'https://fal.media/robot.mp4'},images:[{url:'https://fal.media/robot.png'}],image:{url:'https://fal.media/robot.png'}});
+ };
+ try{
+ const signed=await visualTicket({visualIntent:{...intent,concept:'robot',motion:'dance',motionEvidence:'踊って'}},env,'v','s',1,true);
+ const background=[];const response=await visualRoute(new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket})}),env,'v','s',bridge,{waitUntil:p=>background.push(p)});
+ const events=(await response.text()).trim().split('\n').map(JSON.parse);assert.deepEqual(events.map(e=>e.asset?.kind),['image','video'],JSON.stringify(events));
+ assert.ok(events.every(e=>e.asset.concept==='robot'));assert.match(videoInput.prompt,/robot/);assert.doesNotMatch(videoInput.prompt,/chicken/);assert.ok(events[1].asset.source);assert.equal(l.report().manifestation.reservedUsd,.185);assert.equal(background.length,1);await Promise.all(background);
+ }finally{globalThis.fetch=previous}
+});
+
+

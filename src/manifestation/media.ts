@@ -1,5 +1,6 @@
-import { waitVideoEvent } from './videoPlayback.js';
+import { playVideo, waitVideoEvent } from './videoPlayback.js';
 import type { GeneratedObject } from './types.js';
+export const videoInspectionVersions=new Map<string,number>();
 export const preparedVideos = new Map<string, HTMLVideoElement>();
 /** Key only the saturated green screen. White plumage and yellow feet remain opaque. */
 export function keyGreen(data: Uint8ClampedArray, keyColor: 'green' | 'blue' = 'green') {
@@ -26,35 +27,15 @@ export async function prepareObject(media: GeneratedObject, signal: AbortSignal)
   const abort = () => { video.pause(); video.removeAttribute('src'); video.load(); };
   signal.addEventListener('abort', abort, { once: true });
   try {
-    const loaded=waitVideoEvent(video,'loadeddata',signal,10000,'video_loading_timeout');
     video.addEventListener('loadedmetadata',()=>media.onMediaStage?.('metadata'),{once:true});
-    mark('mediaRequestStart');video.src=media.url;await loaded;media.onMediaStage?.('loaded_data');
-    signal.throwIfAborted();
-    const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) throw new Error('canvas-unavailable');
-    for (const time of [0, .25, .5, .75].map(t => t * video.duration)) {
-    if (!Number.isFinite(time)) throw new Error('video-decode');
-    if (Math.abs(video.currentTime-time)>.01) {
-      media.onMediaStage?.('seek_started');
-      const sought=waitVideoEvent(video,'seeked',signal,3000,'video_seek_timeout');
-      video.currentTime=time;await sought;media.onMediaStage?.('seek_complete');
-    }
-    signal.throwIfAborted();
-    context.drawImage(video, 0, 0, 128, 128);
-    const pixels = context.getImageData(0, 0, 128, 128); keyGreen(pixels.data,media.keyColor);
-    mark('firstKeyCompleted');
-    let clear = 0, solid = 0, edge = 0;
-    for (let p = 0; p < 128 * 128; p++) {
-      const a = pixels.data[p * 4 + 3];
-      if (a < 16) clear++; if (a > 240) solid++;
-      if ((p < 128 || p >= 127 * 128 || p % 128 === 0 || p % 128 === 127) && a > 50) edge++;
-    }
-    if (clear < 128 * 128 * .25 || solid < 128 * 128 * .03 || edge > 25) throw new Error('key_quality');
-    }
-    const rewound=waitVideoEvent(video,'seeked',signal,3000,'video_seek_timeout');video.currentTime=0;await rewound;
+    mark('mediaRequestStart');video.src=media.url;
+    // iOS may preload metadata only. Start muted decoding before waiting for a frame.
+    media.onMediaStage?.('play_requested');
+    await playVideo(video,signal);media.onMediaStage?.('play_started');
+    if(video.readyState<2)await waitVideoEvent(video,'loadeddata',signal,10000,'video_loading_timeout');
+    signal.throwIfAborted();media.onMediaStage?.('loaded_data');
+    inspectVideoFrame(video,media.keyColor);
     media.onMediaStage?.('key_passed');
-    signal.throwIfAborted();
     preparedVideos.set(media.url, video);
     media.timings.compositeReadyAt = Date.now();
   } catch (error) { abort(); throw error; }
@@ -63,4 +44,14 @@ export async function prepareObject(media: GeneratedObject, signal: AbortSignal)
 export function releasePrepared(url: string) {
   const video = preparedVideos.get(url);
   if (video) { video.pause(); video.removeAttribute('src'); video.load(); preparedVideos.delete(url); }
+}
+
+export function inspectVideoFrame(video:HTMLVideoElement,keyColor:'green'|'blue'='green') {
+  if(!video.videoWidth||!video.videoHeight)throw new Error('video_load_failed');
+  const canvas=document.createElement('canvas');canvas.width=128;canvas.height=128;
+  const context=canvas.getContext('2d',{willReadFrequently:true});if(!context)throw new Error('canvas-unavailable');
+  context.drawImage(video,0,0,128,128);const pixels=context.getImageData(0,0,128,128);keyGreen(pixels.data,keyColor);
+  let clear=0,solid=0,edge=0;
+  for(let p=0;p<128*128;p++){const a=pixels.data[p*4+3];if(a<16)clear++;if(a>240)solid++;if((p<128||p>=127*128||p%128===0||p%128===127)&&a>50)edge++;}
+  if(clear<128*128*.25||solid<128*128*.03||edge>25)throw new Error('key_quality');
 }

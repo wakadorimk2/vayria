@@ -18,7 +18,8 @@ let cancellation = new AbortController();
 const tickets = new Map<string, string[]>();
 function rememberTicket(text: string, ticket: string) {
   const key = text.trim();
-  tickets.set(key, [...(tickets.get(key) ?? []), ticket]);
+  tickets.set(key, [...(tickets.get(key) ?? []), ticket].slice(-20));
+  if(tickets.size>100)tickets.delete(tickets.keys().next().value!);
 }
 const listeners = new Set<() => void>();
 export const subscribePublic = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
@@ -79,10 +80,10 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
   const visualGeneration = visualAccess();
   if (visualGeneration !== null) headers.set('X-Vayria-Visual-Generation', String(visualGeneration));
   let body = init.body;
-  if (/\/api\/(chat|card-preview)$/.test(path)) tickets.clear();
+  // Concurrent conversation must not discard tickets for speech already queued.
   if (path.endsWith('/api/tts') && typeof body === 'string') {
     const input = JSON.parse(body); const key = String(input.text).trim(); const ticket = tickets.get(key)?.shift();
-    if (!ticket) return Response.json({ code: 'invalid_ticket', error: publicErrorMessage({ code: 'invalid_ticket' }) }, { status: 403 });
+    if (!ticket) return Response.json({ code: 'tts_ticket_missing', error: publicErrorMessage({ code: 'tts_ticket_missing' }) }, { status: 403 });
     if (!tickets.get(key)?.length) tickets.delete(key);
     body = JSON.stringify({ ticket });
   }

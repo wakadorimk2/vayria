@@ -14,13 +14,13 @@ export function explicitMotionSubject(input: string | null | undefined): string 
   if(text && /浮か|回転|拡大|大きく|きらきら|揺ら|光ら/.test(text))return null;
   if(!text || /[「」『』"“”\n]|ない|なく|なかった|もし|なら|たら|場合|昨日|以前|と言|って言/.test(text))return null;
   const subject=/^(.{1,40}?)(?:を|に).{1,30}?(?:させて|せて)(?:ください|ほしい)?[!！。 ]*$/.exec(text)?.[1]
-    ?? /^(?:歩く|踊る|動く|走る|跳ねる|飛ぶ)(.{1,40}?)を(?:出して|作って)(?:ください)?[!！。 ]*$/.exec(text)?.[1];
+    ?? /^(?:歩く|踊る|ダンスする|動く|走る|跳ねる|飛ぶ)(.{1,40}?)を(?:出して|作って)(?:ください)?[!！。 ]*$/.exec(text)?.[1];
   return subject && !/^(それ|これ|あれ|何か)$/.test(subject)?subject:null;
 }
 
 // Language aliases, not an allowlist. Unknown objects remain available through the same LLM.
 export function canonicalVisualSubject(subject?: string | null): string | null {
-  const aliases: Record<string, string> = { 'プリン':'pudding', '鶏':'chicken', 'ニワトリ':'chicken', 'にわとり':'chicken', 'ボール':'ball', '肉':'meat', '卵':'egg', '羽根':'feather', 'バット':'bat' };
+  const aliases: Record<string, string> = { 'エビ':'shrimp', 'えび':'shrimp', '海老':'shrimp', 'カニ':'crab', 'かに':'crab', 'みかん':'mandarin orange', 'ミカン':'mandarin orange', 'プリン':'pudding', '鶏':'chicken', 'ニワトリ':'chicken', 'にわとり':'chicken', 'ボール':'ball', '肉':'meat', '卵':'egg', '羽根':'feather', 'バット':'bat' };
   return subject ? aliases[subject] ?? null : null;
 }
 

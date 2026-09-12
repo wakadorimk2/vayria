@@ -8,7 +8,7 @@ export const DEFAULT_LIMITS = {
   sessionSeconds: 180, user: 6, autonomous: 2, card: 2,
   transcribe: 8, audioSeconds: 120, tts: 20, ttsChars: 600, concurrency: 5,
   dayBudget: 70_000_000, monthBudget: 3_500_000_000,
-  usdJpy: 150, infrastructureYen: 1000, warningYen: 2000, targetYen: 3000,
+  manifestationMicrousd: 5000000, usdJpy: 150, infrastructureYen: 1000, warningYen: 2000, targetYen: 3000,
 };
 export type Limits = typeof DEFAULT_LIMITS;
 export type Kind = 'user' | 'autonomous' | 'card' | 'transcribe' | 'tts';
@@ -25,6 +25,7 @@ export type Session = {
 type Job = { session: string; kind: Kind; expires: number };
 type Charge = { amount: number; day: string; month: string; settled: boolean; expires: number; exhibition?: string };
 export type LedgerState = {
+  visualMedia?: Record<string,{url:string;session:string;expires:number}>;
   visualDiagnostics?: (VisualDiagnostic & { eventId:string; at:number })[];
   visual?: { cache: Record<string, VisualAsset>; jobs: Record<string, { session: string; generation: number; key: string; target: string; expires: number; finished: boolean }>; claims: Record<string, string> };
 
@@ -332,6 +333,10 @@ export class Ledger {
     const asset = this.visualState().cache[key];
     return asset && asset.expiresAt > this.now && (asset.scope === 'shared' || asset.scope === id) ? asset : null;
   }
+  visualReplay(visitor:string,id:string,generation:number,key:string){
+    this.visualAllowed(visitor,id,generation);
+    return Object.values(this.visualState().cache).find(a=>a.id===key&&a.expiresAt>this.now&&(a.scope==='shared'||a.scope===id))??null;
+  }
   visualStart(visitor: string, id: string, generation: number, token: string, key: string, target: string, duration: number) {
     const session = this.visualAllowed(visitor, id, generation), v = this.visualState();
     const existing = v.jobs[token];
@@ -352,7 +357,7 @@ export class Ledger {
     const key = `${id}:visual:${token}:${step}`;
     if (m.events[key]) throw new LimitError('duplicate_event', 0, 409);
     if ((m.requests[id] ?? 0) >= 20) throw new LimitError('manifestation_limit', session.expires);
-    if (m.reservedMicrousd + cost > 5000000) throw new LimitError('manifestation_budget', 0);
+    if (m.reservedMicrousd + cost > (this.state.limits.manifestationMicrousd ?? 5000000)) throw new LimitError('manifestation_budget', 0);
     const yen = Math.ceil(cost * this.state.limits.usdJpy); this.checkBudget(yen, session.exhibition);
     const p = periods(this.now); this.add(`bd:${p.day}`, yen, p.dayEnd + 2 * 86400000); this.add(`bm:${p.month}`, yen, p.monthEnd + 7 * 86400000);
     if (session.exhibition) this.state.exhibitions![session.exhibition].used += yen;
@@ -370,6 +375,26 @@ export class Ledger {
     const m = this.manifestationState();
     m.metrics.push({ eventId: /^[\w-]{1,80}$/.test(eventId) ? eventId : undefined, code: /^[\w-]{1,60}$/.test(code) ? code : 'visual_failed', timings: Object.fromEntries(Object.entries(timings ?? {}).filter(([k,n]) => /^[\w.]{1,60}$/.test(k) && Number.isFinite(n) && n >= 0).slice(0, 30)) });
     m.metrics = m.metrics.slice(-100);
+  }
+  visualMediaRegister(visitor:string,id:string,generation:number,assetId:string,url:string) {
+    this.visualAllowed(visitor,id,generation);
+    const u=new URL(url);if(u.protocol!=='https:'||!(u.hostname==='fal.media'||u.hostname.endsWith('.fal.media'))||u.username||u.password||u.port)throw new LimitError('invalid_media',0,400);
+    const refs=this.state.visualMedia??={};for(const [k,v] of Object.entries(refs))if(v.expires<=this.now)delete refs[k];
+    refs[assetId]={url,session:id,expires:this.now+900000};return {registered:true};
+  }
+  visualMediaSaved(visitor:string,id:string,key:string,success:boolean,timings:Record<string,number>={},eventId=key){
+    this.session(visitor,id);
+    const ref=this.state.visualMedia?.[key];if(!ref||ref.session!==id)throw new LimitError('invalid_media',0,403);
+    for(const asset of Object.values(this.visualState().cache))if(asset.id===key){
+      if(success)asset.expiresAt=this.now+(asset.scope==='shared'?30:1)*86400000;
+      // On failure the short-lived relay remains usable until its reference expires.
+    }
+    this.manifestationState().metrics.push({eventId,code:success?'media_saved':'media_save_failed',timings:Object.fromEntries(Object.entries(timings).filter(([k,n])=>/^[a-zA-Z.]+$/.test(k)&&Number.isFinite(n)&&n>=0))});
+    this.manifestationState().metrics=this.manifestationState().metrics.slice(-100);
+    return {saved:success};
+  }
+  visualMediaLookup(visitor:string,id:string,assetId:string){
+    this.session(visitor,id);const ref=this.state.visualMedia?.[assetId];return ref&&ref.expires>this.now&&ref.session===id?ref:null;
   }
   visualDiagnostic(visitor:string,id:string,generation:number,eventId:string,values:unknown[]) {
     this.visualAllowed(visitor,id,generation);
@@ -398,7 +423,7 @@ export class Ledger {
     if (active.filter(j => j.session === id).length >= 2 || active.length >= 10) throw new LimitError('busy', this.now + 1000);
     // Normal 480p price: 5 seconds * $0.025. Never assume a promotional discount.
     const cost = 125000;
-    if (state.reservedMicrousd + cost > 5000000) throw new LimitError('manifestation_budget', 0);
+    if (state.reservedMicrousd + cost > (this.state.limits.manifestationMicrousd ?? 5000000)) throw new LimitError('manifestation_budget', 0);
     const yen = Math.ceil(cost * this.state.limits.usdJpy); this.checkBudget(yen, session.exhibition);
     const p = periods(this.now);
     this.add(`bd:${p.day}`, yen, p.dayEnd + 2 * 86400_000);
@@ -427,7 +452,7 @@ export class Ledger {
   report() {
     const p = periods(this.now); const l = this.state.limits;
     const estimatedYen = this.count(`bm:${p.month}`) / 1e6 + l.infrastructureYen;
-    return { visualDiagnostics:(this.state.visualDiagnostics??[]).filter(r=>r.at>this.now-86400000), manifestation: { reservedUsd: (this.state.manifestation?.reservedMicrousd ?? 0) / 1e6, limitUsd: 5, metrics: this.state.manifestation?.metrics ?? [] }, limits: l, stopped: this.state.stopped, dayYen: this.count(`bd:${p.day}`) / 1e6,
+    return { visualDiagnostics:(this.state.visualDiagnostics??[]).filter(r=>r.at>this.now-86400000), manifestation: { reservedUsd: (this.state.manifestation?.reservedMicrousd ?? 0) / 1e6, limitUsd: (l.manifestationMicrousd ?? 5000000) / 1e6, metrics: this.state.manifestation?.metrics ?? [] }, limits: l, stopped: this.state.stopped, dayYen: this.count(`bd:${p.day}`) / 1e6,
       exhibitions: Object.values(this.state.exhibitions!), exhibitionDevices: this.state.exhibitionDevices,
       monthApiYen: this.count(`bm:${p.month}`) / 1e6, estimatedYen,
       warning: estimatedYen >= l.targetYen ? 'target_exceeded' : estimatedYen >= l.warningYen ? 'warning' : null,
