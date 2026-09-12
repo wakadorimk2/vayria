@@ -29,7 +29,7 @@ export function VisualStage({runtime,snapshot,stage}:{runtime:VisualSession;snap
     {snapshot.ready?.filter(o=>o.id==='background').map(o=><img key={o.asset.id} className="visual-background" src={o.asset.url} alt="" onLoad={()=>runtime.visible('background',o.asset.id)}/>)}
     {snapshot.background&&<img className="visual-background" src={snapshot.background.asset.url} alt="" onLoad={()=>runtime.visible('background',snapshot.background!.asset.id)}/>}
     <div className="visual-layer" ref={root}>
-      {[...snapshot.objects.filter(o=>!snapshot.ready?.some(r=>r.id===o.id)),...(snapshot.ready??[]).filter(o=>o.id!=='background')].sort((a,b)=>b.at-a.at).map((object,index)=>{
+      {[...snapshot.objects.filter(o=>!snapshot.ready?.some(r=>r.id===o.id)),...(snapshot.ready??[]).filter(o=>o.id!=='background')].sort((a,b)=>b.at-a.at).slice(0,3).map((object,index)=>{
         const age=snapshot.now-object.at,rect=placement((index===0?1:.7)*(age>=30000?.6:age>=15000?.8:1)*(object.effects.includes('grow')?1.4:1));
         if(!rect)return object.visible?null:<Unplaced key={object.id} id={object.id} assetId={object.asset.id} runtime={runtime}/>;
         return <div key={object.id} className={'visual-object '+object.effects.map(e=>'visual-effect-'+e).join(' ')} style={{...style(rect),opacity:age>=30000?.4:1}}>
