@@ -31,7 +31,8 @@ export function sharedVisual(intent: VisualIntent) {
   return intent.sharing === 'general' && subjects.test(intent.concept) && intent.modifiers.every(m=>modifiers.test(m)||VISUAL_EFFECTS.includes(m as typeof VISUAL_EFFECTS[number]));
 }
 export async function visualRoute(request: Request, env: VisualEnv, visitor: string, session: string, ledger: VisualLedger, ctx?: ExecutionContext) {
-  if (env.MANIFESTATION_ENABLED !== 'true' || env.PUBLIC_BASE_PATH !== '/staging') throw new LimitError('not_found',0,404);
+  const base=env.PUBLIC_BASE_PATH??'';
+  if (env.MANIFESTATION_ENABLED !== 'true' || !['','/staging'].includes(base)) throw new LimitError('not_found',0,404);
   const path = new URL(request.url).pathname, who = { visitor, id:session };
   if (path === '/api/visual/mode' && request.method === 'POST') {
     const b = JSON.parse(new TextDecoder().decode(await boundedBody(request,1024)));
@@ -44,9 +45,9 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
     const asset=await ledger<VisualAsset|null>('visualReplay',{...who,key:b.assetId,generation:b.generation});
     if(!asset)throw new LimitError('not_found',0,404);
     const resolveReplay=async(a:VisualAsset):Promise<VisualAsset>=>{
-      if(a.url.startsWith('/manifestation/'))return {...a,url:'/staging'+a.url};
+      if(a.url.startsWith('/manifestation/'))return {...a,url:base+a.url};
       const ticket=await sign({purpose:'visual-media',visitor,session,key:a.id,exp:Math.min(a.expiresAt,Date.now()+900000)},env.COOKIE_SECRET);
-      return {...a,url:'/staging/api/visual/media/'+a.id+'?ticket='+encodeURIComponent(ticket),source:a.source?await resolveReplay(a.source):undefined};
+      return {...a,url:base+'/api/visual/media/'+a.id+'?ticket='+encodeURIComponent(ticket),source:a.source?await resolveReplay(a.source):undefined};
     };
     return json({type:'asset',asset:await resolveReplay(asset),cache:true});
   }
@@ -93,13 +94,13 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
   if(ticket.video&&b.source&&intent.action==='replace'){
     const candidate=b.source.source??b.source;
     if(typeof candidate.url!=='string')throw new LimitError('invalid_source',0,400);
-    if(candidate.url.startsWith('/staging/api/visual/media/')){
+    if(candidate.url.startsWith(base+'/api/visual/media/')){
       const u=new URL(candidate.url,'https://local');
       const proof=await verify<{exp:number;purpose:string;visitor:string;session:string;key:string}>(u.searchParams.get('ticket')??'',env.COOKIE_SECRET);
       if(!proof||proof.purpose!=='visual-media'||proof.visitor!==visitor||proof.session!==session||proof.key!==u.pathname.split('/').pop())throw new LimitError('invalid_source',0,403);
       source=await ledger<VisualAsset|null>('visualReplay',{...args,key:proof.key});
       if(!source||source.kind!=='image')throw new LimitError('invalid_source',0,403);
-    }else if(builtin&&candidate.url==='/staging/manifestation/'+builtin+'.png')source=stockSource();
+    }else if(builtin&&candidate.url===base+'/manifestation/'+builtin+'.png')source=stockSource();
     else throw new LimitError('invalid_source',0,403);
     if(source.scope!=='shared')scope=session;
   }
@@ -131,9 +132,9 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
     }
   }
   const resolve=async(asset:VisualAsset):Promise<VisualAsset>=>{
-    if(asset.url.startsWith('/manifestation/'))return {...asset,url:'/staging'+asset.url};
+    if(asset.url.startsWith('/manifestation/'))return {...asset,url:base+asset.url};
     const signed=await sign({purpose:'visual-media',visitor,session,key:asset.id,exp:Math.min(asset.expiresAt,Date.now()+900000)},env.COOKIE_SECRET);
-    return {...asset,url:'/staging/api/visual/media/'+asset.id+'?ticket='+encodeURIComponent(signed),...(asset.source?{source:await resolve(asset.source)}:{})};
+    return {...asset,url:base+'/api/visual/media/'+asset.id+'?ticket='+encodeURIComponent(signed),...(asset.source?{source:await resolve(asset.source)}:{})};
   };
   const timings:Record<string,number>={cacheLookup:performance.now()-lookupStarted,cacheHit:cached?1:0,cacheMiss:cached?0:1,explicitRefresh:intent.regenerate?1:0,...(!cached?{[source?'cacheMiss.variant':'cacheMiss.source']:1}:{})};
   if((cached&&cacheDecision(cached,Date.now(),intent.regenerate)==='reuse')||b.cacheOnly===true){

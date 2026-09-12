@@ -172,7 +172,7 @@ async function handle(request: Request, env: Env, ctx?: ExecutionContext): Promi
     return json(await ledger(env, 'start', { visitor: visitor.id, ip, id: crypto.randomUUID() }));
   }
   if (!env.OPENAI_API_KEY || !env.AIVIS_API_KEY || !env.AIVIS_MODEL_UUID) throw new LimitError('configuration_unavailable', 0, 503);
-  const visualPermission = env.MANIFESTATION_ENABLED === 'true' && base === '/staging' ? await ledger<{enabled:boolean;generation:number}>(env, 'visualPermission', who) : { enabled:false, generation:0 };
+  const visualPermission = env.MANIFESTATION_ENABLED === 'true' ? await ledger<{enabled:boolean;generation:number}>(env, 'visualPermission', who) : { enabled:false, generation:0 };
   const visualEnabled = visualPermission.enabled && request.headers.get('X-Vayria-Visual-Generation') === String(visualPermission.generation);
   const audio = url.pathname === '/api/transcribe' ? await boundedBody(request, 640044) : null;
   const input = audio ? {} : await body(request);

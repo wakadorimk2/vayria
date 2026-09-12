@@ -424,3 +424,17 @@ test('new appearance on a referenced video does not reuse the old source',()=>ca
  const changed=(await request({action:'replace',modifiers:['red'],motion:'walk',motionEvidence:'walk'},{source:first.source})).at(-1).asset;
  assert.equal(changed.kind,'video');assert.notEqual(changed.source.id,first.source.id);assert.deepEqual(counts,{image:2,mask:2,video:2,input:2});
 }));
+
+test('production and staging visual routes use their own authenticated media paths',async()=>{
+ const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');
+ for(const base of ['', '/staging']){
+  const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:base,COOKIE_SECRET:('secret-'+(base||'production')).repeat(5)};
+  const {l}=setup();const bridge=async(op,b)=>{if(op==='visualMode')return l.visualMode(b.visitor,b.id,b.enabled,b.generation);if(op==='visualPermission')return l.visualPermission(b.visitor,b.id);if(op==='visualLookup'||op==='visualLookupAny')return null;if(op==='visualFinish')return {};throw Error(op);};
+  for(const [enabled,generation] of [[true,0],[false,1],[true,2]]){const r=await visualRoute(new Request('https://test/api/visual/mode',{method:'POST',body:JSON.stringify({enabled,generation})}),env,'v','s',bridge);assert.equal((await r.json()).enabled,enabled);}
+  const signed=await visualTicket({visualIntent:intent},env,'v','s',3,false);
+  const request=()=>new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket,cacheOnly:true})});
+  const r=await visualRoute(request(),env,'v','s',bridge);assert.equal((await r.json()).asset.url,base+'/manifestation/chicken-1.png');
+  await assert.rejects(visualRoute(request(),{...env,COOKIE_SECRET:'other-environment-secret'},'v','s',bridge),/invalid_ticket/);
+  await assert.rejects(visualRoute(request(),{...env,MANIFESTATION_ENABLED:'false'},'v','s',bridge),/not_found/);
+ }
+});

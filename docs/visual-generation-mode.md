@@ -103,3 +103,9 @@ The ledger now has manifestationMicrousd (default 5000000). Staging may be confi
 Concurrent chat no longer deletes queued speech tickets. TTS expiry, signature failure, session mismatch and local missing tickets have separate codes. Dance wording and shrimp/crab/mandarin aliases constrain explicit requests.
 
 Device acceptance and latency measurements remain separate from automated checks. No iPhone success is inferred from desktop playback.
+
+## Production rollout
+
+Visual routes use PUBLIC_BASE_PATH (empty in production, /staging in preview). The browser supports both authenticated media paths. Each environment uses its own Worker, signing secrets, Durable Object and private R2 bucket. MANIFESTATION_ENABLED remains the server execution gate; each session starts OFF.
+
+Production promotion requires infrastructure PR #112 and application PR #111. Suspend automatic production deployment during the merge sequence. Validate combined main in staging before deploying production with visual generation OFF. Verify the existing ledger, preserve all reservations and daily/monthly limits, and set a USD 5 cumulative visual limit. Enable visuals only after secrets and private storage are ready. Do not reset the staging USD 10 ledger. On failure disable visuals; roll back the Worker only if ordinary features are affected. Restore automatic production deployment after acceptance.
