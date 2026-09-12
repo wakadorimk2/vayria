@@ -1,3 +1,4 @@
+import { isPlacementObstacleVisible } from './placementObstacles';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { VrmStageHandle } from '../avatar/VrmStage';
 import type { WorldRuntime } from './worldRuntime';
@@ -40,6 +41,7 @@ export function useWorldLayout(root: RefObject<HTMLDivElement | null>, stage: Re
         return { x: Math.max(0, Math.min(1, (p.x - viewport.left) / viewport.width + (d?.x ?? 0))), y: Math.max(0, Math.min(1, (p.y - viewport.top) / viewport.height + (d?.y ?? 0))) };
       };
       const obstacles = [...document.querySelectorAll<HTMLElement>('.card-zone, .manifestation-slot, .manifestation-picker, .manifestation-actions, .message-form, .conversation-copy, .subtitle, .subtitle-overlay, .speech-caption, .performer-caption, .public-controls__actions')].flatMap(node => {
+        if (!isPlacementObstacleVisible(node)) return [];
         const r = node.getBoundingClientRect();
         if (!r.width || !r.height || r.right <= viewport.left || r.left >= viewport.right || r.bottom <= viewport.top || r.top >= viewport.bottom) return [];
         return [expandRect(normalize({ x: r.left, y: r.top, width: r.width, height: r.height }), .012)];

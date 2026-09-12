@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 const dir='node_modules/.tmp/visual';await mkdir(dir,{recursive:true});
-const result=await build({stdin:{contents:'export * from "./src/visual/placement"; export * from "./src/manifestation/media"; export * from "./src/manifestation/videoPlayback"; export * from "./src/visual/diagnostics"; export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/decision"; export * from "./src/visual/notice"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
+const result=await build({stdin:{contents:'export * from "./src/world/placementObstacles"; export * from "./src/visual/placement"; export * from "./src/manifestation/media"; export * from "./src/manifestation/videoPlayback"; export * from "./src/visual/diagnostics"; export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/decision"; export * from "./src/visual/notice"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
 await writeFile(dir+'/test.mjs',result.outputFiles[0].text);
 const {Ledger,initialState,readVisualIntent,cacheDecision,assetDescriptionKey,permitsVideo,VisualSession,sharedVisual,inspectVisualPng}=await import('../'+dir+'/test.mjs');
 const intent={type:'prop',action:'add',concept:'chicken',modifiers:[],targetId:'target',motion:'',motionEvidence:'',sharing:'general',regenerate:false};
@@ -304,4 +304,20 @@ test('chest layout uses body center, protects face and controls, caps landscape 
  const second=placeVisualProp(layout,false,1,1,[chest]);assert.ok(second);assert.ok(second.width<=.275);
  const third=placeVisualProp(layout,false,1,1,[chest,second]);assert.ok(third);
  assert.equal(placeVisualProp({...layout,obstacles:[{x:0,y:0,width:1,height:1}]},true,1,1),null);
+});
+
+test('hidden card and chat boxes do not reserve chest space; visible captions remain protected',async()=>{
+ const {isPlacementObstacleVisible}=await import('../'+dir+'/test.mjs');
+ const previous=globalThis.getComputedStyle;
+ globalThis.getComputedStyle=node=>node.style;
+ const node=(style={},parentElement=null)=>({style:{display:'block',visibility:'visible',opacity:'1',...style},parentElement});
+ try {
+  assert.equal(isPlacementObstacleVisible(node()),true);
+  for(const style of [{visibility:'hidden'},{display:'none'},{opacity:'0'},{visibility:'collapse'}]){
+   assert.equal(isPlacementObstacleVisible(node(style)),false);
+   assert.equal(isPlacementObstacleVisible(node({},node(style))),false);
+  }
+  const layout={width:393,height:665,body:{x:.08,y:.08,width:.84,height:.9},face:{x:.25,y:.1,width:.5,height:.35},obstacles:[{x:.2,y:.45,width:.6,height:.055},{x:.09,y:.88,width:.82,height:.1}]};
+  const chest=placeVisualProp(layout,true,1,1);assert.ok(chest);assert.ok(chest.y>=.505);assert.ok(chest.y+chest.height<=.88);
+ } finally {globalThis.getComputedStyle=previous;}
 });
