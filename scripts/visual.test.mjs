@@ -230,11 +230,11 @@ test('initial play can take over four seconds and has its own timeout code',asyn
 test('queued target retains its source after the displayed object retires',async()=>{
  let now=0;const calls=[];const session=new VisualSession({now:()=>now,prepare:async()=>{},generate:(job,signal,accept)=>new Promise(resolve=>calls.push({job,accept,resolve}))});
  session.permission(true,1);session.dispatch('base',intent,'t',1);await calls[0].accept(asset);calls[0].resolve();await flush();session.visible('target');
- session.dispatch('busy1',{...intent,targetId:'b1'},'t',1);session.dispatch('busy2',{...intent,targetId:'b2'},'t',1);
+ now=40000;session.dispatch('busy1',{...intent,targetId:'b1'},'t',1);session.dispatch('busy2',{...intent,targetId:'b2'},'t',1);
  session.dispatch('motion',{...intent,action:'replace',motion:'walk'},'t',1);
  assert.equal(session.getSnapshot().pending.at(-1).source.id,asset.id);
  now=46000;session.tick();assert.equal(session.getSnapshot().objects.length,0);
- assert.equal(calls.length,3);calls.slice(1).forEach(c=>c.resolve());await flush();
+ assert.equal(calls.length,3);calls.slice(1).forEach(c=>c.resolve());await flush();assert.equal(calls[3].job.source.id,asset.id);calls[3].resolve();await flush();
 });
 test('video media stages distinguish loading, seek, play refusal and abort',async()=>{
  const video=new EventTarget();video.pause=()=>{};
