@@ -227,7 +227,7 @@ test('visual decision is signed before speech, survives malformed tail, and is i
  const {default:worker}=await import('../node_modules/.tmp/visual-worker/index.mjs');
  const secret='visual-test-'.repeat(4),sign=value=>{const p=Buffer.from(JSON.stringify(value)).toString('base64url');return p+'.'+createHmac('sha256',secret).update(p).digest('base64url');};
  const calls=[];let scenario='complete',permission=true,providerCalls=0;
- const intent={type:'prop',action:'add',concept:'ball',modifiers:[],targetId:'',motion:'',motionEvidence:'',sharing:'general',regenerate:false};
+ const intent={type:'prop',action:'add',concept:'ボール',modifiers:[],targetId:'',motion:'',motionEvidence:'',sharing:'general',regenerate:false};
  const env={COOKIE_SECRET:secret,PUBLIC_BASE_PATH:'/staging',MANIFESTATION_ENABLED:'true',GENERATION_ENABLED:'true',OPENAI_API_KEY:'mock',AIVIS_API_KEY:'mock',AIVIS_MODEL_UUID:'mock',USAGE:{idFromName:()=>'',get:()=>({fetch:async(u,init)=>{const b=JSON.parse(init.body);calls.push(b.op);if(b.op==='visualPermission')return Response.json({enabled:permission,generation:1});return Response.json({limits:{usdJpy:150},expires:Date.now()+60000});}})}};
  const previous=globalThis.fetch;
  globalThis.fetch=async(url,init)=>{

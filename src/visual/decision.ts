@@ -9,14 +9,14 @@ export function explicitVisualSubject(input: string | null | undefined): string 
   return subject && !/^(それ|これ|あれ|何か|なにか|何|なに)$/.test(subject) ? subject : null;
 }
 
-export function visualDecisionSchema(required: boolean) {
+export function visualDecisionSchema(required: boolean, subject?: string | null) {
   return required ? { ...visualIntentSchema, properties: { ...visualIntentSchema.properties,
     type: { type: 'string', enum: ['prop'] }, action: { type: 'string', enum: ['add'] },
-    concept: { type: 'string', minLength: 1 },
+    concept: subject ? { type: 'string', enum: [subject] } : { type: 'string', minLength: 1 },
   } } : visualIntentSchema;
 }
 
-export function validVisualDecision(value: unknown, required: boolean): VisualIntent | null {
+export function validVisualDecision(value: unknown, required: boolean, subject?: string | null): VisualIntent | null {
   const intent = readVisualIntent(value);
-  return intent && (!required || (intent.type === 'prop' && intent.action === 'add')) ? intent : null;
+  return intent && (!required || (intent.type === 'prop' && intent.action === 'add' && (!subject || intent.concept === subject))) ? intent : null;
 }

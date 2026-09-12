@@ -145,3 +145,10 @@ test('safe failure messages never echo provider text and distinguish limits, ins
  assert.match(f('alpha_quality'),/検査/);assert.match(f('timeout'),/待機時間/);
  assert.doesNotMatch(f('https://secret.example/?key=private'),/secret|private/);
 });
+
+test('explicit subject cannot broaden pudding into a generic dessert',async()=>{
+ const {visualDecisionSchema,validVisualDecision}=await import('../'+dir+'/test.mjs');
+ assert.deepEqual(visualDecisionSchema(true,'プリン').properties.concept.enum,['プリン']);
+ assert.equal(validVisualDecision({...intent,concept:'dessert'},true,'プリン'),null);
+ assert.ok(validVisualDecision({...intent,concept:'プリン'},true,'プリン'));
+});
