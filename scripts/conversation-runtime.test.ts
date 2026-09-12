@@ -25,7 +25,7 @@ const plan = (id: string): PerformancePlan => ({ planId: id, trigger: 'viewer_me
 const result = { speechStartedAt: 1, speechEndedAt: 2 };
 async function flush() { for (let i = 0;i < 30;i++) await Promise.resolve(); }
 
-function fixture(options: ConversationOptions = {}) {
+function fixture(options: ConversationOptions = {}, timers?: Pick<ConversationDependencies, 'setTimeout' | 'clearTimeout'>) {
   const requests: { url: string; body: Record<string, unknown>; signal: AbortSignal | null | undefined }[] = [];
   const plays: { pending: ReturnType<typeof deferred<PerformancePlaybackResult | null>>; callbacks?: PerformancePlaybackCallbacks }[] = [];
   const results: PerformanceResult[] = [];
@@ -52,7 +52,7 @@ function fixture(options: ConversationOptions = {}) {
     },
     createEventEmitter: () => ({ turnId: `turn-${++turn}`, runId: undefined, emit(event) { events.push(event); } }),
     now: () => 100, monotonicNow: () => 100,
-    setTimeout: () => 1, clearTimeout() { }, prefersReducedMotion: () => true,
+    setTimeout: timers?.setTimeout ?? (() => 1), clearTimeout: timers?.clearTimeout ?? (() => {}), prefersReducedMotion: () => true,
   };
   const runtimeOptions = { ...options, onPerformanceResult: (r: PerformanceResult) => results.push(r), onInteractionTimelineEvent: (event: InteractionTimelineEvent) => timeline.push(event) };
   const runtime = createConversationRuntime(playback, runtimeOptions, dependencies);
@@ -593,4 +593,64 @@ test('streaming burst waits for server completion after the current spoken unit'
   assert.deepEqual(latest.body.cardContinuation, { deliveredText: '前半。', acknowledgementDelivered: false });
   f.plays[1].pending.resolve(result); await pending;
   assert.equal(f.runtime.getSnapshot().status, 'idle');
+});
+
+function subtitleTimers() {
+  const entries: { callback: () => void; delay: number; cancelled: boolean }[] = [];
+  return { entries, setTimeout(callback: () => void, delay: number) { entries.push({ callback, delay, cancelled: false }); return entries.length; }, clearTimeout(id: number) { if (entries[id - 1]) entries[id - 1].cancelled = true; } };
+}
+
+test('public subtitles expire after speech, cancel old timers, and display repeated replies', async () => {
+  const timers = subtitleTimers();
+  const f = fixture({ subtitleHoldMs: 2000 }, timers);
+  const first = f.send('first'); await flush();
+  f.plays[0].callbacks?.onSpeechStart?.(1);
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, true);
+  assert.equal(timers.entries.filter(e => e.delay === 2000).length, 0);
+  f.plays[0].callbacks?.onSpeechEnd?.(2);
+  const old = timers.entries.find(e => e.delay === 2000)!;
+  assert.ok(old);
+  f.plays[0].pending.resolve(result); await first;
+  const second = f.send('same-text'); await flush();
+  f.plays[1].callbacks?.onSpeechStart?.(3);
+  assert.equal(f.runtime.getSnapshot().reply, response.text);
+  old.callback();
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, true);
+  f.plays[1].callbacks?.onSpeechEnd?.(4);
+  const last = timers.entries.filter(e => e.delay === 2000).at(-1)!;
+  f.plays[1].pending.resolve(result); await second;
+  last.callback();
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, false);
+  assert.equal(f.runtime.getSnapshot().reply, response.text);
+});
+
+test('public text-only subtitles expire and reset invalidates pending display callbacks', async () => {
+  const timers = subtitleTimers();
+  const f = fixture({ subtitleHoldMs: 2000, isMuted: true }, timers);
+  await f.send('muted');
+  assert.equal(f.plays.length, 0);
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, true);
+  timers.entries.find(e => e.delay === 2000)!.callback();
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, false);
+  await f.send('same-text');
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, true);
+  const pending = timers.entries.filter(e => e.delay === 2000).at(-1)!;
+  f.runtime.resetConversation(); pending.callback();
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, false);
+  assert.equal(f.runtime.getSnapshot().reply, '');
+});
+
+test('a subsequent speech unit keeps public subtitles visible and interruption clears them', async () => {
+  const timers = subtitleTimers(); const f = fixture({ subtitleHoldMs: 2000 }, timers);
+  f.setChat(async () => Response.json({ ...response, text: '最初の文。次の文。' }));
+  const pending = f.send('units'); await flush();
+  f.plays[0].callbacks?.onSpeechStart?.(1); f.plays[0].callbacks?.onSpeechEnd?.(2);
+  const old = timers.entries.find(e => e.delay === 2000)!;
+  f.plays[0].pending.resolve(result); await flush();
+  f.plays[1].callbacks?.onSpeechStart?.(3); old.callback();
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, true);
+  f.runtime.interruptCurrentTurn('router_control');
+  f.plays[1].callbacks?.onSpeechStart?.(5);
+  assert.equal(f.runtime.getSnapshot().isSubtitleVisible, false);
+  f.plays[1].pending.resolve(null); await pending;
 });

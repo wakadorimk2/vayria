@@ -1,3 +1,4 @@
+import InputOrb from './public/InputOrb';
 import { environmentStorageKey } from './storageKey';
 import { calculateSettingsLayout, type AvatarScreenBounds } from './public/settingsLayout';
 import {
@@ -850,6 +851,7 @@ export default function App() {
   const {
     cancelAutonomous,
     changeCardsDuringTurn,
+    clearSubtitle,
     error,
     evaluateVoiceParticipation,
     interruptCurrentTurn,
@@ -867,6 +869,7 @@ export default function App() {
   } = useConversation(playbackCoordinator, {
     createCardContinuationPlan: trigger => createPlanForTrigger(trigger),
     historyTurnLimit: 5,
+    subtitleHoldMs: runtimeConfig.mode === 'public' ? 2000 : undefined,
     isExhibitionMode,
     isMuted,
     characterIdentity,
@@ -881,6 +884,14 @@ export default function App() {
     onReplyPresentationStart: handleReplyPresentationStart,
     onReplyPresentationEnd: handleReplyPresentationEnd,
   });
+
+  useEffect(() => {
+    if (runtimeConfig.mode !== 'public') return;
+    const hidden = () => { if (document.hidden) clearSubtitle(); };
+    if (!publicSessionActive) clearSubtitle();
+    document.addEventListener('visibilitychange', hidden);
+    return () => document.removeEventListener('visibilitychange', hidden);
+  }, [clearSubtitle, publicSessionActive]);
 
   const routerResetSessionRef = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -1048,7 +1059,7 @@ export default function App() {
       ? getVoiceStatusLabel(isVoiceInputEnabled, voiceInputPhase)
       : STATUS_LABELS[status];
   const shouldShowReply =
-    Boolean(reply) && (!isExhibitionMode || isSubtitleVisible);
+    Boolean(reply) && (!(isExhibitionMode || runtimeConfig.mode === 'public') || isSubtitleVisible);
   const voiceError = getVoiceErrorMessage(voiceInputErrorCode);
   const publicMicrophoneState = getMicrophoneState({
     transition: microphoneInputTransition,
@@ -2561,7 +2572,10 @@ export default function App() {
         ref={registerChatTarget}
       >
         <div className="conversation-copy" aria-live="polite">
-          {shouldShowReply && <p className="reply">{reply}</p>}
+          {runtimeConfig.mode === 'public' ? <div className="conversation-voice-row">
+            <div className="conversation-input-slot"><InputOrb state={publicMicrophoneState} level={displayedAudioLevel === null ? null : microphoneInputStrength} /></div>
+            <p className="reply" style={{ visibility: shouldShowReply ? 'visible' : 'hidden' }}>{shouldShowReply ? reply : '\u00a0'}</p>
+          </div> : shouldShowReply && <p className="reply">{reply}</p>}
           {shouldShowStatus && (
             <p className="status">
               {isMuted && status === 'idle'
@@ -2689,7 +2703,6 @@ export default function App() {
           microphoneOn={isVoiceInputEnabled}
           microphoneState={publicMicrophoneState}
           microphoneNotice={voiceInput.notice}
-          microphoneLevel={displayedAudioLevel === null ? null : microphoneInputStrength}
           onMicrophoneToggle={() => { void handleVoiceToggle(); }}
         />
       )}

@@ -5,14 +5,13 @@ import { VoiceInputNotification } from './VoiceInputNotification';
 import type { VoiceInputNotice } from '../voice/voiceInput';
 import type { ThemePreference, ResolvedTheme } from './theme';
 import PublicSettingsPanel from './PublicSettingsPanel';
-import { microphoneStateLabels, normalizeMicrophoneLevel, type MicrophoneState } from './microphoneState';
-import type { CSSProperties } from 'react';
+import { microphoneStateLabels, type MicrophoneState } from './microphoneState';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicExhibition, publicSessionId, registerPublicSessionRequest, subscribePublic, updatePublicStatus, type PublicStatus } from './session';
 import ExhibitionControls from './ExhibitionControls';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+export default function PublicControls({ settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneNotice, onMicrophoneToggle }: {
   settingsLayout: SettingsLayout;
   onSettingsOpenChange: (open: boolean) => void;
   cardsOpen: boolean;
@@ -28,7 +27,6 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
   onMuteToggle: () => void;
   microphoneOn: boolean;
   microphoneState: MicrophoneState;
-  microphoneLevel: number | null;
   microphoneNotice?: VoiceInputNotice;
   onMicrophoneToggle: () => void;
 }) {
@@ -45,7 +43,6 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
   const microphoneLabel = microphoneStateLabels[microphoneState];
   const microphoneAction = microphoneOn ? 'マイクを止める' : 'マイクで話す';
   const microphonePending = microphoneState === 'starting' || microphoneState === 'stopping';
-  const level = normalizeMicrophoneLevel(microphoneLevel);
   const request = useRef<{ promise: Promise<boolean>; resolve: (value: boolean) => void } | null>(null);
   const startAbort = useRef<AbortController | null>(null);
   const finishRequest = useCallback((success: boolean) => { request.current?.resolve(success); request.current = null; setRequested(false); }, []);
@@ -184,7 +181,6 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="12" rx="3" fill={microphoneOn ? 'currentColor' : 'none'} /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />{microphoneState === 'off' && <path d="m3 3 18 18" />}</svg>
         {(microphonePending || microphoneState === 'recognizing') && <span className="public-controls__progress" aria-hidden="true" />}
         {microphoneState === 'error' && <span className="public-controls__error" aria-hidden="true">!</span>}
-        {microphoneState === 'speaking' && <span className="public-controls__level" aria-hidden="true" style={{ '--input-level': level ?? .5 } as CSSProperties}><i /><i /><i /></span>}
       </button>
       <button aria-label={isMuted ? '音声をオンにする' : '音声をミュートする'} title={isMuted ? '音声をオンにする' : '音声をミュートする'} aria-pressed={isMuted} onClick={onMuteToggle}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 4 6 8H3v8h3l5 4Z" />{isMuted ? <path d="m16 9 5 6m0-6-5 6" /> : <><path d="M15 8a6 6 0 0 1 0 8M18 4a11 11 0 0 1 0 16" /></>}</svg>
