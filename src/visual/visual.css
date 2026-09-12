@@ -15,3 +15,7 @@
 @keyframes visual-rotate { to {rotate:360deg} }
 @keyframes visual-pulse { 50% {opacity:.35} }
 @media (prefers-reduced-motion:reduce) { .visual-layer *, .visual-layer *::before,.visual-layer *::after { animation:none!important; } }
+
+/* Keep captions and interactive panels above props, including during re-layout. */
+.public-layout .app-shell .conversation { z-index:20; }
+.public-layout .public-card-panel .card-prototype { z-index:20; }

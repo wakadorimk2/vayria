@@ -136,7 +136,7 @@ test('prepared candidates do not replace visible state until first display; fail
  const s=new VisualSession({now:()=>100,prepare:async()=>{},generate:async(j,signal,accept)=>accept({...asset,id:j.id})});s.permission(true,1);
  s.dispatch('old',intent,'t',1);await flush();assert.equal(s.getSnapshot().objects.length,0);s.visible('target');
  s.dispatch('new',intent,'t2',1);await flush();assert.equal(s.getSnapshot().objects[0].asset.id,'old');
- s.placementFailed('target');assert.equal(s.getSnapshot().objects[0].asset.id,'old');assert.match(s.getSnapshot().notification.message,/空き領域/);
+ s.placementFailed('target');assert.equal(s.getSnapshot().objects[0].asset.id,'old');assert.match(s.getSnapshot().notification.message,/UIを閉じる/);
 });
 
 test('safe failure messages never echo provider text and distinguish limits, inspection, and timeouts',async()=>{
@@ -320,4 +320,48 @@ test('hidden card and chat boxes do not reserve chest space; visible captions re
   const layout={width:393,height:665,body:{x:.08,y:.08,width:.84,height:.9},face:{x:.25,y:.1,width:.5,height:.35},obstacles:[{x:.2,y:.45,width:.6,height:.055},{x:.09,y:.88,width:.82,height:.1}]};
   const chest=placeVisualProp(layout,true,1,1);assert.ok(chest);assert.ok(chest.y>=.505);assert.ok(chest.y+chest.height<=.88);
  } finally {globalThis.getComputedStyle=previous;}
+});
+
+test('UI hold pauses lifetime, resumes once, and OFF blocks held objects',async()=>{
+ let now=100;let accept;const released=[],notices=[];
+ const s=new VisualSession({now:()=>now,prepare:async()=>{},release:a=>released.push(a.id),notice:id=>notices.push(id),generate:async(j,signal,a)=>{accept=a;await a(asset);}});
+ s.permission(true,1);s.dispatch('held',intent,'t',1);await flush();s.visible('target');
+ now=10100;s.hold('target');assert.equal(s.getSnapshot().objects[0].displayedMs,10000);
+ now=100100;s.tick();assert.equal(s.getSnapshot().objects.length,1);assert.equal(released.length,0);
+ s.permission(false,2);s.visible('target');assert.equal(s.getSnapshot().objects[0].held,true);
+ s.permission(true,3);s.visible('target');assert.equal(s.getSnapshot().objects[0].held,false);assert.equal(notices.length,1);
+ now+=34999;s.tick();assert.equal(s.getSnapshot().objects.length,1);now+=2;s.tick();assert.equal(s.getSnapshot().objects.length,0);
+ assert.ok(accept);
+});
+test('prepared assets held before first display survive and reset releases them',async()=>{
+ let now=0;const released=[];const s=new VisualSession({now:()=>now,prepare:async()=>{},release:a=>released.push(a.id),generate:async(j,signal,a)=>a({...asset,id:j.id})});
+ s.permission(true,1);s.dispatch('first',intent,'t',1);await flush();s.hold('target');now=120000;s.tick();assert.equal(s.getSnapshot().ready.length,1);assert.equal(s.getSnapshot().history.length,0);
+ s.reset();assert.equal(s.getSnapshot().ready.length,0);assert.ok(released.includes('first'));
+});
+test('held candidates count toward three and cancel frees a held object',async()=>{
+ const s=new VisualSession({now:()=>10,prepare:async()=>{},generate:async(j,signal,a)=>{if(j.intent.action!=='cancel')await a({...asset,id:j.id});}});s.permission(true,1);
+ for(let i=0;i<4;i++){s.dispatch('e'+i,{...intent,targetId:'t'+i},'t',1);await flush();s.hold('t'+i);}
+ assert.ok(s.getSnapshot().ready.length<=3);assert.ok(s.getSnapshot().ready.some(o=>o.id==='t3'));assert.ok(!s.getSnapshot().ready.some(o=>o.id==='t0'));
+ const id=s.getSnapshot().ready[0].id;s.dispatch('cancel',{...intent,targetId:id,action:'cancel'},'t',1);await flush();assert.ok(!s.getSnapshot().ready.some(o=>o.id===id));
+});
+test('stable placement survives asset replacement and disables unsafe motion',async()=>{
+ const {VisualPlacements,visualMotionBounds,fitsVisualRect}=await import('../'+dir+'/test.mjs');
+ const l={width:393,height:665,body:{x:.1,y:.1,width:.8,height:.8},face:{x:.25,y:.05,width:.5,height:.4},obstacles:[]};
+ const p=new VisualPlacements();const first=p.choose('one',l,true,1,1,[],0);assert.ok(first);
+ assert.deepEqual(p.choose('one',l,true,1,1,[],100),first);
+ const blocked={...l,obstacles:[first]};const moved=p.choose('one',blocked,true,1,1,[],200);assert.ok(moved);assert.notDeepEqual(moved,first);
+ assert.deepEqual(p.choose('one',l,true,1,1,[],250),moved);assert.deepEqual(p.choose('one',l,true,1,1,[],551),first);
+ const motion=visualMotionBounds(first,l,['rotate','float']);assert.ok(motion.width>first.width);
+ assert.equal(fitsVisualRect({...l,obstacles:[{x:first.x-.02,y:first.y,width:.01,height:first.height}]},motion),false);
+});
+
+test('landscape caption leaves a narrow retreat rather than deleting the object',()=>{
+ const l={width:852,height:393,body:{x:.085,y:.085,width:.83,height:.83},face:{x:.275,y:.075,width:.45,height:.35},obstacles:[{x:.188,y:.418,width:.624,height:.104},{x:.088,y:.843,width:.824,height:.157}]};
+ assert.ok(placeVisualProp(l,true,1,1));
+});
+test('video arriving during UI hold inherits visible time and waits for actual display',async()=>{
+ let now=100,accept,finish;const notices=[];const s=new VisualSession({now:()=>now,prepare:async()=>{},notice:id=>notices.push(id),generate:async(j,signal,a)=>{accept=a;await new Promise(r=>finish=r);}});s.permission(true,1);s.dispatch('videoheld',intent,'t',1);
+ await accept({...asset,id:'base'});s.visible('target');now=2100;s.hold('target');
+ await accept({...asset,id:'movie',kind:'video'});assert.equal(s.getSnapshot().ready[0].held,true);assert.equal(s.getSnapshot().ready[0].displayedMs,2000);assert.equal(notices.length,1);
+ now=5100;s.visible('target','movie');assert.equal(s.getSnapshot().objects[0].displayedMs,2000);assert.equal(notices.length,2);finish();await flush();
 });

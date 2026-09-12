@@ -1,4 +1,4 @@
-import {readVisualDiagnostic, type VisualDiagnostic} from './diagnostics';
+import {readVisualDiagnostic, type VisualDiagnostic, type PlacementDiagnostic} from './diagnostics';
 import { VisualModeError, visualModeErrorMessage } from './modeError';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { publicFetch, publicSessionId, requestPublicSession } from '../public/session';
@@ -13,9 +13,9 @@ export function useVisualGeneration(){
     let serial=Promise.resolve();let revision=0;
     const reports=new Map<string,{ticket:string;at:number;pending:VisualDiagnostic[];sent:Set<string>;timer?:ReturnType<typeof setTimeout>}>();
     const build=new URL(import.meta.url).pathname.split('/').pop()??'unknown';
-    const record=(id:string,stage:string,milliseconds?:number)=>{
+    const record=(id:string,stage:string,milliseconds?:number,placement?:PlacementDiagnostic)=>{
       const report=reports.get(id);if(!report)return;
-      const value=readVisualDiagnostic({build,stage,milliseconds:milliseconds??Date.now()-report.at});if(!value||report.sent.has(stage))return;
+      const value=readVisualDiagnostic({build,stage,milliseconds:milliseconds??Date.now()-report.at,...(placement?{placement}:{})});if(!value||report.sent.has(stage))return;
       report.sent.add(stage);report.pending.push(value);
       report.timer??=setTimeout(()=>{
         report.timer=undefined;const records=report.pending.splice(0,24);
@@ -23,7 +23,7 @@ export function useVisualGeneration(){
       },250);
     };
     const runtime=new VisualSession({now:Date.now,release:asset=>releasePrepared(asset.url),
-      diagnostic:(event,id,milliseconds)=>{record(id,event,milliseconds);if(runtimeConfig.mode==='public'&&runtimeConfig.manifestationEnabled)console.info('[visual]',JSON.stringify({event,id,at:Date.now(),milliseconds}));},
+      diagnostic:(event,id,milliseconds,placement)=>{record(id,event,milliseconds,placement);if(runtimeConfig.mode==='public'&&runtimeConfig.manifestationEnabled)console.info('[visual]',JSON.stringify({event,id,at:Date.now(),milliseconds,...(placement?{placement}:{})}));},
       cancel:async(ticket)=>{await publicFetch('/api/visual/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})});},
       prepare:async(asset,signal,job)=>{
         if(asset.kind==='video'){await prepareObject({...asset,composite:'green-key',mode:'reused-base-video',timings:{},onMediaStage:stage=>{if(job)record(job.id,stage);}},signal);const video=preparedVideos.get(asset.url);asset.width=video?.videoWidth;asset.height=video?.videoHeight;return;}

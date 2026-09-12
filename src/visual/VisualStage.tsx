@@ -1,6 +1,7 @@
-import {placeVisualProp} from './placement';
+import {placeVisualProp,VisualPlacements,visualMotionBounds,fitsVisualRect} from './placement';
+import {visualDisplayAge} from './session';
 import {playVideo,VideoFrameProgress} from '../manifestation/videoPlayback';
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { VrmStageHandle } from '../avatar/VrmStage';
 import { useWorldLayout } from '../world/useWorldLayout';
 import { type WorldRect } from '../world/worldLayout';
@@ -35,20 +36,28 @@ ctx.drawImage(video,0,0,canvas.width,canvas.height);const image=ctx.getImageData
   return <canvas style={{position:'relative'}} ref={ref} width={256} height={256} role="img" aria-label={object.asset.concept}/>;
 }
 function Unplaced({runtime,id,assetId}:{runtime:VisualSession;id:string;assetId:string}){
-  useEffect(()=>{runtime.placementFailed(id,assetId);},[runtime,id,assetId]);return null;
+  useEffect(()=>{runtime.hold(id,assetId);},[runtime,id,assetId]);return null;
 }
 export function VisualStage({runtime,snapshot,stage}:{runtime:VisualSession;snapshot:VisualSnapshot;stage:RefObject<VrmStageHandle|null>}){
+  const [positions]=useState(()=>new VisualPlacements());
   const root=useRef<HTMLDivElement>(null);const {layout}=useWorldLayout(root,stage,runtime);const occupied:WorldRect[]=[];
   const placement=(latest:boolean,scale:number,aspect=1)=>{const rect=placeVisualProp(layout,latest,scale,aspect,occupied);if(rect)occupied.push(rect);return rect;};
+  const objects=[...snapshot.objects.filter(o=>!snapshot.ready?.some(r=>r.id===o.id)),...(snapshot.ready??[]).filter(o=>o.id!=='background')].reverse().sort((a,b)=>b.at-a.at).slice(0,3);
+  positions.retain(objects.map(o=>o.id));
   const style=(r:WorldRect)=>({left:`${r.x*100}%`,top:`${r.y*100}%`,width:`${r.width*100}%`,height:`${r.height*100}%`});
   return <>
     {snapshot.ready?.filter(o=>o.id==='background').map(o=><img key={o.asset.id} className="visual-background" src={o.asset.url} alt="" onLoad={()=>runtime.visible('background',o.asset.id)}/>)}
     {snapshot.background&&<img className="visual-background" src={snapshot.background.asset.url} alt="" onLoad={()=>runtime.visible('background',snapshot.background!.asset.id)}/>}
     <div className="visual-layer" ref={root}>
-      {[...snapshot.objects.filter(o=>!snapshot.ready?.some(r=>r.id===o.id)),...(snapshot.ready??[]).filter(o=>o.id!=='background')].sort((a,b)=>b.at-a.at).slice(0,3).map((object,index)=>{
-        const age=snapshot.now-object.at,rect=placement(index===0,(age>=30000?.6:age>=15000?.8:1)*(object.effects.includes('grow')?1.4:1),object.layoutAspect??(object.asset.width&&object.asset.height?object.asset.width/object.asset.height:1));
+      {objects.map((object,index)=>{
+        const age=visualDisplayAge(object,snapshot.now);
+        const rect=object.held&&!snapshot.enabled?null:positions.choose(object.id,layout,index===0,(age>=30000?.6:age>=15000?.8:1)*(object.effects.includes('grow')?1.4:1),object.layoutAspect??(object.asset.width&&object.asset.height?object.asset.width/object.asset.height:1),occupied,snapshot.now);
         if(!rect)return <Unplaced key={object.id} id={object.id} assetId={object.asset.id} runtime={runtime}/>;
-        return <div key={object.id} className={'visual-object '+object.effects.map(e=>'visual-effect-'+e).join(' ')} style={{...style(rect),opacity:age>=30000?.4:1}}>
+        const motionBounds=visualMotionBounds(rect,layout,object.effects);
+        const motionFits=fitsVisualRect(layout,motionBounds,occupied);
+        occupied.push(motionFits?motionBounds:rect);
+        const effects=motionFits?object.effects:object.effects.filter(e=>e!=='float'&&e!=='rotate');
+        return <div key={object.id} className={'visual-object '+effects.map(e=>'visual-effect-'+e).join(' ')} style={{...style(rect),opacity:age>=30000?.4:1}}>
           {object.asset.kind==='video'&&!object.visible&&object.asset.source&&<img style={{position:'absolute',inset:0}} src={object.asset.source.url} alt=""/>}
           {object.asset.kind==='video'?<VisualVideo object={object} runtime={runtime}/>:<img src={object.asset.url} alt={object.asset.concept} onLoad={()=>runtime.visible(object.id,object.asset.id)}/>}
         </div>;

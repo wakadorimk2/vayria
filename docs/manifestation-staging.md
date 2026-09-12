@@ -19,3 +19,18 @@ Record the previous Worker deployment before enabling or deploying. For rollback
 ## Evidence
 
 Local latency evidence remains in `manifestation-latency.md`. Those measurements do not prove staging latency. Public tests cover reservation persistence, concurrency, duplicate events, quota rejection, visitor ownership, timeout rejection, fixed provider inputs, and partial video relay. Real staging speed, audio timing, and visual overlap require a separate browser run after deployment.
+
+
+## UIによる配置保留（2026-09-12）
+
+小物は配置できない間も保持する。表示中の累積時間だけで15/30/45秒の退場を進める。UIが閉じたら再表示する。OFF中は保留から復帰しない。保留も最大3対象に含める。画像から動画への置換で時計を引き継ぐ。
+
+保護領域は非表示・空のパネルを除く。字幕、カード、入力、設定、接続・生成・エラー通知とソフトキーボードを対象にする。保留案内自身は再配置の障害物にしない。浮遊・回転が保護領域に触れる場合は動きを止める。有効な位置は保ち、優先位置への復帰は300ms安定後に行う。
+
+### 無課金のDOM検証
+
+`node scripts/visual-placement-fixture.mjs` で http://127.0.0.1:5198/ を開く。実際のVisualStage、領域取得、公開CSSと同梱の鶏画像を使う。アバターの投影領域は固定の疑似値。APIには接続しない。
+
+393×665で字幕下への配置、全面UIによる保留、表示時計の停止、UIを閉じた後の復帰を確認した。852×393でも縮小表示を確認した。これはブラウザーの疑似投影であり、iPhoneの実機評価ではない。
+
+診断のplacement_shown / placement_held / placement_resumedには対象ID、理由、表示累積時間を付ける。会話本文と素材URLは付けない。既存のイベントIDで照合する。

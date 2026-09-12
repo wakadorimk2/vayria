@@ -1,7 +1,9 @@
+import type { PlacementDiagnostic } from './diagnostics';
 import { visualFailureMessage } from './notice';
 import { fallbackLayout, type WorldLayout } from '../world/worldLayout';
 import { VISUAL_EFFECTS, type VisualIntent, type VisualAsset, type VisualEffect } from './types';
-export interface VisualObject { id: string; layoutAspect?:number; eventId?: string; asset: VisualAsset; at: number; visible: boolean; effects: VisualEffect[] }
+export interface VisualObject { id: string; held?:boolean; displayedMs?:number; displaySince?:number; layoutAspect?:number; eventId?: string; asset: VisualAsset; at: number; visible: boolean; effects: VisualEffect[] }
+export function visualDisplayAge(object:VisualObject,now:number){return (object.displayedMs??0)+(object.visible&&!object.held?Math.max(0,now-(object.displaySince??object.at)):0);}
 export interface VisualJob { id: string; target: string; intent: VisualIntent; ticket: string; at: number; controller?: AbortController }
 export interface VisualNotice { id:string; message:string; until:number; order:number }
 export interface VisualSnapshot { ready?:VisualObject[]; notification?:VisualNotice; enabled: boolean; generation: number; now: number; objects: VisualObject[]; background: VisualObject | null; pending: VisualJob[]; history: string[]; outcomes:string[] }
@@ -12,12 +14,13 @@ export interface VisualDependencies {
   prepare(asset: VisualAsset, signal: AbortSignal, job?:VisualJob): Promise<void>;
   release?(asset:VisualAsset):void;
   notice?(id: string, description: string): void;
-  diagnostic?(event: string, id: string, milliseconds: number): void;
+  diagnostic?(event: string, id: string, milliseconds: number, placement?:PlacementDiagnostic): void;
 }
 export class VisualSession {
   private snapshot: VisualSnapshot = {enabled:false,generation:0,now:0,objects:[],background:null,pending:[],history:[],outcomes:[]};
   private listeners=new Set<()=>void>(); private accepted=new Set<string>(); private notices=new Set<string>(); private active=0; private inputTimes=new Map<string,number>();
   private orders=new Map<string,number>(); private order=0; private notificationOrder=0;
+  private heldNotices=new Set<string>();
   private layout:WorldLayout=fallbackLayout();
   setLayout=(layout:WorldLayout)=>{this.layout=layout;};
   getLayout=()=>this.layout;
@@ -36,14 +39,22 @@ export class VisualSession {
   }
   mediaStage(id:string,stage:string){this.deps.diagnostic?.(stage,id,this.deps.now()-(this.inputTimes.get(this.snapshot.ready?.find(o=>o.eventId===id)?.id??id)??this.deps.now()));}
   modeNotice(message:string){this.notificationOrder=++this.order;this.publish({notification:{id:'mode',message,order:this.order,until:this.deps.now()+6000}});}
+  hold(id:string,assetId?:string){
+    const object=this.snapshot.ready?.find(o=>o.id===id)??this.snapshot.objects.find(o=>o.id===id);
+    if(!object||(assetId&&object.asset.id!==assetId)||object.held)return;
+    const pause=(o:VisualObject)=>o.id===id?{...o,held:true,displayedMs:visualDisplayAge(o,this.deps.now()),displaySince:undefined}:o;
+    this.publish({objects:this.snapshot.objects.map(pause),ready:this.snapshot.ready?.map(pause)});
+    this.deps.diagnostic?.('placement_held',object.eventId??id,visualDisplayAge(object,this.deps.now()),{targetId:id,reason:'ui_blocked',displayedMs:visualDisplayAge(object,this.deps.now())});
+    if(!this.heldNotices.has(id)&&this.snapshot.enabled){this.heldNotices.add(id);this.modeNotice('UIを閉じると小物が戻ります');}
+  }
   placementFailed(id:string,assetId?:string,code='placement_unavailable'){
+    if(code==='placement_unavailable'){this.hold(id,assetId);return;}
     const object=this.snapshot.ready?.find(o=>o.id===id)??this.snapshot.objects.find(o=>o.id===id);if(!object||(assetId&&object.asset.id!==assetId))return;
     this.deps.release?.(object.asset);
     if(object.visible&&object.asset.kind==='video'){
       const source=object.asset.source;
       this.publish({objects:source?this.snapshot.objects.map(o=>o===object?{...object,asset:source,visible:true}:o):this.snapshot.objects.filter(o=>o!==object)});
     }
-    if(object.visible&&code==='placement_unavailable')this.publish({objects:this.snapshot.objects.filter(o=>o.id!==id)});
     this.publish({ready:this.snapshot.ready?.filter(o=>o!==object),outcomes:[...this.snapshot.outcomes,'小物は配置できなかった。表示済みの対象は維持した。'].slice(-8)});
     this.status(object.eventId??id,code,this.snapshot.generation);
     this.deps.diagnostic?.(code,object.eventId??id,0);
@@ -54,7 +65,7 @@ export class VisualSession {
     const objects=this.snapshot.objects.map(o=>{if(!enabled&&o.asset.kind==='video'&&o.asset.source){this.deps.release?.(o.asset);return {...o,asset:o.asset.source};}return o;});
     this.publish({enabled,generation,objects,pending:[],ready:[],notification:undefined,outcomes:!enabled&&this.snapshot.pending.length?[...this.snapshot.outcomes,'保留中の生成を取り消した。表示済みの対象は維持した。'].slice(-8):this.snapshot.outcomes});
   }
-  reset(){this.permission(false,this.snapshot.generation);this.accepted.clear();this.notices.clear();this.orders.clear();for(const o of [...this.snapshot.objects,...(this.snapshot.background?[this.snapshot.background]:[])])this.deps.release?.(o.asset);this.publish({objects:[],background:null,history:[],outcomes:[]});}
+  reset(){this.permission(false,this.snapshot.generation);this.accepted.clear();this.notices.clear();this.heldNotices.clear();this.orders.clear();for(const o of [...this.snapshot.objects,...(this.snapshot.background?[this.snapshot.background]:[])])this.deps.release?.(o.asset);this.publish({objects:[],background:null,history:[],outcomes:[]});}
   dispatch(id:string,intent:VisualIntent,ticket:string,generation:number){
     if(!this.snapshot.enabled||generation!==this.snapshot.generation||this.accepted.has(id)||intent.type==='none')return false;
     this.accepted.add(id);this.status(id,'queued',generation);this.inputTimes.set(intent.targetId||id,this.deps.now());this.deps.diagnostic?.('intent_received',id,0);
@@ -64,7 +75,7 @@ export class VisualSession {
     const superseded=this.snapshot.pending.filter(j=>j.target===target);superseded.forEach(j=>j.controller?.abort());
     this.publish({pending:this.snapshot.pending.filter(j=>j.target!==target)});
     for(const old of superseded)void this.deps.cancel?.(old.ticket).catch(()=>{});
-    if(intent.action==='cancel'){const controller=new AbortController();void this.deps.generate({id,target,intent,ticket,at:this.deps.now(),controller},controller.signal,async()=>{}).then(()=>{if(this.snapshot.enabled&&this.snapshot.generation===generation){this.status(id,'cancelled',generation);this.publish({outcomes:[...this.snapshot.outcomes,'対象の保留要求を取り消した。表示済みの対象は消していない。'].slice(-8)});}}).catch(error=>this.status(id,error instanceof Error?error.message:'failed',generation));return true;}
+    if(intent.action==='cancel'){for(const o of this.snapshot.objects.filter(o=>o.id===target&&o.held))this.deps.release?.(o.asset);this.publish({objects:this.snapshot.objects.filter(o=>o.id!==target||!o.held)});const controller=new AbortController();void this.deps.generate({id,target,intent,ticket,at:this.deps.now(),controller},controller.signal,async()=>{}).then(()=>{if(this.snapshot.enabled&&this.snapshot.generation===generation){this.status(id,'cancelled',generation);this.publish({outcomes:[...this.snapshot.outcomes,'対象の保留要求を取り消した。表示済みの対象は消していない。'].slice(-8)});}}).catch(error=>this.status(id,error instanceof Error?error.message:'failed',generation));return true;}
     if(intent.type==='effect'){
       const effects=[intent.concept,...intent.modifiers].filter(e=>VISUAL_EFFECTS.includes(e as VisualEffect)) as VisualEffect[];
       const controller=new AbortController();
@@ -89,9 +100,14 @@ export class VisualSession {
         this.status(job.id,'preparing',generation);
         await this.deps.prepare(asset,job.controller!.signal,job);
         if(!this.current(job,generation)){this.deps.release?.(asset);return;}
-        const old=job.intent.type==='background'?this.snapshot.background:this.snapshot.objects.find(o=>o.id===job.target);
-        const object:VisualObject={id:job.target,eventId:job.id,asset,layoutAspect:old?.layoutAspect??(asset.width&&asset.height?asset.width/asset.height:1),at:old?.at??this.deps.now(),visible:false,effects:[...new Set([...(old?.effects??[]),...job.intent.modifiers.filter(m=>VISUAL_EFFECTS.includes(m as VisualEffect)) as VisualEffect[]])]};
-        this.publish({ready:[...(this.snapshot.ready??[]).filter(o=>o.id!==object.id),object]});
+        const old=job.intent.type==='background'?this.snapshot.background:this.snapshot.objects.find(o=>o.id===job.target)??this.snapshot.ready?.find(o=>o.id===job.target);
+        const object:VisualObject={id:job.target,eventId:job.id,asset,held:old?.held,displayedMs:old?visualDisplayAge(old,this.deps.now()):0,layoutAspect:old?.layoutAspect??(asset.width&&asset.height?asset.width/asset.height:1),at:old?.at??this.deps.now(),visible:false,effects:[...new Set([...(old?.effects??[]),...job.intent.modifiers.filter(m=>VISUAL_EFFECTS.includes(m as VisualEffect)) as VisualEffect[]])]};
+        const ready=[...(this.snapshot.ready??[]).filter(o=>o.id!==object.id),object];
+        const ids=[...new Map([...this.snapshot.objects,...ready].filter(o=>o.id!=='background').map(o=>[o.id,o])).values()].reverse().sort((a,b)=>b.at-a.at).slice(0,3).map(o=>o.id);
+        for(const o of [...this.snapshot.objects,...ready])if(o.id!=='background'&&!ids.includes(o.id))this.deps.release?.(o.asset);
+        const evicted=new Set([...this.snapshot.objects,...ready].filter(o=>o.id!=='background'&&!ids.includes(o.id)).map(o=>o.id));
+        for(const pending of this.snapshot.pending)if(evicted.has(pending.target)){pending.controller?.abort();void this.deps.cancel?.(pending.ticket).catch(()=>{});}
+        this.publish({pending:this.snapshot.pending.filter(j=>!evicted.has(j.target)),objects:this.snapshot.objects.filter(o=>ids.includes(o.id)),ready:ready.filter(o=>o.id==='background'||ids.includes(o.id))});
         this.deps.diagnostic?.('asset_prepared',job.id,this.deps.now()-job.at);
       }).catch(error=>{if(this.current(job,generation)){this.status(job.id,error instanceof Error?error.message:'failed',generation);this.publish({outcomes:[...this.snapshot.outcomes,'今回の生成は失敗した。以前から表示中の対象はそのまま残っている。'].slice(-8)});this.deps.diagnostic?.(error instanceof Error&&/^[\w-]+$/.test(error.message)?error.message:'failed',job.id,this.deps.now()-job.at);}})
         .finally(()=>{this.active--;this.publish({pending:this.snapshot.pending.filter(j=>j!==job)});this.pump();});
@@ -99,11 +115,14 @@ export class VisualSession {
   }
   visible(id:string,assetId?:string){
     const object=this.snapshot.ready?.find(o=>o.id===id)??(id==='background'?this.snapshot.background:this.snapshot.objects.find(o=>o.id===id));
-    if(!object||object.visible||(assetId&&object.asset.id!==assetId))return;
-    const updated={...object,visible:true,at:this.snapshot.objects.find(o=>o.id===id)?.at??this.deps.now()};
+    if(!object||(object.visible&&!object.held)||(object.held&&!this.snapshot.enabled)||(assetId&&object.asset.id!==assetId))return;
+    const old=this.snapshot.objects.find(o=>o.id===id);
+    const updated={...object,visible:true,held:false,displayedMs:old?visualDisplayAge(old,this.deps.now()):object.displayedMs??0,displaySince:this.deps.now(),at:old?.at??object.at};
+    this.deps.diagnostic?.(object.held?'placement_resumed':'placement_shown',object.eventId??id,updated.displayedMs,{targetId:id,reason:'space_available',displayedMs:updated.displayedMs});
     const ready=this.snapshot.ready?.filter(o=>o!==object);
     if(id==='background'){if(this.snapshot.background)this.deps.release?.(this.snapshot.background.asset);this.publish({background:updated,ready});}
     else {const objects=[...this.snapshot.objects.filter(o=>o.id!==id),updated].slice(-3);for(const old of this.snapshot.objects)if(!objects.includes(old))this.deps.release?.(old.asset);this.publish({objects,ready});}
+    if(object.visible&&object.held)return;
     const waitingVideo=object.asset.kind==='image'&&this.snapshot.pending.some(j=>j.target===id&&j.intent.motion);
     this.status(object.eventId??id,waitingVideo?'video_preparing':object.asset.kind==='video'?'video_playing':'displayed',this.snapshot.generation);
     const noticeId=(object.eventId??id)+(object.asset.kind==='video'?':video':'');
@@ -115,12 +134,11 @@ export class VisualSession {
     const now=this.deps.now();const pending=this.snapshot.pending.filter(j=>{
       if(now-j.at<(j.intent.type==='background'?60000:30000))return true;j.controller?.abort();void this.deps.cancel?.(j.ticket).catch(()=>{});this.status(j.id,'timeout',this.snapshot.generation);this.deps.diagnostic?.('timeout',j.id,now-j.at);this.snapshot={...this.snapshot,outcomes:[...this.snapshot.outcomes,'生成の待機上限に達した。現在の表示は維持した。'].slice(-8)};return false;
     });
-    for(const o of this.snapshot.objects)if(now-o.at>=45000)this.deps.release?.(o.asset);
-    for(const o of this.snapshot.ready??[])if(now-o.at>=30000)this.placementFailed(o.id);
-    this.publish({notification:this.snapshot.notification&&this.snapshot.notification.until>now?this.snapshot.notification:undefined,pending,objects:this.snapshot.objects.filter(o=>now-o.at<45000)});this.pump();
+    for(const o of this.snapshot.objects)if(visualDisplayAge(o,now)>=45000)this.deps.release?.(o.asset);
+    this.publish({notification:this.snapshot.notification&&this.snapshot.notification.until>now?this.snapshot.notification:undefined,pending,objects:this.snapshot.objects.filter(o=>visualDisplayAge(o,now)<45000)});this.pump();
   }
 }
 export function visualContext(s:VisualSnapshot){
-  return ['現在表示済みの世界:',...(s.background?.visible?[`background: ${s.background.asset.concept}`]:[]),...s.objects.filter(o=>o.visible).map(o=>`${o.id}: ${o.asset.concept}; effects=${o.effects.join(',')}`),
+  return ['現在表示済みの世界:',...(s.background?.visible?[`background: ${s.background.asset.concept}`]:[]),...s.objects.filter(o=>o.visible&&!o.held).map(o=>`${o.id}: ${o.asset.concept}; effects=${o.effects.join(',')}`),
     `生成許可: ${s.enabled?'ON':'OFF'}`,'未完成の予告は完成物ではない。手に持ったとは断定しない。',s.pending.length?'未完成の生成要求がある。表示済みの対象に含めない。':'生成待ちはない。','生成処理の結果（新しい対象の出現とは別）:',...s.outcomes,'過去の出来事（現在の表示とは別）:',...s.history].join('\n');
 }

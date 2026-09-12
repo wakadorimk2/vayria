@@ -40,12 +40,16 @@ export function useWorldLayout(root: RefObject<HTMLDivElement | null>, stage: Re
         const d = config.offsets[name];
         return { x: Math.max(0, Math.min(1, (p.x - viewport.left) / viewport.width + (d?.x ?? 0))), y: Math.max(0, Math.min(1, (p.y - viewport.top) / viewport.height + (d?.y ?? 0))) };
       };
-      const obstacles = [...document.querySelectorAll<HTMLElement>('.card-zone, .manifestation-slot, .manifestation-picker, .manifestation-actions, .message-form, .conversation-copy, .subtitle, .subtitle-overlay, .speech-caption, .performer-caption, .public-controls__actions')].flatMap(node => {
-        if (!isPlacementObstacleVisible(node)) return [];
+      const obstacles = [...document.querySelectorAll<HTMLElement>('.card-zone, .manifestation-slot, .manifestation-picker, .manifestation-actions, .message-form, .conversation-copy, .subtitle, .subtitle-overlay, .speech-caption, .performer-caption, .public-controls__actions, .public-controls__panel, .public-entry, .public-generation-notice, .conversation-error, .playback-permission, .public-voice-notice')].flatMap(node => {
+        if (!isPlacementObstacleVisible(node) || (!node.textContent?.trim()&&!node.querySelector('input,button,iframe,svg'))) return [];
+        // The hold message must not itself keep its object held.
+        if (node.matches('.public-generation-notice') && node.textContent === 'UIを閉じると小物が戻ります') return [];
         const r = node.getBoundingClientRect();
         if (!r.width || !r.height || r.right <= viewport.left || r.left >= viewport.right || r.bottom <= viewport.top || r.top >= viewport.bottom) return [];
         return [expandRect(normalize({ x: r.left, y: r.top, width: r.width, height: r.height }), .012)];
       }).slice(0, 16);
+      const visualViewport=window.visualViewport;
+      if(visualViewport){const bottom=(visualViewport.offsetTop+visualViewport.height-viewport.top)/viewport.height;if(bottom<.99)obstacles.push({x:0,y:Math.max(0,bottom),width:1,height:1-Math.max(0,bottom)});}
       const next: WorldLayout = { width: viewport.width, height: viewport.height, body: moveRect('body', regions ? normalize(regions.body) : initial.body), face: moveRect('face', regions ? normalize(regions.face) : initial.face), leftHand: hand('leftHand'), rightHand: hand('rightHand'), leftHandBehind: stage.current?.readWorldHandAnchor?.('leftHand')?.behind, rightHandBehind: stage.current?.readWorldHandAnchor?.('rightHand')?.behind, obstacles };
       runtime.setLayout(next); setLayout(next);
     };
