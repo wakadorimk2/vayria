@@ -1,5 +1,5 @@
 import { type VisualIntent } from '../src/visual/types.js';
-import { explicitVisualSubject, validVisualDecision, visualDecisionSchema } from '../src/visual/decision.js';
+import { explicitVisualSubject, explicitMotionSubject, validVisualDecision, visualDecisionSchema } from '../src/visual/decision.js';
 import type { CardContinuation } from '../src/conversation/cardContinuation.js';
 import { randomUUID } from 'node:crypto';
 import { cardPool } from '../src/cards/cardPool.js';
@@ -499,7 +499,7 @@ export async function generateInteractiveResponse(
 ): Promise<CardAssistantResponse> {
   const selfNameResolution = resolveSelfName(message, characterIdentity);
   const fastPathDecision: ConversationActionDecision | null =
-    greeting || (llm.manifestationEnabled && explicitVisualSubject(message)) || cardContinuation?.deliveredText || selfNameResolution.role === 'direct_address'
+    greeting || (llm.manifestationEnabled && (explicitVisualSubject(message) || explicitMotionSubject(message))) || cardContinuation?.deliveredText || selfNameResolution.role === 'direct_address'
       ? { action: 'take_floor', backchannelCue: 'none' as const }
       : classifyViewerMessageFastPath(message);
   const policyDecision =
@@ -777,9 +777,10 @@ export async function generateReply(
           usedReasonIds: usedReasonIdsProperty,
         }
         : {};
-  const requiredVisual = Boolean(llm.manifestationEnabled && explicitVisualSubject(message));
-  const requestedSubject = requiredVisual ? explicitVisualSubject(message) : null;
-  const decisionProperty = visualDecisionSchema(requiredVisual, requestedSubject);
+  const requiredVisual = Boolean(llm.manifestationEnabled && (explicitVisualSubject(message) || explicitMotionSubject(message)));
+  const motionInput=llm.manifestationEnabled && explicitMotionSubject(message) ? message ?? undefined : undefined;
+  const requestedSubject = requiredVisual ? explicitMotionSubject(message) ?? explicitVisualSubject(message) : null;
+  const decisionProperty = visualDecisionSchema(requiredVisual, requestedSubject, motionInput);
   const responseProperties = streamingEnabled
     ? {
       deliveryHeader: {
@@ -1083,7 +1084,7 @@ export async function generateReply(
   const resolveVisual = (value: unknown) => {
     if (!llm.manifestationEnabled || visualResolved) return;
     visualResolved = true;
-    committedVisual = validVisualDecision(value, requiredVisual, requestedSubject);
+    committedVisual = validVisualDecision(value, requiredVisual, requestedSubject, motionInput);
     streaming?.onVisualDecision?.(committedVisual);
   };
   const cleanHeader = (header: Record<string, unknown>) => {

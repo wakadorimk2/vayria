@@ -207,3 +207,13 @@ test('robot video emits its own image first and reserves each provider request o
  assert.ok(events.every(e=>e.asset.concept==='robot'));assert.match(videoInput.prompt,/robot/);assert.doesNotMatch(videoInput.prompt,/chicken/);assert.ok(events[1].asset.source);assert.equal(l.report().manifestation.reservedUsd,.185);
  }finally{globalThis.fetch=previous}
 });
+
+
+test('explicit articulated action is required in the same response schema',async()=>{
+ const {explicitMotionSubject,visualDecisionSchema,validVisualDecision}=await import('../'+dir+'/test.mjs');
+ assert.equal(explicitMotionSubject('鶏を歩かせて。'),'鶏');assert.equal(explicitMotionSubject('踊るロボットを出して'),'ロボット');
+ assert.equal(explicitMotionSubject('鶏を歩かせないで'),null);
+ const schema=visualDecisionSchema(true,'鶏','鶏を歩かせて。');assert.equal(schema.properties.motion.minLength,1);
+ assert.equal(validVisualDecision({...intent,motion:'',motionEvidence:''},true,'鶏','鶏を歩かせて。'),null);
+ assert.ok(validVisualDecision({...intent,motion:'walk',motionEvidence:'鶏を歩かせて。'},true,'鶏','鶏を歩かせて。'));
+});
