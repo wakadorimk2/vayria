@@ -115,6 +115,10 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
     if(!old||old.asset.kind!=='image')return null;
     return ledger<VisualAsset>('visualAlias',{...args,key:baseKey,fromKey:old.key});
   };
+  // A displayed source can only shortcut preparation for the same appearance.
+  if(source&&(normalizeVisualIntent({...baseIntent,concept:source.concept}).concept!==intent.concept||intent.modifiers.length)){
+    const matching=await findBase();source=matching?.kind==='image'?matching:null;
+  }
   source??=await findBase();
   if(!source&&builtin&&!intent.modifiers.length)source=stockSource();
   const videoKey=()=>digest(scope+assetDescriptionKey(intent,portrait)+':video-v3:h3-480-fast:key-v1:'+source!.id);

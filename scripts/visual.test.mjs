@@ -417,3 +417,10 @@ test('stage claims survive restart and cancellation cannot fund a follow-up step
  const {l,state}=setup();l.visualMode('v','s',true,0);l.visualStart('v','s',1,'owner','r1','a',30000);l.visualStart('v','s',1,'waiter','r2','b',30000);assert.equal(l.visualClaim('v','s',1,'owner','base').owner,true);assert.equal(l.visualClaim('v','s',1,'waiter','base').owner,false);
  const restored=new Ledger(JSON.parse(JSON.stringify(state)),2000);assert.equal(restored.visualClaimActive('v','s',1,'base','owner'),true);restored.visualCancel('v','s',1,'a','owner');assert.equal(restored.visualClaimActive('v','s',1,'base','owner'),false);assert.throws(()=>restored.visualReserve('v','s',1,'owner','mask',50000),/job_expired/);assert.equal(restored.report().manifestation.reservedUsd,0);
 });
+
+
+test('new appearance on a referenced video does not reuse the old source',()=>cacheHarness(async({request,counts})=>{
+ const first=(await request({motion:'walk',motionEvidence:'walk'})).at(-1).asset;
+ const changed=(await request({action:'replace',modifiers:['red'],motion:'walk',motionEvidence:'walk'},{source:first.source})).at(-1).asset;
+ assert.equal(changed.kind,'video');assert.notEqual(changed.source.id,first.source.id);assert.deepEqual(counts,{image:2,mask:2,video:2,input:2});
+}));
