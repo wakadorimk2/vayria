@@ -2,9 +2,9 @@ import type { PlacementDiagnostic } from './diagnostics';
 import { visualFailureMessage } from './notice';
 import { fallbackLayout, type WorldLayout } from '../world/worldLayout';
 import { VISUAL_EFFECTS, type VisualIntent, type VisualAsset, type VisualEffect } from './types';
-export interface VisualObject { id: string; held?:boolean; displayedMs?:number; displaySince?:number; layoutAspect?:number; eventId?: string; asset: VisualAsset; at: number; visible: boolean; effects: VisualEffect[] }
+export interface VisualObject { id: string; deadline?:number; held?:boolean; displayedMs?:number; displaySince?:number; layoutAspect?:number; eventId?: string; asset: VisualAsset; at: number; visible: boolean; effects: VisualEffect[] }
 export function visualDisplayAge(object:VisualObject,now:number){return (object.displayedMs??0)+(object.visible&&!object.held?Math.max(0,now-(object.displaySince??object.at)):0);}
-export interface VisualJob { id: string; target: string; intent: VisualIntent; ticket: string; at: number; controller?: AbortController }
+export interface VisualJob { id: string; target: string; intent: VisualIntent; ticket: string; at: number; source?: VisualAsset; controller?: AbortController }
 export interface VisualNotice { id:string; message:string; until:number; order:number }
 export interface VisualSnapshot { ready?:VisualObject[]; notification?:VisualNotice; enabled: boolean; generation: number; now: number; objects: VisualObject[]; background: VisualObject | null; pending: VisualJob[]; history: string[]; outcomes:string[] }
 export interface VisualDependencies {
@@ -88,7 +88,8 @@ export class VisualSession {
     }
     const waiting=this.snapshot.pending.find(j=>!j.controller);
     if(waiting){void this.deps.cancel?.(waiting.ticket).catch(()=>{});this.status(waiting.id,'queue_replaced',generation);this.deps.diagnostic?.('queue_replaced',waiting.id,this.deps.now()-waiting.at);this.publish({pending:this.snapshot.pending.filter(j=>j!==waiting)});}
-    this.publish({pending:[...this.snapshot.pending,{id,target,intent,ticket,at:this.deps.now()}]});this.pump();return true;
+    const source=[...this.snapshot.objects,...(this.snapshot.ready??[])].find(o=>o.id===target)?.asset;
+    this.publish({pending:[...this.snapshot.pending,{id,target,intent,ticket,at:this.deps.now(),source:source?structuredClone(source.source??source):undefined}]});this.pump();return true;
   }
   private current(job:VisualJob,generation:number){return this.snapshot.enabled&&this.snapshot.generation===generation&&this.snapshot.pending.includes(job)&&!job.controller?.signal.aborted;}
   private pump(){
@@ -101,7 +102,7 @@ export class VisualSession {
         await this.deps.prepare(asset,job.controller!.signal,job);
         if(!this.current(job,generation)){this.deps.release?.(asset);return;}
         const old=job.intent.type==='background'?this.snapshot.background:this.snapshot.objects.find(o=>o.id===job.target)??this.snapshot.ready?.find(o=>o.id===job.target);
-        const object:VisualObject={id:job.target,eventId:job.id,asset,held:old?.held,displayedMs:old?visualDisplayAge(old,this.deps.now()):0,layoutAspect:old?.layoutAspect??(asset.width&&asset.height?asset.width/asset.height:1),at:old?.at??this.deps.now(),visible:false,effects:[...new Set([...(old?.effects??[]),...job.intent.modifiers.filter(m=>VISUAL_EFFECTS.includes(m as VisualEffect)) as VisualEffect[]])]};
+        const object:VisualObject={id:job.target,eventId:job.id,deadline:job.at+30000,asset,held:old?.held,displayedMs:old?visualDisplayAge(old,this.deps.now()):0,layoutAspect:old?.layoutAspect??(asset.width&&asset.height?asset.width/asset.height:1),at:old?.at??this.deps.now(),visible:false,effects:[...new Set([...(old?.effects??[]),...job.intent.modifiers.filter(m=>VISUAL_EFFECTS.includes(m as VisualEffect)) as VisualEffect[]])]};
         const ready=[...(this.snapshot.ready??[]).filter(o=>o.id!==object.id),object];
         const ids=[...new Map([...this.snapshot.objects,...ready].filter(o=>o.id!=='background').map(o=>[o.id,o])).values()].reverse().sort((a,b)=>b.at-a.at).slice(0,3).map(o=>o.id);
         for(const o of [...this.snapshot.objects,...ready])if(o.id!=='background'&&!ids.includes(o.id))this.deps.release?.(o.asset);

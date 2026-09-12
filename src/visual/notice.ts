@@ -1,4 +1,8 @@
 export function visualFailureMessage(code: string): string {
+  if (code === 'cache_miss') return '保存済み素材が見つかりませんでした。検証中のため新規生成は行いません。';
+  if (code === 'source_unavailable' || code === 'invalid_source') return '元の小物を参照できませんでした。作り直しは行っていません。';
+  if (code === 'video_start_timeout') return '動画の再生開始が時間切れになりました。画像は残しています。';
+  if (code === 'video_first_frame_timeout') return '動画の最初のフレームを確認できませんでした。画像は残しています。';
   if (code === 'video_play_rejected') return '端末が動画の自動再生を許可しませんでした。画像は残しています。';
   if (code === 'video_seek_timeout') return '動画の検査に時間がかかり、再生を止めました。';
   if (code === 'video_loading_timeout') return '動画の読み込みが時間切れになりました。';

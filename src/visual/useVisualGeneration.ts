@@ -26,14 +26,14 @@ export function useVisualGeneration(){
       diagnostic:(event,id,milliseconds,placement)=>{record(id,event,milliseconds,placement);if(runtimeConfig.mode==='public'&&runtimeConfig.manifestationEnabled)console.info('[visual]',JSON.stringify({event,id,at:Date.now(),milliseconds,...(placement?{placement}:{})}));},
       cancel:async(ticket)=>{await publicFetch('/api/visual/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})});},
       prepare:async(asset,signal,job)=>{
-        if(asset.kind==='video'){await prepareObject({...asset,composite:'green-key',mode:'reused-base-video',timings:{},onMediaStage:stage=>{if(job)record(job.id,stage);}},signal);const video=preparedVideos.get(asset.url);asset.width=video?.videoWidth;asset.height=video?.videoHeight;return;}
+        if(asset.kind==='video'){await prepareObject({...asset,composite:'green-key',mode:'reused-base-video',timings:{},onMediaStage:stage=>{if(job)record(job.id,stage);}},signal,(job?.at??Date.now())+30000);const video=preparedVideos.get(asset.url);asset.width=video?.videoWidth;asset.height=video?.videoHeight;return;}
         const image=new Image();image.src=asset.url;await image.decode().catch(()=>{throw new Error('image_decode_failed');});signal.throwIfAborted();asset.width=image.naturalWidth;asset.height=image.naturalHeight;
       },
       generate:async(job,signal,onAsset)=>{
         reports.set(job.id,{ticket:job.ticket,at:job.at,pending:[],sent:new Set()});
         if(reports.size>30){const first=reports.keys().next().value;if(first)reports.delete(first);}
         record(job.id,job.intent.motion?'motion_requested':'image_requested');
-        const response=await publicFetch('/api/visual/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:job.ticket,source:runtime.getSnapshot().objects.find(o=>o.id===job.target)?.asset,remainingMs:Math.max(1,(job.intent.type==='background'?60000:30000)-(Date.now()-job.at)),portrait:runtime.getLayout().height>runtime.getLayout().width,layout:runtime.getLayout()}),signal});
+        const response=await publicFetch('/api/visual/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:job.ticket,source:job.source,remainingMs:Math.max(1,(job.intent.type==='background'?60000:30000)-(Date.now()-job.at)),portrait:runtime.getLayout().height>runtime.getLayout().width,layout:runtime.getLayout()}),signal});
         if(response.ok)record(job.id,'request_accepted');
         console.info('[visual-response]',JSON.stringify({id:job.id,status:response.status,stream:response.headers.get('Content-Type')?.includes('ndjson')===true}));
         const receive=async(value:{type:string;asset?:VisualAsset;code?:string;cache?:boolean})=>{if(value.type==='asset'&&value.asset){record(job.id,value.asset.kind==='video'?'video_received':'image_received');if(value.cache)record(job.id,value.asset.kind==='video'?'cache_video':'cache_image');console.info('[visual-response]',JSON.stringify({id:job.id,stage:'asset_received'}));if(value.asset.kind==='video'&&value.asset.source&&!runtime.getSnapshot().objects.some(o=>o.id===job.target))await onAsset(value.asset.source);await onAsset(value.asset);}if(value.type==='failed')throw new Error(value.code??'visual_failed');};

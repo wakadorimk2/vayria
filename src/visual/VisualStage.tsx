@@ -12,14 +12,14 @@ function VisualVideo({object,runtime}:{object:VisualObject;runtime:VisualSession
   const ref=useRef<HTMLCanvasElement>(null);
   useEffect(()=>{
     const video=preparedVideos.get(object.asset.url),ctx=ref.current?.getContext('2d',{willReadFrequently:true});if(!video||!ctx)return;
-    const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;let frame=0,stopped=false,confirmed=false;
+    const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches,previouslyShown=(object.displayedMs??0)>0;let frame=0,stopped=false,confirmed=false;
     const signal=new AbortController(),progress=new VideoFrameProgress(),id=object.eventId??object.id;
     const canvas=ref.current!;canvas.width=Math.min(video.videoWidth,768);canvas.height=Math.round(canvas.width*video.videoHeight/video.videoWidth);
     const fail=(code:string)=>{if(stopped)return;runtime.mediaStage(id,code);runtime.placementFailed(object.id,object.asset.id,code);};
     let watchdog:ReturnType<typeof setTimeout>|undefined;
     let checked=-1;
     const schedule=()=>{if('requestVideoFrameCallback' in video)frame=video.requestVideoFrameCallback(draw);else frame=requestAnimationFrame(draw);};
-    const draw=()=>{if(stopped)return;
+    const draw=()=>{if(stopped||document.hidden)return;
       try {const sample=Math.floor(video.currentTime);if(sample!==checked&&!videoInspectionVersions.has(object.asset.id)){inspectVideoFrame(video,object.asset.keyColor);checked=sample;if(video.currentTime>=video.duration*.75){videoInspectionVersions.set(object.asset.id,1);if(videoInspectionVersions.size>100)videoInspectionVersions.delete(videoInspectionVersions.keys().next().value!);}}}
       catch(error){fail(error instanceof Error?error.message:'key_quality');return;}
       const advancing=progress.advancing(video.currentTime);
@@ -29,10 +29,21 @@ ctx.drawImage(video,0,0,canvas.width,canvas.height);const image=ctx.getImageData
       if(!confirmed&&advancing){confirmed=true;runtime.mediaStage(id,'frames_advancing');runtime.visible(object.id,object.asset.id);}
       schedule();
     };
-    if(reduced)schedule();
-    else {runtime.mediaStage(id,'play_requested');void playVideo(video,signal.signal).then(()=>{if(stopped)return;runtime.mediaStage(id,'play_started');watchdog=setTimeout(()=>fail('video_frame_stalled'),4000);schedule();}).catch(error=>fail(error instanceof Error?error.message:'video_play_failed'));}
-    return()=>{stopped=true;signal.abort();clearTimeout(watchdog);if('cancelVideoFrameCallback' in video)video.cancelVideoFrameCallback(frame);else cancelAnimationFrame(frame);video.pause();};
-  },[object.asset.url,object.asset.id,object.asset.keyColor,object.id,object.eventId,runtime]);
+    let attempt:AbortController|undefined;
+    const suspend=()=>{attempt?.abort();clearTimeout(watchdog);if('cancelVideoFrameCallback' in video)video.cancelVideoFrameCallback(frame);else cancelAnimationFrame(frame);video.pause();};
+    const resume=()=>{
+      suspend();if(document.hidden||stopped)return;
+      if(reduced){schedule();return;}
+      const current=new AbortController();attempt=current;
+      runtime.mediaStage(id,'play_requested');
+      void playVideo(video,current.signal,confirmed||previouslyShown?30000:Math.max(1,(object.deadline??Date.now()+30000)-Date.now())).then(()=>{
+        if(stopped||current.signal.aborted||document.hidden)return;
+        runtime.mediaStage(id,'play_started');watchdog=setTimeout(()=>fail(confirmed?'video_frame_stalled':'video_first_frame_timeout'),confirmed||previouslyShown?4000:Math.max(1,(object.deadline??Date.now()+30000)-Date.now()));schedule();
+      }).catch(error=>{if(!current.signal.aborted)fail(error instanceof Error?error.message:'video_play_failed');});
+    };
+    document.addEventListener('visibilitychange',resume);resume();
+    return()=>{stopped=true;signal.abort();suspend();document.removeEventListener('visibilitychange',resume);};
+  },[object.asset.url,object.asset.id,object.asset.keyColor,object.id,object.eventId,object.deadline,object.displayedMs,runtime]);
   return <canvas style={{position:'relative'}} ref={ref} width={256} height={256} role="img" aria-label={object.asset.concept}/>;
 }
 function Unplaced({runtime,id,assetId}:{runtime:VisualSession;id:string;assetId:string}){

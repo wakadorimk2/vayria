@@ -7,7 +7,7 @@ import { inspectVisualPng, videoSourcePng } from './visualMedia';
 export interface VisualEnv {
   ASSETS: Fetcher; VISUAL_ASSETS?: R2Bucket; COOKIE_SECRET: string; MANIFESTATION_ENABLED?: string;
   PUBLIC_BASE_PATH?: string; GENERATION_ENABLED: string; FAL_KEY?: string; RUNWARE_API_KEY?: string;
-  VISUAL_IMAGE_PROVIDER?: string; VISUAL_BACKGROUND_ENABLED?: string; VISUAL_VIDEO_ENABLED?: string;
+  VISUAL_IMAGE_PROVIDER?: string; VISUAL_BACKGROUND_ENABLED?: string; VISUAL_VIDEO_ENABLED?: string; VISUAL_CACHE_ONLY?: string;
 }
 export type VisualLedger = <T>(op: string, args?: object) => Promise<T>;
 interface VisualTicket { eventId?:string; exp: number; purpose: string; visitor: string; session: string; generation: number; token: string; intent: VisualIntent; video: boolean }
@@ -91,7 +91,8 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
   let scope=sharedVisual(intent)?'shared':session,source:VisualAsset|null=null;
   const builtin=stock[intent.concept.toLowerCase()];
   const stockSource=():VisualAsset=>({id:'stock-'+builtin,url:'/manifestation/'+builtin+'.png',kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'});
-  if(ticket.video&&b.source&&intent.action==='replace'){
+  if(ticket.video&&intent.action==='replace'&&intent.targetId&&!b.source)throw new LimitError('source_unavailable',0,409);
+  if(ticket.video&&b.source){
     const candidate=b.source.source??b.source;
     if(typeof candidate.url!=='string')throw new LimitError('invalid_source',0,400);
     if(candidate.url.startsWith(base+'/api/visual/media/')){
@@ -102,7 +103,9 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
       if(!source||source.kind!=='image')throw new LimitError('invalid_source',0,403);
     }else if(builtin&&candidate.url===base+'/manifestation/'+builtin+'.png')source=stockSource();
     else throw new LimitError('invalid_source',0,403);
-    if(source.scope!=='shared')scope=session;
+    // A verified existing source keeps its server-owned scope for motion-only edits.
+    if(!intent.modifiers.length&&normalizeVisualIntent({...intent,concept:source.concept}).concept===intent.concept)scope=source.scope==='shared'?'shared':session;
+    else if(source.scope!=='shared')scope=session;
   }
   const baseIntent={...intent,motion:'',motionEvidence:''};
   const baseKey=await digest(scope+assetDescriptionKey(baseIntent,portrait));
@@ -137,7 +140,7 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
     return {...asset,url:base+'/api/visual/media/'+asset.id+'?ticket='+encodeURIComponent(signed),...(asset.source?{source:await resolve(asset.source)}:{})};
   };
   const timings:Record<string,number>={cacheLookup:performance.now()-lookupStarted,cacheHit:cached?1:0,cacheMiss:cached?0:1,explicitRefresh:intent.regenerate?1:0,...(!cached?{[source?'cacheMiss.variant':'cacheMiss.source']:1}:{})};
-  if((cached&&cacheDecision(cached,Date.now(),intent.regenerate)==='reuse')||b.cacheOnly===true){
+  if((cached&&cacheDecision(cached,Date.now(),intent.regenerate)==='reuse')||b.cacheOnly===true||env.VISUAL_CACHE_ONLY==='true'){
     // Cache-only never claims, reserves, or submits a provider request.
     const record=ledger('visualFinish',{...args,code:cached?'cache_reuse':'cache_miss',timings,eventId:ticket.eventId}).catch(()=>{});
     if(ctx)ctx.waitUntil(record);else await record;
