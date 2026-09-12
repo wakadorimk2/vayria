@@ -125,6 +125,8 @@ export interface ConversationOptions {
   historyTurnLimit?: number;
   isMuted?: boolean;
   isExhibitionMode?: boolean;
+  /** Optional display-only expiry. Omitted preserves the existing mode behavior. */
+  subtitleHoldMs?: number;
   characterIdentity?: CharacterIdentity;
   conversationContext?: ConversationContext | null;
   programContext?: ProgramContext;
@@ -412,7 +414,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     setIsSubtitleVisible(false);
   };
   const scheduleSubtitleClear = (generation: number) => {
-    if (!isExhibitionMode)
+    if (!isExhibitionMode && options.subtitleHoldMs === undefined)
       return;
     clearSubtitleTimer();
     const timerId = dependencies.setTimeout(() => {
@@ -422,7 +424,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       if (generation !== generationRef.current)
         return;
       setIsSubtitleVisible(false);
-    }, SUBTITLE_HOLD_MS);
+    }, options.subtitleHoldMs ?? SUBTITLE_HOLD_MS);
     subtitleClearTimerRef.current = timerId;
   };
   const invalidateCurrentTurn = (stopPlayback: boolean) => {
@@ -809,9 +811,10 @@ export function createConversationRuntime(playback: PerformancePlayback, options
               });
             },
             onSpeechStart: (startedAt) => {
+              if (generation !== generationRef.current) return;
               unitPlaying = true;
               setReply(text.trim());
-              if (isExhibitionMode) { clearSubtitleTimer(); setIsSubtitleVisible(true); }
+              if (isExhibitionMode || options.subtitleHoldMs !== undefined) { clearSubtitleTimer(); setIsSubtitleVisible(true); }
               if (previousStreamingUnitEndedAt !== null && index > 0) {
                 eventEmitter.emit('tts_queue_gap', {
                   durationMs: Math.max(0, startedAt - previousStreamingUnitEndedAt),
@@ -1099,7 +1102,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       }
       if (textOnlyTurn) {
         setReply(responseText);
-        if (isExhibitionMode) { clearSubtitleTimer(); setIsSubtitleVisible(true); }
+        if (isExhibitionMode || options.subtitleHoldMs !== undefined) { clearSubtitleTimer(); setIsSubtitleVisible(true); }
       }
       onPerformanceCueRef.current?.(executionPlan.planId, {
         emotion: responseEmotion,
@@ -1120,6 +1123,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         }
       }
       if (textOnlyTurn) {
+        if (options.subtitleHoldMs !== undefined) scheduleSubtitleClear(generation);
         recordDelivered(0, responseText);
         onReplyAccepted(activatedCards, cardContext.swapRevision);
         if (abortControllerRef.current === chatController) {

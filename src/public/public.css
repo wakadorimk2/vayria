@@ -43,8 +43,6 @@
 .public-controls__progress, .public-controls__error { position: absolute; right: 3px; top: 3px; width: 12px; height: 12px; }
 .public-controls__progress { border: 2px solid rgb(255 255 255 / 25%); border-top-color: white; border-radius: 50%; animation: public-microphone-progress 1s linear infinite; }
 .public-controls__error { border-radius: 50%; background: #f3c3cd; color: #341725; font-size: 11px; font-weight: bold; line-height: 12px; }
-.public-controls__level { position: absolute; bottom: 3px; display: flex; height: 7px; align-items: center; gap: 2px; }
-.public-controls__level i { display: block; width: 2px; height: calc(2px + var(--input-level) * 5px); background: currentColor; border-radius: 1px; }
 @keyframes public-microphone-progress { to { transform: rotate(360deg); } }
 .public-layout .public-card-panel { display: contents; }
 .public-layout .public-card-panel[data-open="false"] .card-prototype { visibility: hidden; pointer-events: none; }
@@ -106,7 +104,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .public-controls__progress { animation: none; }
-  .public-controls__level i { height: 5px; }
   .public-controls .public-controls__actions button { transition: none; }
   .public-controls .public-controls__actions button:active { transform: none; }
 }
@@ -346,3 +343,14 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-handoff h1 { font-size: clamp(20px, 3vw, 28px); }
 .public-handoff button { min-height: 48px; padding: 12px 24px; font: inherit; }
 .public-exhibition-welcome { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 90vw; padding: 8px 16px; border-radius: 20px; background: var(--public-surface); color: var(--public-ink); pointer-events: none; }
+
+.public-input-orb { width: 48px; height: 48px; pointer-events: none; }
+.public-input-orb svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.public-input-orb path { fill: var(--public-capsule); stroke: var(--public-focus); stroke-width: 2; stroke-linejoin: round; }
+.public-layout .conversation-copy > :is(.conversation-error,.playback-permission) { pointer-events: auto; }
+
+.public-layout .app-shell .conversation { left: 16px; right: 16px; }
+.public-layout .app-shell .conversation-copy { width: min(100%, 38rem); max-width: 100%; }
+.public-layout .conversation-voice-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 12px; width: 100%; font-size: clamp(0.9rem, 2.1vw, 1.2rem); min-height: max(48px, calc(2.8em + .56rem + 2px)); }
+.public-layout .conversation-input-slot { width: 48px; height: 48px; }
+.public-layout .app-shell .conversation-voice-row .reply { width: 100%; max-width: 100%; box-sizing: border-box; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
