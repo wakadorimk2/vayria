@@ -14,7 +14,9 @@ export class SharedConversationQueue {
   reportOverflow() { this.overflow(); }
   speechStarted() { this.speaking = true; this.cancelTimer(); }
   speechEnded(at = this.now()) { this.speaking = false; this.quietSince = at; this.pendingTranscripts++; this.schedule(); }
-  discard() { this.pendingTranscripts = Math.max(0, this.pendingTranscripts - 1); this.schedule(); }
+  discard(cancelSpeech = false) {
+    if (cancelSpeech) { this.speaking = false; this.quietSince = this.now(); }
+    this.pendingTranscripts = Math.max(0, this.pendingTranscripts - 1); this.schedule(); }
   append(text: string) {
     this.pendingTranscripts = Math.max(0, this.pendingTranscripts - 1);
     if (this.texts.join('\n').length + text.length > 1000 || this.texts.length >= 4) {

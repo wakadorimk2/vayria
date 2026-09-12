@@ -1,8 +1,8 @@
 # Vayria Mission Control
 
 - Target: 2026-09-23 Exhibition
-- Reviewed: 2026-09-04
-- Phase: 2/5 Experience Push
+- Reviewed: 2026-09-12
+- Phase: 3/5 Selection
 
 ## Phases
 
@@ -14,30 +14,27 @@
 
 ## Now
 
-- 🚧 展示準備: 公開版の起動・復旧手順をdocs/exhibition-quickstart.mdへ整理した。9/10までの合計電力と会場回線の確認はdocs/exhibition-power-network-check.md。5候補の比較と期限はdocs/exhibition-readiness.md。実測・実機・Owner評価は未確認
-
-- 公開版と同じURL・ビルドに展示モードを追加する。端末登録、参加者交代、展示枠全体の推計API予算10,000円を使う。手順: docs/public-exhibition.md
-
-- 🔥 [Experience Push Tracker #80](https://github.com/wakadorimk2/vayria/issues/80) — Speed、Conversation、Cardを実装済み。残るEmbodimentをSelectionへ渡せる状態にする
-- ⚡ Speed — [LLM #83](https://github.com/wakadorimk2/vayria/issues/83)は現状十分として完了。[TTS #78](https://github.com/wakadorimk2/vayria/issues/78)で展示用PC、本番予定network、failure recoveryを確認する
-- 💬 Conversation — [Issue #23](https://github.com/wakadorimk2/vayria/issues/23)の実機・復帰条件を確認し、[Issue #87](https://github.com/wakadorimk2/vayria/issues/87)でセッション内記憶が会話の自然さへ与える効果を検証する
-- 👀 [Embodiment #79](https://github.com/wakadorimk2/vayria/issues/79) — 発話開始時の視線、表情、モーションを一つの身体反応として尖らせる
-- 🛡 [Guardrails #21](https://github.com/wakadorimk2/vayria/issues/21)・[#24](https://github.com/wakadorimk2/vayria/issues/24)・[#25](https://github.com/wakadorimk2/vayria/issues/25) — 実環境再現性、表情・音声競合、性能・復帰・安全なログの下限を維持する
+- ✅ 9/12 Owner方針: Speed・Conversation・Card・Embodiment・Exhibition UIの既存5候補は残す。採用方針と実機検証の完了を分ける
+- 🎨 生成系を展示に採用する方針。カードによる変化の伝わり方、生成待ち、失敗時の継続、費用を重点に仕上げる
+- 🔊 GPT-Liveは見送り方向。Owner評価は「応答は自然だが、声がヴェイリアの印象に合わない」。展示音声は従来方式を軸にする
+- 📱 展示体験はiPad 1台。タップは作業用機器とスマホの給電にも使う。展示専用PCの常時稼働を前提にしない。給電する機器の同時合計100W以内を確認する
+- 📡 会場Wi-Fiを使う。外部HTTPS・認証・再接続は未確認。回線問い合わせは未送信。Live用WebRTCの確認は再採用を検討する場合に行う
+- 📋 版・設定・実機結果はdocs/exhibition-readiness.mdへ記録する。Ownerの採用方針を、自動検証や実機試験の合格に置き換えない
 
 ## Next
 
-- → 検証URLを https://vayria.me/staging/ へ移す変更を実装。旧サブドメインは転送する。移行手順: docs/staging-url-migration.md。配信版・台帳を記録し、検証Turnstileへvayria.meを追加済み。未マージ・未配信。本番CD有効のためマージ後は本番更新も動く。記録: docs/staging-url-preflight-2026-09-09.md。
-
-- → 公開版の参加導線: 挨拶ボタン、ガラスパネルのカード開閉、独立した接続案内をローカル実装した。関連テスト371件と展示・公開ビルドが成功。docs/evaluation/public-greeting-entry.md に沿って実AI・iOS・初見利用者を確認する。未公開
-- → 9/9同期完了: この作業へorigin/mainのc0c26fbを取り込んだ。参加導線と停止後通知修正を保持し、公開セッション確認・マイク表示との競合を解消した。関連テスト368件と展示・公開ビルドが成功。改善自体は未コミット・未公開。docs/evaluation/exhibition-participation-research.md の統合記録を参照する
-- → Selectionの参加導線: 一操作での初回交換、18枚の変化予告と話題、同じ質問での比較、返答の振り返り、交代リセットを候補実装した。停止後の音声通知を無視する修正を回帰テストで確認した。docs/evaluation/exhibition-participation-research.md に沿って実AI・実音声と参加率を確認する。模擬応答でのブラウザー操作は確認済み、参加率の改善は未検証
-- → 9/8〜12: [Issue #29](https://github.com/wakadorimk2/vayria/issues/29) で4候補をSmoke Testし、[Issue #30](https://github.com/wakadorimk2/vayria/issues/30) で候補ごとにKeep/Dropを決める。採用数に上限は設けない
-- → 9/13〜17: [Issue #31](https://github.com/wakadorimk2/vayria/issues/31) でKeepした体験を磨き、Go/No-Goを確定する
-- → 9/17まで: [Issue #27](https://github.com/wakadorimk2/vayria/issues/27) と [Issue #28](https://github.com/wakadorimk2/vayria/issues/28) へ運用手順と搬入準備を反映する
-- → 9/18: [Issue #32](https://github.com/wakadorimk2/vayria/issues/32) でHard Freezeする
-- → 9/19〜22: [Issue #26](https://github.com/wakadorimk2/vayria/issues/26) で最終Owner Playcheckを行う
+- → 生成系: 採用対象の配信版と生成設定をそろえる。カード変更から生成結果までの見せ方を確認する。待機・失敗・参加者交代でも体験を継続できるよう整える
+- → iPad: 従来の声と生成系を組み合わせ、一往復・交代・録音と再生の停止・通信失敗後の復帰を確認する。初見評価とOwner評価を分けて記録する
+- → 給電と回線: iPad・作業用機器・スマホの同時給電を確認する。会場回線の条件を確認する。電力の実測値と会場での成功は未確認
+- → [Smoke Test #29](https://github.com/wakadorimk2/vayria/issues/29) の残る実機検証と [Selection #30](https://github.com/wakadorimk2/vayria/issues/30) の記録を整える。既存5候補を残す方針は決まった。GitHubへの反映と課題完了は別途扱う
+- → 9/13〜17: [Issue #31](https://github.com/wakadorimk2/vayria/issues/31) で採用する体験を磨き、Go/No-Goを確認する
+- → 9/17まで: [Issue #27](https://github.com/wakadorimk2/vayria/issues/27) と [Issue #28](https://github.com/wakadorimk2/vayria/issues/28) の運用・搬入準備を整える。90×90cm、A1ポスター、クロスを維持する
+- → 9/18: [Issue #32](https://github.com/wakadorimk2/vayria/issues/32) でHard Freezeする。以降の変更はbug・recovery・performance・runbookに限定する
+- → 9/19〜22: [Issue #26](https://github.com/wakadorimk2/vayria/issues/26) で最終Owner Playcheckと搬入確認を行う
 
 ## Recently Done
+
+- 9/12 選定方針を更新。既存5候補を維持し、生成系を採用する。GPT-Liveは声の印象を理由に見送り方向。実機・電力・回線の未確認事項を別管理にした
 
 - 9/9 展示モードをローカル実装。型検査・lint・通常/公開ビルド・既存テスト・公開版49件を確認した。iPad相当サイズの模擬ブラウザー試験も成功した。展示モードの配信・本番枠作成・有料生成・実機確認は未実施。
 

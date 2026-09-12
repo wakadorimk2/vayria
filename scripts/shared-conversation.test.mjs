@@ -28,3 +28,14 @@ test('echo hint accepts an exact playback fragment but preserves additional huma
   assert(!resemblesPlayback('雨の日はゲーム？ 私は映画だよ', '雨の日はゲーム。'));
   assert(!resemblesPlayback('はい', 'はい、そうです。'));
 });
+
+test('recoverable transcription failure cancels partial speech but preserves queued complete speech', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const sent = []; const q = new SharedConversationQueue(text => sent.push(text), () => assert.fail('overflow'));
+  q.speechEnded(); q.speechEnded(); q.speechStarted();
+  q.discard(true); t.mock.timers.tick(1000);
+  assert.deepEqual(sent, []);
+  q.append('残っている確定発話'); t.mock.timers.tick(0);
+  assert.deepEqual(sent, ['残っている確定発話']);
+  q.reset();
+});

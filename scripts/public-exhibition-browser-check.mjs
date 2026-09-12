@@ -159,6 +159,8 @@ try {
   await page.getByRole('button', { name: '体験を終える', exact: true }).click();
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.exhibitTracks.every(t => t.readyState === 'ended')), true);
+  // Handoff remounts the avatar. Its playback-port replacement intentionally cancels old work.
+  await page.getByText('VRM を読み込んでいます…', { exact: true }).waitFor({ state: 'detached', timeout: 90000 });
   await page.getByRole('button', { name: '挨拶してみる', exact: true }).click();
   await page.getByText('文字・マイク・カードから続けられます', { exact: true }).waitFor();
   assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).greeting === true));

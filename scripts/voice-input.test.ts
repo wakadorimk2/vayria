@@ -8,6 +8,20 @@ import {
   reduceVoiceInput,
   type VoiceInputSnapshot,
 } from '../src/voice/voiceInput.js';
+
+test('capture and playback waiting never present active listening or retain old speech', () => {
+  const controller = createVoiceInputController();
+  for (const reason of ['capture-starting', 'playback-wait'] as const) {
+    controller.dispatch({ type: 'speech_started', segmentId: 'old', at: 1 });
+    controller.dispatch({ type: 'listening_pending', reason, at: 2 });
+    assert.equal(controller.getSnapshot().phase, 'recovering');
+    assert.equal(controller.getSnapshot().segmentId, null);
+    assert.equal(controller.getSnapshot().errorCode, null);
+    assert.equal(controller.getSnapshot().notice?.code, reason);
+    controller.dispatch({ type: 'listening_started', at: 3 });
+    assert.equal(controller.getSnapshot().notice, undefined);
+  }
+});
 import { createBrowserSpeechRecognitionAdapter } from '../src/voice/browserSpeechRecognition.js';
 import {
   PCM_CHUNK_BYTES,
@@ -1925,19 +1939,38 @@ test('Voice Lab JSONL validates session IDs, size, and forbidden audio identifie
 });
 import { getMicrophoneState, getPublicInteractionHint, microphoneStateLabels, normalizeMicrophoneLevel } from '../src/public/microphoneState.js';
 
-test('public shared hint prioritizes errors, card selection, microphone status and card fallback', () => {
-  for (const state of ['off', 'starting', 'stopping', 'error', 'recognizing', 'speaking', 'listening'] as const) {
-    assert.equal(getPublicInteractionHint(state, true, '一枚選んで'), state === 'error' ? 'マイクを確認' : '脳内へ一枚');
+test('voice recovery clears the failed utterance and exposes a separate notice', () => {
+  const controller = createVoiceInputController();
+  controller.dispatch({ type: 'listening_started', at: 1 });
+  controller.dispatch({ type: 'speech_started', segmentId: 'first', at: 2 });
+  controller.dispatch({ type: 'interim_transcript_updated', segmentId: 'first', text: '途中', at: 3 });
+  const waiting = controller.dispatch({ type: 'recognition_failed', code: 'network_error', recoverable: true, retryAt: 1004, at: 4 });
+  assert.equal(waiting.phase, 'recovering'); assert.equal(waiting.transcript, ''); assert.equal(waiting.segmentId, null);
+  assert.equal(waiting.notice?.state, 'recovering');
+  const resumed = controller.dispatch({ type: 'listening_started', recovered: true, at: 1004 });
+  assert.equal(resumed.phase, 'listening'); assert.equal(resumed.errorCode, null); assert.equal(resumed.notice?.state, 'resumed');
+  controller.dispatch({ type: 'speech_started', segmentId: 'second', at: 1005 });
+  assert.equal(controller.getSnapshot().notice, undefined);
+  controller.dispatch({ type: 'recognition_failed', code: 'transcribe_limit', recoverable: false, at: 1006 });
+  assert.equal(controller.getSnapshot().phase, 'error');
+  controller.dispatch({ type: 'recognition_stopped', at: 1007 });
+  assert.equal(controller.getSnapshot().notice, undefined);
+});
+
+test('public shared hint preserves card actions during voice failure and recovery', () => {
+  for (const state of ['off', 'starting', 'stopping', 'error', 'recovering', 'recognizing', 'speaking', 'listening'] as const) {
+    assert.equal(getPublicInteractionHint(state, true, '一枚選んで'), '脳内へ一枚');
     for (const fallback of ['一枚選んで', 'このターンは操作済み']) {
-      assert.equal(getPublicInteractionHint(state, false, fallback), microphoneStateLabels[state] || fallback);
+      assert.equal(getPublicInteractionHint(state, false, fallback), state === 'error' || state === 'recovering' ? fallback : microphoneStateLabels[state] || fallback);
     }
   }
-  assert.deepEqual(['error', 'starting', 'listening', 'off'].map(state => getPublicInteractionHint(state as keyof typeof microphoneStateLabels, false, '一枚選んで')), ['マイクを確認', '開始中', '入力受付中', '一枚選んで']);
+  assert.deepEqual(['error', 'starting', 'listening', 'off'].map(state => getPublicInteractionHint(state as keyof typeof microphoneStateLabels, false, '一枚選んで')), ['一枚選んで', '開始中', '入力受付中', '一枚選んで']);
 });
 
 test('public microphone state prioritizes transitions, failures and disabled input', () => {
   const input = { transition: null, error: null, enabled: true, recognizing: false, speaking: false } as const;
   assert.equal(getMicrophoneState(input), 'listening');
+  assert.equal(getMicrophoneState({ ...input, recovering: true, error: 'network_error' }), 'recovering');
   assert.equal(getMicrophoneState({ ...input, speaking: true }), 'speaking');
   assert.equal(getMicrophoneState({ ...input, speaking: true, recognizing: true }), 'recognizing');
   assert.equal(getMicrophoneState({ ...input, enabled: false, recognizing: true, speaking: true }), 'off');

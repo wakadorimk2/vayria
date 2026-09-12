@@ -21,10 +21,10 @@ export function useConversation(playback: PerformancePlayback, options: Conversa
   useEffect(() => { runtime.updatePlayback(playback); }, [runtime, playback]);
   useEffect(() => { runtime.updateOptions(options); });
   useEffect(() => () => runtime.dispose(), [runtime]);
-  const { cancelAutonomous, clearSubtitle, evaluateVoiceParticipation, interruptCurrentTurn,
+  const { changeCardsDuringTurn, cancelAutonomous, clearSubtitle, evaluateVoiceParticipation, interruptCurrentTurn,
     previewVoiceMessage, recordVoiceSignal, resetConversation, sendAutonomous, sendManual, sendVoice } = runtime;
   return {
-    ...snapshot, cancelAutonomous, clearSubtitle, evaluateVoiceParticipation, interruptCurrentTurn,
+    ...snapshot, changeCardsDuringTurn, cancelAutonomous, clearSubtitle, evaluateVoiceParticipation, interruptCurrentTurn,
     previewVoiceMessage, recordVoiceSignal, resetConversation, sendAutonomous, sendManual, sendVoice
   };
 }

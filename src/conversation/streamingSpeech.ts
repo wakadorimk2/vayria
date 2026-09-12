@@ -1,3 +1,5 @@
+import { MAX_SPEECH_UNIT_INDEX } from './cardContinuation.js';
+
 export interface StreamingSpeechUnitEvent<TResponse = unknown> {
   type: 'speech_unit';
   index: number;
@@ -61,6 +63,7 @@ function parseStreamingChatEvent<TResponse>(line: string): StreamingChatEvent<TR
     record.type === 'speech_unit' &&
     Number.isSafeInteger(record.index) &&
     (record.index as number) >= 0 &&
+    (record.index as number) <= MAX_SPEECH_UNIT_INDEX &&
     typeof record.text === 'string' &&
     record.response &&
     typeof record.response === 'object'

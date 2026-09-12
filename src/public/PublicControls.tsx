@@ -2,6 +2,8 @@ import type { PublicExperience } from './exhibition';
 import { publicUrl } from './paths';
 import type { SettingsLayout } from './settingsLayout';
 import { publicErrorMessage } from './errors';
+import { VoiceInputNotification } from './VoiceInputNotification';
+import type { VoiceInputNotice } from '../voice/voiceInput';
 import type { ThemePreference, ResolvedTheme } from './theme';
 import PublicSettingsPanel from './PublicSettingsPanel';
 import { microphoneStateLabels, normalizeMicrophoneLevel, type MicrophoneState } from './microphoneState';
@@ -11,7 +13,7 @@ import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicEx
 import ExhibitionControls from './ExhibitionControls';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ experience, onExperienceChange, experiencePending, exhibitionTools, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, onMicrophoneToggle }: {
+export default function PublicControls({ experience, onExperienceChange, experiencePending, exhibitionTools, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
   settingsLayout: SettingsLayout;
   onSettingsOpenChange: (open: boolean) => void;
   cardsOpen: boolean;
@@ -32,6 +34,7 @@ export default function PublicControls({ experience, onExperienceChange, experie
   microphoneOn: boolean;
   microphoneState: MicrophoneState;
   microphoneLevel: number | null;
+  microphoneNotice?: VoiceInputNotice;
   onMicrophoneToggle: () => void;
 }) {
   const active = useSyncExternalStore(subscribePublic, publicActive);
@@ -120,6 +123,7 @@ export default function PublicControls({ experience, onExperienceChange, experie
     const timer = window.setInterval(() => { if (active && status?.session && status.session.expires <= Date.now()) { pausePublic(); setMessage('体験が終了しました。'); } }, 500);
     const error = (event: Event) => {
       const reason = (event as CustomEvent).detail;
+      if (reason?.source === '/api/transcribe') return;
       finishRequest(false); setNoticeOpen(true);
       setMessage(publicErrorMessage(reason));
     };
@@ -160,6 +164,7 @@ export default function PublicControls({ experience, onExperienceChange, experie
     } catch { setMessage('再生と録音を停止しました。終了の通信を確認できませんでした。'); }
   };
   return <aside className="public-controls" aria-label="会話の操作">
+    <VoiceInputNotification notice={microphoneNotice} suppressed={expanded || noticeOpen} />
     {exhibition && <div className="public-exhibition-handoff">
       <button onClick={() => { cancelRequest(); window.dispatchEvent(new Event('vayria-exhibition-next')); }}>体験を終える</button>
       {(!exhibition.available || status?.stopped || status?.enabled === false) && <span className="public-exhibition-paused" role="status">展示を休止しています。設定を確認してください。</span>}

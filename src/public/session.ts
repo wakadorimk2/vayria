@@ -15,7 +15,11 @@ export function updatePublicStatus(value: Pick<PublicStatus, 'exhibition'>) {
 let session: PublicStatus['session'] = null;
 let active = false;
 let cancellation = new AbortController();
-const tickets = new Map<string, string>();
+const tickets = new Map<string, string[]>();
+function rememberTicket(text: string, ticket: string) {
+  const key = text.trim();
+  tickets.set(key, [...(tickets.get(key) ?? []), ticket]);
+}
 const listeners = new Set<() => void>();
 export const subscribePublic = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
 export const publicActive = () => active;
@@ -89,24 +93,43 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
   }
   const headers = new Headers(init.headers); headers.set('X-Vayria-Session', session.id);
   let body = init.body;
+  if (/\/api\/(chat|card-preview)$/.test(path)) tickets.clear();
   if (path.endsWith('/api/tts') && typeof body === 'string') {
-    const input = JSON.parse(body); const ticket = tickets.get(String(input.text).trim());
+    const input = JSON.parse(body); const key = String(input.text).trim(); const ticket = tickets.get(key)?.shift();
     if (!ticket) return Response.json({ code: 'invalid_ticket', error: publicErrorMessage({ code: 'invalid_ticket' }) }, { status: 403 });
-    tickets.delete(String(input.text).trim()); body = JSON.stringify({ ticket });
+    if (!tickets.get(key)?.length) tickets.delete(key);
+    body = JSON.stringify({ ticket });
   }
   const signal = AbortSignal.any([cancellation.signal, ...(init.signal ? [init.signal] : [])]);
   let response: Response;
-  try { response = await fetch(path, { ...init, body, headers, credentials: 'same-origin',
-    signal });
-  } catch (error) {
-    if (signal.aborted) throw error;
-    response = Response.json({ code: 'network_error' }, { status: 503 });
+  // Admission rejects busy requests before provider calls or ticket consumption.
+  // Keep the prepared body (including the same TTS ticket) across these retries.
+  for (let attempt = 0; ; attempt++) {
+    try { response = await fetch(path, { ...init, body, headers, credentials: 'same-origin', signal }); }
+    catch (error) {
+      if (signal.aborted) throw error;
+      response = Response.json({ code: 'network_error' }, { status: 503 });
+    }
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (response.status !== 429 || attempt >= 5 || !/\/api\/(chat|card-preview|transcribe|tts)$/.test(path)) break;
+    const reason = await response.clone().json().catch(() => null);
+    if (reason?.code !== 'busy') break;
+    const delay = typeof reason.retryAt === 'number' && Number.isFinite(reason.retryAt)
+      ? Math.max(250, Math.min(5000, reason.retryAt - Date.now())) : 1000;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve(); }, delay);
+      function cancel() { clearTimeout(timer); signal.removeEventListener('abort', cancel); reject(new DOMException('Aborted', 'AbortError')); }
+      signal.addEventListener('abort', cancel, { once: true });
+      if (signal.aborted) cancel();
+    });
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   }
-  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   if (response.ok && /\/api\/(chat|card-preview)$/.test(path)) {
     if (response.headers.get('Content-Type')?.startsWith('application/x-ndjson') && response.body) {
       let pending = '';
-      const inspect = (line: string) => { const value = JSON.parse(line); if (value.ttsTicket && value.text) tickets.set(value.text.trim(), value.ttsTicket);
+      const inspect = (line: string) => {
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const value = JSON.parse(line); if (value.ttsTicket && value.text) rememberTicket(value.text, value.ttsTicket);
         if (value.type === 'error') { value.error = publicErrorMessage(value); window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: value })); }
         return JSON.stringify(value); };
       const reader = response.body.pipeThrough(new TextDecoderStream()).pipeThrough(new TransformStream<string, Uint8Array>({
@@ -139,12 +162,16 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
     }
     const result = await response.clone().json();
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-    if (result.ttsTicket && result.text) tickets.set(result.text.trim(), result.ttsTicket);
+    if (Array.isArray(result.ttsTickets)) {
+      for (const unit of result.ttsTickets) {
+        if (typeof unit.text === 'string' && typeof unit.ttsTicket === 'string') rememberTicket(unit.text, unit.ttsTicket);
+      }
+    } else if (result.ttsTicket && result.text) rememberTicket(result.text, result.ttsTicket);
   }
   if (!response.ok) {
     const reason = await response.clone().json().catch(() => ({}));
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-    window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: reason }));
+    window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: { ...reason, source: path.endsWith('/api/transcribe') ? '/api/transcribe' : path } }));
     const headers = new Headers(response.headers); headers.delete('content-length'); headers.delete('content-encoding');
     return Response.json({ ...reason, error: publicErrorMessage(reason) }, { status: response.status, headers });
   }

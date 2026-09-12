@@ -1,3 +1,4 @@
+import { splitSpeechAtBoundaries, type CardContinuation } from './cardContinuation.js';
 /** Session-local conversation execution. Only the current generation can publish or deliver speech. */
 import type { ConversationEventName, ConversationEventDetails } from './conversationEventTypes.js';
 import { readAudioPlaybackSource } from '../audio/audioPlaybackSource.js';
@@ -15,6 +16,7 @@ import type {
   PerformancePlan,
   PerformanceResult,
   PerformerStateContext,
+  PerformerTrigger,
   WeightedSemanticCue,
 } from '../performer/types.js';
 import { isConversationActionDecision } from '../performer/types.js';
@@ -49,6 +51,7 @@ import {
 import {
   createSemanticDialogueHistory,
   DEFAULT_HISTORY_TURN_LIMIT,
+  type SemanticDialogueMessage,
 } from './semanticDialogueHistory.js';
 import { readStreamingChatEvents } from './streamingSpeech.js';
 import {
@@ -95,6 +98,7 @@ interface ChatResponse {
 export interface ChatCardContext {
   brainCardIds: string[];
   forcedCardId: string | null;
+  swapRevision?: number;
 }
 
 export interface PerformanceContextPayload {
@@ -125,6 +129,7 @@ export interface ConversationOptions {
   conversationContext?: ConversationContext | null;
   programContext?: ProgramContext;
   getPerformerStateContext?: () => PerformerStateContext;
+  createCardContinuationPlan?: (trigger: PerformerTrigger) => PerformancePlan;
   onPerformanceCue?: (
     planId: string,
     cue: { emotion: Emotion; intensity: number },
@@ -152,6 +157,17 @@ interface ErrorResponse {
 interface ProcessTurnResult {
   completed: boolean;
   decision: AutonomousDecision | null;
+  cardChange?: PendingCardContinuation;
+}
+
+/** Local ownership and history retained across the replacement generation. */
+interface PendingCardContinuation {
+  cards: ChatCardContext;
+  generation: number;
+  continuation: CardContinuation;
+  historyTurnId: string;
+  nextUnitIndex: number;
+  history: SemanticDialogueMessage[];
 }
 
 const MAX_HISTORY_TURN_LIMIT = 10;
@@ -163,8 +179,6 @@ const ACTIVE_STATUSES: ConversationStatus[] = [
 ];
 
 const INTERACTIVE_SOURCES: ConversationSource[] = ['manual', 'voice'];
-const VOICE_STREAM_PRIMING_TARGET_MS = 150;
-const VOICE_STREAM_PRIMING_MAXIMUM_WAIT_MS = 300;
 
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
@@ -337,11 +351,13 @@ export function createConversationRuntime(playback: PerformancePlayback, options
   const isMutedRef = { current: isMuted };
   const sourceRef: { current: ConversationSource | null } = { current: null };
   const statusRef: { current: ConversationStatus } = { current: 'idle' };
+  let acknowledgedCardRevision: number | undefined;
   const activeDeliveredTextRef = { current: '' };
   const activePlanRef: { current: PerformancePlan | null } = { current: null };
   const activeTurnControlRef: {
     current: {
       interrupt: (reason: string) => void;
+      changeCards: (cards: ChatCardContext) => boolean;
     } | null
   } = { current: null };
   const onPerformanceCueRef = { current: options.onPerformanceCue };
@@ -420,6 +436,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       onReplyPresentationEndRef.current?.(presentationPlanId);
     }
   };
+  const changeCardsDuringTurn = (cards: ChatCardContext) => activeTurnControlRef.current?.changeCards(cards) ?? false;
   const interruptCurrentTurn = (reason = 'interrupted') => {
     activeTurnControlRef.current?.interrupt(reason);
     const plan = activePlanRef.current;
@@ -442,6 +459,8 @@ export function createConversationRuntime(playback: PerformancePlayback, options
   const resetConversation = () => {
     finishActivePlanAsCancelled();
     invalidateCurrentTurn(true);
+    humanSpeechPending = false;
+    acknowledgedCardRevision = undefined;
     semanticHistory.clear();
     floorController.reset('conversation_reset');
     participationController.reset();
@@ -453,8 +472,10 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     setConversationState('idle', null);
   };
   const previewVoiceMessage = (message: string) => floorController.preview(message).candidateText;
+  let humanSpeechPending = false;
   const recordVoiceSignal = (event: VoiceInputEvent) => {
     if (event.type === 'speech_started') {
+      humanSpeechPending = true;
       participationController.observeSpeechStarted({
         speakerId: event.speakerId,
         at: event.at,
@@ -474,6 +495,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       event.type === 'listening_started') {
       return;
     }
+    if (event.type === 'utterance_finalized' || event.type === 'recognition_failed' || event.type === 'recognition_stopped') humanSpeechPending = false;
     floorController.observeSignal(toTurnSignal(event));
   };
   const evaluateVoiceParticipation = (input: ParticipationUtteranceInput, characterIdentityOverride?: CharacterIdentity): ParticipationDecision => {
@@ -487,7 +509,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     }
     return decision;
   };
-  const processTurn = async (turnSource: ConversationSource, message: string | null, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, autonomousContext: AutonomousContext | null, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyCandidate: AutonomyCandidate | null = null, autonomyEvidenceContext: AutonomyEvidenceContext | null = null, greeting?: true): Promise<ProcessTurnResult> => {
+  const processTurn = async (turnSource: ConversationSource, message: string | null, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[], swapRevision?: number) => void, autonomousContext: AutonomousContext | null, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyCandidate: AutonomyCandidate | null = null, autonomyEvidenceContext: AutonomyEvidenceContext | null = null, greeting?: true, continuationState?: NonNullable<ProcessTurnResult['cardChange']>): Promise<ProcessTurnResult> => {
     const eventEmitter = createConversationEventEmitter(turnSource);
     const messageForRequest = message;
     const programContextForRequest = programContextOverride ?? programContextRef.current;
@@ -532,7 +554,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       finishActivePlanAsCancelled();
       invalidateCurrentTurn(true);
     }
-    const historyForRequest = semanticHistory.toMessages();
+    const historyForRequest = continuationState?.history ?? semanticHistory.toMessages();
     clearSubtitle();
     const pendingPlan = turnSource === 'voice' ? createInteractionReactionPlan(plan) : plan;
     let executionPlan = pendingPlan;
@@ -544,13 +566,17 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     const emitOwnedResult: typeof emitResult = (...args) => {
       if (generation === generationRef.current) emitResult(...args);
     };
-    if (message !== null) semanticHistory.beginTurn(eventEmitter.turnId, message, dependencies.now());
+    const historyTurnId = continuationState?.historyTurnId ?? eventEmitter.turnId;
+    semanticHistory.beginTurn(historyTurnId, message, dependencies.now());
+    let nextUnitIndex = continuationState?.nextUnitIndex ?? 0;
+    const unitIndexOffset = nextUnitIndex;
     activeDeliveredTextRef.current = "";
     const textOnlyTurn = isMutedRef.current;
     let deliveredText = "";
+    let unitCancelledBeforeSpeech = false;
     let releaseAudioCapture: (() => void) | undefined;
     const guard = <T extends unknown[]>(callback: ((...args: T) => void) | undefined) => (...args: T) => {
-      if (generation === generationRef.current) callback?.(...args);
+      if (generation === generationRef.current && !unitCancelledBeforeSpeech) callback?.(...args);
     };
     const playOwned: PerformancePlayback['play'] = (ownedPlan, audio, callbacks = {}) => {
       if (generation !== generationRef.current) return Promise.resolve(null);
@@ -568,9 +594,10 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       });
     };
     const recordDelivered = (index: number, text: string) => {
-      if (generation !== generationRef.current) return;
-      semanticHistory.beginTurn(eventEmitter.turnId, message, dependencies.now());
-      const delivered = semanticHistory.appendDeliveredUnit(eventEmitter.turnId, index, text);
+      if (generation !== generationRef.current || unitCancelledBeforeSpeech) return;
+      const delivered = semanticHistory.appendDeliveredUnit(historyTurnId, unitIndexOffset + index, text);
+      if (delivered !== null && index === 0 && cardContext.forcedCardId) acknowledgedCardRevision = cardContext.swapRevision;
+      nextUnitIndex = Math.max(nextUnitIndex, unitIndexOffset + index + 1);
       if (delivered) participationController.observeVayriaUtterance(delivered, dependencies.now());
       if (delivered !== null) { deliveredText = delivered; activeDeliveredTextRef.current = delivered; lastSelfUtteranceRef.current = delivered; }
     };
@@ -606,8 +633,24 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       });
       return { completed: true, decision: null };
     }
+    let pendingCardChange: ChatCardContext | null = null;
+    let unitPlaying = false;
+    let playbackPending = false;
+    const cardChanged = () => { if (pendingCardChange) throw new DOMException('Card changed', 'AbortError'); };
     const turnControl = {
+      changeCards: (cards: ChatCardContext) => {
+        if (generation !== generationRef.current || !ACTIVE_STATUSES.includes(statusRef.current)) return false;
+        if (cards.swapRevision === cardContext.swapRevision && cards.forcedCardId === cardContext.forcedCardId) return false;
+        pendingCardChange = { ...cards, brainCardIds: [...cards.brainCardIds] };
+        if (!unitPlaying) {
+          unitCancelledBeforeSpeech = true;
+          // Drain admitted work before replacing it; HTTP abort does not prove server release.
+          if (playbackPending) playback.stop();
+        }
+        return true;
+      },
       interrupt: (reason: string) => {
+        pendingCardChange = null;
         emitTerminalEvent('turn_aborted', { reason });
       },
     };
@@ -627,7 +670,6 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     let streamingFirstResult: PerformancePlaybackResult | null = null;
     let streamingLastResult: PerformancePlaybackResult | null = null;
     let streamedChatPayload: ChatResponse | null = null;
-    let streamedReplyText = '';
     let previousStreamingUnitEndedAt: number | null = null;
     const streamingUnitIndexes = new Set<number>();
     const performerStateContext = turnSource === 'autonomous'
@@ -647,25 +689,20 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       abortControllerRef.current = chatController;
       const llmStartedAt = dependencies.monotonicNow();
       eventEmitter.emit('llm_start', { phase: 'llm' });
-      const enqueueStreamingSpeechUnit = (index: number, text: string, candidate: ChatResponse) => {
-        if (textOnlyTurn || isMutedRef.current || generation !== generationRef.current ||
+      const enqueueSpeechUnit = (index: number, text: string, candidate: ChatResponse) => {
+        if (textOnlyTurn || isMutedRef.current || generation !== generationRef.current || pendingCardChange ||
           streamingUnitIndexes.has(index) ||
           !text.trim()) {
           return;
         }
         streamingUnitIndexes.add(index);
         streamingSpeechStarted = true;
-        streamedReplyText += text.trim();
-        setReply(streamedReplyText);
-        if (isExhibitionMode) {
-          clearSubtitleTimer();
-          setIsSubtitleVisible(true);
-        }
         if (streamingTtsStartedAt === null) {
           streamingTtsStartedAt = dependencies.monotonicNow();
           currentPhase = 'tts';
           eventEmitter.emit('speech_unit_ready');
           eventEmitter.emit('tts_start', { phase: 'tts' });
+          timeline.record({ kind: 'tts_event', at: dependencies.now(), phase: 'start', channel: 'server_tts' });
           setConversationState('synthesizing', turnSource);
         }
         const unitTtsStartedAt = dependencies.monotonicNow();
@@ -681,46 +718,47 @@ export function createConversationRuntime(playback: PerformancePlayback, options
             unitIndex: index,
           });
         };
-        const audioPromise = dependencies.fetch('/api/tts', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Performer-Turn-Id': eventEmitter.turnId,
-            ...(eventEmitter.runId
-              ? { 'X-Performer-Run-Id': eventEmitter.runId }
-              : {}),
-          },
-          body: JSON.stringify({
-            text: text.trim(),
-            emotion: normalizeEmotion(candidate.emotion),
-            ttsProfile: plan.ttsProfile,
-            unitIndex: index,
-          }),
-          signal: chatController.signal,
-        }).then(async (ttsResponse) => {
-          if (!ttsResponse.ok) {
-            throw new Error(await readError(ttsResponse, '返答音声を生成できませんでした。'));
-          }
-          const audioSource = await readAudioPlaybackSource(ttsResponse, {
-            streamMpegPlayback: runtimeConfig.cloudTtsStreamPlaybackEnabled,
-          });
-          if (audioSource.kind === 'buffer') {
-            emitUnitAudioReady(dependencies.monotonicNow());
-          }
-          if (audioSource.kind === 'buffer' && !streamingFirstAudioEmitted) {
-            streamingFirstAudioEmitted = true;
-            eventEmitter.emit('tts_first_audio', {
-              durationMs: dependencies.monotonicNow() - (streamingTtsStartedAt ?? unitTtsStartedAt),
-              phase: 'tts',
-            });
-          }
-          return audioSource;
-        });
-        void audioPromise.catch(() => { });
         streamingPlaybackQueue = streamingPlaybackQueue.then(async () => {
-
+          if (generation !== generationRef.current) return null;
+          cardChanged();
+          const audioPromise = dependencies.fetch('/api/tts', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Performer-Turn-Id': eventEmitter.turnId,
+              ...(eventEmitter.runId
+                ? { 'X-Performer-Run-Id': eventEmitter.runId }
+                : {}),
+            },
+            body: JSON.stringify({
+              text: text.trim(),
+              emotion: normalizeEmotion(candidate.emotion),
+              ttsProfile: plan.ttsProfile,
+              unitIndex: index,
+            }),
+            signal: chatController.signal,
+          }).then(async (ttsResponse) => {
+            if (!ttsResponse.ok) {
+              throw new Error(await readError(ttsResponse, '返答音声を生成できませんでした。'));
+            }
+            const audioSource = await readAudioPlaybackSource(ttsResponse, {
+              streamMpegPlayback: runtimeConfig.cloudTtsStreamPlaybackEnabled,
+            });
+            if (audioSource.kind === 'buffer') {
+              emitUnitAudioReady(dependencies.monotonicNow());
+            }
+            if (audioSource.kind === 'buffer' && !streamingFirstAudioEmitted) {
+              streamingFirstAudioEmitted = true;
+              eventEmitter.emit('tts_first_audio', {
+                durationMs: dependencies.monotonicNow() - (streamingTtsStartedAt ?? unitTtsStartedAt),
+                phase: 'tts',
+              });
+            }
+            return audioSource;
+          });
           const audioSource = await audioPromise;
           if (generation !== generationRef.current) return null;
+          cardChanged();
           const unitPlan: PerformancePlan = {
             ...plan,
             ...(index === 0 ? {} : { motion: undefined }),
@@ -738,9 +776,27 @@ export function createConversationRuntime(playback: PerformancePlayback, options
               postSpeechHoldMs: 0,
             },
           };
+          playbackPending = true;
           const result = await playOwned(unitPlan, audioSource, {
+            ...(turnSource === 'voice' ? { streamPriming: { targetMs: 150, maximumWaitMs: 300 } } : {}),
             onAudioComplete: () => recordDelivered(index, text),
+            onMotionReady: () => eventEmitter.emit('motion_ready'),
+            onMotionStart: (at) => { motionStartedAt = at; eventEmitter.emit('motion_start'); },
+            onPlaybackStartup: (diagnostic) => {
+              if (turnSource !== 'voice') return;
+              eventEmitter.emit('playback_startup', {
+                audioContextState: ['running', 'suspended', 'closed'].includes(diagnostic.audioContextState) ? diagnostic.audioContextState as 'running' | 'suspended' | 'closed' : undefined,
+                audioSourceKind: diagnostic.sourceKind, bufferedDurationMs: diagnostic.bufferedDurationMs,
+                firstChunkBytes: diagnostic.firstChunkBytes, firstChunkIntervalMs: diagnostic.firstChunkIntervalMs,
+                phase: 'tts', playbackRoute: 'conversation', primingOutcome: diagnostic.primingOutcome,
+                primingTargetMs: diagnostic.primingTargetMs, primingWaitMs: diagnostic.primingWaitMs, sampleRateHz: diagnostic.sampleRateHz,
+              });
+            },
             onFirstAudioReady: (readyAt) => {
+              if (isSpeechAct(candidate.speechAct) && activePresentationPlanIdRef.current !== plan.planId) {
+                activePresentationPlanIdRef.current = plan.planId;
+                onReplyPresentationStartRef.current?.(plan.planId, readActivatedCards(candidate.activatedCards), candidate.speechAct);
+              }
               emitUnitAudioReady(readyAt);
               if (streamingFirstAudioEmitted)
                 return;
@@ -757,6 +813,9 @@ export function createConversationRuntime(playback: PerformancePlayback, options
               });
             },
             onSpeechStart: (startedAt) => {
+              unitPlaying = true;
+              setReply(text.trim());
+              if (isExhibitionMode) { clearSubtitleTimer(); setIsSubtitleVisible(true); }
               if (previousStreamingUnitEndedAt !== null && index > 0) {
                 eventEmitter.emit('tts_queue_gap', {
                   durationMs: Math.max(0, startedAt - previousStreamingUnitEndedAt),
@@ -792,7 +851,11 @@ export function createConversationRuntime(playback: PerformancePlayback, options
               scheduleSubtitleClear(generation);
             },
           });
+          unitPlaying = false;
+          playbackPending = false;
           if (result) recordDelivered(index, text);
+          if (generation !== generationRef.current) return null;
+          if (pendingCardChange) cardChanged();
           if (!streamingFirstResult && result)
             streamingFirstResult = result;
           if (result)
@@ -802,6 +865,15 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         });
         void streamingPlaybackQueue.catch(() => { });
       };
+      let speechUnitIndex = 0;
+      const serverUnitIndexes = new Set<number>();
+      const enqueueStreamingSpeechUnit = (index: number, text: string, candidate: ChatResponse) => {
+        if (serverUnitIndexes.has(index)) return;
+        serverUnitIndexes.add(index);
+        // The server defines audible boundaries and signs matching public TTS tickets.
+        enqueueSpeechUnit(speechUnitIndex++, text, candidate);
+      };
+      cardChanged();
       const chatResponse = await dependencies.fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -822,9 +894,11 @@ export function createConversationRuntime(playback: PerformancePlayback, options
             ? {}
             : { message: messageForRequest }),
           history: historyForRequest,
+          ...(continuationState ? { cardContinuation: continuationState.continuation } : cardContext.forcedCardId && cardContext.swapRevision !== undefined && acknowledgedCardRevision === cardContext.swapRevision ? { cardContinuation: { deliveredText: '', acknowledgementDelivered: true } } : {}),
           characterIdentity: characterIdentityOverride ?? characterIdentityRef.current,
           programContext: programContextForRequest,
-          ...cardContext,
+          brainCardIds: cardContext.brainCardIds,
+          forcedCardId: cardContext.forcedCardId,
           performanceContext: plan.speech?.llmContext ?? {
             callbackTendency: 0,
             fragmentation: 0,
@@ -856,8 +930,10 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       if (contentType.startsWith('application/x-ndjson')) {
         streamingModeUsed = true;
         await readStreamingChatEvents<ChatResponse>(chatResponse, (event) => {
-          if (event.type === 'error')
+          if (event.type === 'error') {
+            if (pendingCardChange) return;
             throw new Error(event.error);
+          }
           if (event.type === 'provider_timing') {
             const eventName = event.milestone === 'start'
               ? 'llm_provider_start'
@@ -884,6 +960,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       const chatPayload = streamingModeUsed
         ? (streamedChatPayload as unknown as ChatResponse)
         : ((await chatResponse.json()) as ChatResponse);
+      if (!unitPlaying) cardChanged();
       eventEmitter.emit('llm_done', {
         durationMs: dependencies.monotonicNow() - llmStartedAt,
         phase: 'llm',
@@ -1024,18 +1101,14 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         });
         return { completed: true, decision: autonomousDecision };
       }
-      setReply(responseText);
-      if (isExhibitionMode) {
-        clearSubtitleTimer();
-        setIsSubtitleVisible(true);
+      if (textOnlyTurn) {
+        setReply(responseText);
+        if (isExhibitionMode) { clearSubtitleTimer(); setIsSubtitleVisible(true); }
       }
       onPerformanceCueRef.current?.(executionPlan.planId, {
         emotion: responseEmotion,
         intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
       });
-      onReplyAccepted(activatedCards);
-      if (!textOnlyTurn && !streamingSpeechStarted)
-        eventEmitter.emit('speech_unit_ready');
       if (INTERACTIVE_SOURCES.includes(turnSource)) {
         if (turnSource === 'voice' && interactionDecision) {
           const floorTransition = floorController.applyFinalized(message ?? '', interactionDecision, finalizedVoiceMetadata);
@@ -1052,6 +1125,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       }
       if (textOnlyTurn) {
         recordDelivered(0, responseText);
+        onReplyAccepted(activatedCards, cardContext.swapRevision);
         if (abortControllerRef.current === chatController) {
           abortControllerRef.current = null;
         }
@@ -1097,7 +1171,14 @@ export function createConversationRuntime(playback: PerformancePlayback, options
           decision: null,
         };
       }
-      if (streamingModeUsed && streamingSpeechStarted) {
+      if (!streamingSpeechStarted) {
+        if (turnSource === 'autonomous' && !isCardChangeTurn) await waitMilliseconds(plan.speech?.delayMs ?? 0);
+        if (generation !== generationRef.current) return { completed: false, decision: null };
+        cardChanged();
+        for (const unit of splitSpeechAtBoundaries(responseText)) enqueueSpeechUnit(speechUnitIndex++, unit, chatPayload);
+      }
+      if (!unitPlaying) cardChanged();
+      if (streamingSpeechStarted) {
         currentPhase = 'tts';
         const playbackResult = await streamingPlaybackQueue;
         if (abortControllerRef.current === chatController) {
@@ -1109,6 +1190,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
           return { completed: false, decision: null };
         }
         const completedAt = dependencies.monotonicNow();
+        timeline.record({ kind: 'tts_event', at: dependencies.now(), phase: 'ready', channel: 'server_tts', durationMs: completedAt - (streamingTtsStartedAt ?? completedAt) });
         const firstStreamingResult = streamingFirstResult as PerformancePlaybackResult | null;
         const lastStreamingResult = streamingLastResult as PerformancePlaybackResult | null;
         eventEmitter.emit('tts_completed', {
@@ -1119,6 +1201,8 @@ export function createConversationRuntime(playback: PerformancePlayback, options
           durationMs: completedAt - (streamingTtsStartedAt ?? completedAt),
           phase: 'tts',
         });
+        onReplyAccepted(activatedCards, cardContext.swapRevision);
+        if (isExpressionLevel(expressionLevel)) recentExpressionLevelsRef.current = [...recentExpressionLevelsRef.current, expressionLevel].slice(-10);
         // Self context is updated only by completed delivery.
         onAutonomyDeltaRef.current?.(internalDelta, autonomyDeltaContext);
         if (turnSource === 'voice')
@@ -1149,258 +1233,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         });
         return { completed: true, decision: autonomousDecision };
       }
-      setConversationState('synthesizing', turnSource);
-      currentPhase = 'tts';
-      if (turnSource === 'autonomous' && !isCardChangeTurn) {
-        await waitMilliseconds(plan.speech?.delayMs ?? 0);
-      }
-      if (generation !== generationRef.current) {
-        emitOwnedResult(executionPlan, 'interrupted');
-        emitTerminalEvent('turn_aborted', {
-          reason: 'superseded',
-          phase: currentPhase,
-        });
-        return { completed: false, decision: null };
-      }
-      const ttsController = new AbortController();
-      requestController = ttsController;
-      abortControllerRef.current = ttsController;
-      const ttsStartedAt = dependencies.monotonicNow();
-      eventEmitter.emit('tts_start', { phase: 'tts' });
-      timeline.record({
-        kind: 'tts_event',
-        at: dependencies.now(),
-        phase: 'start',
-        channel: 'server_tts',
-      });
-      const ttsResponse = await dependencies.fetch('/api/tts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Performer-Turn-Id': eventEmitter.turnId,
-          ...(eventEmitter.runId
-            ? { 'X-Performer-Run-Id': eventEmitter.runId }
-            : {}),
-        },
-        body: JSON.stringify({
-          text: responseText,
-          emotion: responseEmotion,
-          ttsProfile: plan.ttsProfile,
-        }),
-        signal: ttsController.signal,
-      });
-      if (generation !== generationRef.current) {
-        emitOwnedResult(executionPlan, 'interrupted');
-        emitTerminalEvent('turn_aborted', { reason: 'superseded', phase: 'tts' });
-        return { completed: false, decision: null };
-      }
-      if (!ttsResponse.ok) {
-        throw new Error(await readError(ttsResponse, '返答音声を生成できませんでした。'));
-      }
-      const audioSource = await readAudioPlaybackSource(ttsResponse, {
-        streamMpegPlayback: runtimeConfig.cloudTtsStreamPlaybackEnabled,
-      });
-      if (audioSource.kind === 'buffer') {
-        eventEmitter.emit('tts_first_audio', {
-          durationMs: dependencies.monotonicNow() - ttsStartedAt,
-          phase: 'tts',
-        });
-        eventEmitter.emit('tts_completed', {
-          durationMs: dependencies.monotonicNow() - ttsStartedAt,
-          phase: 'tts',
-        });
-        eventEmitter.emit('tts_ready', {
-          durationMs: dependencies.monotonicNow() - ttsStartedAt,
-          phase: 'tts',
-        });
-        timeline.record({
-          kind: 'tts_event',
-          at: dependencies.now(),
-          phase: 'ready',
-          channel: 'server_tts',
-          durationMs: dependencies.monotonicNow() - ttsStartedAt,
-        });
-      }
-      if (abortControllerRef.current === ttsController) {
-        abortControllerRef.current = null;
-      }
-      if (generation !== generationRef.current || isMutedRef.current) {
-        if (generation === generationRef.current) {
-          setConversationState('idle', null);
-          emitOwnedResult(executionPlan, 'cancelled', {
-            emotionCue: {
-              emotion: responseEmotion,
-              intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
-            },
-          });
-          emitTerminalEvent('turn_aborted', {
-            reason: 'muted',
-            phase: currentPhase,
-          });
-        }
-        else {
-          emitOwnedResult(executionPlan, 'interrupted');
-          emitTerminalEvent('turn_aborted', { reason: 'superseded', phase: 'tts' });
-        }
-        return {
-          completed: INTERACTIVE_SOURCES.includes(turnSource),
-          decision: null,
-        };
-      }
-      const playbackResult = await playOwned(plan, audioSource, {
-        presentationLeadMs: dependencies.prefersReducedMotion()
-          ? 0
-          : 120,
-        ...(turnSource === 'voice'
-          ? {
-            streamPriming: {
-              targetMs: VOICE_STREAM_PRIMING_TARGET_MS,
-              maximumWaitMs: VOICE_STREAM_PRIMING_MAXIMUM_WAIT_MS,
-            },
-          }
-          : {}),
-        onFirstAudioReady: (readyAt) => {
-          if (generation === generationRef.current &&
-            isSpeechAct(speechAct) &&
-            activePresentationPlanIdRef.current !== executionPlan.planId) {
-            const previousPlanId = activePresentationPlanIdRef.current;
-            if (previousPlanId) {
-              onReplyPresentationEndRef.current?.(previousPlanId);
-            }
-            activePresentationPlanIdRef.current = executionPlan.planId;
-            onReplyPresentationStartRef.current?.(executionPlan.planId, activatedCards, speechAct);
-          }
-          eventEmitter.emit('tts_first_audio', {
-            durationMs: readyAt - ttsStartedAt,
-            phase: 'tts',
-          });
-        },
-        onAudioComplete: (completedAt) => {
-          recordDelivered(0, responseText);
-          eventEmitter.emit('tts_completed', {
-            durationMs: completedAt - ttsStartedAt,
-            phase: 'tts',
-          });
-          eventEmitter.emit('tts_ready', {
-            durationMs: completedAt - ttsStartedAt,
-            phase: 'tts',
-          });
-          timeline.record({
-            kind: 'tts_event',
-            at: dependencies.now(),
-            phase: 'ready',
-            channel: 'server_tts',
-            durationMs: completedAt - ttsStartedAt,
-          });
-        },
-        onMotionReady: () => {
-          eventEmitter.emit('motion_ready');
-        },
-        onMotionStart: (startedAt) => {
-          motionStartedAt = startedAt;
-          eventEmitter.emit('motion_start');
-        },
-        onPlaybackGestureRequired: (reason) => {
-          eventEmitter.emit('playback_gesture_required', {
-            phase: 'tts',
-            reason,
-          });
-        },
-        onPlaybackStartup: (diagnostic) => {
-          if (turnSource !== 'voice')
-            return;
-          eventEmitter.emit('playback_startup', {
-            audioContextState: diagnostic.audioContextState === 'running' ||
-              diagnostic.audioContextState === 'suspended' ||
-              diagnostic.audioContextState === 'closed'
-              ? diagnostic.audioContextState
-              : undefined,
-            audioSourceKind: diagnostic.sourceKind,
-            bufferedDurationMs: diagnostic.bufferedDurationMs,
-            ...(diagnostic.firstChunkBytes === undefined
-              ? {}
-              : { firstChunkBytes: diagnostic.firstChunkBytes }),
-            ...(diagnostic.firstChunkIntervalMs === undefined
-              ? {}
-              : { firstChunkIntervalMs: diagnostic.firstChunkIntervalMs }),
-            phase: 'tts',
-            playbackRoute: 'conversation',
-            primingOutcome: diagnostic.primingOutcome,
-            primingTargetMs: diagnostic.primingTargetMs,
-            primingWaitMs: diagnostic.primingWaitMs,
-            sampleRateHz: diagnostic.sampleRateHz,
-          });
-        },
-        onSpeechStart: (startedAt) => {
-          speechStartedAt = startedAt;
-          eventEmitter.emit('playback_started', {
-            durationMs: startedAt - ttsStartedAt,
-            phase: 'tts',
-          });
-          if (generation === generationRef.current) {
-            eventEmitter.emit('animation_start');
-            setConversationState('speaking', turnSource);
-          }
-        },
-        onSpeechEnd: () => {
-          if (generation !== generationRef.current)
-            return;
-          if (generation === generationRef.current && activePresentationPlanIdRef.current === executionPlan.planId) {
-            activePresentationPlanIdRef.current = null;
-            onReplyPresentationEndRef.current?.(executionPlan.planId);
-          }
-          scheduleSubtitleClear(generation);
-        },
-      });
-      if (generation !== generationRef.current) {
-        emitOwnedResult(executionPlan, 'interrupted');
-        emitTerminalEvent('turn_aborted', { reason: 'superseded' });
-        return { completed: false, decision: null };
-      }
-      if (!playbackResult) {
-        emitOwnedResult(executionPlan, 'interrupted');
-        emitTerminalEvent('turn_aborted', { reason: 'superseded' });
-        return { completed: false, decision: null };
-      }
-      recordDelivered(0, responseText);
-      if (isExpressionLevel(expressionLevel)) {
-        recentExpressionLevelsRef.current = [
-          ...recentExpressionLevelsRef.current,
-          expressionLevel,
-        ].slice(-10);
-      }
-      // Self context is updated only by completed delivery.
-      onAutonomyDeltaRef.current?.(internalDelta, autonomyDeltaContext);
-      if (turnSource === 'voice') {
-        floorController.release('response_completed');
-      }
-      setConversationState('idle', null);
-      emitOwnedResult(executionPlan, 'completed', {
-        interactionAction: interactionDecision?.action ??
-          (autonomousDecision
-            ? 'take_floor'
-            : executionPlan.actionDecision?.action),
-        spokenText: deliveredText,
-        emotionCue: {
-          emotion: responseEmotion,
-          intensity: responseEmotion === 'neutral' ? 0.25 : 0.7,
-        },
-        motionStartedAt: playbackResult.motionStartedAt ?? motionStartedAt,
-        speechStartedAt: playbackResult.speechStartedAt ?? speechStartedAt,
-        speechEndedAt: playbackResult.speechEndedAt,
-      });
-      emitTerminalEvent('turn_completed', {
-        ...(interactionDecision?.action
-          ? { interactionAction: interactionDecision.action }
-          : autonomousDecision
-            ? {
-              interactionAction: 'take_floor',
-            }
-            : executionPlan.actionDecision?.action
-              ? { interactionAction: executionPlan.actionDecision.action }
-              : {}),
-      });
-      return { completed: true, decision: autonomousDecision };
+      throw new Error('返答に再生可能な発話がありません。');
     }
     catch (caughtError) {
       if (abortControllerRef.current === requestController) {
@@ -1413,6 +1246,25 @@ export function createConversationRuntime(playback: PerformancePlayback, options
           phase: currentPhase,
         });
         return { completed: false, decision: null };
+      }
+      if (pendingCardChange) {
+        try { await streamingPlaybackQueue; } catch { /* Drain the active audio request; queued old units do not start. */ }
+        if (generation !== generationRef.current) return { completed: false, decision: null };
+        abortFetch();
+        emitTerminalEvent('turn_aborted', { reason: 'card_change' });
+        if (humanSpeechPending) {
+          emitOwnedResult(executionPlan, 'interrupted');
+          setConversationState('idle', null);
+          return { completed: false, decision: null };
+        }
+        // End only the old performance. The pending card belongs to the continuation.
+        emitOwnedResult(executionPlan, 'interrupted');
+        setConversationState('idle', null);
+        const replacementCards = pendingCardChange as ChatCardContext;
+        return { completed: false, decision: null, cardChange: {
+          cards: replacementCards, generation, historyTurnId, nextUnitIndex, history: historyForRequest,
+          continuation: { deliveredText: (deliveredText || continuationState?.continuation.deliveredText || '').slice(-4000), acknowledgementDelivered: replacementCards.swapRevision !== undefined && replacementCards.swapRevision === acknowledgedCardRevision },
+        } };
       }
       if (isAbortError(caughtError)) {
         if (turnSource === 'voice') {
@@ -1459,10 +1311,25 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       }
     }
   };
-  const sendManual = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext, greeting?: true) => (await processTurn('manual', message, cardContext, onReplyAccepted, null, plan, undefined, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null, greeting)).completed;
-  const sendVoice = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext) => (await processTurn('voice', message, cardContext, onReplyAccepted, null, plan, voiceMetadata, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null)).completed;
-  const sendAutonomous = async (cardContext: ChatCardContext, autonomousContext: AutonomousContext, onReplyAccepted: (activatedCardIds: string[]) => void, plan: PerformancePlan, programContextOverride?: ProgramContext, autonomyCandidate?: AutonomyCandidate) => {
-    const result = await processTurn('autonomous', null, cardContext, onReplyAccepted, autonomousContext, plan, undefined, undefined, programContextOverride, autonomyCandidate ?? null, null);
+  const runTurn = async (...args: Parameters<typeof processTurn>): Promise<ProcessTurnResult> => {
+    let result = await processTurn(...args);
+    while (result.cardChange && result.cardChange.generation === generationRef.current) {
+      const change = result.cardChange;
+      args[2] = change.cards;
+      const trigger: PerformerTrigger | null = args[1] !== null
+        ? { kind: 'viewer_message', text: args[1] }
+        : args[9] ? { kind: 'autonomous_candidate', episodeId: args[9].episodeId, reasonIds: args[9].reasons.map(reason => reason.id) } : null;
+      if (trigger) args[5] = options.createCardContinuationPlan?.(trigger) ?? args[5];
+      args[8] = { ...(args[8] ?? programContextRef.current), phase: 'after_card_change' };
+      args[12] = change;
+      result = await processTurn(...args);
+    }
+    return result;
+  };
+  const sendManual = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[], swapRevision?: number) => void, plan: PerformancePlan, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext, greeting?: true) => (await runTurn('manual', message, cardContext, onReplyAccepted, null, plan, undefined, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null, greeting)).completed;
+  const sendVoice = async (message: string, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[], swapRevision?: number) => void, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyEvidenceContext?: AutonomyEvidenceContext) => (await runTurn('voice', message, cardContext, onReplyAccepted, null, plan, voiceMetadata, characterIdentityOverride, programContextOverride, undefined, autonomyEvidenceContext ?? null)).completed;
+  const sendAutonomous = async (cardContext: ChatCardContext, autonomousContext: AutonomousContext, onReplyAccepted: (activatedCardIds: string[], swapRevision?: number) => void, plan: PerformancePlan, programContextOverride?: ProgramContext, autonomyCandidate?: AutonomyCandidate) => {
+    const result = await runTurn('autonomous', null, cardContext, onReplyAccepted, autonomousContext, plan, undefined, undefined, programContextOverride, autonomyCandidate ?? null, null);
     return result.completed ? result.decision : null;
   };
   const makeSnapshot = () => ({
@@ -1540,6 +1407,6 @@ export function createConversationRuntime(playback: PerformancePlayback, options
   updateOptions(options);
   return {
     getSnapshot: () => snapshot, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, updateOptions, updatePlayback, dispose,
-    cancelAutonomous, clearSubtitle, evaluateVoiceParticipation, interruptCurrentTurn, previewVoiceMessage, recordVoiceSignal, resetConversation, sendAutonomous, sendManual, sendVoice
+    changeCardsDuringTurn, cancelAutonomous, clearSubtitle, evaluateVoiceParticipation, interruptCurrentTurn, previewVoiceMessage, recordVoiceSignal, resetConversation, sendAutonomous, sendManual, sendVoice
   };
 }
