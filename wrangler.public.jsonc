@@ -48,9 +48,16 @@
     "TURNSTILE_SITE_KEY": "0x4AAAAAAErno-F0ugJTtA7B",
     "AIVIS_MODEL_UUID": "7fc08a41-b64d-456d-8b22-8e1284674775",
     "AIVIS_SPEAKER_UUID": "8e2dfde9-a155-4bd8-b451-80832ad5e8ac",
-    "PUBLIC_BASE_PATH": "/staging"
+    "PUBLIC_BASE_PATH": "/staging",
+    "VISUAL_VIDEO_ENABLED": "true"
   },
   "observability": {
     "enabled": false
-  }
+  },
+  "r2_buckets": [
+    {
+      "binding": "VISUAL_ASSETS",
+      "bucket_name": "vayria-staging-visual-assets"
+    }
+  ]
 }
