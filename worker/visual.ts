@@ -7,7 +7,7 @@ import { inspectVisualPng, videoSourcePng } from './visualMedia';
 export interface VisualEnv {
   ASSETS: Fetcher; VISUAL_ASSETS?: R2Bucket; COOKIE_SECRET: string; MANIFESTATION_ENABLED?: string;
   PUBLIC_BASE_PATH?: string; GENERATION_ENABLED: string; FAL_KEY?: string; RUNWARE_API_KEY?: string;
-  VISUAL_IMAGE_PROVIDER?: string; VISUAL_BACKGROUND_ENABLED?: string; VISUAL_VIDEO_ENABLED?: string;
+  VISUAL_IMAGE_PROVIDER?: string; VISUAL_BACKGROUND_ENABLED?: string; VISUAL_VIDEO_ENABLED?: string; VISUAL_CACHE_ONLY?: string;
 }
 export type VisualLedger = <T>(op: string, args?: object) => Promise<T>;
 interface VisualTicket { eventId?:string; exp: number; purpose: string; visitor: string; session: string; generation: number; token: string; intent: VisualIntent; video: boolean }
@@ -140,7 +140,7 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
     return {...asset,url:base+'/api/visual/media/'+asset.id+'?ticket='+encodeURIComponent(signed),...(asset.source?{source:await resolve(asset.source)}:{})};
   };
   const timings:Record<string,number>={cacheLookup:performance.now()-lookupStarted,cacheHit:cached?1:0,cacheMiss:cached?0:1,explicitRefresh:intent.regenerate?1:0,...(!cached?{[source?'cacheMiss.variant':'cacheMiss.source']:1}:{})};
-  if((cached&&cacheDecision(cached,Date.now(),intent.regenerate)==='reuse')||b.cacheOnly===true){
+  if((cached&&cacheDecision(cached,Date.now(),intent.regenerate)==='reuse')||b.cacheOnly===true||env.VISUAL_CACHE_ONLY==='true'){
     // Cache-only never claims, reserves, or submits a provider request.
     const record=ledger('visualFinish',{...args,code:cached?'cache_reuse':'cache_miss',timings,eventId:ticket.eventId}).catch(()=>{});
     if(ctx)ctx.waitUntil(record);else await record;

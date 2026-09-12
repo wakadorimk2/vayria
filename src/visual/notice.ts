@@ -1,4 +1,5 @@
 export function visualFailureMessage(code: string): string {
+  if (code === 'cache_miss') return '保存済み素材が見つかりませんでした。検証中のため新規生成は行いません。';
   if (code === 'source_unavailable' || code === 'invalid_source') return '元の小物を参照できませんでした。作り直しは行っていません。';
   if (code === 'video_start_timeout') return '動画の再生開始が時間切れになりました。画像は残しています。';
   if (code === 'video_first_frame_timeout') return '動画の最初のフレームを確認できませんでした。画像は残しています。';

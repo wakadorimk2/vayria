@@ -397,8 +397,12 @@ async function cacheHarness(run){
  return Response.json({video:{url:'https://fal.media/result.mp4'},images:[{url:'https://fal.media/result.png'}],image:{url:'https://fal.media/result.png'}});
  };
  const request=async(patch={},extra={})=>{const i={...intent,concept:'crab',targetId:'target-'+(++number),...patch};const signed=await visualTicket({visualIntent:i},env,'v','s',1,permitsVideo(i,i.motionEvidence));const res=await visualRoute(new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket,...extra})}),env,'v','s',bridge);return (await res.text()).trim().split('\n').map(JSON.parse);};
- try{await run({request,counts,l,state,store,fail:()=>{fail=true;}});}finally{globalThis.fetch=previous;}
+ try{await run({request,counts,l,state,store,env,fail:()=>{fail=true;}});}finally{globalThis.fetch=previous;}
 }
+test('server cache-only validation never reserves or sends on a miss',()=>cacheHarness(async({request,counts,env,l})=>{
+ env.VISUAL_CACHE_ONLY='true';const results=await request({motion:'walk',motionEvidence:'walk'});
+ assert.equal(results[0].code,'cache_miss');assert.deepEqual(counts,{image:0,mask:0,video:0,input:0});assert.equal(l.report().manifestation.reservedUsd,0);
+}));
 test('resolved source makes repeated video a hit; changing motion reuses image, mask and input',()=>cacheHarness(async({request,counts})=>{
  const first=await request({motion:'walk',motionEvidence:'walk'});assert.equal(first.at(-1).asset?.kind,'video',JSON.stringify(first));assert.deepEqual(counts,{image:1,mask:1,video:1,input:1});
  const again=await request({concept:'カニ',motion:'walking',motionEvidence:'walking'});assert.equal(again.at(-1).asset.id,first.at(-1).asset.id);assert.deepEqual(counts,{image:1,mask:1,video:1,input:1});
