@@ -79,9 +79,9 @@ test('context generation is opt-in and shares the normal conversation provider c
   globalThis.__entryRequests = [];
   try {
     for (const enabled of [false, true]) {
-      globalThis.__entryManifestation = enabled ? { type:'prop', action:'add', concept:'鶏', modifiers:[], targetId:'', motion:'', motionEvidence:'', sharing:'general', regenerate:false } : undefined;
+      globalThis.__entryManifestation = enabled ? { type:'prop', action:'add', concept:'chicken', modifiers:[], targetId:'', motion:'', motionEvidence:'', sharing:'general', regenerate:false } : undefined;
       const result = await server.generateInteractiveResponse({ ...llm, manifestationEnabled: enabled }, 'manual', input.message, [], input.brainCardIds, null, input.performanceContext, input.characterIdentity, input.programContext, tracker, null, false, [], true);
-      assert.deepEqual(result.visualIntent, enabled ? { type:'prop', action:'add', concept:'鶏', modifiers:[], targetId:'', motion:'', motionEvidence:'', sharing:'general', regenerate:false } : undefined);
+      assert.deepEqual(result.visualIntent, enabled ? { type:'prop', action:'add', concept:'chicken', modifiers:[], targetId:'', motion:'', motionEvidence:'', sharing:'general', regenerate:false } : undefined);
     }
     assert.equal(globalThis.__entryRequests.length, 2);
     assert.doesNotMatch(globalThis.__entryRequests[0].staticPrompt, /Visual generation permission/);

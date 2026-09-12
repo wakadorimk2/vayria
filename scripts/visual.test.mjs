@@ -148,7 +148,14 @@ test('safe failure messages never echo provider text and distinguish limits, ins
 
 test('explicit subject cannot broaden pudding into a generic dessert',async()=>{
  const {visualDecisionSchema,validVisualDecision}=await import('../'+dir+'/test.mjs');
- assert.deepEqual(visualDecisionSchema(true,'プリン').properties.concept.enum,['プリン']);
+ assert.deepEqual(visualDecisionSchema(true,'プリン').properties.concept.enum,['pudding']);
  assert.equal(validVisualDecision({...intent,concept:'dessert'},true,'プリン'),null);
- assert.ok(validVisualDecision({...intent,concept:'プリン'},true,'プリン'));
+ assert.ok(validVisualDecision({...intent,concept:'pudding'},true,'プリン'));
+});
+
+test('unknown requested objects still use the same LLM translation and never send Japanese lettering as an object',async()=>{
+ const {validVisualDecision,visualDecisionSchema}=await import('../'+dir+'/test.mjs');
+ assert.ok(validVisualDecision({...intent,concept:'purple airship'},true,'紫色の飛行船'));
+ assert.equal(validVisualDecision({...intent,concept:'プリン'},true,'プリン'),null);
+ assert.equal(visualDecisionSchema(true,'紫色の飛行船').properties.concept.enum,undefined);
 });
