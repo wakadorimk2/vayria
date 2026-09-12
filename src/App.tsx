@@ -2778,6 +2778,7 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
+          visualObjectPresent={runtimeConfig.manifestationEnabled && [...visual.snapshot.objects,...(visual.snapshot.ready??[])].some(o=>o.id!=='background')}
           generation={runtimeConfig.manifestationEnabled ? { enabled: visual.snapshot.enabled, busy: visual.busy, message: visual.message, toggle: visual.toggle } : undefined}
           settingsLayout={publicSettingsLayout}
           onSettingsOpenChange={setPublicSettingsOpen}

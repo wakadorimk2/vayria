@@ -1,8 +1,9 @@
+import {placeVisualProp} from './placement';
 import {playVideo,VideoFrameProgress} from '../manifestation/videoPlayback';
 import { useEffect, useRef, type RefObject } from 'react';
 import type { VrmStageHandle } from '../avatar/VrmStage';
 import { useWorldLayout } from '../world/useWorldLayout';
-import { placeWorldProp, type WorldRect } from '../world/worldLayout';
+import { type WorldRect } from '../world/worldLayout';
 import { preparedVideos, keyGreen, inspectVideoFrame, videoInspectionVersions } from '../manifestation/media';
 import type { VisualObject, VisualSession, VisualSnapshot } from './session';
 import './visual.css';
@@ -38,24 +39,22 @@ function Unplaced({runtime,id,assetId}:{runtime:VisualSession;id:string;assetId:
 }
 export function VisualStage({runtime,snapshot,stage}:{runtime:VisualSession;snapshot:VisualSnapshot;stage:RefObject<VrmStageHandle|null>}){
   const root=useRef<HTMLDivElement>(null);const {layout}=useWorldLayout(root,stage,runtime);const occupied:WorldRect[]=[];
-  const placement=(scale:number,aspect=1)=>{for(const shrink of [1,.8,.6,.45])for(const anchor of [{x:.84,y:.55},{x:.16,y:.55},{x:.84,y:.32},{x:.16,y:.32},{x:.84,y:.73},{x:.16,y:.73},{x:.5,y:.68},{x:.38,y:.73},{x:.62,y:.73}]){
-    const p=placeWorldProp(layout,anchor,{bounds:{x:0,y:0,width:1,height:1},pivot:{x:.5,y:.5},aspect,displayWidth:.32,maxWidth:.45,shrinkSteps:[1]},scale*shrink,occupied);if(p){occupied.push(p.visible);return p.rect;}}
-    return null;};
+  const placement=(latest:boolean,scale:number,aspect=1)=>{const rect=placeVisualProp(layout,latest,scale,aspect,occupied);if(rect)occupied.push(rect);return rect;};
   const style=(r:WorldRect)=>({left:`${r.x*100}%`,top:`${r.y*100}%`,width:`${r.width*100}%`,height:`${r.height*100}%`});
   return <>
     {snapshot.ready?.filter(o=>o.id==='background').map(o=><img key={o.asset.id} className="visual-background" src={o.asset.url} alt="" onLoad={()=>runtime.visible('background',o.asset.id)}/>)}
     {snapshot.background&&<img className="visual-background" src={snapshot.background.asset.url} alt="" onLoad={()=>runtime.visible('background',snapshot.background!.asset.id)}/>}
     <div className="visual-layer" ref={root}>
       {[...snapshot.objects.filter(o=>!snapshot.ready?.some(r=>r.id===o.id)),...(snapshot.ready??[]).filter(o=>o.id!=='background')].sort((a,b)=>b.at-a.at).slice(0,3).map((object,index)=>{
-        const age=snapshot.now-object.at,rect=placement((index===0?1:.7)*(age>=30000?.6:age>=15000?.8:1)*(object.effects.includes('grow')?1.4:1),object.asset.width&&object.asset.height?object.asset.width/object.asset.height:1);
-        if(!rect)return object.visible?null:<Unplaced key={object.id} id={object.id} assetId={object.asset.id} runtime={runtime}/>;
+        const age=snapshot.now-object.at,rect=placement(index===0,(age>=30000?.6:age>=15000?.8:1)*(object.effects.includes('grow')?1.4:1),object.layoutAspect??(object.asset.width&&object.asset.height?object.asset.width/object.asset.height:1));
+        if(!rect)return <Unplaced key={object.id} id={object.id} assetId={object.asset.id} runtime={runtime}/>;
         return <div key={object.id} className={'visual-object '+object.effects.map(e=>'visual-effect-'+e).join(' ')} style={{...style(rect),opacity:age>=30000?.4:1}}>
           {object.asset.kind==='video'&&!object.visible&&object.asset.source&&<img style={{position:'absolute',inset:0}} src={object.asset.source.url} alt=""/>}
           {object.asset.kind==='video'?<VisualVideo object={object} runtime={runtime}/>:<img src={object.asset.url} alt={object.asset.concept} onLoad={()=>runtime.visible(object.id,object.asset.id)}/>}
         </div>;
       })}
       {snapshot.pending.filter(j=>j.intent.type==='prop'&&!snapshot.objects.some(o=>o.id===j.target)).slice(0,3).map(job=>{
-        const rect=placement(.7);return rect?<div key={job.id} className="visual-presence" style={style(rect)} role="status" aria-label="何かが現れようとしています">✧</div>:null;
+        const rect=placement(false,.7);return rect?<div key={job.id} className="visual-presence" style={style(rect)} role="status" aria-label="何かが現れようとしています">✧</div>:null;
       })}
     </div>
   </>;

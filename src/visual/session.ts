@@ -1,7 +1,7 @@
 import { visualFailureMessage } from './notice';
 import { fallbackLayout, type WorldLayout } from '../world/worldLayout';
 import { VISUAL_EFFECTS, type VisualIntent, type VisualAsset, type VisualEffect } from './types';
-export interface VisualObject { id: string; eventId?: string; asset: VisualAsset; at: number; visible: boolean; effects: VisualEffect[] }
+export interface VisualObject { id: string; layoutAspect?:number; eventId?: string; asset: VisualAsset; at: number; visible: boolean; effects: VisualEffect[] }
 export interface VisualJob { id: string; target: string; intent: VisualIntent; ticket: string; at: number; controller?: AbortController }
 export interface VisualNotice { id:string; message:string; until:number; order:number }
 export interface VisualSnapshot { ready?:VisualObject[]; notification?:VisualNotice; enabled: boolean; generation: number; now: number; objects: VisualObject[]; background: VisualObject | null; pending: VisualJob[]; history: string[]; outcomes:string[] }
@@ -43,6 +43,7 @@ export class VisualSession {
       const source=object.asset.source;
       this.publish({objects:source?this.snapshot.objects.map(o=>o===object?{...object,asset:source,visible:true}:o):this.snapshot.objects.filter(o=>o!==object)});
     }
+    if(object.visible&&code==='placement_unavailable')this.publish({objects:this.snapshot.objects.filter(o=>o.id!==id)});
     this.publish({ready:this.snapshot.ready?.filter(o=>o!==object),outcomes:[...this.snapshot.outcomes,'小物は配置できなかった。表示済みの対象は維持した。'].slice(-8)});
     this.status(object.eventId??id,code,this.snapshot.generation);
     this.deps.diagnostic?.(code,object.eventId??id,0);
@@ -89,7 +90,7 @@ export class VisualSession {
         await this.deps.prepare(asset,job.controller!.signal,job);
         if(!this.current(job,generation)){this.deps.release?.(asset);return;}
         const old=job.intent.type==='background'?this.snapshot.background:this.snapshot.objects.find(o=>o.id===job.target);
-        const object:VisualObject={id:job.target,eventId:job.id,asset,at:this.deps.now(),visible:false,effects:[...new Set([...(old?.effects??[]),...job.intent.modifiers.filter(m=>VISUAL_EFFECTS.includes(m as VisualEffect)) as VisualEffect[]])]};
+        const object:VisualObject={id:job.target,eventId:job.id,asset,layoutAspect:old?.layoutAspect??(asset.width&&asset.height?asset.width/asset.height:1),at:old?.at??this.deps.now(),visible:false,effects:[...new Set([...(old?.effects??[]),...job.intent.modifiers.filter(m=>VISUAL_EFFECTS.includes(m as VisualEffect)) as VisualEffect[]])]};
         this.publish({ready:[...(this.snapshot.ready??[]).filter(o=>o.id!==object.id),object]});
         this.deps.diagnostic?.('asset_prepared',job.id,this.deps.now()-job.at);
       }).catch(error=>{if(this.current(job,generation)){this.status(job.id,error instanceof Error?error.message:'failed',generation);this.publish({outcomes:[...this.snapshot.outcomes,'今回の生成は失敗した。以前から表示中の対象はそのまま残っている。'].slice(-8)});this.deps.diagnostic?.(error instanceof Error&&/^[\w-]+$/.test(error.message)?error.message:'failed',job.id,this.deps.now()-job.at);}})
@@ -99,7 +100,7 @@ export class VisualSession {
   visible(id:string,assetId?:string){
     const object=this.snapshot.ready?.find(o=>o.id===id)??(id==='background'?this.snapshot.background:this.snapshot.objects.find(o=>o.id===id));
     if(!object||object.visible||(assetId&&object.asset.id!==assetId))return;
-    const updated={...object,at:this.deps.now(),visible:true};
+    const updated={...object,visible:true,at:this.snapshot.objects.find(o=>o.id===id)?.at??this.deps.now()};
     const ready=this.snapshot.ready?.filter(o=>o!==object);
     if(id==='background'){if(this.snapshot.background)this.deps.release?.(this.snapshot.background.asset);this.publish({background:updated,ready});}
     else {const objects=[...this.snapshot.objects.filter(o=>o.id!==id),updated].slice(-3);for(const old of this.snapshot.objects)if(!objects.includes(old))this.deps.release?.(old.asset);this.publish({objects,ready});}

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 const dir='node_modules/.tmp/visual';await mkdir(dir,{recursive:true});
-const result=await build({stdin:{contents:'export * from "./src/manifestation/media"; export * from "./src/manifestation/videoPlayback"; export * from "./src/visual/diagnostics"; export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/decision"; export * from "./src/visual/notice"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
+const result=await build({stdin:{contents:'export * from "./src/visual/placement"; export * from "./src/manifestation/media"; export * from "./src/manifestation/videoPlayback"; export * from "./src/visual/diagnostics"; export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/decision"; export * from "./src/visual/notice"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
 await writeFile(dir+'/test.mjs',result.outputFiles[0].text);
 const {Ledger,initialState,readVisualIntent,cacheDecision,assetDescriptionKey,permitsVideo,VisualSession,sharedVisual,inspectVisualPng}=await import('../'+dir+'/test.mjs');
 const intent={type:'prop',action:'add',concept:'chicken',modifiers:[],targetId:'target',motion:'',motionEvidence:'',sharing:'general',regenerate:false};
@@ -180,10 +180,10 @@ test('Worker creates opaque video source without losing original dimensions',asy
  assert.deepEqual(await inspectVisualPng(result.bytes,false),{width:original.width,height:original.height});assert.ok(['green','blue'].includes(result.keyColor));
 });
 test('image to video replacement waits for visibility and failed playback preserves image',async()=>{
- let accept,finish;const notices=[];const s=new VisualSession({now:()=>100,prepare:async()=>{},notice:(id)=>notices.push(id),generate:async(j,signal,a)=>{accept=a;await new Promise(r=>finish=r);}});s.permission(true,1);s.dispatch('motion',intent,'t',1);
- await accept({...asset,id:'base'});s.visible('target','base');await accept({...asset,id:'video',kind:'video'});assert.equal(s.getSnapshot().objects[0].asset.id,'base');
+ let accept,finish;let clock=100;const notices=[];const s=new VisualSession({now:()=>clock,prepare:async()=>{},notice:(id)=>notices.push(id),generate:async(j,signal,a)=>{accept=a;await new Promise(r=>finish=r);}});s.permission(true,1);s.dispatch('motion',intent,'t',1);
+ await accept({...asset,id:'base',width:400,height:800});s.visible('target','base');clock=500;await accept({...asset,id:'video',kind:'video'});assert.equal(s.getSnapshot().objects[0].asset.id,'base');
  s.placementFailed('target','video','video_decode_failed');assert.equal(s.getSnapshot().objects[0].asset.id,'base');
- await accept({...asset,id:'video2',kind:'video'});s.visible('target','video2');s.visible('target','video2');assert.deepEqual(notices,['motion','motion:video']);finish();await flush();
+ await accept({...asset,id:'video2',kind:'video'});s.visible('target','video2');s.visible('target','video2');assert.equal(s.getSnapshot().objects[0].at,100);assert.equal(s.getSnapshot().objects[0].layoutAspect,.5);assert.deepEqual(notices,['motion','motion:video']);finish();await flush();
 });
 
 
@@ -291,4 +291,17 @@ test('video is delivered before asynchronous R2 persistence',async()=>{
  const events=(await response.text()).trim().split('\n').map(JSON.parse);assert.deepEqual(events.map(e=>e.asset?.kind),['image','video'],JSON.stringify(events));
  assert.ok(events.every(e=>e.asset.concept==='robot'));assert.match(videoInput.prompt,/robot/);assert.doesNotMatch(videoInput.prompt,/chicken/);assert.ok(events[1].asset.source);assert.equal(l.report().manifestation.reservedUsd,.185);assert.equal(background.length,1);await Promise.all(background);
  }finally{globalThis.fetch=previous}
+});
+
+const {placeVisualProp}=await import('../'+dir+'/test.mjs');
+test('chest layout uses body center, protects face and controls, caps landscape and giant',()=>{
+ const layout={width:400,height:850,body:{x:.1,y:.15,width:.8,height:.8},face:{x:.3,y:.12,width:.4,height:.32},obstacles:[{x:0,y:.9,width:1,height:.1}]};
+ const chest=placeVisualProp(layout,true,1,1);assert.ok(chest);assert.equal(chest.width,.55);assert.ok(Math.abs(chest.x+chest.width/2-.5)<.001);assert.ok(chest.y>=.44);assert.ok(chest.y+chest.height<=.9);
+ const giant=placeVisualProp(layout,true,1.4,1);assert.ok(giant.width<=.55);
+ const shifted=placeVisualProp({...layout,body:{...layout.body,x:.2,width:.6}},true,1,1);assert.ok(Math.abs(shifted.x+shifted.width/2-.5)<.001);
+ const landscape=placeVisualProp({...layout,width:850,height:400,body:{x:.4,y:.1,width:.2,height:.8},face:{x:.45,y:.05,width:.1,height:.2}},true,1,1);assert.ok(landscape);assert.ok(landscape.width<=.19);
+ for(const aspect of [.5,2]){const p=placeVisualProp(layout,true,1,aspect);assert.ok(p);assert.ok(Math.abs(p.width*400/(p.height*850)-aspect)<.001);}
+ const second=placeVisualProp(layout,false,1,1,[chest]);assert.ok(second);assert.ok(second.width<=.275);
+ const third=placeVisualProp(layout,false,1,1,[chest,second]);assert.ok(third);
+ assert.equal(placeVisualProp({...layout,obstacles:[{x:0,y:0,width:1,height:1}]},true,1,1),null);
 });

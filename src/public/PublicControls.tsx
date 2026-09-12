@@ -12,7 +12,8 @@ import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicEx
 import ExhibitionControls from './ExhibitionControls';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ generation, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+export default function PublicControls({ visualObjectPresent = false, generation, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+  visualObjectPresent?: boolean;
   generation?: { enabled: boolean; busy: boolean; message: string; toggle: () => Promise<void> };
   settingsLayout: SettingsLayout;
   onSettingsOpenChange: (open: boolean) => void;
@@ -162,12 +163,12 @@ export default function PublicControls({ generation, settingsLayout, onSettingsO
       <button onClick={() => { cancelRequest(); window.dispatchEvent(new Event('vayria-exhibition-next')); }}>体験を終える</button>
       {(!exhibition.available || status?.stopped || status?.enabled === false) && <span className="public-exhibition-paused" role="status">展示を休止しています。設定を確認してください。</span>}
     </div>}
-    {!noticeOpen && !cardsOpen && !textOpen && !expanded && <div className="public-entry" aria-label="Vayriaとの会話を始める">
+    {!noticeOpen && !cardsOpen && !textOpen && !expanded && (!greetingComplete || !visualObjectPresent) && <div className="public-entry" aria-label="Vayriaとの会話を始める">
       {!greetingComplete ? <>
         <p className="public-entry__title">Vayriaに、ひとこと。</p>
         <button className="public-entry__greeting" disabled={greetingBusy} onClick={onGreeting}>{greetingBusy ? '返答を待っています…' : '挨拶してみる'}</button>
         <p>{isMuted ? '字幕で返事します' : '声と字幕で返事します'}</p>
-      </> : <p className="public-entry__continue">文字・マイク・カードから続けられます</p>}
+      </> : !visualObjectPresent && <p className="public-entry__continue">文字・マイク・カードから続けられます</p>}
     </div>}
     {noticeOpen && <section className="public-entry public-entry--notice" aria-label="会話の接続と案内">
       <p role="status">{message}</p>
