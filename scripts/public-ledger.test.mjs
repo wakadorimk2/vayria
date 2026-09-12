@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import ts from 'typescript';
+import { build } from 'esbuild';
 await mkdir('node_modules/.tmp/public-tests', { recursive: true });
-for (const name of ['diagnostics', 'ledger', 'security']) {
+await build({ entryPoints: ['worker/ledger.ts'], bundle: true, format: 'esm', platform: 'node', outfile: 'node_modules/.tmp/public-tests/ledger.mjs' });
+for (const name of ['diagnostics', 'security']) {
   const source = (await readFile(`worker/${name}.ts`, 'utf8')).replace("'./ledger'", "'./ledger.mjs'").replace("'./diagnostics'", "'./diagnostics.mjs'");
   await writeFile(`node_modules/.tmp/public-tests/${name}.mjs`, ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.ESNext } }).outputText);
 }

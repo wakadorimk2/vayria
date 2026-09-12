@@ -1,0 +1,68 @@
+{
+  "environment": "production",
+  "capturedAt": "2026-09-11T01:35:02.402Z",
+  "before": {
+    "limits": {
+      "visitorDay": 2,
+      "visitorMonth": 10,
+      "ipMinute": 10,
+      "ipHour": 30,
+      "ipDay": 100,
+      "sessionSeconds": 180,
+      "user": 6,
+      "autonomous": 2,
+      "card": 2,
+      "transcribe": 8,
+      "audioSeconds": 120,
+      "tts": 20,
+      "ttsChars": 600,
+      "concurrency": 5,
+      "dayBudget": 70000000,
+      "monthBudget": 3500000000,
+      "usdJpy": 150,
+      "infrastructureYen": 1000,
+      "warningYen": 2000,
+      "targetYen": 3000
+    },
+    "stopped": false,
+    "dayYen": 0,
+    "monthApiYen": 3.498709,
+    "activeJobs": 0
+  },
+  "patch": {
+    "sessionSeconds": 300,
+    "visitorDay": 5,
+    "visitorMonth": 155,
+    "dayBudget": 200000000,
+    "monthBudget": 3500000000
+  },
+  "after": {
+    "limits": {
+      "visitorDay": 5,
+      "visitorMonth": 155,
+      "ipMinute": 10,
+      "ipHour": 30,
+      "ipDay": 100,
+      "sessionSeconds": 300,
+      "user": 6,
+      "autonomous": 2,
+      "card": 2,
+      "transcribe": 8,
+      "audioSeconds": 120,
+      "tts": 20,
+      "ttsChars": 600,
+      "concurrency": 5,
+      "dayBudget": 200000000,
+      "monthBudget": 3500000000,
+      "usdJpy": 150,
+      "infrastructureYen": 1000,
+      "warningYen": 2000,
+      "targetYen": 3000
+    },
+    "stopped": false,
+    "dayYen": 0,
+    "monthApiYen": 3.498709,
+    "activeJobs": 0
+  },
+  "verifiedAt": "2026-09-11T01:35:02.493Z"
+}

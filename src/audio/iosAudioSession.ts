@@ -11,6 +11,7 @@ export function isIosDevice(device: Pick<Navigator, 'userAgent' | 'platform' | '
 export class IosAudioSession {
   private capture: MicrophoneCapture | null = null;
   private holds = new Set<symbol>();
+  private recordingHolds = new Set<symbol>();
   private ready: Promise<void> = Promise.resolve();
   private cycle = 0;
   constructor(private readonly setType: (type: 'playback' | 'play-and-record') => void) {}
@@ -23,7 +24,17 @@ export class IosAudioSession {
   }
 
   recording(): void { if (!this.playbackHeld) this.setType('play-and-record'); }
-  playback(): void { this.setType('playback'); }
+  playback(): void { if (!this.recordingHolds.size) this.setType('playback'); }
+
+  // Full-duplex conversations must remain record-capable across remote playback.
+  holdRecording(): () => void {
+    const token = Symbol();
+    this.recordingHolds.add(token);
+    this.setType('play-and-record');
+    return () => {
+      if (this.recordingHolds.delete(token) && !this.recordingHolds.size) this.playback();
+    };
+  }
 
   holdPlayback(): { ready: Promise<void>; release: () => void } {
     const token = Symbol();

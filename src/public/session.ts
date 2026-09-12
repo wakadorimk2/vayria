@@ -2,7 +2,7 @@ import { publicUrl } from './paths';
 import { publicErrorMessage } from './errors';
 import { runtimeConfig } from '../runtimeConfig';
 export type PublicStatus = { session: { id: string; expires: number } | null; remainingDay: number; remainingMonth: number;
-  enabled?: boolean; siteKey?: string; cookieReady?: boolean; stopped?: boolean; exhibition?: ExhibitionStatus | null };
+  enabled?: boolean; siteKey?: string; cookieReady?: boolean; stopped?: boolean; liveAvailable?: boolean; exhibition?: ExhibitionStatus | null };
 export type ExhibitionStatus = { id: string; starts: number; expires: number; epoch: number; budgetYen: number; usedYen: number;
   available: boolean; revoked: boolean; stopped: boolean; warning: '50' | '80' | null };
 let exhibition: ExhibitionStatus | null = null;

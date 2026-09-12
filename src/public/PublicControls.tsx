@@ -5,14 +5,16 @@ import { VoiceInputNotification } from './VoiceInputNotification';
 import type { VoiceInputNotice } from '../voice/voiceInput';
 import type { ThemePreference, ResolvedTheme } from './theme';
 import PublicSettingsPanel from './PublicSettingsPanel';
-import { microphoneStateLabels, normalizeMicrophoneLevel, type MicrophoneState } from './microphoneState';
-import type { CSSProperties } from 'react';
+import { microphoneStateLabels, type MicrophoneState } from './microphoneState';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicExhibition, publicSessionId, registerPublicSessionRequest, subscribePublic, updatePublicStatus, type PublicStatus } from './session';
 import ExhibitionControls from './ExhibitionControls';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+export default function PublicControls({ liveSelected = false, voiceEngineSwitching = false, onVoiceEngineChange, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneNotice, onMicrophoneToggle }: {
+  liveSelected?: boolean;
+  voiceEngineSwitching?: boolean;
+  onVoiceEngineChange?: (selected: boolean) => void;
   settingsLayout: SettingsLayout;
   onSettingsOpenChange: (open: boolean) => void;
   cardsOpen: boolean;
@@ -28,7 +30,6 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
   onMuteToggle: () => void;
   microphoneOn: boolean;
   microphoneState: MicrophoneState;
-  microphoneLevel: number | null;
   microphoneNotice?: VoiceInputNotice;
   onMicrophoneToggle: () => void;
 }) {
@@ -45,7 +46,6 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
   const microphoneLabel = microphoneStateLabels[microphoneState];
   const microphoneAction = microphoneOn ? 'マイクを止める' : 'マイクで話す';
   const microphonePending = microphoneState === 'starting' || microphoneState === 'stopping';
-  const level = normalizeMicrophoneLevel(microphoneLevel);
   const request = useRef<{ promise: Promise<boolean>; resolve: (value: boolean) => void } | null>(null);
   const startAbort = useRef<AbortController | null>(null);
   const finishRequest = useCallback((success: boolean) => { request.current?.resolve(success); request.current = null; setRequested(false); }, []);
@@ -165,7 +165,7 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
         <p className="public-entry__title">Vayriaに、ひとこと。</p>
         <button className="public-entry__greeting" disabled={greetingBusy} onClick={onGreeting}>{greetingBusy ? '返答を待っています…' : '挨拶してみる'}</button>
         <p>{isMuted ? '字幕で返事します' : '声と字幕で返事します'}</p>
-      </> : <p className="public-entry__continue">文字・マイク・カードから続けられます</p>}
+      </> : <p className="public-entry__continue">{liveSelected ? 'GPT-Live：マイクで話しながら、カードを替えられます' : '文字・マイク・カードから続けられます'}</p>}
     </div>}
     {noticeOpen && <section className="public-entry public-entry--notice" aria-label="会話の接続と案内">
       <p role="status">{message}</p>
@@ -177,14 +177,13 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
       <button className="public-controls__cards" aria-label="カードで遊ぶ" title="カードで遊ぶ" aria-expanded={cardsOpen} aria-controls="public-card-panel" onClick={() => { setExpanded(false); if (!expanded || !cardsOpen) onCardsToggle(); }}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="3" width="13" height="18" rx="2" /><path d="m4 6-2 1 3 14M13.5 8l3 4-3 4-3-4Z" /></svg>
       </button>
-      <button className="public-controls__text" aria-expanded={textOpen} aria-controls="public-text-panel" aria-label="文字で話す" title="文字で話す" onClick={() => { setExpanded(false); window.dispatchEvent(new Event('vayria-public-prepare')); if (!expanded || !textOpen) window.dispatchEvent(new Event('vayria-public-text-input')); }}>
+      <button className="public-controls__text" disabled={liveSelected || voiceEngineSwitching} aria-expanded={textOpen} aria-controls="public-text-panel" aria-label="文字で話す" title="文字で話す" onClick={() => { setExpanded(false); window.dispatchEvent(new Event('vayria-public-prepare')); if (!expanded || !textOpen) window.dispatchEvent(new Event('vayria-public-text-input')); }}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z" /><path d="M7 9h10M7 13h6" /></svg>
       </button>
-      <button className="public-controls__microphone" data-state={microphoneState} aria-label={`${microphoneAction}。${microphoneLabel || 'オフ'}`} title={`${microphoneAction}。${microphoneLabel || 'オフ'}`} aria-pressed={microphoneOn} disabled={microphonePending} onClick={onMicrophoneToggle}>
+      <button className="public-controls__microphone" data-state={microphoneState} aria-label={`${microphoneAction}。${microphoneLabel || 'オフ'}`} title={`${microphoneAction}。${microphoneLabel || 'オフ'}`} aria-pressed={microphoneOn} disabled={voiceEngineSwitching || (microphonePending && (!liveSelected || microphoneState === 'stopping'))} onClick={onMicrophoneToggle}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="12" rx="3" fill={microphoneOn ? 'currentColor' : 'none'} /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />{microphoneState === 'off' && <path d="m3 3 18 18" />}</svg>
         {(microphonePending || microphoneState === 'recognizing') && <span className="public-controls__progress" aria-hidden="true" />}
         {microphoneState === 'error' && <span className="public-controls__error" aria-hidden="true">!</span>}
-        {microphoneState === 'speaking' && <span className="public-controls__level" aria-hidden="true" style={{ '--input-level': level ?? .5 } as CSSProperties}><i /><i /><i /></span>}
       </button>
       <button aria-label={isMuted ? '音声をオンにする' : '音声をミュートする'} title={isMuted ? '音声をオンにする' : '音声をミュートする'} aria-pressed={isMuted} onClick={onMuteToggle}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 4 6 8H3v8h3l5 4Z" />{isMuted ? <path d="m16 9 5 6m0-6-5 6" /> : <><path d="M15 8a6 6 0 0 1 0 8M18 4a11 11 0 0 1 0 16" /></>}</svg>
@@ -195,6 +194,13 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
       </button>
     </div>
     <PublicSettingsPanel layout={settingsLayout} open={expanded} onClose={closeSettings}>
+    {status?.liveAvailable && !exhibition && <fieldset className="public-live-engine" disabled={voiceEngineSwitching}>
+      <legend>音声会話（staging検証）</legend>
+      <label><input type="radio" name="voice-engine" checked={!liveSelected} onChange={() => onVoiceEngineChange?.(false)} />既存方式</label>
+      <label><input type="radio" name="voice-engine" checked={liveSelected} onChange={() => onVoiceEngineChange?.(true)} />GPT-Live</label>
+      <p>{voiceEngineSwitching ? '音声を停止しています…' : liveSelected ? 'GPT-Liveの声を使います。マイクから会話を開始できます。文字入力と自律発話は休止します。' : '現在の音声認識と音声合成を使います。'}</p>
+      <p>方式を替えると会話履歴を消去します。カード配置は保持します。</p>
+    </fieldset>}
     <fieldset className="public-theme" data-resolved-theme={resolvedTheme}><legend>テーマ</legend>
       {(['auto', 'light', 'dark'] as const).map((value, index) => <label key={value} title={['自動（端末の設定に合わせる）', 'ライト', 'ダーク'][index]}>
         <input className="visually-hidden" aria-label={['自動', 'ライト', 'ダーク'][index]} type="radio" name="public-theme" value={value} checked={themePreference === value} onChange={() => onThemeChange(value)} />
@@ -208,12 +214,12 @@ export default function PublicControls({ settingsLayout, onSettingsOpenChange, c
     {active && !status?.exhibition && <button onClick={() => void end()}>会話を終了</button>}
     <ExhibitionControls exhibition={status?.exhibition} />
     {statusStale && <p role="status">利用状況を更新できていません。表示は最後に確認できた値です。</p>}
-    {microphoneOn && <>
+    {microphoneOn && !liveSelected && <>
     <h3>音声入力</h3>
     <label><input type="checkbox" checked={manual} onChange={event => { setManual(event.target.checked); window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: event.target.checked, pressed: false } })); }} />押して話す（オフで自動検出）</label>
     {manual && <button disabled={!active} onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: true, pressed: true } })); }} onPointerUp={() => window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: true, pressed: false } }))} onPointerCancel={() => window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: true, pressed: false } }))}>押している間に話す</button>}
     </>}
-    <details><summary>送信先・利用条件</summary>音声認識と文章生成はOpenAI、音声合成はAivis Cloudへ送信します。匿名Cookieを90日間保存し、利用回数を管理します。会話本文と音声はアプリの永続ログへ保存しません。<br />アバター作者: わかどり。このアプリでの表示を許可しています。第三者への再利用許諾ではありません。<br />音声: zonoko / zgock（配布元の表示: CC0）。<a href="https://hub.aivis-project.com/aivm-models/7fc08a41-b64d-456d-8b22-8e1284674775" target="_blank" rel="noreferrer">モデル情報</a></details>
+    <details><summary>送信先・利用条件</summary>{liveSelected ? 'GPT-Liveでは音声とカード配置をOpenAIへ送信します。' : '音声認識と文章生成はOpenAI、音声合成はAivis Cloudへ送信します。'}匿名Cookieを90日間保存し、利用回数を管理します。会話本文と音声はアプリの永続ログへ保存しません。<br />アバター作者: わかどり。このアプリでの表示を許可しています。第三者への再利用許諾ではありません。<br />{liveSelected ? '音声: OpenAI marin（AI生成音声）。' : <>音声: zonoko / zgock（配布元の表示: CC0）。<a href="https://hub.aivis-project.com/aivm-models/7fc08a41-b64d-456d-8b22-8e1284674775" target="_blank" rel="noreferrer">モデル情報</a></>}</details>
     </PublicSettingsPanel>
   </aside>;
 }

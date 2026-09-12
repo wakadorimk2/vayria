@@ -1070,13 +1070,14 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         camera.clearViewOffset();
         if (horizontalOffsetRef.current > 0) camera.setViewOffset(width, height, horizontalOffsetRef.current, 0, width, height);
       };
-      updateViewRef.current = updateView;
       const publishBounds = () => {
         if (!screenBoundsCallbackRef.current) return;
         camera.clearViewOffset();
-        screenBoundsCallbackRef.current(projectAvatarBounds(basePosePoints, camera, container.clientWidth));
+        const bounds = projectAvatarBounds(basePosePoints, camera, container.clientWidth);
         updateView();
+        screenBoundsCallbackRef.current(bounds);
       };
+      updateViewRef.current = publishBounds;
       const resize = () => {
         stageRect = readStageRect(container);
         const width = Math.max(container.clientWidth, 1);
@@ -1098,6 +1099,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
       const resizeObserver = new ResizeObserver(resizeWithBounds);
       const handleWindowScroll = () => {
         stageRect = readStageRect(container);
+        publishBounds();
       };
       window.addEventListener('scroll', handleWindowScroll, true);
       resizeObserver.observe(container);

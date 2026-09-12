@@ -52,6 +52,7 @@ export interface CardDragPositionUpdate {
 }
 
 interface CardGamePrototypeProps {
+  expectsCardReply?: boolean;
   publicMicrophoneState?: MicrophoneState;
   game: CardGamePrototypeController;
   feedbackMessage?: string;
@@ -229,6 +230,7 @@ function resolveDragDropPreview(
 }
 
 export function CardGamePrototype({
+  expectsCardReply = true,
   publicMicrophoneState = 'off',
   game,
   feedbackMessage,
@@ -598,7 +600,7 @@ export function CardGamePrototype({
       const isSupporting =
         zone === 'brain' && zones.activatedCardIds[1] === card.id;
       const isPendingInsertion =
-        zone === 'brain' && zones.forcedCardId === card.id;
+        expectsCardReply && zone === 'brain' && zones.forcedCardId === card.id;
       const isDropTarget =
         zone === 'brain' &&
         dragState?.isDragging === true &&

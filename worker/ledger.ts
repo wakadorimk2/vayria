@@ -1,4 +1,5 @@
 import { distribution, sanitizeMeasurements, safeMetricCode, timingFields, type Measurements } from './diagnostics';
+import { LIVE_CLOSE_TIMEOUT_MS, LIVE_LEASE_MS, LIVE_MAX_SECONDS, liveCostMicroYen } from '../src/live/liveProtocol';
 // All monetary values are integer micro-yen. No conversation content belongs here.
 export const DEFAULT_LIMITS = {
   visitorDay: 2, visitorMonth: 10, ipMinute: 10, ipHour: 30, ipDay: 100,
@@ -20,7 +21,15 @@ export type Session = {
 };
 type Job = { session: string; kind: Kind; expires: number };
 type Charge = { amount: number; day: string; month: string; settled: boolean; expires: number; exhibition?: string };
+export type LiveSessionRecord = {
+  visitor: string; session: string; requestId: string; charge: string; created: number; expires: number;
+  heartbeatExpires: number; usdJpy: number; reserved: number; seconds: number; providerId?: string;
+  phase: 'opening' | 'running' | 'closing' | 'closed' | 'unconfirmed'; closingAt?: number;
+  reason?: string; confirmedRevision?: number; failureCode?: string; closeAttempts?: number; retryCloseAt?: number;
+};
 export type LedgerState = {
+  liveSessions?: Record<string, LiveSessionRecord>;
+  liveHistory?: LiveSessionRecord[];
   limits: Limits; stopped: boolean; sessions: Record<string, Session>; counters: Record<string, Counter>;
   jobs: Record<string, Job>; charges: Record<string, Charge>; usedTickets: Record<string, number>;
   exhibitions?: Record<string, Exhibition>;
@@ -62,6 +71,11 @@ export class Ledger {
     }
   }
   cleanup() {
+    this.state.liveSessions ??= {};
+    this.state.liveHistory = (this.state.liveHistory ?? []).filter(r => r.expires + 86400_000 > this.now).slice(-2000);
+    for (const [id, live] of Object.entries(this.state.liveSessions)) {
+      if (live.expires + 86400_000 <= this.now) delete this.state.liveSessions[id];
+    }
     this.state.exhibitions ??= {};
     this.state.exhibitionDevices ??= {};
     this.state.exhibitionCodes ??= {};
@@ -154,6 +168,9 @@ export class Ledger {
   }
   nextAlarm() {
     const times = [this.now + 3600_000,
+      ...Object.values(this.state.liveSessions ?? {}).flatMap(r => r.retryCloseAt ? [r.retryCloseAt] : []),
+      ...Object.values(this.state.liveSessions ?? {}).filter(r => r.phase !== 'closed' && r.phase !== 'unconfirmed')
+        .map(r => r.phase === 'closing' ? r.closingAt! + LIVE_CLOSE_TIMEOUT_MS : Math.min(r.expires, r.heartbeatExpires)),
       ...Object.values(this.state.sessions).map(s => s.ended ? (s.closedAt ?? s.expires) + 86400_000 : s.expires),
       ...Object.values(this.state.counters).map(c => c.expires),
       ...Object.values(this.state.jobs).map(j => j.expires),
@@ -212,6 +229,7 @@ export class Ledger {
   }
   begin(visitor: string, id: string, kind: Kind, jobId: string, amount = 0, ticket = '') {
     const s = this.session(visitor, id); const l = this.state.limits;
+    if (this.state.liveSessions?.[id] && this.state.liveSessions[id].phase !== 'closed') throw new LimitError('live_active', 0, 409);
     if (this.state.stopped) throw new LimitError('generation_stopped', 0, 503);
     if (!['user', 'autonomous', 'card', 'transcribe', 'tts'].includes(kind)) throw new LimitError('invalid_request', 0, 400);
     if (!Number.isFinite(amount) || amount < 0) throw new LimitError('invalid_request', 0, 400);
@@ -219,7 +237,8 @@ export class Ledger {
     if (!s.exhibition && s.counts[kind] >= l[kind]) throw new LimitError(`${kind}_limit`, s.expires);
     if (!s.exhibition && kind === 'transcribe' && s.counts.user >= l.user) throw new LimitError('user_limit', s.expires);
     const jobs = Object.values(this.state.jobs);
-    const occupied = new Set(jobs.map(j => j.session));
+    const occupied = new Set([...jobs.map(j => j.session), ...Object.values(this.state.liveSessions ?? {})
+      .filter(r => r.phase !== 'closed' && r.phase !== 'unconfirmed').map(r => r.session)]);
     if (!occupied.has(id) && occupied.size >= l.concurrency) throw new LimitError('busy', this.now + 5000);
     // TTS units may overlap with their generating chat, but not with another TTS unit.
     if (jobs.some(j => j.session === id && (kind === 'tts' ? j.kind === 'tts' : j.kind !== 'tts'))) throw new LimitError('busy', this.now + 1000);
@@ -291,6 +310,9 @@ export class Ledger {
     const p = periods(this.now); const l = this.state.limits;
     const estimatedYen = this.count(`bm:${p.month}`) / 1e6 + l.infrastructureYen;
     return { limits: l, stopped: this.state.stopped, dayYen: this.count(`bd:${p.day}`) / 1e6,
+      liveSessions: [...(this.state.liveHistory ?? []), ...Object.values(this.state.liveSessions ?? {})].map(r => ({ requestId: r.requestId, phase: r.phase,
+        seconds: r.seconds, reservedYen: r.reserved / 1e6, confirmedYen: r.phase === 'closed' ? liveCostMicroYen(r.seconds, r.usdJpy) / 1e6 : null,
+        reason: r.reason, failureCode: r.failureCode, confirmedRevision: r.confirmedRevision, created: r.created, expires: r.expires })),
       exhibitions: Object.values(this.state.exhibitions!), exhibitionDevices: this.state.exhibitionDevices,
       monthApiYen: this.count(`bm:${p.month}`) / 1e6, estimatedYen,
       warning: estimatedYen >= l.targetYen ? 'target_exceeded' : estimatedYen >= l.warningYen ? 'warning' : null,
@@ -322,5 +344,57 @@ export class Ledger {
     Object.assign(this.state.limits, patch);
     if (stopped !== undefined) this.state.stopped = stopped;
     return this.report();
+  }
+
+  liveRecord(visitor: string, id: string, requestId: string): LiveSessionRecord {
+    const record = this.state.liveSessions?.[id];
+    if (!record || record.visitor !== visitor || record.requestId !== requestId) throw new LimitError('live_session_required', 0, 409);
+    return record;
+  }
+  liveBegin(visitor: string, id: string, requestId: string) {
+    const s = this.session(visitor, id);
+    if (s.exhibition) throw new LimitError('live_exhibition_unsupported', 0, 403);
+    if (!/^[a-f0-9-]{36}$/.test(requestId)) throw new LimitError('invalid_request', 0, 400);
+    if (this.state.stopped) throw new LimitError('generation_stopped', 0, 503);
+    const current = this.state.liveSessions![id];
+    if (current && (current.phase !== 'closed' || current.requestId === requestId)) throw new LimitError('live_active', 0, 409);
+    const active = Object.values(this.state.liveSessions!).filter(r => r.phase !== 'closed' && r.phase !== 'unconfirmed');
+    if (Object.values(this.state.jobs).some(j => j.session === id)) throw new LimitError('busy', this.now + 1000);
+    if (new Set([...active.map(r => r.session), ...Object.values(this.state.jobs).map(j => j.session)]).size >= this.state.limits.concurrency) throw new LimitError('busy', this.now + 5000);
+    const expires = Math.min(s.expires, this.now + LIVE_MAX_SECONDS * 1000);
+    if (expires - this.now < 15_000) throw new LimitError('session_expired', 0, 401);
+    // Reserve close-drain time too; never refund an unconfirmed provider session.
+    const amount = liveCostMicroYen((expires - this.now + LIVE_CLOSE_TIMEOUT_MS) / 1000, this.state.limits.usdJpy);
+    const charge = `live:${requestId}`;
+    this.state.jobs[charge] = { session: id, kind: 'user', expires };
+    this.reserve(visitor, id, charge, charge, amount);
+    delete this.state.jobs[charge];
+    if (current) this.state.liveHistory!.push({ ...current });
+    const record: LiveSessionRecord = { visitor, session: id, requestId, charge, created: this.now, expires,
+      heartbeatExpires: this.now + LIVE_LEASE_MS, usdJpy: this.state.limits.usdJpy, reserved: amount, seconds: 15, phase: 'opening' };
+    this.state.liveSessions![id] = record;
+    return record;
+  }
+  liveTouch(visitor: string, id: string, requestId: string) {
+    this.session(visitor, id);
+    const r = this.liveRecord(visitor, id, requestId);
+    if (this.state.stopped || r.expires <= this.now || r.heartbeatExpires <= this.now || !['opening', 'running'].includes(r.phase)) throw new LimitError('live_ended', 0, 409);
+    r.heartbeatExpires = Math.min(r.expires, this.now + LIVE_LEASE_MS);
+    return { phase: r.phase, seconds: r.seconds, expires: r.expires, confirmedRevision: r.confirmedRevision, failureCode: r.failureCode };
+  }
+  liveClosing(visitor: string, id: string, requestId: string, reason: string) {
+    const r = this.liveRecord(visitor, id, requestId);
+    if (r.phase === 'opening' || r.phase === 'running') { r.phase = 'closing'; r.closingAt = this.now; r.reason = reason; }
+    return r;
+  }
+  liveFinalize(visitor: string, id: string, requestId: string, seconds: number | null, reason: string) {
+    const r = this.liveRecord(visitor, id, requestId);
+    if (r.phase === 'closed') return;
+    if (seconds !== null && Number.isFinite(seconds) && seconds >= 0) {
+      r.seconds = Math.max(15, seconds); r.phase = 'closed';
+      this.settle(r.charge, liveCostMicroYen(r.seconds, r.usdJpy));
+    } else r.phase = 'unconfirmed';
+    r.reason = reason;
+    delete r.retryCloseAt;
   }
 }
