@@ -279,6 +279,14 @@ test('text-only response is retained without starting playback', async () => {
   assert.deepEqual(f.requests[1].body.history, [{ role: 'user', content: 'こんにちは' }, { role: 'assistant', content: response.text }]);
 });
 
+test('displayed world supersedes a stale per-turn world context after reset', async () => {
+  const f = fixture({ isMuted: true, programContext: { ...DEFAULT_PROGRAM_CONTEXT, worldContext: 'world 3' } });
+  f.runtime.resetConversation();
+  f.runtime.updateOptions({ isMuted: true, programContext: { ...DEFAULT_PROGRAM_CONTEXT, worldContext: 'world 0' } });
+  await f.runtime.sendManual('こんにちは', cards, () => {}, plan('new'), undefined, { ...DEFAULT_PROGRAM_CONTEXT, worldContext: 'world 3' });
+  assert.equal((f.requests[0].body.programContext as { worldContext: string }).worldContext, 'world 0');
+});
+
 test('greeting purpose is separate from visible input and never leaks into the next turn', async () => {
   const f = fixture({ isMuted: true });
   await f.runtime.sendManual('こんにちは', cards, () => {}, plan('greeting'), undefined, undefined, undefined, true);
@@ -593,4 +601,19 @@ test('streaming burst waits for server completion after the current spoken unit'
   assert.deepEqual(latest.body.cardContinuation, { deliveredText: '前半。', acknowledgementDelivered: false });
   f.plays[1].pending.resolve(result); await pending;
   assert.equal(f.runtime.getSnapshot().status, 'idle');
+});
+
+
+test('validated context effects use the same manual and voice response path once per turn', async () => {
+  const effects: { id: string; effect: string }[] = [];
+  const f = fixture({ isMuted: true, onManifestation: (id, effect) => effects.push({ id, effect }) });
+  f.setChat(async () => Response.json({ ...response, manifestation: 'chicken' }));
+  assert.equal(await f.send('context-manual'), true);
+  assert.equal(effects.length, 1); assert.equal(effects[0].effect, 'chicken');
+  assert.equal(await f.runtime.sendVoice('近くに一羽呼んでみよう', cards, () => {}, plan('context-voice')), true);
+  assert.equal(effects.length, 2); assert.notEqual(effects[0].id, effects[1].id);
+  f.setChat(async () => Response.json({ ...response, manifestation: 'unknown-object' }));
+  await f.send('unsupported'); assert.equal(effects.length, 2);
+  f.setChat(async () => Response.json({ ...response, manifestation: 'none' }));
+  await f.send('none'); assert.equal(effects.length, 2);
 });

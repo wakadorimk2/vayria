@@ -1,3 +1,6 @@
+import { readVisualDiagnostic, type VisualDiagnostic } from '../src/visual/diagnostics';
+import type { VisualAsset } from '../src/visual/types';
+import type { InputEvent } from '../src/manifestation/types';
 import { distribution, sanitizeMeasurements, safeMetricCode, timingFields, type Measurements } from './diagnostics';
 // All monetary values are integer micro-yen. No conversation content belongs here.
 export const DEFAULT_LIMITS = {
@@ -5,7 +8,7 @@ export const DEFAULT_LIMITS = {
   sessionSeconds: 180, user: 6, autonomous: 2, card: 2,
   transcribe: 8, audioSeconds: 120, tts: 20, ttsChars: 600, concurrency: 5,
   dayBudget: 70_000_000, monthBudget: 3_500_000_000,
-  usdJpy: 150, infrastructureYen: 1000, warningYen: 2000, targetYen: 3000,
+  manifestationMicrousd: 5000000, usdJpy: 150, infrastructureYen: 1000, warningYen: 2000, targetYen: 3000,
 };
 export type Limits = typeof DEFAULT_LIMITS;
 export type Kind = 'user' | 'autonomous' | 'card' | 'transcribe' | 'tts';
@@ -15,12 +18,20 @@ type ExhibitionDevice = { event: string; epoch: number; revoked: boolean; lastHa
 export type Session = {
   id: string; visitor: string; expires: number; created: number; paid: boolean; ended: boolean;
   day: string; month: string; counts: Record<Kind, number>; audioSeconds: number; ttsChars: number;
+  visualPermission?: { enabled: boolean; generation: number };
   closedAt?: number;
   exhibition?: string; epoch?: number;
 };
 type Job = { session: string; kind: Kind; expires: number };
 type Charge = { amount: number; day: string; month: string; settled: boolean; expires: number; exhibition?: string };
 export type LedgerState = {
+  visualMedia?: Record<string,{url:string;session:string;expires:number}>;
+  visualDiagnostics?: (VisualDiagnostic & { eventId:string; at:number })[];
+  visual?: { cache: Record<string, VisualAsset>; jobs: Record<string, { session: string; generation: number; key: string; target: string; expires: number; finished: boolean }>; claims: Record<string, string> };
+
+  manifestation?: { reservedMicrousd: number; requests: Record<string, number>; events: Record<string, boolean>;
+    jobs: Record<string, { visitor: string; session: string; expires: number; active: boolean; target?: string }>;
+    metrics: { eventId?: string; code: string; timings: Record<string, number> }[] };
   limits: Limits; stopped: boolean; sessions: Record<string, Session>; counters: Record<string, Counter>;
   jobs: Record<string, Job>; charges: Record<string, Charge>; usedTickets: Record<string, number>;
   exhibitions?: Record<string, Exhibition>;
@@ -62,6 +73,19 @@ export class Ledger {
     }
   }
   cleanup() {
+    if (this.state.visual) {
+      const v = this.state.visual;
+      for (const [key, asset] of Object.entries(v.cache)) if (asset.expiresAt <= this.now) delete v.cache[key];
+      for (const [token, job] of Object.entries(v.jobs)) if (job.expires + 86400000 <= this.now) delete v.jobs[token];
+      for (const [key, token] of Object.entries(v.claims)) if (!v.jobs[token] || v.jobs[token].finished || v.jobs[token].expires <= this.now) delete v.claims[key];
+    }
+    const m = this.state.manifestation;
+    if (m) {
+      for (const [key, job] of Object.entries(m.jobs)) if (job.expires <= this.now) delete m.jobs[key];
+      for (const id of Object.keys(m.requests)) if (!this.state.sessions[id] || this.state.sessions[id].expires <= this.now) {
+        delete m.requests[id]; for (const key of Object.keys(m.events)) if (key.startsWith(id + ':')) delete m.events[key];
+      }
+    }
     this.state.exhibitions ??= {};
     this.state.exhibitionDevices ??= {};
     this.state.exhibitionCodes ??= {};
@@ -287,10 +311,167 @@ export class Ledger {
     this.state.metrics!.push({ at: this.now, kind, durationMs: 0, code: safeMetricCode(code), rejected: true });
     this.state.metrics = this.state.metrics!.slice(-2000);
   }
+  private visualState() { return this.state.visual ??= { cache: {}, jobs: {}, claims: {} }; }
+  visualPermission(visitor: string, id: string) {
+    return this.session(visitor, id).visualPermission ?? { enabled: false, generation: 0 };
+  }
+  visualMode(visitor: string, id: string, enabled: boolean, generation: number) {
+    const session = this.session(visitor, id);
+    const previous = session.visualPermission ?? { enabled: false, generation: 0 };
+    if (enabled && previous.generation !== generation) throw new LimitError('stale_permission', 0, 409);
+    session.visualPermission = { enabled, generation: previous.generation + 1 };
+    for (const job of Object.values(this.visualState().jobs)) if (job.session === id) job.finished = true;
+    return session.visualPermission;
+  }
+  private visualAllowed(visitor: string, id: string, generation: number) {
+    const p = this.visualPermission(visitor, id);
+    if (this.state.stopped || !p.enabled || p.generation !== generation) throw new LimitError('visual_disabled', 0, 409);
+    return this.session(visitor, id);
+  }
+  visualLookup(visitor: string, id: string, generation: number, key: string) {
+    this.visualAllowed(visitor, id, generation);
+    const asset = this.visualState().cache[key];
+    return asset && asset.expiresAt > this.now && (asset.scope === 'shared' || asset.scope === id) ? asset : null;
+  }
+  visualLookupAny(visitor:string,id:string,generation:number,keys:string[]){
+    if(!Array.isArray(keys)||keys.length>80)throw new LimitError('invalid_request',0,400);
+    for(const key of keys){const asset=this.visualLookup(visitor,id,generation,key);if(asset)return {key,asset};}return null;
+  }
+  visualReplay(visitor:string,id:string,generation:number,key:string){
+    this.visualAllowed(visitor,id,generation);
+    return Object.values(this.visualState().cache).flatMap(a=>a.source?[a,a.source]:[a]).find(a=>a.id===key&&a.expiresAt>this.now&&(a.scope==='shared'||a.scope===id))??null;
+  }
+  visualStart(visitor: string, id: string, generation: number, token: string, key: string, target: string, duration: number) {
+    const session = this.visualAllowed(visitor, id, generation), v = this.visualState();
+    const existing = v.jobs[token];
+    if (existing) throw new LimitError('duplicate_event', 0, 409);
+    for (const j of Object.values(v.jobs)) if (j.session === id && j.target === target) j.finished = true;
+    const active = Object.values(v.jobs).filter(j => !j.finished && j.expires > this.now);
+    if (active.filter(j => j.session === id).length >= 2 || active.length >= 10) throw new LimitError('busy', 0, 429);
+    const claimed = v.jobs[v.claims[key]];
+    if (claimed && !claimed.finished && claimed.expires > this.now) return { owner: false };
+    v.jobs[token] = { session: id, generation, key, target, expires: Math.min(session.expires, this.now + Math.min(duration, 60000)), finished: false };
+    v.claims[key] = token;
+    return { owner: true };
+  }
+  visualClaim(visitor:string,id:string,generation:number,token:string,key:string){
+    this.visualAllowed(visitor,id,generation);const v=this.visualState(),job=v.jobs[token];
+    if(!job||job.session!==id||job.generation!==generation||job.finished||job.expires<=this.now)throw new LimitError('job_expired',0,409);
+    const owner=v.jobs[v.claims[key]];
+    if(owner&&!owner.finished&&owner.expires>this.now&&v.claims[key]!==token)return {owner:false,token:v.claims[key]};
+    v.claims[key]=token;return {owner:true,token};
+  }
+  visualClaimActive(visitor:string,id:string,generation:number,key:string,token:string){
+    this.visualAllowed(visitor,id,generation);const v=this.visualState(),owner=v.jobs[token];
+    return !!owner&&v.claims[key]===token&&!owner.finished&&owner.expires>this.now;
+  }
+  visualAlias(visitor:string,id:string,generation:number,key:string,fromKey:string){
+    const asset=this.visualLookup(visitor,id,generation,fromKey);if(!asset)return null;
+    this.visualState().cache[key]=asset;return asset;
+  }
+  visualReserve(visitor: string, id: string, generation: number, token: string, step: string, cost: number) {
+    const session = this.visualAllowed(visitor, id, generation), job = this.visualState().jobs[token], m = this.manifestationState();
+    if (!job || job.session !== id || job.generation !== generation || job.finished || job.expires <= this.now) throw new LimitError('job_expired', 0, 409);
+    if (!Number.isSafeInteger(cost) || cost <= 0 || cost > 200000) throw new LimitError('invalid_price', 0, 400);
+    const key = `${id}:visual:${token}:${step}`;
+    if (m.events[key]) throw new LimitError('duplicate_event', 0, 409);
+    if ((m.requests[id] ?? 0) >= 20) throw new LimitError('manifestation_limit', session.expires);
+    if (m.reservedMicrousd + cost > (this.state.limits.manifestationMicrousd ?? 5000000)) throw new LimitError('manifestation_budget', 0);
+    const yen = Math.ceil(cost * this.state.limits.usdJpy); this.checkBudget(yen, session.exhibition);
+    const p = periods(this.now); this.add(`bd:${p.day}`, yen, p.dayEnd + 2 * 86400000); this.add(`bm:${p.month}`, yen, p.monthEnd + 7 * 86400000);
+    if (session.exhibition) this.state.exhibitions![session.exhibition].used += yen;
+    m.reservedMicrousd += cost; m.requests[id] = (m.requests[id] ?? 0) + 1; m.events[key] = true; session.paid = true;
+  }
+  visualPublish(visitor: string, id: string, generation: number, token: string, asset: VisualAsset, key?: string) {
+    this.visualAllowed(visitor, id, generation);
+    const v = this.visualState(), job = v.jobs[token];
+    if (!job || job.session !== id || job.finished || job.expires <= this.now) throw new LimitError('job_expired', 0, 409);
+    v.cache[key ?? job.key] = asset;
+  }
+  visualFinish(visitor: string, id: string, token: string, code: string, timings: Record<string, number>, eventId = token) {
+    this.session(visitor, id); const v = this.visualState(), job = v.jobs[token];
+    if (job?.session === id) { job.finished = true; if (v.claims[job.key] === token) delete v.claims[job.key]; }
+    const m = this.manifestationState();
+    m.metrics.push({ eventId: /^[\w-]{1,80}$/.test(eventId) ? eventId : undefined, code: /^[\w-]{1,60}$/.test(code) ? code : 'visual_failed', timings: Object.fromEntries(Object.entries(timings ?? {}).filter(([k,n]) => /^[\w.]{1,60}$/.test(k) && Number.isFinite(n) && n >= 0).slice(0, 30)) });
+    m.metrics = m.metrics.slice(-100);
+  }
+  visualMediaRegister(visitor:string,id:string,generation:number,assetId:string,url:string) {
+    this.visualAllowed(visitor,id,generation);
+    const u=new URL(url);if(u.protocol!=='https:'||!(u.hostname==='fal.media'||u.hostname.endsWith('.fal.media'))||u.username||u.password||u.port)throw new LimitError('invalid_media',0,400);
+    const refs=this.state.visualMedia??={};for(const [k,v] of Object.entries(refs))if(v.expires<=this.now)delete refs[k];
+    refs[assetId]={url,session:id,expires:this.now+900000};return {registered:true};
+  }
+  visualMediaSaved(visitor:string,id:string,key:string,success:boolean,timings:Record<string,number>={},eventId=key){
+    this.session(visitor,id);
+    const ref=this.state.visualMedia?.[key];if(!ref||ref.session!==id)throw new LimitError('invalid_media',0,403);
+    for(const asset of Object.values(this.visualState().cache))if(asset.id===key){
+      if(success)asset.expiresAt=asset.createdAt+(asset.scope==='shared'?30:1)*86400000;
+      // On failure the short-lived relay remains usable until its reference expires.
+    }
+    this.manifestationState().metrics.push({eventId,code:success?'media_saved':'media_save_failed',timings:Object.fromEntries(Object.entries(timings).filter(([k,n])=>/^[a-zA-Z.]+$/.test(k)&&Number.isFinite(n)&&n>=0))});
+    this.manifestationState().metrics=this.manifestationState().metrics.slice(-100);
+    return {saved:success};
+  }
+  visualMediaLookup(visitor:string,id:string,assetId:string){
+    this.session(visitor,id);const ref=this.state.visualMedia?.[assetId];return ref&&ref.expires>this.now&&ref.session===id?ref:null;
+  }
+  visualDiagnostic(visitor:string,id:string,generation:number,eventId:string,values:unknown[]) {
+    this.visualAllowed(visitor,id,generation);
+    if(!/^[\w-]{1,80}$/.test(eventId)||!Array.isArray(values)||!values.length||values.length>24)throw new LimitError('invalid_diagnostic',0,400);
+    const records=values.map(readVisualDiagnostic);if(records.some(v=>!v))throw new LimitError('invalid_diagnostic',0,400);
+    this.limit('visual-diagnostic:'+id,120,'diagnostic_limit',this.now+60000);
+    this.add('visual-diagnostic:'+id,1,this.now+600000);
+    const history=(this.state.visualDiagnostics??[]).filter(r=>r.at>this.now-86400000);
+    for(const record of records)if(record&&!history.some(r=>r.eventId===eventId&&r.stage===record.stage&&r.build===record.build))history.push({...record,eventId,at:this.now});
+    this.state.visualDiagnostics=history.slice(-1000);return {accepted:true};
+  }
+  visualCancel(visitor: string, id: string, generation: number, target: string, token?: string) {
+    this.visualAllowed(visitor, id, generation);
+    for (const [jobToken, job] of Object.entries(this.visualState().jobs)) if ((!token || jobToken === token) && job.session === id && job.target === target) job.finished = true;
+  }
+  private manifestationState() {
+    return this.state.manifestation ??= { reservedMicrousd: 0, requests: {}, events: {}, jobs: {}, metrics: [] };
+  }
+  manifestationBegin(visitor: string, id: string, event: InputEvent, token: string) {
+    const session = this.session(visitor, id); const state = this.manifestationState();
+    if (this.state.stopped) throw new LimitError('generation_stopped', 0, 503);
+    const key = `${id}:${event.eventId}`;
+    if (state.events[key]) throw new LimitError('duplicate_event', 0, 409);
+    if ((state.requests[id] ?? 0) >= 20) throw new LimitError('manifestation_limit', session.expires);
+    const active = Object.values(state.jobs).filter(j => j.active && j.expires > this.now);
+    if (active.filter(j => j.session === id).length >= 2 || active.length >= 10) throw new LimitError('busy', this.now + 1000);
+    // Normal 480p price: 5 seconds * $0.025. Never assume a promotional discount.
+    const cost = 125000;
+    if (state.reservedMicrousd + cost > (this.state.limits.manifestationMicrousd ?? 5000000)) throw new LimitError('manifestation_budget', 0);
+    const yen = Math.ceil(cost * this.state.limits.usdJpy); this.checkBudget(yen, session.exhibition);
+    const p = periods(this.now);
+    this.add(`bd:${p.day}`, yen, p.dayEnd + 2 * 86400_000);
+    this.add(`bm:${p.month}`, yen, p.monthEnd + 7 * 86400_000);
+    if (session.exhibition) this.state.exhibitions![session.exhibition].used += yen;
+    state.reservedMicrousd += cost; state.requests[id] = (state.requests[id] ?? 0) + 1;
+    state.events[key] = true; session.paid = true;
+    state.jobs[token] = { visitor, session: id, expires: Math.min(session.expires, this.now + 10000), active: true };
+  }
+  manifestationComplete(visitor: string, id: string, token: string, target: string) {
+    const session = this.session(visitor, id); const job = this.manifestationState().jobs[token];
+    if (!job || job.visitor !== visitor || job.session !== id || !job.active || job.expires <= this.now) throw new LimitError('job_expired', 0, 409);
+    job.target = target; job.expires = Math.min(session.expires, this.now + 600000);
+  }
+  manifestationMedia(visitor: string, token: string) {
+    const job = this.manifestationState().jobs[token];
+    if (!job || job.visitor !== visitor || !job.target || job.expires <= this.now) throw new LimitError('invalid_ticket', 0, 403);
+    this.session(visitor, job.session); return job.target;
+  }
+  manifestationFinish(token: string, code: string, timings: Record<string, number>) {
+    const state = this.manifestationState(); const job = state.jobs[token]; if (!job) return;
+    job.active = false;
+    state.metrics.push({ code: code === 'complete' ? 'complete' : 'provider_failure', timings: Object.fromEntries(Object.entries(timings ?? {}).filter(([k,v]) => /^[a-zA-Z0-9._]{1,60}$/.test(k) && Number.isFinite(v) && v >= 0).slice(0,30)) });
+    state.metrics = state.metrics.slice(-100);
+  }
   report() {
     const p = periods(this.now); const l = this.state.limits;
     const estimatedYen = this.count(`bm:${p.month}`) / 1e6 + l.infrastructureYen;
-    return { limits: l, stopped: this.state.stopped, dayYen: this.count(`bd:${p.day}`) / 1e6,
+    return { visualDiagnostics:(this.state.visualDiagnostics??[]).filter(r=>r.at>this.now-86400000), manifestation: { reservedUsd: (this.state.manifestation?.reservedMicrousd ?? 0) / 1e6, limitUsd: (l.manifestationMicrousd ?? 5000000) / 1e6, metrics: this.state.manifestation?.metrics ?? [] }, limits: l, stopped: this.state.stopped, dayYen: this.count(`bd:${p.day}`) / 1e6,
       exhibitions: Object.values(this.state.exhibitions!), exhibitionDevices: this.state.exhibitionDevices,
       monthApiYen: this.count(`bm:${p.month}`) / 1e6, estimatedYen,
       warning: estimatedYen >= l.targetYen ? 'target_exceeded' : estimatedYen >= l.warningYen ? 'warning' : null,

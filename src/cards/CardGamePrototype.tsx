@@ -59,6 +59,7 @@ interface CardGamePrototypeProps {
   lastReply?: string;
   isQuestionDisabled?: boolean;
   isResetLocked?: boolean;
+  isExchangeLocked?: boolean;
   onCardInserted?: (result: CardSwapResult) => void;
   onCardInteraction?: (target: CardInteractionTarget) => void;
   onCardAttentionInput?: (input: CardAttentionInput) => void;
@@ -236,6 +237,7 @@ export function CardGamePrototype({
   lastReply,
   isQuestionDisabled = false,
   isResetLocked = false,
+  isExchangeLocked = false,
   onCardInserted,
   onCardInteraction,
   onCardAttentionInput,
@@ -262,7 +264,7 @@ export function CardGamePrototype({
   const suppressNextClickRef = useRef(false);
   const suppressNextAppearanceAttentionRef = useRef(false);
   const brainCardsRef = useRef<HTMLDivElement>(null);
-  const isSpent = zones.remainingInterferenceCount === 0;
+  const isSpent = isExchangeLocked || zones.remainingInterferenceCount === 0;
   const interactionLocked = isSpent;
   const dragActive = dragState?.isDragging === true;
   const visualInteractionLocked = interactionLocked && !dragActive;

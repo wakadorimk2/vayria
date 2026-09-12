@@ -50,6 +50,10 @@ const messages: Record<string, string> = {
   cookie_required: '会話にはCookieを有効にしてください。',
   challenge_required: '利用確認を完了してください。',
   challenge_failed: '利用確認に失敗しました。もう一度お試しください。',
+  tts_ticket_missing: 'この発話の音声情報を取得できませんでした。',
+  tts_ticket_invalid: '音声の認証情報を確認できませんでした。',
+  tts_ticket_expired: 'この音声の再生期限が切れました。',
+  tts_ticket_session: 'セッションが変わったため、この音声を再生できません。',
   invalid_ticket: '音声の有効期限が切れたか、再生できない状態です。',
   ticket_used: 'この音声はすでに再生処理を開始しています。',
 };

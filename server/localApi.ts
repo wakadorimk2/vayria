@@ -31,6 +31,9 @@ import {
   readVoiceLabRecord,
 } from './voiceLabStore.js';
 
+import { handleWorldRequest } from './worldHandler.js';
+import { handleManifestationRequest } from './manifestationHandler.js';
+
 export async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -41,6 +44,14 @@ export async function handleRequest(
     'http://127.0.0.1',
   ).pathname;
 
+  if (pathname.startsWith('/api/manifestation/')) {
+    await handleManifestationRequest(request, response, config);
+    return;
+  }
+  if (pathname.startsWith('/api/world/')) {
+    await handleWorldRequest(request, response, config);
+    return;
+  }
   if (pathname === HEALTH_PATH) {
     if (request.method !== 'GET') {
       sendJson(response, 405, { error: 'Method not allowed.' });
@@ -506,7 +517,8 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
           pathname !== TTS_PATH &&
           pathname !== EVENTS_PATH &&
           pathname !== VOICE_LAB_EVENTS_PATH &&
-          pathname !== ROUTER_EVENTS_PATH
+          pathname !== ROUTER_EVENTS_PATH &&
+          !pathname.startsWith('/api/world/') && !pathname.startsWith('/api/manifestation/')
         ) {
           next();
           return;

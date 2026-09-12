@@ -3,6 +3,7 @@ import { cardPool } from './cardPool';
 import { M1_INITIAL_BRAIN_CARD_IDS } from './cardReactions';
 import type { WildcardCardData } from './cardTypes';
 import { acceptCardReply } from './cardReplyState';
+import { chooseSlotCard } from './slotCardInsertion';
 
 const MAX_INTERFERENCE_COUNT = 1;
 
@@ -41,19 +42,19 @@ function selectCards(ids: readonly string[]): WildcardCardData[] {
   });
 }
 
-function createInitialState(): CardZoneState {
+function createInitialState(worldEnabled = false): CardZoneState {
   return {
     swapRevision: 0,
     brain: selectCards(M1_INITIAL_BRAIN_CARD_IDS),
-    hand: selectCards(INITIAL_HAND_IDS),
+    hand: selectCards(INITIAL_HAND_IDS.map(id => worldEnabled && id === 'panic' ? 'underwater' : id)),
     remainingInterferenceCount: MAX_INTERFERENCE_COUNT,
     activatedCardIds: [],
     forcedCardId: null,
   };
 }
 
-export function useCardGamePrototype(unlimitedInterference = false) {
-  const [zones, setZones] = useState<CardZoneState>(createInitialState);
+export function useCardGamePrototype(unlimitedInterference = false, worldEnabled = false) {
+  const [zones, setZones] = useState<CardZoneState>(() => createInitialState(worldEnabled));
   const zonesRef = useRef(zones);
   const updateZones = useCallback((update: (current: CardZoneState) => CardZoneState) => {
     zonesRef.current = update(zonesRef.current);
@@ -65,6 +66,18 @@ export function useCardGamePrototype(unlimitedInterference = false) {
     swapRevision: zonesRef.current.swapRevision,
   }), []);
   const swapSequenceRef = useRef(0);
+  const reinforcementRef = useRef<Record<string, number>>({});
+  const insertSlotCard = useCallback((cardId: string): CardSwapResult | null => {
+    const current = zonesRef.current;
+    const choice = chooseSlotCard(current.brain, cardId, reinforcementRef.current);
+    if (!choice) return null;
+    const sequence = ++swapSequenceRef.current;
+    reinforcementRef.current[cardId] = sequence;
+    const hand = current.hand.filter(c => c.id !== cardId);
+    if (!choice.reinforced && !hand.some(c => c.id === choice.ejected.id)) hand.push(choice.ejected);
+    updateZones(() => ({ ...current, brain: choice.brain, hand: hand.slice(-5), swapRevision: sequence, forcedCardId: cardId, activatedCardIds: [], remainingInterferenceCount: MAX_INTERFERENCE_COUNT }));
+    return { animationSequence: sequence, brainCardIds: choice.brain.map(c => c.id), ejectedCardId: choice.ejected.id, forcedCardId: cardId, insertedCardId: cardId };
+  }, [updateZones]);
   const [selectedBrainCardId, setSelectedBrainCardId] = useState<
     string | null
   >(null);
@@ -139,6 +152,13 @@ export function useCardGamePrototype(unlimitedInterference = false) {
     setSelectedHandCardId(null);
   }, [updateZones]);
 
+  const resetGame = useCallback(() => {
+    reinforcementRef.current = {};
+    updateZones(() => ({ ...createInitialState(worldEnabled), swapRevision: ++swapSequenceRef.current }));
+    setSelectedBrainCardId(null);
+    setSelectedHandCardId(null);
+  }, [worldEnabled, updateZones]);
+
   const resetCards = useCallback(() => {
     updateZones(() => ({ ...createInitialState(), swapRevision: ++swapSequenceRef.current }));
     setSelectedBrainCardId(null);
@@ -170,6 +190,7 @@ export function useCardGamePrototype(unlimitedInterference = false) {
   }, [updateZones]);
 
   return {
+    insertSlotCard,
     readCardContext,
     maxInterferenceCount: MAX_INTERFERENCE_COUNT,
     acceptReply,
@@ -177,6 +198,7 @@ export function useCardGamePrototype(unlimitedInterference = false) {
     clearReplyPresentation,
     presentReply,
     resetTurn,
+    resetGame,
     resetCards,
     selectCard,
     selectedBrainCardId,

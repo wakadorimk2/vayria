@@ -1,3 +1,7 @@
+import { visualAccess } from '../visual/access.js';
+import { explicitVisualSubject } from '../visual/decision.js';
+import { readVisualIntent, type VisualIntent } from '../visual/types.js';
+import { SLOT_CARDS, type SlotCard } from '../manifestation/types.js';
 import { splitSpeechAtBoundaries, type CardContinuation } from './cardContinuation.js';
 /** Session-local conversation execution. Only the current generation can publish or deliver speech. */
 import type { ConversationEventName, ConversationEventDetails } from './conversationEventTypes.js';
@@ -83,6 +87,9 @@ export interface AutonomousDecision {
 }
 
 interface ChatResponse {
+  visualDecision?: string;
+  visualIntent?: unknown; visualTicket?: string; visualGeneration?: number;
+  manifestation?: unknown;
   activatedCards: unknown;
   speechAct: unknown;
   expressionLevel: unknown;
@@ -130,6 +137,9 @@ export interface ConversationOptions {
   programContext?: ProgramContext;
   getPerformerStateContext?: () => PerformerStateContext;
   createCardContinuationPlan?: (trigger: PerformerTrigger) => PerformancePlan;
+  onVisualStatus?: (eventId: string, code: string, generation: number) => void;
+  onVisualIntent?: (eventId: string, intent: VisualIntent, ticket: string, generation: number) => void;
+  onManifestation?: (eventId: string, effect: SlotCard) => void;
   onPerformanceCue?: (
     planId: string,
     cue: { emotion: Emotion; intensity: number },
@@ -308,7 +318,7 @@ function normalizeHistoryTurnLimit(value: number | undefined): number {
 
 export interface ConversationDependencies {
   fetch: typeof fetch;
-  config: { streamingSpeechEnabled: boolean; earlySpeechLeadEnabled: boolean; cloudTtsStreamPlaybackEnabled: boolean };
+  config: { mode?: string; manifestationEnabled?: boolean; streamingSpeechEnabled: boolean; earlySpeechLeadEnabled: boolean; cloudTtsStreamPlaybackEnabled: boolean };
   createEventEmitter: (source: ConversationSource) => { turnId: string; runId?: string | null; emit: (event: ConversationEventName, details?: ConversationEventDetails) => void };
   now: () => number;
   monotonicNow: () => number;
@@ -360,6 +370,9 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       changeCards: (cards: ChatCardContext) => boolean;
     } | null
   } = { current: null };
+  const onVisualStatusRef = { current: options.onVisualStatus };
+  const onVisualIntentRef = { current: options.onVisualIntent };
+  const onManifestationRef = { current: options.onManifestation };
   const onPerformanceCueRef = { current: options.onPerformanceCue };
   const onPerformancePlanRef = { current: options.onPerformancePlan };
   const onPerformanceResultRef = { current: options.onPerformanceResult };
@@ -508,8 +521,11 @@ export function createConversationRuntime(playback: PerformancePlayback, options
   };
   const processTurn = async (turnSource: ConversationSource, message: string | null, cardContext: ChatCardContext, onReplyAccepted: (activatedCardIds: string[], swapRevision?: number) => void, autonomousContext: AutonomousContext | null, plan: PerformancePlan, voiceMetadata?: VoiceTurnMetadata, characterIdentityOverride?: CharacterIdentity, programContextOverride?: ProgramContext, autonomyCandidate: AutonomyCandidate | null = null, autonomyEvidenceContext: AutonomyEvidenceContext | null = null, greeting?: true, continuationState?: NonNullable<ProcessTurnResult['cardChange']>): Promise<ProcessTurnResult> => {
     const eventEmitter = createConversationEventEmitter(turnSource);
+    const visualInputAt=Date.now();
+    const visualGeneration = visualAccess();
+    let visualDelivered = false;
     const messageForRequest = message;
-    const programContextForRequest = programContextOverride ?? programContextRef.current;
+    const programContextForRequest = { ...(programContextOverride ?? programContextRef.current), ...(programContextRef.current.worldContext ? { worldContext: programContextRef.current.worldContext } : {}) };
     const isCardChangeTurn = turnSource === 'autonomous' &&
       cardContext.forcedCardId !== null &&
       programContextForRequest.phase === 'after_card_change';
@@ -827,6 +843,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
                 return;
               streamingPlaybackStarted = true;
               speechStartedAt = startedAt;
+              if(runtimeConfig.mode==='public'&&runtimeConfig.manifestationEnabled)console.info('[visual-audio]',JSON.stringify({id:eventEmitter.turnId,at:Date.now(),milliseconds:Date.now()-visualInputAt}));
               eventEmitter.emit('playback_started', {
                 durationMs: startedAt - (streamingTtsStartedAt ?? unitTtsStartedAt),
                 phase: 'tts',
@@ -869,6 +886,20 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         // The server defines audible boundaries and signs matching public TTS tickets.
         enqueueSpeechUnit(speechUnitIndex++, text, candidate);
       };
+      const explicitVisual = Boolean(explicitVisualSubject(messageForRequest));
+      const receiveVisual = (payload: ChatResponse) => {
+        if (visualDelivered || generation !== generationRef.current || visualGeneration === null || visualAccess() !== visualGeneration) return;
+        if (payload.visualGeneration !== undefined && payload.visualGeneration !== visualGeneration) return;
+        visualDelivered = true;
+        const intent = readVisualIntent(payload.visualIntent);
+        console.info('[visual-decision]', JSON.stringify({id:eventEmitter.turnId, at:Date.now(), milliseconds:Date.now()-visualInputAt, decision:payload.visualDecision ?? (intent ? 'accepted' : 'invalid'), ticket:Boolean(payload.visualTicket)}));
+        if (intent && intent.type !== 'none' && typeof payload.visualTicket === 'string' && payload.visualGeneration === visualGeneration) {
+          onVisualIntentRef.current?.(eventEmitter.turnId, intent, payload.visualTicket, visualGeneration);
+        } else if (explicitVisual || payload.visualDecision === 'invalid') {
+          onVisualStatusRef.current?.(eventEmitter.turnId, payload.visualDecision === 'cancelled' ? 'cancelled' : 'decision_invalid', visualGeneration);
+        }
+      };
+      if (visualGeneration !== null && explicitVisual) onVisualStatusRef.current?.(eventEmitter.turnId, 'deciding', visualGeneration);
       cardChanged();
       const chatResponse = await dependencies.fetch('/api/chat', {
         method: 'POST',
@@ -942,6 +973,9 @@ export function createConversationRuntime(playback: PerformancePlayback, options
               retry: event.retry,
             });
           }
+          else if (event.type === 'visual_decision') {
+            if (event.eventId === eventEmitter.turnId) receiveVisual(event.response);
+          }
           else if (event.type === 'speech_unit') {
             enqueueStreamingSpeechUnit(event.index, event.text, event.response);
           }
@@ -956,6 +990,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       const chatPayload = streamingModeUsed
         ? (streamedChatPayload as unknown as ChatResponse)
         : ((await chatResponse.json()) as ChatResponse);
+      receiveVisual(chatPayload);
       if (!unitPlaying) cardChanged();
       eventEmitter.emit('llm_done', {
         durationMs: dependencies.monotonicNow() - llmStartedAt,
@@ -1056,6 +1091,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         activatedCards[0] !== cardContext.forcedCardId) {
         throw new Error('AI が交換したカードを主役にしませんでした。');
       }
+
       responseEmotion = normalizeEmotion(chatPayload.emotion);
       if (interactionDecision &&
         interactionDecision.action !== 'take_floor') {
@@ -1097,6 +1133,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         });
         return { completed: true, decision: autonomousDecision };
       }
+      if (SLOT_CARDS.includes(chatPayload.manifestation as SlotCard)) onManifestationRef.current?.(eventEmitter.turnId, chatPayload.manifestation as SlotCard);
       if (textOnlyTurn) {
         setReply(responseText);
         if (isExhibitionMode) { clearSubtitleTimer(); setIsSubtitleVisible(true); }
@@ -1232,6 +1269,7 @@ export function createConversationRuntime(playback: PerformancePlayback, options
       throw new Error('返答に再生可能な発話がありません。');
     }
     catch (caughtError) {
+      if (!visualDelivered && visualGeneration !== null && explicitVisualSubject(messageForRequest)) onVisualStatusRef.current?.(eventEmitter.turnId, isAbortError(caughtError) ? 'cancelled' : 'connection_failed', visualGeneration);
       if (abortControllerRef.current === requestController) {
         abortControllerRef.current = null;
       }
@@ -1341,6 +1379,9 @@ export function createConversationRuntime(playback: PerformancePlayback, options
     isMuted = options.isMuted ?? false;
     isExhibitionMode = options.isExhibitionMode ?? false;
 
+    onVisualStatusRef.current = options.onVisualStatus;
+    onVisualIntentRef.current = options.onVisualIntent;
+    onManifestationRef.current = options.onManifestation;
     onPerformanceCueRef.current = options.onPerformanceCue;
     onPerformancePlanRef.current = options.onPerformancePlan;
     onPerformanceResultRef.current = options.onPerformanceResult;

@@ -1,3 +1,5 @@
+import type { VisualAsset } from '../src/visual/types';
+import type { InputEvent } from '../src/manifestation/types';
 import type { Measurements } from './diagnostics';
 import { DurableObject } from 'cloudflare:workers';
 import { Ledger, LimitError, initialState, type LedgerState, type Limits, type Kind } from './ledger';
@@ -20,11 +22,32 @@ export class PublicUsage extends DurableObject {
   async alarm() { const next = this.run(l => l.nextAlarm()); await this.ctx.storage.setAlarm(next); }
   async fetch(request: Request) {
     try {
-      const b = await request.json() as { op: string; visitor: string; ip: string; id: string; kind: Kind;
+      const b = await request.json() as { keys:string[]; fromKey:string; url:string; records: unknown[]; eventId: string; enabled: boolean; generation: number; key: string; duration: number; step: string; cost: number; asset: VisualAsset; manifestationEvent: InputEvent; token: string; target: string; timings: Record<string, number>; op: string; visitor: string; ip: string; id: string; kind: Kind;
         job: string; amount: number; ticket: string; charge: string; patch: Partial<Limits>; stopped?: boolean; code: string; measurements?: Measurements;
         event: string; starts: number; expires: number; budget: number; hash: string; epoch: number; requestId: string };
       const result = this.run(l => {
         switch (b.op) {
+          case 'visualMediaSaved': return l.visualMediaSaved(b.visitor,b.id,b.key,b.enabled,b.timings,b.eventId);
+          case 'visualMediaRegister': return l.visualMediaRegister(b.visitor,b.id,b.generation,b.key,b.url);
+          case 'visualMediaLookup': return l.visualMediaLookup(b.visitor,b.id,b.key);
+          case 'visualPermission': return l.visualPermission(b.visitor, b.id);
+          case 'visualMode': return l.visualMode(b.visitor, b.id, b.enabled, b.generation);
+          case 'visualReplay': return l.visualReplay(b.visitor,b.id,b.generation,b.key);
+          case 'visualLookup': return l.visualLookup(b.visitor, b.id, b.generation, b.key);
+          case 'visualLookupAny': return l.visualLookupAny(b.visitor,b.id,b.generation,b.keys);
+          case 'visualAlias': return l.visualAlias(b.visitor,b.id,b.generation,b.key,b.fromKey);
+          case 'visualClaim': return l.visualClaim(b.visitor,b.id,b.generation,b.token,b.key);
+          case 'visualClaimActive': return l.visualClaimActive(b.visitor,b.id,b.generation,b.key,b.token);
+          case 'visualStart': return l.visualStart(b.visitor, b.id, b.generation, b.token, b.key, b.target, b.duration);
+          case 'visualReserve': return l.visualReserve(b.visitor, b.id, b.generation, b.token, b.step, b.cost);
+          case 'visualPublish': return l.visualPublish(b.visitor, b.id, b.generation, b.token, b.asset, b.key);
+          case 'visualFinish': return l.visualFinish(b.visitor, b.id, b.token, b.code, b.timings, b.eventId);
+          case 'visualDiagnostic': return l.visualDiagnostic(b.visitor,b.id,b.generation,b.eventId,b.records);
+          case 'visualCancel': return l.visualCancel(b.visitor, b.id, b.generation, b.target, b.token);
+          case 'manifestationBegin': return l.manifestationBegin(b.visitor, b.id, b.manifestationEvent, b.token);
+          case 'manifestationComplete': return l.manifestationComplete(b.visitor, b.id, b.token, b.target);
+          case 'manifestationMedia': return l.manifestationMedia(b.visitor, b.token);
+          case 'manifestationFinish': return l.manifestationFinish(b.token, b.code, b.timings);
           case 'status': return l.status(b.visitor);
           case 'attempt': return l.attempt(b.ip);
           case 'start': return l.start(b.visitor, b.ip, b.id, b.epoch);
@@ -48,7 +71,8 @@ export class PublicUsage extends DurableObject {
       const next = this.run(l => l.nextAlarm());
       const previous = await this.ctx.storage.getAlarm();
       if (previous === null || next < previous) await this.ctx.storage.setAlarm(next);
-      return Response.json(result ?? {});
+      // A cache miss is null. Preserve it across the Durable Object boundary.
+      return Response.json(result === undefined ? {} : result);
     } catch (error) {
       if (error instanceof LimitError) return Response.json({ code: error.code, retryAt: error.retryAt }, { status: error.status });
       return Response.json({ code: 'usage_unavailable' }, { status: 503 });

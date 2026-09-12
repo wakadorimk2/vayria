@@ -26,6 +26,7 @@ test('public client consumes separate tickets for each sentence, including repea
   try {
     await publicFetch('/api/chat');
     await publicFetch('/api/tts', { body: JSON.stringify({ text: 'ありがとう。' }) });
+    await publicFetch('/api/chat'); // New input must retain the second queued sentence.
     await publicFetch('/api/tts', { body: JSON.stringify({ text: 'ありがとう。' }) });
     assert.deepEqual(received, ['first', 'second']);
   } finally { Object.assign(globalThis, previous); }

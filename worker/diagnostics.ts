@@ -1,9 +1,9 @@
 // Server durations only. Never accept content, credentials, or visitor identifiers.
-export const timingFields = ['generationMs', 'firstSpeechUnitMs', 'ttsFirstByteMs', 'ttsTotalMs'] as const;
+export const timingFields = ['ttsTicketAgeMs', 'generationMs', 'firstSpeechUnitMs', 'ttsFirstByteMs', 'ttsTotalMs'] as const;
 export type Measurements = Partial<Record<typeof timingFields[number], number>> & {
   llmCalls?: number; llmRetries?: number; actualModels?: string[];
 };
-export const metricCodes = ['complete', 'provider_failure', 'cancelled', 'limit', 'card_limit', 'user_limit',
+export const metricCodes = ['tts_ticket_invalid', 'tts_ticket_expired', 'tts_ticket_session', 'complete', 'provider_failure', 'cancelled', 'limit', 'card_limit', 'user_limit',
   'autonomous_limit', 'tts_limit', 'transcribe_limit', 'audio_limit', 'daily_budget', 'monthly_budget',
   'session_expired', 'generation_stopped', 'busy', 'ticket_used', 'invalid_request', 'provider_unavailable',
   'generation_failed', 'service_unavailable', 'usage_unavailable', 'timeout'] as const;

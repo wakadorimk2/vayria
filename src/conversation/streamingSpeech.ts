@@ -32,6 +32,7 @@ export interface StreamingErrorEvent {
 }
 
 export type StreamingChatEvent<TResponse = unknown> =
+  | { type: 'visual_decision'; eventId: string; response: TResponse }
   | StreamingSpeechUnitEvent<TResponse>
   | StreamingProviderTimingEvent
   | StreamingStateEvent
@@ -70,6 +71,7 @@ function parseStreamingChatEvent<TResponse>(line: string): StreamingChatEvent<TR
   ) {
     return value as StreamingSpeechUnitEvent<TResponse>;
   }
+  if (record.type === 'visual_decision' && typeof record.eventId === 'string' && record.response && typeof record.response === 'object') return value as StreamingChatEvent<TResponse>;
   if (record.type === 'state' && typeof record.rejected === 'boolean') {
     return value as StreamingStateEvent;
   }

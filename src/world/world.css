@@ -1,0 +1,49 @@
+.avatar-area:has(.world-foreground) { isolation: isolate; }
+.world-background { position: absolute; inset: 0; z-index: 0; border-radius: inherit; background-position: center; background-size: cover; animation: world-reveal .32s ease-out; pointer-events: none; }
+.avatar-area:has(.world-foreground) > .vrm-stage { z-index: 2; }
+.avatar-area:has(.world-background) > .vrm-stage { background: transparent; }
+.avatar-area:has(.world-foreground) > .card-prototype { z-index: 4; }
+.world-foreground { position: absolute; inset: 0; pointer-events: none; }
+.world-object { position: absolute; object-fit: fill; z-index: 3; animation: world-reveal .25s ease-out; }
+.world-presence { position: absolute; z-index: 3; width: 28px; height: 28px; border-radius: 50%; background: radial-gradient(circle, #fff9 0%, #a9e6ff66 45%, transparent 70%); transform: translate(-50%, -50%); animation: world-reveal .3s ease-out; }
+.world-presence--waiting { border: 1px solid #dcf6ff88; box-shadow: 0 0 18px #c6eeff55; }
+.world-layout-editor { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+.world-region { position: absolute; border: 2px dashed #70b6ff; background: #5588bb22; color: #b9dfff; font-size: 12px; cursor: move; pointer-events: auto; touch-action: none; }
+.world-region--face { border-color: #ff9bb8; background: #dd669922; }
+.world-region--blocked { border-color: #e8d492; color: #e8d492; pointer-events: none; }
+.world-layout-settings { position: absolute; right: 12px; top: 16px; max-width: 230px; padding: 12px; border-radius: 12px; color: #e5efff; background: #172539eb; pointer-events: auto; font-size: 12px; }
+.world-layout-settings label { display: block; }
+.world-layout-settings button { margin: 4px; padding: 5px; }
+.world-bubbles { position: absolute; inset: 0; overflow: hidden; z-index: 3; }
+.world-bubbles i { position: absolute; left: 12%; bottom: 0; width: 22px; height: 22px; border: 2px solid #d9fbffb0; border-radius: 50%; animation: world-bubble 8s linear infinite; }
+.world-bubbles i:nth-child(2) { left: 85%; animation-delay: -2s; }
+.world-bubbles i:nth-child(3) { left: 22%; animation-delay: -5s; }
+.world-bubbles i:nth-child(4) { left: 78%; animation-delay: -7s; }
+.world-controls { width: min(900px, 94%); margin: .6rem auto; color: inherit; }
+.world-status { display: flex; align-items: center; justify-content: center; gap: 1rem; min-height: 2rem; }
+.world-controls button { margin: .25rem; padding: .4rem .75rem; border-radius: .6rem; border: 1px solid #9baabc; background: #f5f8ff; color: #23334a; cursor: pointer; }
+.world-controls button:disabled { opacity: .5; cursor: default; }
+.world-controls details { margin-top: .5rem; font-size: .8rem; }
+.world-controls pre { max-height: 200px; overflow: auto; white-space: pre-wrap; }
+.world-error { color: #a34536; }
+.public-layout .app-shell[data-world-ui="true"] .world-controls { position: absolute; top: max(16px, env(safe-area-inset-top)); left: 16px; z-index: 20; width: min(300px, calc(100% - 32px)); margin: 0; color: var(--public-ink); font-size: 12px; }
+.public-layout .app-shell[data-world-ui="true"] .world-status { justify-content: flex-start; font-size: 12px; }
+.public-layout .app-shell[data-world-ui="true"] .world-controls details[open], .public-layout .world-error { padding: 12px; border-radius: 12px; background: var(--public-surface); max-height: 35dvh; overflow: auto; }
+.public-layout .app-shell[data-world-ui="true"] .world-controls button { background: var(--public-button); color: var(--public-ink); border-color: var(--public-border); }
+.public-layout .app-shell[data-world-ui="true"] .avatar-area:has(.world-background) > .vrm-stage { background: transparent; }
+.public-layout .app-shell[data-world-ui="true"] .world-background { border-radius: 0; }
+@media (max-width: 599px) { .public-layout .app-shell[data-world-ui="true"] .card-zone--brain { top: 110px; } }
+.world-conversion-error { position: absolute; inset: 0; pointer-events: none; z-index: 3; opacity: 0; background: repeating-linear-gradient(0deg, transparent 0 10px, #a9cbdb33 10px 12px); animation: world-error-pulse .5s ease-out; }
+@keyframes world-error-pulse { from { opacity: .6; transform: translateX(3px); } to { opacity: 0; transform: none; } }
+@keyframes world-reveal { from { opacity: 0; } to { opacity: 1; } }
+@keyframes world-float { 50% { transform: translate(-50%, -56%) rotate(3deg); } }
+@keyframes world-bubble { to { transform: translateY(-700px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .world-background, .world-object, .world-bubbles i, .world-conversion-error { animation: none; } .world-bubbles { display: none; } }
+@media (prefers-reduced-motion: reduce) { .world-background, .world-object, .world-presence { animation: world-reveal .15s ease-out; } }
+@media (orientation: landscape) {
+  .public-layout .app-shell[data-world-ui="true"] .card-prototype { --public-card-width: clamp(44px, 7dvh, 64px); --exhibition-hand-card-width: var(--public-card-width); --exhibition-hand-card-height: calc(var(--public-card-width) * 1.4); }
+}
+@media (max-width: 599px) and (orientation: portrait) {
+  .public-layout .app-shell[data-world-ui="true"] .world-controls { top: 138px; font-size: 11px; }
+  .public-layout .app-shell[data-world-ui="true"] .world-status { font-size: 11px; gap: 4px; }
+}

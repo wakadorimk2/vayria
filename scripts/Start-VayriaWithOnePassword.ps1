@@ -69,7 +69,7 @@ function Resolve-ReferenceFile {
       continue
     }
 
-    if ($trimmedLine -notmatch '^(OPENAI_API_KEY|AIVIS_CLOUD_API_KEY)\s*=\s*(.*?)\s*$') {
+    if ($trimmedLine -notmatch '^(OPENAI_API_KEY|AIVIS_CLOUD_API_KEY|FAL_KEY|RUNWARE_API_KEY)\s*=\s*(.*?)\s*$') {
       throw 'The 1Password reference file may contain only supported API key op:// references and comments.'
     }
     $name = $Matches[1]

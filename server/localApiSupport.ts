@@ -200,6 +200,13 @@ export const ALL_CARD_IDS = cardPool.map((card) => card.id);
 export const providerRequestCounts = { active: 0 };
 
 export interface LocalApiConfig {
+  manifestationBudgetLimitUsd?: number;
+  manifestationEnabled?: boolean;
+  visualVideoEnabled?: boolean;
+  manifestationBenchmarkEnabled?: boolean;
+  manifestationRunwareEnabled?: boolean;
+  manifestation?: import('./manifestationProvider.js').ManifestationConfig;
+  worldMutationEnabled?: boolean;
   openAiApiKey?: string;
   aivisBaseUrl?: string;
   aivisSpeedScale?: string;
@@ -225,6 +232,8 @@ export interface LocalApiConfig {
 }
 
 export interface LlmRequestContext {
+  manifestationEnabled?: boolean;
+  visualVideoEnabled?: boolean;
   apiKey: string;
   runtime: LlmRuntimeOptions;
   signal: AbortSignal;
@@ -388,6 +397,8 @@ export interface CardPreviewRequestPayload {
 }
 
 export interface CardAssistantResponse extends AssistantResponse {
+  visualIntent?: import('../src/visual/types.js').VisualIntent;
+  manifestation?: 'none' | 'chicken' | 'gigantic' | 'sparkle' | 'underwater';
   activatedCards: string[];
   speechAct: SpeechAct | null;
   expressionLevel: ExpressionLevel | null;
@@ -768,6 +779,7 @@ export interface GeneratedChatResponse {
 }
 
 export interface StreamingReplyCallbacks {
+  onVisualDecision?: (intent: unknown) => void;
   onSpeechUnit: (
     index: number,
     unit: string,

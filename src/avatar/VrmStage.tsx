@@ -1,3 +1,4 @@
+import { runtimeConfig } from '../runtimeConfig';
 import { captureAvatarPoints, projectAvatarBounds } from './screenBounds';
 import type { AvatarScreenBounds } from './screenBounds';
 import { AvatarLoadOwnership } from './avatarLoadOwnership';
@@ -246,6 +247,8 @@ interface VrmStageProps {
 }
 
 export interface VrmStageHandle {
+  readWorldHandAnchor?(hand: 'leftHand' | 'rightHand'): { x: number; y: number; behind: boolean } | null;
+  readWorldRegions?(): { body: { x: number; y: number; width: number; height: number }; face: { x: number; y: number; width: number; height: number } } | null;
   prepareMotion(
     plan: PerformancePlan,
     signal?: AbortSignal,
@@ -534,6 +537,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     const [vrmLookAtDebugSnapshot, setVrmLookAtDebugSnapshot] =
       useState<VrmLookAtBoundaryFrame | null>(null);
     const loadedVrmRef = useRef<VRM | null>(null);
+    const worldCameraRef = useRef<PerspectiveCamera | null>(null);
     const lifeDynamicsRef = useRef<LifeDynamics | null>(null);
     const lifeDynamicsBlinkAdapterRef =
       useRef<LifeDynamicsBlinkAdapter | null>(null);
@@ -885,6 +889,35 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
     useImperativeHandle(
       ref,
       () => ({
+        readWorldRegions() {
+          const vrm = loadedVrmRef.current, camera = worldCameraRef.current, canvas = canvasRef.current;
+          if (!vrm || !camera || !canvas) return null;
+          const rect = canvas.getBoundingClientRect();
+          const project = (v: Vector3) => { v.project(camera); return { x: rect.left + (v.x + 1) * rect.width / 2, y: rect.top + (1 - v.y) * rect.height / 2 }; };
+          const head = vrm.humanoid.getNormalizedBoneNode('head')?.getWorldPosition(new Vector3());
+          if (!head) return null;
+          const neck = vrm.humanoid.getNormalizedBoneNode('neck')?.getWorldPosition(new Vector3());
+          const radius = Math.max(.13, neck ? head.distanceTo(neck) * 1.4 : .16);
+          const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0), up = new Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+          const corners = [-1, 1].flatMap(x => [-1, 1].map(y => project(head.clone().addScaledVector(right, x * radius).addScaledVector(up, (y + .6) * radius))));
+          const bounds = (points: { x: number; y: number }[]) => { const x = Math.min(...points.map(p => p.x)), y = Math.min(...points.map(p => p.y)); return { x, y, width: Math.max(...points.map(p => p.x)) - x, height: Math.max(...points.map(p => p.y)) - y }; };
+          const bones = (['hips', 'leftShoulder', 'rightShoulder', 'leftHand', 'rightHand', 'leftFoot', 'rightFoot'] as const).flatMap(name => { const bone = vrm.humanoid.getNormalizedBoneNode(name); return bone ? [project(bone.getWorldPosition(new Vector3()))] : []; });
+          return { face: bounds(corners), body: bounds([...corners, ...bones]) };
+        },
+        readWorldHandAnchor(hand) {
+          const vrm = loadedVrmRef.current;
+          const camera = worldCameraRef.current;
+          const canvas = canvasRef.current;
+          const bone = vrm?.humanoid.getNormalizedBoneNode(hand);
+          if (!bone || !camera || !canvas) return null;
+          const point = bone.getWorldPosition(new Vector3());
+          const torso = vrm?.humanoid.getNormalizedBoneNode('chest')?.getWorldPosition(new Vector3());
+          const behind = torso ? point.distanceToSquared(camera.position) > torso.distanceToSquared(camera.position) : false;
+          point.project(camera);
+          if (point.z < -1 || point.z > 1) return null;
+          const rect = canvas.getBoundingClientRect();
+          return { x: rect.left + (point.x + 1) * rect.width / 2, y: rect.top + (1 - point.y) * rect.height / 2, behind };
+        },
         prepareMotion,
         startPreparedMotion,
         markSpeechStart,
@@ -980,6 +1013,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         0.01,
         50,
       );
+      worldCameraRef.current = camera;
       setupStageLighting(
         scene,
         stageVariant === 'card-preview'
@@ -1088,7 +1122,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
             camera,
             width,
             height,
-            usesExhibitionPortraitCamera()
+            ((runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public') || usesExhibitionPortraitCamera())
               ? EXHIBITION_PORTRAIT_CAMERA
               : STAGE_PRESET.camera,
           );
@@ -1219,7 +1253,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
               camera,
               container.clientWidth,
               container.clientHeight,
-              usesExhibitionPortraitCamera()
+              ((runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public') || usesExhibitionPortraitCamera())
                 ? EXHIBITION_PORTRAIT_CAMERA
                 : STAGE_PRESET.camera,
             );
@@ -2444,6 +2478,7 @@ export const VrmStage = forwardRef<VrmStageHandle, VrmStageProps>(
         motionPlayerRef.current?.dispose();
         motionPlayerRef.current = null;
         loadedVrmRef.current = null;
+        worldCameraRef.current = null;
         if (loadedVrm) {
           scene.remove(loadedVrm.scene);
 

@@ -1,0 +1,27 @@
+.visual-background { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none; z-index:0; }
+.avatar-area:has(.visual-background) > .vrm-stage { background:transparent; }
+.visual-layer { position:absolute; inset:0; z-index:6; pointer-events:none; overflow:hidden; }
+.visual-object,.visual-presence { position:absolute; pointer-events:none; }
+.visual-object img,.visual-object canvas { width:100%; height:100%; object-fit:contain; animation:visual-arrive .3s ease-out; }
+.visual-presence { display:grid; place-items:center; color:#e4d0ff; font-size:2rem; opacity:.65; animation:visual-pulse 2s ease-in-out infinite; }
+.public-generation-notice { position:absolute; bottom:4rem; left:50%; transform:translateX(-50%); width:max-content; max-width:min(26rem,90vw); padding:.6rem .8rem; border-radius:20px; font-size:.75rem; background:var(--public-capsule); color:var(--public-ink); backdrop-filter:blur(16px); pointer-events:none; }
+.visual-effect-float { animation:visual-float 3s ease-in-out infinite; }
+.visual-effect-rotate img { animation:visual-rotate 8s linear infinite; }
+.visual-effect-pulse { animation:visual-pulse 2s ease-in-out infinite; }
+.visual-effect-sparkle::after,.visual-effect-bubbles::before { content:'✧ · ✦'; position:absolute; inset:0; color:#ffedb0; font-size:2rem; text-align:center; }
+.visual-effect-bubbles::before { content:'◌ ○ ◌'; color:#b1e8ff; }
+@keyframes visual-arrive { from {opacity:0} to {opacity:1} }
+@keyframes visual-float { 50% {translate:0 -4px} }
+@keyframes visual-rotate { to {rotate:360deg} }
+@keyframes visual-pulse { 50% {opacity:.35} }
+@media (prefers-reduced-motion:reduce) { .visual-layer *, .visual-layer *::before,.visual-layer *::after { animation:none!important; } }
+
+/* Keep captions and interactive panels above props, including during re-layout. */
+.public-layout .app-shell .conversation { z-index:20; }
+.public-layout .public-card-panel .card-prototype { z-index:20; }
+
+.visual-effect-sway { animation:visual-sway 2s ease-in-out infinite; }
+.visual-effect-bob { animation:visual-float 1.4s ease-in-out infinite; }
+.visual-effect-slide { animation:visual-slide 3s ease-in-out infinite; }
+@keyframes visual-sway { 25% {translate:-4px 0} 75% {translate:4px 0} }
+@keyframes visual-slide { 50% {translate:8px 0} }

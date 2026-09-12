@@ -1,3 +1,4 @@
+import { visualAccess } from '../visual/access';
 import { publicUrl } from './paths';
 import { publicErrorMessage } from './errors';
 import { runtimeConfig } from '../runtimeConfig';
@@ -17,7 +18,8 @@ let cancellation = new AbortController();
 const tickets = new Map<string, string[]>();
 function rememberTicket(text: string, ticket: string) {
   const key = text.trim();
-  tickets.set(key, [...(tickets.get(key) ?? []), ticket]);
+  tickets.set(key, [...(tickets.get(key) ?? []), ticket].slice(-20));
+  if(tickets.size>100)tickets.delete(tickets.keys().next().value!);
 }
 const listeners = new Set<() => void>();
 export const subscribePublic = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
@@ -75,11 +77,13 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
     pausePublic(); return Response.json({ code: 'session_required', error: publicErrorMessage({ code: 'session_required' }) }, { status: 401 });
   }
   const headers = new Headers(init.headers); headers.set('X-Vayria-Session', session.id);
+  const visualGeneration = visualAccess();
+  if (visualGeneration !== null) headers.set('X-Vayria-Visual-Generation', String(visualGeneration));
   let body = init.body;
-  if (/\/api\/(chat|card-preview)$/.test(path)) tickets.clear();
+  // Concurrent conversation must not discard tickets for speech already queued.
   if (path.endsWith('/api/tts') && typeof body === 'string') {
     const input = JSON.parse(body); const key = String(input.text).trim(); const ticket = tickets.get(key)?.shift();
-    if (!ticket) return Response.json({ code: 'invalid_ticket', error: publicErrorMessage({ code: 'invalid_ticket' }) }, { status: 403 });
+    if (!ticket) return Response.json({ code: 'tts_ticket_missing', error: publicErrorMessage({ code: 'tts_ticket_missing' }) }, { status: 403 });
     if (!tickets.get(key)?.length) tickets.delete(key);
     body = JSON.stringify({ ticket });
   }
@@ -154,7 +158,7 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
   if (!response.ok) {
     const reason = await response.clone().json().catch(() => ({}));
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-    window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: { ...reason, source: path.endsWith('/api/transcribe') ? '/api/transcribe' : path } }));
+    if (!path.includes('/api/manifestation/') && !path.includes('/api/visual/')) window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: { ...reason, source: path.endsWith('/api/transcribe') ? '/api/transcribe' : path } }));
     const headers = new Headers(response.headers); headers.delete('content-length'); headers.delete('content-encoding');
     return Response.json({ ...reason, error: publicErrorMessage(reason) }, { status: response.status, headers });
   }

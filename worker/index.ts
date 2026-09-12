@@ -1,3 +1,6 @@
+import { visualRoute, visualTicket, type VisualEnv } from './visual';
+import { permitsVideo, readVisualIntent } from '../src/visual/types';
+import { manifestation } from './manifestation';
 import { splitSpeechAtBoundaries } from '../src/conversation/cardContinuation';
 import { createGenerationMeasurements, type Measurements } from './diagnostics';
 import { PublicUsage } from './usage';
@@ -11,7 +14,8 @@ import { readChatRequest, readCardPreviewRequest } from '../server/chatValidatio
 import { normalizeEmotion, VOICE_STYLE_BY_EMOTION } from '../src/character/emotion';
 export { PublicUsage };
 
-interface Env {
+interface Env extends VisualEnv {
+  FAL_KEY?: string; MANIFESTATION_ENABLED?: string;
   ASSETS: Fetcher; USAGE: DurableObjectNamespace;
   COOKIE_SECRET: string; IP_SECRET: string; ADMIN_SECRET: string;
   OPENAI_API_KEY: string; AIVIS_API_KEY: string; AIVIS_MODEL_UUID: string;
@@ -23,7 +27,7 @@ interface Env {
   PUBLIC_BASE_PATH?: string;
 }
 type Visitor = { id: string; exp: number; purpose: 'visitor' };
-type Ticket = { exp: number; purpose: 'tts'; visitor: string; session: string; nonce: string; text: string; emotion: string };
+type Ticket = { exp: number; purpose: 'tts'; visitor: string; session: string; nonce: string; issuedAt?:number; text: string; emotion: string };
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
 const previewRedirect = (base: string, ticket?: string) => new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><title>Vayria</title><a href="${base}/">Vayriaを開く</a></html>`, {
   status: 303,
@@ -46,7 +50,7 @@ async function codeHash(code: string) {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
   return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
 }
-async function handle(request: Request, env: Env): Promise<Response> {
+async function handle(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const base = env.PUBLIC_BASE_PATH ?? '';
   if (base !== '' && base !== '/staging') return json({ code: 'configuration_unavailable' }, 503);
@@ -91,7 +95,12 @@ async function handle(request: Request, env: Env): Promise<Response> {
       headers.set('X-Robots-Tag', 'noindex');
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }
-    return env.ASSETS.fetch(request);
+    const response=await env.ASSETS.fetch(request);
+    if(base && response.headers.get('Content-Type')?.includes('text/html')){
+      const headers=new Headers(response.headers);headers.set('Cache-Control','private, no-store');
+      return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+    }
+    return response;
   }
   if (request.method !== 'GET' && request.headers.get('Origin') !== url.origin) throw new LimitError('invalid_origin', 0, 403);
   if (url.pathname === '/api/admin' && request.method === 'POST') {
@@ -114,7 +123,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     return json(await ledger(env, 'configure', { patch: input.patch, stopped: input.stopped }));
   }
   const known = ['/api/session', '/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts', '/api/exhibition/enroll', '/api/exhibition/next'];
-  if (!known.includes(url.pathname)) return json({ code: 'not_found' }, 404);
+  if (!known.includes(url.pathname) && !url.pathname.startsWith('/api/manifestation/') && !url.pathname.startsWith('/api/visual/')) return json({ code: 'not_found' }, 404);
   let visitor = await verify<Visitor>(cookie(request, visitorCookie), env.COOKIE_SECRET);
   if (visitor?.purpose !== 'visitor') visitor = null;
   if (url.pathname === '/api/session' && request.method === 'GET') {
@@ -128,6 +137,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
   if (!visitor) throw new LimitError('cookie_required', 0, 403);
   const id = request.headers.get('X-Vayria-Session') ?? '';
   const who = { visitor: visitor.id, id };
+  if (url.pathname.startsWith('/api/visual/')) return visualRoute(request, env, visitor.id, id, (op, args) => ledger(env, op, args), ctx);
+  if (url.pathname === '/api/manifestation/generate') throw new LimitError('visual_mode_required', 0, 409);
+  if (url.pathname.startsWith('/api/manifestation/')) return manifestation(request, env, visitor.id, id, (op, args) => ledger(env, op, args));
   if (url.pathname === '/api/exhibition/next' && request.method === 'POST') {
     const input = await body(request);
     return json(await ledger(env, 'exhibition-next', { visitor: visitor.id, requestId: input.requestId, epoch: input.epoch }));
@@ -160,15 +172,30 @@ async function handle(request: Request, env: Env): Promise<Response> {
     return json(await ledger(env, 'start', { visitor: visitor.id, ip, id: crypto.randomUUID() }));
   }
   if (!env.OPENAI_API_KEY || !env.AIVIS_API_KEY || !env.AIVIS_MODEL_UUID) throw new LimitError('configuration_unavailable', 0, 503);
+  const visualPermission = env.MANIFESTATION_ENABLED === 'true' ? await ledger<{enabled:boolean;generation:number}>(env, 'visualPermission', who) : { enabled:false, generation:0 };
+  const visualEnabled = visualPermission.enabled && request.headers.get('X-Vayria-Visual-Generation') === String(visualPermission.generation);
   const audio = url.pathname === '/api/transcribe' ? await boundedBody(request, 640044) : null;
   const input = audio ? {} : await body(request);
   if (url.pathname === '/api/chat') readChatRequest(input);
   if (url.pathname === '/api/card-preview') readCardPreviewRequest(input);
   let ticket: Ticket | null = null;
   if (url.pathname === '/api/tts') {
-    ticket = await verify<Ticket>(String(input.ticket ?? ''), env.COOKIE_SECRET);
-    if (!ticket || ticket.purpose !== 'tts' || ticket.visitor !== visitor.id || ticket.session !== id) throw new LimitError('invalid_ticket', 0, 403);
+    ticket = await verify<Ticket>(String(input.ticket ?? ''), env.COOKIE_SECRET, true);
+    const code=!ticket||ticket.purpose!=='tts'?'tts_ticket_invalid':ticket.exp<=Date.now()?'tts_ticket_expired':ticket.visitor!==visitor.id||ticket.session!==id?'tts_ticket_session':null;
+    if(code){await ledger(env,'reject',{kind:'tts',code}).catch(()=>{});throw new LimitError(code,0,403);}
   }
+  let visualAttachment: Promise<Record<string, unknown>> | undefined;
+  const attachVisual = async (response: { visualIntent?: unknown }) => {
+    visualAttachment ??= resolveAttachment(response);
+    return { ...response, ...await visualAttachment };
+  };
+  const resolveAttachment = async (response: { visualIntent?: unknown }): Promise<Record<string, unknown>> => {
+    const intent = readVisualIntent('visualIntent' in response ? response.visualIntent : undefined);
+    if (!visualEnabled || !intent || intent.type === 'none') return { visualGeneration: visualPermission.generation, visualDecision: !visualEnabled ? 'disabled' : !intent ? 'invalid' : 'none' };
+    const current = await ledger<{enabled:boolean;generation:number}>(env, 'visualPermission', who);
+    if (!current.enabled || current.generation !== visualPermission.generation) return { visualGeneration: visualPermission.generation, visualDecision: 'cancelled', visualIntent: undefined };
+    return visualTicket({ visualIntent: intent }, env, visitor.id, id, current.generation, permitsVideo(intent, String(input.message ?? '')), request.headers.get('X-Performer-Turn-Id') ?? undefined);
+  };
   const preview = url.pathname === '/api/card-preview';
   const cardReaction = input.mode === 'autonomous' && typeof input.forcedCardId === 'string' &&
     typeof input.programContext === 'object' && input.programContext !== null &&
@@ -185,7 +212,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
   const { limits, expires } = admission;
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(Math.max(1, Math.min(90000, expires - Date.now())))]);
   const reserve = async (amount: number) => { const charge = crypto.randomUUID(); await ledger(env, 'reserve', { ...who, job, charge, amount: Math.ceil(amount) }); return charge; };
-  const measurements: Measurements = {};
+  const measurements: Measurements = ticket?.issuedAt?{ttsTicketAgeMs:Math.max(0,Date.now()-ticket.issuedAt)}:{};
   let streaming = false;
   let outcome = 'provider_failure';
   try {
@@ -226,7 +253,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
       if (result.responses?.usage.inputTokens !== undefined && result.responses.usage.outputTokens !== undefined) await ledger(env, 'settle', { charge, amount: Math.ceil((result.responses.usage.inputTokens * .05 + result.responses.usage.outputTokens * .4) * limits.usdJpy) });
       return result;
     } };
-    const issue = (text: string, emotion: unknown) => sign({ purpose: 'tts', visitor: visitor.id, session: id, nonce: crypto.randomUUID(), text, emotion: normalizeEmotion(emotion), exp: Date.now() + 60000 }, env.COOKIE_SECRET);
+    const issue = (text: string, emotion: unknown) => sign({ purpose: 'tts', visitor: visitor.id, session: id, nonce: crypto.randomUUID(), issuedAt:Date.now(), text, emotion: normalizeEmotion(emotion), exp: Date.now() + 60000 }, env.COOKIE_SECRET);
     if (input.streamSpeech === true && !preview) {
       streaming = true;
       const abort = new AbortController();
@@ -238,7 +265,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
           void (async () => {
             try {
               const response = await llmExecutionScope.run(execution, () => generate(input, false, env.OPENAI_API_KEY,
-                AbortSignal.any([signal, abort.signal]), { onStateRejected() { rejected = true; }, onDeliveryMetadataRejected() { rejected = true; }, onSpeechUnit(_index, text, candidate) {
+                AbortSignal.any([signal, abort.signal]), { onVisualDecision(intent) {
+                  queue = queue.then(async () => { send({ type: 'visual_decision', eventId: request.headers.get('X-Performer-Turn-Id') ?? job, response: await attachVisual({ visualIntent: intent }) }); });
+                  void queue.catch(() => abort.abort());
+                }, onStateRejected() { rejected = true; }, onDeliveryMetadataRejected() { rejected = true; }, onSpeechUnit(_index, text, candidate) {
                   generation.firstSpeechUnit();
                   for (const unit of splitSpeechAtBoundaries(text)) {
                     const index = emittedUnitCount++;
@@ -246,10 +276,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
                       response: input.mode === 'voice' ? { ...candidate, interactionAction: candidate.voiceAction } : candidate }); });
                   }
                   void queue.catch(() => abort.abort());
-                } }, generation));
+                } }, generation, visualEnabled, env.VISUAL_VIDEO_ENABLED === 'true'));
               await queue;
               send({ type: 'state', internalDelta: 'internalDelta' in response ? response.internalDelta : { reasonUpdates: [] }, rejected });
-              send({ type: 'done', response });
+              send({ type: 'done', response: { ...response, ...await attachVisual('visualIntent' in response ? response : {}) } });
               outcome = 'complete';
             } catch (error) {
               if (error instanceof LimitError) outcome = error.code;
@@ -264,18 +294,18 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
     const generation = createGenerationMeasurements();
     let response: Awaited<ReturnType<typeof generate>>;
-    try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation)); }
+    try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation, visualEnabled, env.VISUAL_VIDEO_ENABLED === 'true')); }
     finally { generation.finish(); Object.assign(measurements, generation.values); }
     const text = 'text' in response && typeof response.text === 'string' ? response.text : '';
     const ttsTickets = !preview && text ? await Promise.all(splitSpeechAtBoundaries(text).map(async unit => ({ text: unit, ttsTicket: await issue(unit, response.emotion) }))) : [];
-    const result = json({ ...response, ttsTicket: text ? await issue(text, response.emotion) : undefined, ...(ttsTickets.length ? { ttsTickets } : {}) });
+    const result = json({ ...response, ...await attachVisual('visualIntent' in response ? response : {}), ttsTicket: text ? await issue(text, response.emotion) : undefined, ...(ttsTickets.length ? { ttsTickets } : {}) });
     outcome = 'complete'; return result;
   } catch (error) { if (error instanceof LimitError) outcome = error.code; throw error;
   } finally { if (!streaming) await ledger(env, 'finish', { job, measurements, code: request.signal.aborted ? 'cancelled' : signal.aborted ? 'timeout' : outcome }).catch(() => {}); }
 }
-export default { async fetch(request: Request, env: Env) {
+export default { async fetch(request: Request, env: Env, ctx?: ExecutionContext) {
   try {
-    const response = await handle(request, env);
+    const response = await handle(request, env, ctx);
     const location = response.headers.get('Location');
     const base = env.PUBLIC_BASE_PATH;
     if (base === '/staging' && location?.startsWith('/') && !location.startsWith('//') && location !== base && !location.startsWith(base + '/')) {

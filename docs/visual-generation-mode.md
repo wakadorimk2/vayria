@@ -1,0 +1,111 @@
+# 生成モード（ステージング）
+
+## 操作と境界
+
+既存の操作バーに「✨生成」を追加する。初期値はOFF。カード・文字・音声・バストアップのカメラは維持する。
+
+公開セッションのDurable Objectが許可世代を管理する。OFFとリセットで保留を破棄する。表示済み素材は残し、小物は15秒で縮小、30秒で薄くなり、45秒で退場する。
+
+会話モデルの同じ応答にvisualIntentを含める。別の生成判定モデルは呼ばない。発話をしない判断でも、検証済み意図は実行層へ渡す。単なる言及・否定・過去はnoneとする指示を使う。モデル判断の実際の精度は実機評価の対象とする。
+
+## 実行と素材
+
+- 既存の鶏・卵・羽根・バットを優先する。
+- 小物はFLUX.2 klein 4Bと背景除去を使う。PNGの透過率・輪郭の欠けをサーバーで検査する。
+- 背景は同じ高速画像モデルを使う。VRMと操作領域の投影座標を、coverの逆変換後に構図指示へ渡す。
+- 小物は30秒、背景は60秒を待機上限とする。5秒で別の鶏へ置き換えない。
+- 同時2件、未開始は最新1件。同じ対象の変更は、その対象だけを取消する。
+- 動画は、対象を問わず今回の明示的な動作要求に限る。浮遊・回転は既存演出を使う。VISUAL_VIDEO_ENABLEDはステージングで実検証後に採否を記録する。本番は無効のまま。
+- VISUAL_BACKGROUND_ENABLEDは速度・品質の採用確認まで無効にする。
+- 生成画像を読み込んでから表示する。発話の終了は待たない。
+
+R2は専用の非公開バケットを使う。認証付きの同一オリジン配信のみを許可する。索引と生成中の重複防止は既存のDurable Objectに置く。一般化を確実にできる対象だけを共有する。個人依存または不確かな対象はセッション専用とする。
+
+共有素材の保存は30日、セッション専用は1日。24時間未満は再利用する。7日未満は明示的な再生成だけ更新する。7日以上は次回利用時に更新する。更新中と更新失敗時は旧素材を維持する。
+
+## 費用と診断
+
+累計5 USD、公開セッション20要求、既存の日次・月次予算を維持する。画像・背景除去・動画を個別に予約する。失敗・取消の予約は戻さない。自動再試行と事業者の自動切替は行わない。
+
+falは公式料金API、Runwareは公式公開カタログを送信前に照合する。確認できない価格や、予約上限を超える料金では送信しない。予約額は画像0.01 USD、背景除去0.05 USD、鶏動画0.125 USDを保守的な枠として用いる。実際の請求額と予約額は区別する。
+
+- 意図出力: ブラウザーのvisual-decision。turn IDとtarget IDを記録する。
+- 受付・API応答・準備: visualイベントと台帳のevent ID・数値時刻。
+- 表示: first_display。会話本文・APIキー・署名チケットは記録しない。
+
+料金参照: https://fal.ai/docs/platform-apis/v1/models/pricing
+Runware参照: https://content.runware.ai/models/runware%3A400%404/pricing と https://content.runware.ai/models/runware%3A109%401/pricing
+
+## 検証状態（2026-09-11）
+
+専用の固定時計・疑似APIテストで、OFF、古い世代、費用上限、同時要求、個人素材の非共有、期間境界、3/8/15秒の完成、取消競合、背景反応の重複防止、PNG検査、保存後の再利用を確認した。
+
+既存回帰テスト、lint、型検査、ステージングビルドを実行した。配信基盤は別PR #112に分離した。アプリはPR #111を更新する。
+
+実API比較は未完了。1Password CLIがauthorization timeoutを返している。各事業者・各種別3試行、90%以上の5秒以内表示、縦長・横長の実機確認は未判定。疑似APIの合格を、実生成の速度・画質・面白さの合格として扱わない。
+
+## 生成判断と通知の修復（2026-09-12）
+
+生成許可ONでは、ストリーミング応答のdeliveryHeader内でvisualIntentを先に確定する。公開Workerは発話の前に、イベントID付きvisual_decisionと実行チケットを送る。最終応答は同じチケットを再利用する。後続JSONの解析失敗で、確定済みの意図を失わない。判断だけでは画像費用を予約しない。
+
+「対象を出して・作って・召喚して」という明確な現在の依頼では、prop/addを構造化出力で要求する。色や大きさは通常の既定値にする。否定、引用、過去、条件付きの話、対象不明の指示はこの強制条件から除外する。文脈による判断は同じ会話モデルが行う。新しい判断専用LLM呼び出しは追加しない。
+
+判断中、待機中、生成中、表示検査中、表示済み、失敗・取消を既存のガラス通知へ接続した。終了時の通知は6秒で消える。古いイベントと古い許可世代は新しい通知を上書きしない。予算、機能停止、接続、時間切れ、素材検査、配置不能を区別する。事業者の未確認の拒否理由は推測しない。
+
+読込済み素材は一時候補として保持する。初回表示を確認してから表示状態を更新する。配置できない場合は候補を除去し、以前の表示を維持する。再生成・事業者切替は自動で行わない。
+
+自動検証: 公開テスト134件、既存の全テスト、配信テスト20件、lint、型検査、ステージングビルドが成功。公開Worker入口では、文字・音声入力、否定、判断の先着、末尾解析失敗、チケットの重複防止を疑似APIで確認した。実画像の速度・画質・実機評価とは区別する。今回の実測結果はPR #111に記録する。生成予算と背景・動画の採用設定は変更しない。
+
+実画像確認で、プリンがdessertへ一般化される例を確認した。明確な現在の依頼では、定番の日本語名は英語の対象名へ正規化し、conceptのenumと実行前検証で一致を確認する。未知の名詞は同じ会話モデルが具体的な英語名へ変換する。対象一覧による限定は追加しない。日本語を画像プロンプトの対象名へ直送すると文字を描く例があったため、明示依頼の対象名は英語に限定する。追加後の公開テストは136件成功。
+
+
+## 2026-09-12 動画と配置の修正
+
+- 動画停止は `video_disabled` として通知し、静止画へ黙って切り替えない。
+- 元画像は表示済みの認証付き素材、キャッシュ、定番素材、新規透過画像の順に選ぶ。元画像の表示後も同じ30秒期限を使う。
+- 単色入力PNGはWorkerで作る。緑／青のキー色を選び、ブラウザーは複数時点の切り抜きを検査する。動画不合格時は元画像を維持する。
+- 動画は元画像と動作で区別し、表示中の個人用素材を共有へ昇格しない。
+- 基準幅32%、左右優先、胴体前も使用する。顔・字幕・操作・他の対象を保護する。カメラと最大3個は維持する。
+- 発話の代替応答も既存の契約検証へ通す。確定済みの判断を再実行しない。
+- 実検証前の台帳予約は$1.22/$5。実生成結果は配信後に追記する。
+
+
+### ステージング実測（7e9b7c4）
+
+- 最初の動作依頼で判断がnone、次のロボット依頼で動作抜けを発見。明示動作も同じ応答スキーマで必須にした。
+- 歩く鶏: 入力→判断1.721秒、判断→元画像0.187秒、判断→動画6.998秒、入力→音声2.845秒。
+- 踊るロボット: 入力→判断1.880秒、判断→元画像0.384秒、判断→動画8.114秒、入力→音声2.441秒。先の試行の元画像を再利用。
+- 両方で動画の初回描画、複数時点の切り抜き検査、ポーズの変化を確認。横長で共存し、顔・字幕・操作を隠さなかった。
+- 5秒の動画表示目標は未達。動画はステージングで有効を維持する。2例だけの暫定評価であり、スマホ実機・面白さは未確認。
+- 動作を反映した動画は出たが、会話が依頼を復唱した例がある。台詞の自然さは改善余地がある。
+- 縦長では縮小が早かったため、左右と胴体前の全候補を確認してから段階的に縮小する。
+
+
+### 2026-09-12: 通常URLの動画診断
+
+- `/staging/` のHTMLは `private, no-store`。ビルド確認用クエリは不要。
+- 署名済みイベントIDで、画像・動画キャッシュ、読み込み、シーク、検査、再生拒否、フレーム進行を認証付き `/api/visual/diagnostic` へ送る。
+- 保存項目はイベントID、ビルド識別子、許可した段階コード、所要時間、受信時刻だけ。本文・素材URL・認証値を保存しない。24時間、最大1000件。許可世代が古い報告は拒否する。
+- 元画像の表示中は動画準備の通知を維持。再生時刻の進行と複数描画を確認して動画表示を確定する。読み込み10秒、検査シーク3秒、再生開始・初回進行4秒で原因別に失敗する。全体の30秒上限は維持。
+- 検証用 `cacheOnly: true` はキャッシュ未存在時に `cache_miss` を返す。生成枠を予約しない。通常動作には指定しない。
+- 自動検証: 公開146件、小物17件、配信20件、型検査、lint、ステージングビルド成功。
+- iPhoneの原因確定は診断導入後の同一文言による実機照合が必要。Safariが原因とはまだ断定していない。有料再生成は行わない。
+
+
+### iPhone playback and media latency repair
+
+Muted playback now starts decoding before waiting for loadeddata. The first frame is checked before display. Later frames are checked during playback; a failed frame restores the source image. Decoded-frame callbacks drive canvas rendering where available. Inspection version 1 is cached per asset in browser memory; other browsers still inspect the asset. OFF restores the source image.
+
+The Worker publishes an authenticated short-lived media reference before R2 storage completes. Range responses use the provider while storage is pending, then R2. Failed storage preserves the temporary relay. Only server-registered URLs are relayed. Source preparation images are cached by source asset version. The authenticated POST /api/visual/replay endpoint accepts assetId and generation and never calls a generation provider.
+
+The ledger now has manifestationMicrousd (default 5000000). Staging may be configured to 10000000 without clearing prior reservations. Production defaults remain unchanged.
+
+Concurrent chat no longer deletes queued speech tickets. TTS expiry, signature failure, session mismatch and local missing tickets have separate codes. Dance wording and shrimp/crab/mandarin aliases constrain explicit requests.
+
+Device acceptance and latency measurements remain separate from automated checks. No iPhone success is inferred from desktop playback.
+
+## Production rollout
+
+Visual routes use PUBLIC_BASE_PATH (empty in production, /staging in preview). The browser supports both authenticated media paths. Each environment uses its own Worker, signing secrets, Durable Object and private R2 bucket. MANIFESTATION_ENABLED remains the server execution gate; each session starts OFF.
+
+Production promotion requires infrastructure PR #112 and application PR #111. Suspend automatic production deployment during the merge sequence. Validate combined main in staging before deploying production with visual generation OFF. Verify the existing ledger, preserve all reservations and daily/monthly limits, and set a USD 5 cumulative visual limit. Enable visuals only after secrets and private storage are ready. Do not reset the staging USD 10 ledger. On failure disable visuals; roll back the Worker only if ordinary features are affected. Restore automatic production deployment after acceptance.
