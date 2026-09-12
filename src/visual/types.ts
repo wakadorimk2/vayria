@@ -10,7 +10,7 @@ export interface VisualIntent {
 export interface VisualAsset {
   id: string; url: string; kind: 'image' | 'video'; composite: 'alpha' | 'green-key' | 'opaque';
   type: 'prop' | 'background'; concept: string; createdAt: number;
-  expiresAt: number; scope: string;
+  expiresAt: number; scope: string; width?: number; height?: number; keyColor?: 'green' | 'blue'; source?: VisualAsset;
 }
 export const visualIntentSchema = {
   type: 'object', additionalProperties: false,
@@ -45,6 +45,8 @@ export function cacheDecision(asset: VisualAsset | null, now: number, regenerate
   return age < 86400000 || (age < 7 * 86400000 && !regenerate) ? 'reuse' : 'refresh';
 }
 export function permitsVideo(intent: VisualIntent, input: string) {
-  return intent.type === 'prop' && /^(chicken|鶏)$/i.test(intent.concept) && intent.motionEvidence.trim().length >= 2 &&
-    input.includes(intent.motionEvidence.trim()) && ['walk', 'peck', 'flap'].includes(intent.motion);
+  if (intent.type !== 'prop' || intent.action === 'cancel' || !intent.motion.trim() ||
+      intent.motionEvidence.trim().length < 2 || !input.includes(intent.motionEvidence.trim())) return false;
+  if (/「|」|『|』|["“”]|しない|さない|せない|ないで|なくて|不要|昨日|以前|だった|したら|ならば|if |don't|do not|yesterday/i.test(input)) return false;
+  return !/^(float|rotate|pulse|grow|sparkle|bubbles)$/i.test(intent.motion.trim());
 }

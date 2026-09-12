@@ -1032,7 +1032,7 @@ export async function generateReply(
         'Each audible unit must be independently speakable and must not contain Markdown.',
       ].join(' ')
       : '',
-    ...(llm.manifestationEnabled ? ['Visual generation permission is ON. Decide visualIntent FIRST, inside deliveryHeader for streaming or before text otherwise. Speech must agree with this decision. A none decision must not promise to create an object. For a valid request acknowledge an ATTEMPT, never guaranteed success. You can request a new visual object or background through visualIntent. Use the current user input or just-inserted card, conversation, and visible world together. Default type none when there is no current request for a visual change. An explicit current request to show, create, summon, or bring out an object is sufficient to set type prop and action add, even if it is not a known stock asset. Do not defer that request just to ask about optional color, size, style, or variety; choose an ordinary recognizable version of the requested object and leave unspecified modifiers empty. For example, ボールを出して requests concept ball; 肉を出して requests concept meat (an ordinary food item); 鶏を出して requests concept chicken, not the broader bird. Preserve the specific requested subject rather than replacing it with a broader category. A brief reply should acknowledge the attempted appearance, not require another user answer before starting it. Mere mentions, negation such as 出さないで, past events, or unchanged cards do not request generation. Do not ask the user to provide an object when they are asking you to create it. Choose prop for a new small object, background for environment changes, effect for lightweight changes to a visible object. Use its targetId for replacements or cancellations; use an empty targetId for new props. When the schema fixes concept to a single value, use that canonical English object name. Always translate Japanese object names into concrete English nouns, never Japanese lettering. Do not broaden it (pudding must not become dessert). Otherwise use short general English nouns for concept and shape modifiers. Never add personal details inferred from the conversation. Set sharing general only for impersonal generic concepts; use private for personal requests and uncertain if unsure. Effects are grow, float, rotate, pulse, sparkle, bubbles. These do not require new images. Motion is empty unless the current input clearly requests walking, pecking or flapping; then use walk, peck or flap, with the exact supporting input substring as motionEvidence. Existing generated videos are not evidence of a new motion request. Regenerate is true only on an explicit request to remake the appearance. You have requested generation but the asset is not yet visible: do not claim it is complete or held in your hand. Acknowledge the attempted change naturally, then continue the conversation.'] : []),
+    ...(llm.manifestationEnabled ? [llm.visualVideoEnabled ? 'Video execution is available; acknowledge only an attempt.' : 'Video execution is OFF. Never promise animation. Preserve an explicit motion intent so the runtime can report that video is stopped.', 'Visual generation permission is ON. Decide visualIntent FIRST, inside deliveryHeader for streaming or before text otherwise. Speech must agree with this decision. A none decision must not promise to create an object. For a valid request acknowledge an ATTEMPT, never guaranteed success. You can request a new visual object or background through visualIntent. Use the current user input or just-inserted card, conversation, and visible world together. Default type none when there is no current request for a visual change. An explicit current request to show, create, summon, or bring out an object is sufficient to set type prop and action add, even if it is not a known stock asset. Do not defer that request just to ask about optional color, size, style, or variety; choose an ordinary recognizable version of the requested object and leave unspecified modifiers empty. For example, ボールを出して requests concept ball; 肉を出して requests concept meat (an ordinary food item); 鶏を出して requests concept chicken, not the broader bird. Preserve the specific requested subject rather than replacing it with a broader category. A brief reply should acknowledge the attempted appearance, not require another user answer before starting it. Mere mentions, negation such as 出さないで, past events, or unchanged cards do not request generation. Do not ask the user to provide an object when they are asking you to create it. Choose prop for a new small object, background for environment changes, effect for lightweight changes to a visible object. Use its targetId for replacements or cancellations; use an empty targetId for new props. When the schema fixes concept to a single value, use that canonical English object name. Always translate Japanese object names into concrete English nouns, never Japanese lettering. Do not broaden it (pudding must not become dessert). Otherwise use short general English nouns for concept and shape modifiers. Never add personal details inferred from the conversation. Set sharing general only for impersonal generic concepts; use private for personal requests and uncertain if unsure. Effects are grow, float, rotate, pulse, sparkle, bubbles. These do not require new images. Motion is empty unless the current input explicitly requests articulated animation (walking, dancing, waving, etc.). Use a short English action and the exact supporting input substring as motionEvidence. Any object can be animated. For an existing visible target use action replace and its targetId. Float, rotate, pulse, grow and particles use effects, not video. Existing generated videos are not evidence of a new motion request. Regenerate is true only on an explicit request to remake the appearance. You have requested generation but the asset is not yet visible: do not claim it is complete or held in your hand. Acknowledge the attempted change naturally, then continue the conversation.'] : []),
     greeting ? 'For this greeting, use a short welcome and exactly one easy, low-pressure question. Keep it to two short Japanese sentences. Follow the character identity. Do not ask for personal information or explain controls. The second sentence may be the question.' : 'When a second sentence is used, make it an interruption, self-correction, private aside, or unfinished thought. Do not use the second sentence to explain the cards or add a lecture.',
   ].join('\n');
   const dynamicSystemPrompt = [
@@ -1421,6 +1421,17 @@ export async function generateReply(
     }
   };
 
+  const visualFallback = (text: string): CardAssistantResponse => parseAssistantResponse(
+    JSON.stringify(mode === 'autonomous' ? {
+      text: '', emotion: 'neutral', activatedCards: [], speechAct: null, expressionLevel: null,
+      externalAction: 'none', usedReasonIds: [], internalDelta: { reasonUpdates: [] },
+    } : {
+      text, emotion: 'neutral', activatedCards: [forcedCardId ?? brainCardIds[0]],
+      speechAct: 'answer', expressionLevel: 'low', internalDelta: { reasonUpdates: [] },
+      ...(mode === 'voice' ? { voiceAction: 'take_floor', backchannelCue: 'none' } : {}),
+    }), mode, brainCardIds, forcedCardId, message, characterIdentity, autonomyCandidate, expressionBudget,
+  );
+
   const parseWithManifestation = (value: string): CardAssistantResponse => {
     if (!llm.manifestationEnabled) return parseAttempt(value);
     const raw = JSON.parse(value) as Record<string, unknown>;
@@ -1429,7 +1440,7 @@ export async function generateReply(
     delete raw.visualIntent;
     if (header) raw.deliveryHeader = cleanHeader(header);
     if (!committedVisual) {
-      return { text: '出すものの判断を確定できませんでした。', emotion: 'neutral', activatedCards: [], internalDelta: { reasonUpdates: [] }, speechAct: null, expressionLevel: null } as CardAssistantResponse;
+      return visualFallback('出すものの判断を確定できませんでした。');
     }
     const response = parseAttempt(JSON.stringify(raw));
     return { ...response, visualIntent: committedVisual };
@@ -1452,7 +1463,7 @@ export async function generateReply(
       };
     }
     if (visualResolved) {
-      return { response: { text: '表示の準備を確認しています。', emotion: 'neutral', activatedCards: [], internalDelta: { reasonUpdates: [] }, speechAct: null, expressionLevel: null, ...(committedVisual ? { visualIntent: committedVisual } : {}) } as CardAssistantResponse, providerCallCount };
+      return { response: { ...visualFallback('表示の準備を確認しています。'), ...(committedVisual ? { visualIntent: committedVisual } : {}) }, providerCallCount };
     }
     if (isRetryableIncompleteResponseError(error)) {
       retryCause = 'output_limit';

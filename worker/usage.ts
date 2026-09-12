@@ -32,7 +32,7 @@ export class PublicUsage extends DurableObject {
           case 'visualLookup': return l.visualLookup(b.visitor, b.id, b.generation, b.key);
           case 'visualStart': return l.visualStart(b.visitor, b.id, b.generation, b.token, b.key, b.target, b.duration);
           case 'visualReserve': return l.visualReserve(b.visitor, b.id, b.generation, b.token, b.step, b.cost);
-          case 'visualPublish': return l.visualPublish(b.visitor, b.id, b.generation, b.token, b.asset);
+          case 'visualPublish': return l.visualPublish(b.visitor, b.id, b.generation, b.token, b.asset, b.key);
           case 'visualFinish': return l.visualFinish(b.visitor, b.id, b.token, b.code, b.timings);
           case 'visualCancel': return l.visualCancel(b.visitor, b.id, b.generation, b.target, b.token);
           case 'manifestationBegin': return l.manifestationBegin(b.visitor, b.id, b.manifestationEvent, b.token);

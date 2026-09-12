@@ -1,4 +1,5 @@
 export function visualFailureMessage(code: string): string {
+  if (code === 'video_disabled') return '動画生成は現在停止中です。';
   if (/budget|manifestation_limit/.test(code)) return '生成の利用上限に達しました。';
   if (/disabled|stopped|not_adopted|configuration/.test(code)) return 'この生成機能は現在休止しています。';
   if (/session|ticket|permission/.test(code)) return '生成の受付期限が切れました。';

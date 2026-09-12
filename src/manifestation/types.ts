@@ -15,6 +15,7 @@ export interface GeneratedObject {
   url: string;
   kind: 'image' | 'video';
   composite: 'alpha' | 'green-key';
+  keyColor?: 'green' | 'blue';
   mode: ManifestationMode;
   timings: Record<string, number>;
 }

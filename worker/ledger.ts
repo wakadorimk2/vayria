@@ -356,11 +356,11 @@ export class Ledger {
     if (session.exhibition) this.state.exhibitions![session.exhibition].used += yen;
     m.reservedMicrousd += cost; m.requests[id] = (m.requests[id] ?? 0) + 1; m.events[key] = true; session.paid = true;
   }
-  visualPublish(visitor: string, id: string, generation: number, token: string, asset: VisualAsset) {
+  visualPublish(visitor: string, id: string, generation: number, token: string, asset: VisualAsset, key?: string) {
     this.visualAllowed(visitor, id, generation);
     const v = this.visualState(), job = v.jobs[token];
     if (!job || job.session !== id || job.finished || job.expires <= this.now) throw new LimitError('job_expired', 0, 409);
-    v.cache[job.key] = asset;
+    v.cache[key ?? job.key] = asset;
   }
   visualFinish(visitor: string, id: string, token: string, code: string, timings: Record<string, number>) {
     this.session(visitor, id); const v = this.visualState(), job = v.jobs[token];

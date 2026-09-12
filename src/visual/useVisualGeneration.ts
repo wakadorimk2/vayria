@@ -2,7 +2,7 @@ import { VisualModeError, visualModeErrorMessage } from './modeError';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { publicFetch, publicSessionId, requestPublicSession } from '../public/session';
 import { runtimeConfig } from '../runtimeConfig';
-import { prepareObject, releasePrepared } from '../manifestation/media';
+import { prepareObject, releasePrepared, preparedVideos } from '../manifestation/media';
 import { setVisualAccess } from './access';
 import { VisualSession } from './session';
 import type { VisualAsset } from './types';
@@ -14,11 +14,11 @@ export function useVisualGeneration(){
       diagnostic:(event,id,milliseconds)=>{if(runtimeConfig.mode==='public'&&runtimeConfig.manifestationEnabled)console.info('[visual]',JSON.stringify({event,id,at:Date.now(),milliseconds}));},
       cancel:async(ticket)=>{await publicFetch('/api/visual/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})});},
       prepare:async(asset,signal)=>{
-        if(asset.kind==='video'){await prepareObject({...asset,composite:'green-key',mode:'reused-base-video',timings:{}},signal);return;}
-        const image=new Image();image.src=asset.url;await image.decode().catch(()=>{throw new Error('image_decode_failed');});signal.throwIfAborted();
+        if(asset.kind==='video'){await prepareObject({...asset,composite:'green-key',mode:'reused-base-video',timings:{}},signal);const video=preparedVideos.get(asset.url);asset.width=video?.videoWidth;asset.height=video?.videoHeight;return;}
+        const image=new Image();image.src=asset.url;await image.decode().catch(()=>{throw new Error('image_decode_failed');});signal.throwIfAborted();asset.width=image.naturalWidth;asset.height=image.naturalHeight;
       },
       generate:async(job,signal,onAsset)=>{
-        const response=await publicFetch('/api/visual/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:job.ticket,remainingMs:Math.max(1,(job.intent.type==='background'?60000:30000)-(Date.now()-job.at)),portrait:runtime.getLayout().height>runtime.getLayout().width,layout:runtime.getLayout()}),signal});
+        const response=await publicFetch('/api/visual/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:job.ticket,source:runtime.getSnapshot().objects.find(o=>o.id===job.target)?.asset,remainingMs:Math.max(1,(job.intent.type==='background'?60000:30000)-(Date.now()-job.at)),portrait:runtime.getLayout().height>runtime.getLayout().width,layout:runtime.getLayout()}),signal});
         console.info('[visual-response]',JSON.stringify({id:job.id,status:response.status,stream:response.headers.get('Content-Type')?.includes('ndjson')===true}));
         const receive=async(value:{type:string;asset?:VisualAsset;code?:string})=>{if(value.type==='asset'&&value.asset){console.info('[visual-response]',JSON.stringify({id:job.id,stage:'asset_received'}));await onAsset(value.asset);}if(value.type==='failed')throw new Error(value.code??'visual_failed');};
         if(!response.ok){const value=await response.json();throw new Error(value.code??'visual_failed');}

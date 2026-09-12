@@ -1,12 +1,13 @@
 import type { GeneratedObject } from './types.js';
 export const preparedVideos = new Map<string, HTMLVideoElement>();
 /** Key only the saturated green screen. White plumage and yellow feet remain opaque. */
-export function keyGreen(data: Uint8ClampedArray) {
+export function keyGreen(data: Uint8ClampedArray, keyColor: 'green' | 'blue' = 'green') {
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const k = keyColor === 'green' ? 1 : 2, other = k === 1 ? 2 : 1;
+    const r = data[i], g = data[i + k], b = data[i + other];
     const excess = g - Math.max(r, b);
     const alpha = Math.max(0, Math.min(1, (65 - excess) / 45));
-    if (g > 80 && excess > 20) { data[i + 3] = Math.round(255 * alpha); data[i + 1] = Math.min(g, Math.max(r, b) + 20); }
+    if (g > 80 && excess > 20) { data[i + 3] = Math.round(255 * alpha); data[i + k] = Math.min(g, Math.max(r, b) + 20); }
   }
 }
 export async function prepareObject(media: GeneratedObject, signal: AbortSignal) {
@@ -36,8 +37,17 @@ export async function prepareObject(media: GeneratedObject, signal: AbortSignal)
     const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128;
     const context = canvas.getContext('2d', { willReadFrequently: true });
     if (!context) throw new Error('canvas-unavailable');
+    for (const time of [0, .25, .5, .75].map(t => t * video.duration)) {
+    if (!Number.isFinite(time)) throw new Error('video-decode');
+    if (Math.abs(video.currentTime-time)>.01) await new Promise<void>((resolve,reject)=>{
+      const timeout=setTimeout(()=>{clean();reject(new Error('video-decode'));},3000);
+      const done=()=>{clean();resolve();};const stop=()=>{clean();reject(new Error('aborted'));};
+      const clean=()=>{clearTimeout(timeout);video.removeEventListener('seeked',done);signal.removeEventListener('abort',stop);};
+      video.addEventListener('seeked',done,{once:true});signal.addEventListener('abort',stop,{once:true});video.currentTime=time;
+    });
+    signal.throwIfAborted();
     context.drawImage(video, 0, 0, 128, 128);
-    const pixels = context.getImageData(0, 0, 128, 128); keyGreen(pixels.data);
+    const pixels = context.getImageData(0, 0, 128, 128); keyGreen(pixels.data,media.keyColor);
     mark('firstKeyCompleted');
     let clear = 0, solid = 0, edge = 0;
     for (let p = 0; p < 128 * 128; p++) {
@@ -46,6 +56,8 @@ export async function prepareObject(media: GeneratedObject, signal: AbortSignal)
       if ((p < 128 || p >= 127 * 128 || p % 128 === 0 || p % 128 === 127) && a > 50) edge++;
     }
     if (clear < 128 * 128 * .25 || solid < 128 * 128 * .03 || edge > 25) throw new Error('key-quality');
+    }
+    video.currentTime=0;
     signal.throwIfAborted();
     preparedVideos.set(media.url, video);
     media.timings.compositeReadyAt = Date.now();

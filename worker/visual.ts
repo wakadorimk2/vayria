@@ -3,7 +3,7 @@ import { VISUAL_EFFECTS, readVisualIntent, cacheDecision, assetDescriptionKey, t
 import { sign, verify, boundedBody } from './security';
 import { LimitError } from './ledger';
 import { generateVisualImage, callVisualProvider, safeVisualMediaUrl, type ProviderContext, type VisualProvider } from './visualProvider';
-import { inspectVisualPng } from './visualMedia';
+import { inspectVisualPng, videoSourcePng } from './visualMedia';
 export interface VisualEnv {
   ASSETS: Fetcher; VISUAL_ASSETS?: R2Bucket; COOKIE_SECRET: string; MANIFESTATION_ENABLED?: string;
   PUBLIC_BASE_PATH?: string; GENERATION_ENABLED: string; FAL_KEY?: string; RUNWARE_API_KEY?: string;
@@ -58,15 +58,32 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
   const intent=readVisualIntent(ticket.intent);if(!intent||intent.type==='none')throw new LimitError('invalid_request',0,400);
   const args={...who,generation:ticket.generation,token:ticket.token};
   if(path==='/api/visual/cancel'||intent.action==='cancel'){await ledger('visualCancel',{...args,token:intent.action==='cancel'?undefined:ticket.token,target:intent.targetId});return json({type:'cancel',targetId:intent.targetId});}
+  if(ticket.video && env.VISUAL_VIDEO_ENABLED!=='true')return json({type:'failed',code:'video_disabled'});
   if(intent.type==='effect')return json({type:'effect',intent});
   intent.modifiers=intent.modifiers.filter(m=>!VISUAL_EFFECTS.includes(m as typeof VISUAL_EFFECTS[number]));
-  const portrait=b.portrait===true, scope=sharedVisual(intent)?'shared':session;
-  const key=await digest(scope+assetDescriptionKey(intent,portrait));
+  const portrait=b.portrait===true, scope=sharedVisual(intent)&&!b.source?'shared':session;
+  const baseIntent={...intent,motion:'',motionEvidence:''};
+  const baseKey=await digest(scope+assetDescriptionKey(baseIntent,portrait));
+  let source:VisualAsset|null=null;
+  if(ticket.video && b.source && intent.action==='replace') {
+    const candidate=b.source.source??b.source;
+    if(typeof candidate.url!=='string')throw new LimitError('invalid_source',0,400);
+    if(candidate.url.startsWith('/staging/api/visual/media/')){
+      const u=new URL(candidate.url,'https://local');
+      const proof=await verify<{exp:number;purpose:string;visitor:string;session:string;key:string}>(u.searchParams.get('ticket')??'',env.COOKIE_SECRET);
+      if(!proof||proof.purpose!=='visual-media'||proof.visitor!==visitor||proof.session!==session||proof.key!==u.pathname.split('/').pop())throw new LimitError('invalid_source',0,403);
+      source={id:proof.key,url:proof.key,kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:proof.exp,scope:session};
+    }else if(candidate.url==='/staging/manifestation/'+stock[intent.concept.toLowerCase()]+'.png')source={id:'stock-'+stock[intent.concept.toLowerCase()],url:candidate.url.replace('/staging',''),kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'};
+    else throw new LimitError('invalid_source',0,400);
+  }
+  source??=ticket.video?await ledger<VisualAsset|null>('visualLookup',{...args,key:baseKey}):null;
+  const key=ticket.video?await digest(scope+assetDescriptionKey(intent,portrait)+':video-v2:'+(source?.id??'new')):baseKey;
+
   const cached=await ledger<VisualAsset|null>('visualLookup',{...args,key});
-  const resolve=async(asset:VisualAsset)=>{
+  const resolve=async(asset:VisualAsset):Promise<VisualAsset>=>{
     if(asset.url.startsWith('/manifestation/'))return {...asset,url:'/staging'+asset.url};
     const signed=await sign({purpose:'visual-media',visitor,session,key:asset.id,exp:Math.min(asset.expiresAt,Date.now()+900000)},env.COOKIE_SECRET);
-    return {...asset,url:'/staging/api/visual/media/'+asset.id+'?ticket='+encodeURIComponent(signed)};
+    return {...asset,url:'/staging/api/visual/media/'+asset.id+'?ticket='+encodeURIComponent(signed),...(asset.source?{source:await resolve(asset.source)}:{})};
   };
   const builtin=stock[intent.concept.toLowerCase()];
   if(intent.type==='prop'&&!cached&&builtin&&!intent.modifiers.length&&!ticket.video){
@@ -93,24 +110,42 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
         const provider:VisualProvider=env.VISUAL_IMAGE_PROVIDER==='runware'?'runware':'fal';
         const context:ProviderContext={provider,falKey:env.FAL_KEY,runwareKey:env.RUNWARE_API_KEY,signal,timings,layout:isWorldLayout(b.layout)?b.layout:undefined,
           reserve:async(step,cost)=>{if(env.GENERATION_ENABLED!=='true')throw new Error('generation_stopped');await ledger('visualReserve',{...args,step,cost});}};
-        let url:string;
-        if(ticket.video&&env.VISUAL_VIDEO_ENABLED==='true'&&builtin==='chicken-1'&&!intent.modifiers.length){
-          emit({type:'asset',asset:{id:ticket.token,url:'/staging/manifestation/chicken-1.png',kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'}});
-          const source=await env.ASSETS.fetch(new Request('https://assets/manifestation/chicken-source.png'));
-          if(!source.ok||!source.headers.get('Content-Type')?.includes('image/png'))throw new Error('source_invalid');
-          const result=await callVisualProvider({...context,provider:'fal'},'video',{image_url:'data:image/png;base64,'+Buffer.from(await source.arrayBuffer()).toString('base64'),prompt:`Locked camera. One chicken ${intent.motion}. Full silhouette inside frame. Uniform green background. No cuts, hands, text, or other subjects.`,duration:5,resolution:'480P',prompt_expansion_mode:'fast',enable_safety_checker:true});
+        let url:string, keyColor:'green'|'blue'|undefined;
+        if(ticket.video){
+          if(!source){
+            if(builtin&&!intent.modifiers.length)source={id:'stock-'+builtin,url:'/manifestation/'+builtin+'.png',kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'};
+            else {
+              const baseUrl=await generateVisualImage(context,baseIntent,portrait);
+              const response=await fetch(safeVisualMediaUrl(baseUrl),{signal,redirect:'manual'});
+              if(!response.ok)throw new Error('media_failed');
+              const bytes=await boundedBody(response as unknown as Request,12000000);
+              const dimensions=await inspectVisualPng(new Uint8Array(bytes),true);
+              const now=Date.now(),id=(scope==='shared'?'s-':'p-')+await digest(baseKey+now+ticket.token);
+              const expiresAt=now+(scope==='shared'?30:1)*86400000;
+              await env.VISUAL_ASSETS!.put(id,bytes,{httpMetadata:{contentType:'image/png'},customMetadata:{expiresAt:String(expiresAt),scope:scope==='shared'?'shared':'private'}});
+              source={id,url:id,kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:now,expiresAt,scope,width:dimensions.width,height:dimensions.height};
+              await ledger('visualPublish',{...args,asset:source,key:baseKey});
+            }
+          }
+          emit({type:'asset',asset:await resolve(source)});
+          const original=source.url.startsWith('/manifestation/')
+            ?await env.ASSETS.fetch(new Request('https://assets'+source.url))
+            :await env.VISUAL_ASSETS!.get(source.id);
+          if(!original)throw new Error('source_invalid');
+          const input=await videoSourcePng(new Uint8Array(await original.arrayBuffer()));keyColor=input.keyColor;
+          const result=await callVisualProvider({...context,provider:'fal'},'video',{image_url:'data:image/png;base64,'+Buffer.from(input.bytes).toString('base64'),prompt:`Locked camera. One ${intent.concept} performing this action: ${intent.motion}. Preserve the source appearance. Full silhouette stays inside the frame with a generous margin. Uniform saturated ${keyColor} background. No cuts, text, extra subjects, floor or shadows.`,duration:5,resolution:'480P',prompt_expansion_mode:'fast',enable_safety_checker:true});
           url=String((result.video as {url?:string})?.url);
         }else url=await generateVisualImage(context,intent,portrait);
         const media=await fetch(safeVisualMediaUrl(url),{signal,redirect:'manual'});
         if(!media.ok)throw new Error('media_failed');
-        const video=ticket.video&&env.VISUAL_VIDEO_ENABLED==='true'&&builtin==='chicken-1'&&!intent.modifiers.length;
+        const video=ticket.video;
         if(!media.headers.get('Content-Type')?.includes(video?'video/mp4':'image/png'))throw new Error('media_type');
         const bytes=await boundedBody(media as unknown as Request,video?32000000:12000000);
-        if(!video)await inspectVisualPng(new Uint8Array(bytes),intent.type==='prop');
+        const dimensions=!video?await inspectVisualPng(new Uint8Array(bytes),intent.type==='prop'):undefined;
         const now=Date.now(), id=(scope==='shared'?'s-':'p-')+await digest(key+now+ticket.token), expiresAt=now+(scope==='shared'?30:1)*86400000;
         await ledger('visualPermission',who).then(p=>{const value=p as {enabled:boolean;generation:number};if(!value.enabled||value.generation!==ticket.generation)throw new Error('visual_disabled');});
         await env.VISUAL_ASSETS!.put(id,bytes,{httpMetadata:{contentType:video?'video/mp4':'image/png'},customMetadata:{expiresAt:String(expiresAt),scope:scope==='shared'?'shared':'private'}});
-        const asset:VisualAsset={id,url:id,kind:video?'video':'image',composite:video?'green-key':intent.type==='prop'?'alpha':'opaque',type:intent.type as 'prop'|'background',concept:intent.concept,createdAt:now,expiresAt,scope};
+        const asset:VisualAsset={id,url:id,kind:video?'video':'image',composite:video?'green-key':intent.type==='prop'?'alpha':'opaque',type:intent.type as 'prop'|'background',concept:intent.concept,createdAt:now,expiresAt,scope,...(video?{keyColor,source:source??undefined}:{width:dimensions?.width,height:dimensions?.height})};
         await ledger('visualPublish',{...args,asset});timings.ready=performance.now()-start;
         emit({type:'asset',asset:await resolve(asset)});code='complete';
       }catch(error){code=error instanceof Error?/^[\w-]{1,60}$/.test(error.message)?error.message:'visual_failed':'visual_failed';emit({type:'failed',code});}

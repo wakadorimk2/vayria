@@ -202,6 +202,7 @@ export const providerRequestCounts = { active: 0 };
 export interface LocalApiConfig {
   manifestationBudgetLimitUsd?: number;
   manifestationEnabled?: boolean;
+  visualVideoEnabled?: boolean;
   manifestationBenchmarkEnabled?: boolean;
   manifestationRunwareEnabled?: boolean;
   manifestation?: import('./manifestationProvider.js').ManifestationConfig;
@@ -232,6 +233,7 @@ export interface LocalApiConfig {
 
 export interface LlmRequestContext {
   manifestationEnabled?: boolean;
+  visualVideoEnabled?: boolean;
   apiKey: string;
   runtime: LlmRuntimeOptions;
   signal: AbortSignal;

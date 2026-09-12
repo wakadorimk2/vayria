@@ -235,7 +235,7 @@ test('visual decision is signed before speech, survives malformed tail, and is i
   const streaming=Boolean(props.deliveryHeader);
   assert.deepEqual((streaming?props.deliveryHeader.properties:props).visualIntent.properties.type.enum,scenario==='negative'?['none','prop','background','effect']:['prop']);
   const visual=['invalid','negative'].includes(scenario)?{...intent,type:'none'}:intent;
-  const header={visualIntent:visual,emotion:'neutral',speechAct:'answer',expressionLevel:'low',...(props.deliveryHeader?.properties.voiceAction?{voiceAction:'take_floor',backchannelCue:'none'}:{})};
+  const header={visualIntent:visual,emotion:'neutral',speechAct:scenario==='bad-plan'?null:'answer',expressionLevel:scenario==='bad-plan'?null:'low',...(props.deliveryHeader?.properties.voiceAction?{voiceAction:'take_floor',backchannelCue:'none'}:{})};
   const full=streaming?{deliveryHeader:header,speechLead:'',speechUnits:['ボールを出してみるね。'],activatedCards:['chicken']}:{visualIntent:visual,text:'ボールを出してみるね。',emotion:'neutral',speechAct:'answer',expressionLevel:'low',activatedCards:['chicken']};
   const text=JSON.stringify(full);const delta=scenario==='tail'?text.slice(0,text.indexOf(',"activatedCards"')):text;
   const events=[{type:'response.output_text.delta',delta},{type:'response.completed',response:{model:'gpt-5-nano',usage:{input_tokens:10,output_tokens:10},service_tier:'default'}}];
@@ -254,6 +254,7 @@ test('visual decision is signed before speech, survives malformed tail, and is i
   }
   scenario='complete';const result=await (await worker.fetch(request(false),env)).json();assert.ok(result.visualTicket);assert.ok(result.text);
   const voice=(await (await worker.fetch(request(true,'voice'),env)).text()).trim().split('\n').map(JSON.parse);assert.ok(voice[0].response.visualTicket);assert.equal(voice[1].type,'speech_unit');
+  scenario='bad-plan';const fallbackEvents=(await (await worker.fetch(request(true),env)).text()).trim().split('\n').map(JSON.parse);const fallback=fallbackEvents.find(e=>e.type==='done')?.response;assert.ok(fallback);assert.equal(fallback.speechAct,'answer');assert.equal(fallback.expressionLevel,'low');assert.ok(fallback.visualTicket);
   scenario='negative';const negative=(await (await worker.fetch(request(true,'voice'),env)).text()).trim().split('\n').map(JSON.parse);assert.equal(negative[0].response.visualDecision,'none');assert.equal(negative[0].response.visualTicket,undefined);
   assert.equal(calls.includes('visualReserve'),false,'Decision alone never reserves image costs');
  }finally{globalThis.fetch=previous;}

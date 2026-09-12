@@ -159,3 +159,51 @@ test('unknown requested objects still use the same LLM translation and never sen
  assert.equal(validVisualDecision({...intent,concept:'プリン'},true,'プリン'),null);
  assert.equal(visualDecisionSchema(true,'紫色の飛行船').properties.concept.enum,undefined);
 });
+
+
+test('video request supports robot motion but rejects negation, quotes, history and transform effects',()=>{
+ const moving={...intent,concept:'robot',motion:'dance',motionEvidence:'踊って'};
+ assert.equal(permitsVideo(moving,'ロボットに踊ってほしい'),true);
+ for(const input of ['踊ってと言ったのは昨日','「踊って」と言った','踊ってほしくないでしょ'])assert.equal(permitsVideo(moving,input),false,input);
+ assert.equal(permitsVideo({...moving,motion:'float'},'ロボットに踊ってほしい'),false);
+});
+test('video disabled refuses before lookup or paid reservation',async()=>{
+ const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');let calls=0;
+ const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',COOKIE_SECRET:'test-secret-'.repeat(4)};
+ const signed=await visualTicket({visualIntent:{...intent,motion:'walk',motionEvidence:'歩いて'}},env,'v','s',1,true);
+ const result=await visualRoute(new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket})}),env,'v','s',async op=>{calls++;assert.equal(op,'visualPermission');return {enabled:true,generation:1}});
+ assert.deepEqual(await result.json(),{type:'failed',code:'video_disabled'});assert.equal(calls,1);
+});
+test('Worker creates opaque video source without losing original dimensions',async()=>{
+ const {videoSourcePng}=await import('../'+dir+'/test.mjs');const input=await readFile('public/manifestation/chicken-1.png');
+ const result=await videoSourcePng(new Uint8Array(input));const original=await inspectVisualPng(new Uint8Array(input),true);
+ assert.deepEqual(await inspectVisualPng(result.bytes,false),{width:original.width,height:original.height});assert.ok(['green','blue'].includes(result.keyColor));
+});
+test('image to video replacement waits for visibility and failed playback preserves image',async()=>{
+ let accept,finish;const notices=[];const s=new VisualSession({now:()=>100,prepare:async()=>{},notice:(id)=>notices.push(id),generate:async(j,signal,a)=>{accept=a;await new Promise(r=>finish=r);}});s.permission(true,1);s.dispatch('motion',intent,'t',1);
+ await accept({...asset,id:'base'});s.visible('target','base');await accept({...asset,id:'video',kind:'video'});assert.equal(s.getSnapshot().objects[0].asset.id,'base');
+ s.placementFailed('target','video','video_decode_failed');assert.equal(s.getSnapshot().objects[0].asset.id,'base');
+ await accept({...asset,id:'video2',kind:'video'});s.visible('target','video2');s.visible('target','video2');assert.deepEqual(notices,['motion','motion:video']);finish();await flush();
+});
+
+
+test('robot video emits its own image first and reserves each provider request once',async()=>{
+ const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');const {l}=setup();l.visualMode('v','s',true,0);
+ const png=await readFile('public/manifestation/chicken-1.png'),store=new Map();let videoInput;
+ const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',COOKIE_SECRET:'test-secret-'.repeat(4),GENERATION_ENABLED:'true',VISUAL_VIDEO_ENABLED:'true',FAL_KEY:'dummy',VISUAL_ASSETS:{put:async(id,bytes)=>store.set(id,bytes),get:async id=>store.has(id)?new Response(store.get(id)):null}};
+ const bridge=async(op,b)=>{switch(op){case 'visualPermission':return l.visualPermission(b.visitor,b.id);case 'visualLookup':return l.visualLookup(b.visitor,b.id,b.generation,b.key);case 'visualStart':return l.visualStart(b.visitor,b.id,b.generation,b.token,b.key,b.target,b.duration);case 'visualReserve':return l.visualReserve(b.visitor,b.id,b.generation,b.token,b.step,b.cost);case 'visualPublish':return l.visualPublish(b.visitor,b.id,b.generation,b.token,b.asset,b.key);case 'visualFinish':return l.visualFinish(b.visitor,b.id,b.token,b.code,b.timings);default:throw new Error(op)}};
+ const previous=globalThis.fetch;globalThis.fetch=async(url,init)=>{
+ const u=new URL(url);
+ if(u.hostname==='api.fal.ai')return Response.json({prices:[{endpoint_id:u.searchParams.get('endpoint_id'),unit_price:.0001,unit:u.searchParams.get('endpoint_id').includes('video')?'seconds':u.searchParams.get('endpoint_id').includes('birefnet')?'compute seconds':'megapixels',currency:'USD'}]});
+ if(u.hostname==='fal.media')return new Response(u.pathname.endsWith('mp4')?'mock-video':png,{headers:{'Content-Type':u.pathname.endsWith('mp4')?'video/mp4':'image/png'}});
+ if(init?.method==='POST'){const video=u.pathname.includes('video');if(video)videoInput=JSON.parse(init.body);return Response.json({status_url:'https://queue.fal.run/status',response_url:'https://queue.fal.run/'+(video?'video':'image')});}
+ if(u.pathname==='/status')return Response.json({status:'COMPLETED'});
+ return Response.json({video:{url:'https://fal.media/robot.mp4'},images:[{url:'https://fal.media/robot.png'}],image:{url:'https://fal.media/robot.png'}});
+ };
+ try{
+ const signed=await visualTicket({visualIntent:{...intent,concept:'robot',motion:'dance',motionEvidence:'踊って'}},env,'v','s',1,true);
+ const response=await visualRoute(new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket})}),env,'v','s',bridge);
+ const events=(await response.text()).trim().split('\n').map(JSON.parse);assert.deepEqual(events.map(e=>e.asset?.kind),['image','video'],JSON.stringify(events));
+ assert.ok(events.every(e=>e.asset.concept==='robot'));assert.match(videoInput.prompt,/robot/);assert.doesNotMatch(videoInput.prompt,/chicken/);assert.ok(events[1].asset.source);assert.equal(l.report().manifestation.reservedUsd,.185);
+ }finally{globalThis.fetch=previous}
+});

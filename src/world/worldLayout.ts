@@ -40,11 +40,11 @@ export function imageRectToScreen(r: WorldRect, viewport: { width: number; heigh
   return { x: (r.x * image.width * scale - (image.width * scale - viewport.width) / 2) / viewport.width, y: (r.y * image.height * scale - (image.height * scale - viewport.height) / 2) / viewport.height, width: r.width * image.width * scale / viewport.width, height: r.height * image.height * scale / viewport.height };
 }
 export const overlaps = (a: WorldRect, b: WorldRect) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
-export interface PropGeometry { bounds: WorldRect; pivot: WorldPoint; aspect: number; displayWidth: number }
+export interface PropGeometry { bounds: WorldRect; pivot: WorldPoint; aspect: number; displayWidth: number; maxWidth?: number }
 export function placeWorldProp(layout: WorldLayout, anchor: WorldPoint, geometry: PropGeometry, scale = 1, occupied: WorldRect[] = []): { rect: WorldRect; visible: WorldRect } | null {
   const blocked = [layout.face, ...layout.obstacles, ...occupied];
   for (const shrink of [1, .8, .6, .45]) {
-    const width = Math.min(.3, geometry.displayWidth * scale) * shrink;
+    const width = Math.min(geometry.maxWidth ?? .3, geometry.displayWidth * scale) * shrink;
     const height = width * layout.width / layout.height / geometry.aspect;
     for (const offset of [{ x: 0, y: 0 }, { x: -.04, y: 0 }, { x: .04, y: 0 }, { x: 0, y: .04 }]) {
       const rect = { x: anchor.x + offset.x - geometry.pivot.x * width, y: anchor.y + offset.y - geometry.pivot.y * height, width, height };

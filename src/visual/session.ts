@@ -35,12 +35,12 @@ export class VisualSession {
     this.publish({notification:{id,message,order,until:pending?this.deps.now()+60000:this.deps.now()+6000}});
   }
   modeNotice(message:string){this.notificationOrder=++this.order;this.publish({notification:{id:'mode',message,order:this.order,until:this.deps.now()+6000}});}
-  placementFailed(id:string,assetId?:string){
+  placementFailed(id:string,assetId?:string,code='placement_unavailable'){
     const object=this.snapshot.ready?.find(o=>o.id===id);if(!object||(assetId&&object.asset.id!==assetId))return;
     this.deps.release?.(object.asset);
     this.publish({ready:this.snapshot.ready?.filter(o=>o!==object),outcomes:[...this.snapshot.outcomes,'小物は配置できなかった。表示済みの対象は維持した。'].slice(-8)});
-    this.status(object.eventId??id,'placement_unavailable',this.snapshot.generation);
-    this.deps.diagnostic?.('placement_unavailable',object.eventId??id,0);
+    this.status(object.eventId??id,code,this.snapshot.generation);
+    this.deps.diagnostic?.(code,object.eventId??id,0);
   }
   permission(enabled:boolean,generation:number){
     for(const job of this.snapshot.pending){job.controller?.abort();void this.deps.cancel?.(job.ticket).catch(()=>{});}
@@ -98,10 +98,10 @@ export class VisualSession {
     if(id==='background'){if(this.snapshot.background)this.deps.release?.(this.snapshot.background.asset);this.publish({background:updated,ready});}
     else {const objects=[...this.snapshot.objects.filter(o=>o.id!==id),updated].slice(-3);for(const old of this.snapshot.objects)if(!objects.includes(old))this.deps.release?.(old.asset);this.publish({objects,ready});}
     this.status(object.eventId??id,'displayed',this.snapshot.generation);
-    const noticeId=object.eventId??id;
-    if(!this.notices.has(noticeId)){this.notices.add(noticeId);const description=id==='background'?`背景が${object.asset.concept}の画像になった。`:`近くに${object.asset.concept}の小物が表示された。握ってはいない。`;
+    const noticeId=(object.eventId??id)+(object.asset.kind==='video'?':video':'');
+    if(!this.notices.has(noticeId)){this.notices.add(noticeId);const description=id==='background'?`背景が${object.asset.concept}の画像になった。`:`近くに${object.asset.concept}の${object.asset.kind==='video'?'動画':'小物'}が表示された。握ってはいない。`;
       this.publish({history:[...this.snapshot.history,description].slice(-8)});this.deps.notice?.(noticeId,description);}
-    this.deps.diagnostic?.('first_display',id,this.deps.now()-(this.inputTimes.get(id)??object.at));
+    this.deps.diagnostic?.(object.asset.kind==='video'?'first_video_display':'first_display',object.eventId??id,this.deps.now()-(this.inputTimes.get(id)??object.at));
   }
   tick(){
     const now=this.deps.now();const pending=this.snapshot.pending.filter(j=>{
