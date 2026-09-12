@@ -1,3 +1,4 @@
+import {playVideo,VideoFrameProgress} from '../manifestation/videoPlayback';
 import { useEffect, useRef, type RefObject } from 'react';
 import type { VrmStageHandle } from '../avatar/VrmStage';
 import { useWorldLayout } from '../world/useWorldLayout';
@@ -9,14 +10,21 @@ function VisualVideo({object,runtime}:{object:VisualObject;runtime:VisualSession
   const ref=useRef<HTMLCanvasElement>(null);
   useEffect(()=>{
     const video=preparedVideos.get(object.asset.url),ctx=ref.current?.getContext('2d',{willReadFrequently:true});if(!video||!ctx)return;
-    const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;let frame=0,stopped=false;
+    const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;let frame=0,stopped=false,confirmed=false;
+    const signal=new AbortController(),progress=new VideoFrameProgress(),id=object.eventId??object.id;
     const canvas=ref.current!;canvas.width=Math.min(video.videoWidth,768);canvas.height=Math.round(canvas.width*video.videoHeight/video.videoWidth);
-    const draw=()=>{if(stopped)return;ctx.drawImage(video,0,0,canvas.width,canvas.height);const image=ctx.getImageData(0,0,canvas.width,canvas.height);keyGreen(image.data,object.asset.keyColor);ctx.putImageData(image,0,0);runtime.visible(object.id,object.asset.id);if(!reduced)frame=requestAnimationFrame(draw);};
+    const fail=(code:string)=>{if(stopped)return;runtime.mediaStage(id,code);runtime.placementFailed(object.id,object.asset.id,code);};
+    let watchdog:ReturnType<typeof setTimeout>|undefined;
+    const draw=()=>{if(stopped)return;ctx.drawImage(video,0,0,canvas.width,canvas.height);const image=ctx.getImageData(0,0,canvas.width,canvas.height);keyGreen(image.data,object.asset.keyColor);ctx.putImageData(image,0,0);
+      if(reduced){runtime.mediaStage(id,'video_reduced_motion');runtime.placementFailed(object.id,object.asset.id,'video_reduced_motion');return;}
+      if(!confirmed&&progress.advancing(video.currentTime)){confirmed=true;clearTimeout(watchdog);runtime.mediaStage(id,'frames_advancing');runtime.visible(object.id,object.asset.id);}
+      frame=requestAnimationFrame(draw);
+    };
     if(reduced)frame=requestAnimationFrame(draw);
-    else void video.play().then(()=>{if(!stopped)frame=requestAnimationFrame(draw);}).catch(()=>runtime.placementFailed(object.id,object.asset.id,'video_decode_failed'));
-    return()=>{stopped=true;cancelAnimationFrame(frame);video.pause();};
-  },[object.asset.url,object.asset.id,object.asset.keyColor,object.id,runtime]);
-  return <canvas ref={ref} width={256} height={256} role="img" aria-label={object.asset.concept}/>;
+    else {runtime.mediaStage(id,'play_requested');void playVideo(video,signal.signal).then(()=>{if(stopped)return;runtime.mediaStage(id,'play_started');watchdog=setTimeout(()=>fail('video_frame_stalled'),4000);frame=requestAnimationFrame(draw);}).catch(error=>fail(error instanceof Error?error.message:'video_play_failed'));}
+    return()=>{stopped=true;signal.abort();clearTimeout(watchdog);cancelAnimationFrame(frame);video.pause();};
+  },[object.asset.url,object.asset.id,object.asset.keyColor,object.id,object.eventId,runtime]);
+  return <canvas style={{position:'relative'}} ref={ref} width={256} height={256} role="img" aria-label={object.asset.concept}/>;
 }
 function Unplaced({runtime,id,assetId}:{runtime:VisualSession;id:string;assetId:string}){
   useEffect(()=>{runtime.placementFailed(id,assetId);},[runtime,id,assetId]);return null;
@@ -35,6 +43,7 @@ export function VisualStage({runtime,snapshot,stage}:{runtime:VisualSession;snap
         const age=snapshot.now-object.at,rect=placement((index===0?1:.7)*(age>=30000?.6:age>=15000?.8:1)*(object.effects.includes('grow')?1.4:1),object.asset.width&&object.asset.height?object.asset.width/object.asset.height:1);
         if(!rect)return object.visible?null:<Unplaced key={object.id} id={object.id} assetId={object.asset.id} runtime={runtime}/>;
         return <div key={object.id} className={'visual-object '+object.effects.map(e=>'visual-effect-'+e).join(' ')} style={{...style(rect),opacity:age>=30000?.4:1}}>
+          {object.asset.kind==='video'&&!object.visible&&object.asset.source&&<img style={{position:'absolute',inset:0}} src={object.asset.source.url} alt=""/>}
           {object.asset.kind==='video'?<VisualVideo object={object} runtime={runtime}/>:<img src={object.asset.url} alt={object.asset.concept} onLoad={()=>runtime.visible(object.id,object.asset.id)}/>}
         </div>;
       })}

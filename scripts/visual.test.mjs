@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 const dir='node_modules/.tmp/visual';await mkdir(dir,{recursive:true});
-const result=await build({stdin:{contents:'export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/decision"; export * from "./src/visual/notice"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
+const result=await build({stdin:{contents:'export * from "./src/manifestation/videoPlayback"; export * from "./src/visual/diagnostics"; export * from "./worker/ledger"; export * from "./src/visual/types"; export * from "./src/visual/decision"; export * from "./src/visual/notice"; export * from "./src/visual/session"; export * from "./worker/visual"; export * from "./worker/visualMedia"; export * from "./src/visual/modeError";',resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'node'});
 await writeFile(dir+'/test.mjs',result.outputFiles[0].text);
 const {Ledger,initialState,readVisualIntent,cacheDecision,assetDescriptionKey,permitsVideo,VisualSession,sharedVisual,inspectVisualPng}=await import('../'+dir+'/test.mjs');
 const intent={type:'prop',action:'add',concept:'chicken',modifiers:[],targetId:'target',motion:'',motionEvidence:'',sharing:'general',regenerate:false};
@@ -216,4 +216,34 @@ test('explicit articulated action is required in the same response schema',async
  const schema=visualDecisionSchema(true,'鶏','鶏を歩かせて。');assert.equal(schema.properties.motion.minLength,1);
  assert.equal(validVisualDecision({...intent,motion:'',motionEvidence:''},true,'鶏','鶏を歩かせて。'),null);
  assert.ok(validVisualDecision({...intent,motion:'walk',motionEvidence:'鶏を歩かせて。'},true,'鶏','鶏を歩かせて。'));
+});
+
+const {waitVideoEvent,playVideo,VideoFrameProgress,readVisualDiagnostic}=await import('../'+dir+'/test.mjs');
+test('video media stages distinguish loading, seek, play refusal and abort',async()=>{
+ const video=new EventTarget();video.pause=()=>{};
+ await assert.rejects(waitVideoEvent(video,'loadeddata',new AbortController().signal,5,'video_loading_timeout'),/video_loading_timeout/);
+ await assert.rejects(waitVideoEvent(video,'seeked',new AbortController().signal,5,'video_seek_timeout'),/video_seek_timeout/);
+ const wait=waitVideoEvent(video,'loadeddata',new AbortController().signal,50,'timeout');video.dispatchEvent(new Event('error'));await assert.rejects(wait,/video_load_failed/);
+ video.play=()=>Promise.reject(new DOMException('blocked','NotAllowedError'));await assert.rejects(playVideo(video,new AbortController().signal),/video_play_rejected/);
+ video.play=()=>new Promise(()=>{});const controller=new AbortController();const pending=playVideo(video,controller.signal);controller.abort();await assert.rejects(pending,/aborted/);
+ const frames=new VideoFrameProgress();assert.equal(frames.advancing(0),false);assert.equal(frames.advancing(0),false);assert.equal(frames.advancing(.1),true);
+});
+test('diagnostics retain only safe bounded stages and reject stale permission',()=>{
+ const {l}=setup();l.visualMode('v','s',true,0);
+ const record={build:'index-test.js',stage:'video_play_rejected',milliseconds:100};
+ assert.equal(readVisualDiagnostic({...record,url:'secret'}),null);assert.equal(readVisualDiagnostic({...record,stage:'arbitrary text'}),null);
+ l.visualDiagnostic('v','s',1,'event',[record]);l.visualDiagnostic('v','s',1,'event',[record]);assert.equal(l.report().visualDiagnostics.length,1);
+ l.visualMode('v','s',false,1);assert.throws(()=>l.visualDiagnostic('v','s',1,'event',[record]),/visual_disabled/);
+ assert.equal(l.report().manifestation.reservedUsd,0);
+});
+test('exact moving chicken request permits video',()=>{
+ assert.equal(permitsVideo({...intent,motion:'move',motionEvidence:'動く'},'動く鶏を出して'),true);
+});
+
+test('cache-only video probe never reserves or generates on a miss',async()=>{
+ const {visualTicket,visualRoute}=await import('../'+dir+'/test.mjs');
+ const env={MANIFESTATION_ENABLED:'true',PUBLIC_BASE_PATH:'/staging',VISUAL_VIDEO_ENABLED:'true',COOKIE_SECRET:'test-secret-'.repeat(4)};
+ const signed=await visualTicket({visualIntent:{...intent,motion:'move',motionEvidence:'動く'}},env,'v','s',1,true,'event');
+ const calls=[];const response=await visualRoute(new Request('https://test/api/visual/generate',{method:'POST',body:JSON.stringify({ticket:signed.visualTicket,cacheOnly:true})}),env,'v','s',async op=>{calls.push(op);if(op==='visualPermission')return {enabled:true,generation:1};if(op==='visualLookup')return null;throw new Error('paid path');});
+ assert.deepEqual(await response.json(),{type:'failed',code:'cache_miss'});assert.ok(calls.every(op=>['visualPermission','visualLookup'].includes(op)));
 });

@@ -1,3 +1,4 @@
+import { waitVideoEvent } from './videoPlayback.js';
 import type { GeneratedObject } from './types.js';
 export const preparedVideos = new Map<string, HTMLVideoElement>();
 /** Key only the saturated green screen. White plumage and yellow feet remain opaque. */
@@ -25,26 +26,20 @@ export async function prepareObject(media: GeneratedObject, signal: AbortSignal)
   const abort = () => { video.pause(); video.removeAttribute('src'); video.load(); };
   signal.addEventListener('abort', abort, { once: true });
   try {
-    await new Promise<void>((resolve, reject) => {
-      const stop = () => reject(new Error('aborted'));
-      const clean = () => signal.removeEventListener('abort', stop);
-      video.onloadeddata = () => { mark('loadeddata'); clean(); resolve(); };
-      video.onerror = () => { clean(); reject(new Error('video-decode')); };
-      if (signal.aborted) stop(); else signal.addEventListener('abort', stop, { once: true });
-      mark('mediaRequestStart'); video.src = media.url;
-    });
+    const loaded=waitVideoEvent(video,'loadeddata',signal,10000,'video_loading_timeout');
+    video.addEventListener('loadedmetadata',()=>media.onMediaStage?.('metadata'),{once:true});
+    mark('mediaRequestStart');video.src=media.url;await loaded;media.onMediaStage?.('loaded_data');
     signal.throwIfAborted();
     const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128;
     const context = canvas.getContext('2d', { willReadFrequently: true });
     if (!context) throw new Error('canvas-unavailable');
     for (const time of [0, .25, .5, .75].map(t => t * video.duration)) {
     if (!Number.isFinite(time)) throw new Error('video-decode');
-    if (Math.abs(video.currentTime-time)>.01) await new Promise<void>((resolve,reject)=>{
-      const timeout=setTimeout(()=>{clean();reject(new Error('video-decode'));},3000);
-      const done=()=>{clean();resolve();};const stop=()=>{clean();reject(new Error('aborted'));};
-      const clean=()=>{clearTimeout(timeout);video.removeEventListener('seeked',done);signal.removeEventListener('abort',stop);};
-      video.addEventListener('seeked',done,{once:true});signal.addEventListener('abort',stop,{once:true});video.currentTime=time;
-    });
+    if (Math.abs(video.currentTime-time)>.01) {
+      media.onMediaStage?.('seek_started');
+      const sought=waitVideoEvent(video,'seeked',signal,3000,'video_seek_timeout');
+      video.currentTime=time;await sought;media.onMediaStage?.('seek_complete');
+    }
     signal.throwIfAborted();
     context.drawImage(video, 0, 0, 128, 128);
     const pixels = context.getImageData(0, 0, 128, 128); keyGreen(pixels.data,media.keyColor);
@@ -55,9 +50,10 @@ export async function prepareObject(media: GeneratedObject, signal: AbortSignal)
       if (a < 16) clear++; if (a > 240) solid++;
       if ((p < 128 || p >= 127 * 128 || p % 128 === 0 || p % 128 === 127) && a > 50) edge++;
     }
-    if (clear < 128 * 128 * .25 || solid < 128 * 128 * .03 || edge > 25) throw new Error('key-quality');
+    if (clear < 128 * 128 * .25 || solid < 128 * 128 * .03 || edge > 25) throw new Error('key_quality');
     }
-    video.currentTime=0;
+    const rewound=waitVideoEvent(video,'seeked',signal,3000,'video_seek_timeout');video.currentTime=0;await rewound;
+    media.onMediaStage?.('key_passed');
     signal.throwIfAborted();
     preparedVideos.set(media.url, video);
     media.timings.compositeReadyAt = Date.now();

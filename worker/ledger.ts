@@ -1,3 +1,4 @@
+import { readVisualDiagnostic, type VisualDiagnostic } from '../src/visual/diagnostics';
 import type { VisualAsset } from '../src/visual/types';
 import type { InputEvent } from '../src/manifestation/types';
 import { distribution, sanitizeMeasurements, safeMetricCode, timingFields, type Measurements } from './diagnostics';
@@ -24,6 +25,7 @@ export type Session = {
 type Job = { session: string; kind: Kind; expires: number };
 type Charge = { amount: number; day: string; month: string; settled: boolean; expires: number; exhibition?: string };
 export type LedgerState = {
+  visualDiagnostics?: (VisualDiagnostic & { eventId:string; at:number })[];
   visual?: { cache: Record<string, VisualAsset>; jobs: Record<string, { session: string; generation: number; key: string; target: string; expires: number; finished: boolean }>; claims: Record<string, string> };
 
   manifestation?: { reservedMicrousd: number; requests: Record<string, number>; events: Record<string, boolean>;
@@ -362,12 +364,22 @@ export class Ledger {
     if (!job || job.session !== id || job.finished || job.expires <= this.now) throw new LimitError('job_expired', 0, 409);
     v.cache[key ?? job.key] = asset;
   }
-  visualFinish(visitor: string, id: string, token: string, code: string, timings: Record<string, number>) {
+  visualFinish(visitor: string, id: string, token: string, code: string, timings: Record<string, number>, eventId = token) {
     this.session(visitor, id); const v = this.visualState(), job = v.jobs[token];
     if (job?.session === id) { job.finished = true; if (v.claims[job.key] === token) delete v.claims[job.key]; }
     const m = this.manifestationState();
-    m.metrics.push({ eventId: /^[\w-]{1,80}$/.test(token) ? token : undefined, code: /^[\w-]{1,60}$/.test(code) ? code : 'visual_failed', timings: Object.fromEntries(Object.entries(timings ?? {}).filter(([k,n]) => /^[\w.]{1,60}$/.test(k) && Number.isFinite(n) && n >= 0).slice(0, 30)) });
+    m.metrics.push({ eventId: /^[\w-]{1,80}$/.test(eventId) ? eventId : undefined, code: /^[\w-]{1,60}$/.test(code) ? code : 'visual_failed', timings: Object.fromEntries(Object.entries(timings ?? {}).filter(([k,n]) => /^[\w.]{1,60}$/.test(k) && Number.isFinite(n) && n >= 0).slice(0, 30)) });
     m.metrics = m.metrics.slice(-100);
+  }
+  visualDiagnostic(visitor:string,id:string,generation:number,eventId:string,values:unknown[]) {
+    this.visualAllowed(visitor,id,generation);
+    if(!/^[\w-]{1,80}$/.test(eventId)||!Array.isArray(values)||!values.length||values.length>24)throw new LimitError('invalid_diagnostic',0,400);
+    const records=values.map(readVisualDiagnostic);if(records.some(v=>!v))throw new LimitError('invalid_diagnostic',0,400);
+    this.limit('visual-diagnostic:'+id,120,'diagnostic_limit',this.now+60000);
+    this.add('visual-diagnostic:'+id,1,this.now+600000);
+    const history=(this.state.visualDiagnostics??[]).filter(r=>r.at>this.now-86400000);
+    for(const record of records)if(record&&!history.some(r=>r.eventId===eventId&&r.stage===record.stage&&r.build===record.build))history.push({...record,eventId,at:this.now});
+    this.state.visualDiagnostics=history.slice(-1000);return {accepted:true};
   }
   visualCancel(visitor: string, id: string, generation: number, target: string, token?: string) {
     this.visualAllowed(visitor, id, generation);
@@ -415,7 +427,7 @@ export class Ledger {
   report() {
     const p = periods(this.now); const l = this.state.limits;
     const estimatedYen = this.count(`bm:${p.month}`) / 1e6 + l.infrastructureYen;
-    return { manifestation: { reservedUsd: (this.state.manifestation?.reservedMicrousd ?? 0) / 1e6, limitUsd: 5, metrics: this.state.manifestation?.metrics ?? [] }, limits: l, stopped: this.state.stopped, dayYen: this.count(`bd:${p.day}`) / 1e6,
+    return { visualDiagnostics:(this.state.visualDiagnostics??[]).filter(r=>r.at>this.now-86400000), manifestation: { reservedUsd: (this.state.manifestation?.reservedMicrousd ?? 0) / 1e6, limitUsd: 5, metrics: this.state.manifestation?.metrics ?? [] }, limits: l, stopped: this.state.stopped, dayYen: this.count(`bd:${p.day}`) / 1e6,
       exhibitions: Object.values(this.state.exhibitions!), exhibitionDevices: this.state.exhibitionDevices,
       monthApiYen: this.count(`bm:${p.month}`) / 1e6, estimatedYen,
       warning: estimatedYen >= l.targetYen ? 'target_exceeded' : estimatedYen >= l.warningYen ? 'warning' : null,

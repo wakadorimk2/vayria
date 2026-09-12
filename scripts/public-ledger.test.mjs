@@ -4,9 +4,10 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import ts from 'typescript';
 await mkdir('node_modules/.tmp/public-tests', { recursive: true });
 for (const name of ['diagnostics', 'ledger', 'security']) {
-  const source = (await readFile(`worker/${name}.ts`, 'utf8')).replace("'./ledger'", "'./ledger.mjs'").replace("'./diagnostics'", "'./diagnostics.mjs'");
+  const source = (await readFile(`worker/${name}.ts`, 'utf8')).replace("'../src/visual/diagnostics'", "'./visual-diagnostics.mjs'").replace("'./ledger'", "'./ledger.mjs'").replace("'./diagnostics'", "'./diagnostics.mjs'");
   await writeFile(`node_modules/.tmp/public-tests/${name}.mjs`, ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.ESNext } }).outputText);
 }
+await writeFile('node_modules/.tmp/public-tests/visual-diagnostics.mjs',ts.transpileModule(await readFile('src/visual/diagnostics.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2023,module:ts.ModuleKind.ESNext}}).outputText);
 const { Ledger, initialState, periods } = await import('../node_modules/.tmp/public-tests/ledger.mjs');
 const { sign, verify, wavSeconds, boundedBody } = await import('../node_modules/.tmp/public-tests/security.mjs');
 const now = Date.parse('2026-09-08T10:00:00+09:00');

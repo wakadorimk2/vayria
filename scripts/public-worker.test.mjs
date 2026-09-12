@@ -192,6 +192,11 @@ test('staging visual routes pass through the real Worker entry and never invoke 
    assert.deepEqual(await (await mode(false,0)).json(),{enabled:false,generation:1});
    assert.deepEqual(await (await mode(true,1)).json(),{enabled:true,generation:2});
    const visitor=JSON.parse(Buffer.from(bootstrap.headers.get('set-cookie').split('=')[1].split('.')[0],'base64url').toString()).id;
+   const diagnosticTicket=sign({purpose:'visual',exp:Date.now()+60000,visitor,session:started.session.id,generation:2,token:crypto.randomUUID(),eventId:'phone-event'});
+   const diagnostic={ticket:diagnosticTicket,records:[{build:'index-test.js',stage:'video_play_rejected',milliseconds:200}]};
+   assert.equal((await post('/api/visual/diagnostic',diagnostic)).status,200);
+   assert.equal((await post('/api/visual/diagnostic',{...diagnostic,records:[{...diagnostic.records[0],url:'private'}]})).status,400);
+   assert.equal((await post('/api/visual/diagnostic',diagnostic,{Cookie:''})).status,403);
    const generate=async(type,concept)=>{
     const ticket=sign({purpose:'visual',exp:Date.now()+60000,visitor,session:started.session.id,generation:2,token:crypto.randomUUID(),video:false,
      intent:{type,concept,action:'add',modifiers:[],targetId:type==='background'?'background':'chicken-test',motion:'',motionEvidence:'',sharing:'general',regenerate:false}});
@@ -206,6 +211,7 @@ test('staging visual routes pass through the real Worker entry and never invoke 
    const events=(await unknown.text()).trim().split('\n').map(line=>JSON.parse(line));
    assert.deepEqual(events,[{type:'failed',code:'pricing_unverified'}]);
    assert.deepEqual(await (await mode(false,2)).json(),{enabled:false,generation:3});
+   assert.equal((await post('/api/visual/diagnostic',diagnostic)).status,409);
    assert.equal((await mode(true,1)).status,409);
    assert.deepEqual(await (await mode(true,3)).json(),{enabled:true,generation:4});
    // Reload initialization always sends OFF, even when its local generation starts at zero.

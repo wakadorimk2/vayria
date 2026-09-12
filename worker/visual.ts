@@ -10,16 +10,16 @@ export interface VisualEnv {
   VISUAL_IMAGE_PROVIDER?: string; VISUAL_BACKGROUND_ENABLED?: string; VISUAL_VIDEO_ENABLED?: string;
 }
 export type VisualLedger = <T>(op: string, args?: object) => Promise<T>;
-interface VisualTicket { exp: number; purpose: string; visitor: string; session: string; generation: number; token: string; intent: VisualIntent; video: boolean }
+interface VisualTicket { eventId?:string; exp: number; purpose: string; visitor: string; session: string; generation: number; token: string; intent: VisualIntent; video: boolean }
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
 const stock: Record<string,string> = { chicken:'chicken-1', '鶏':'chicken-1', egg:'egg', '卵':'egg', feather:'feather', '羽根':'feather', bat:'bat', 'バット':'bat' };
-export async function visualTicket(response: { visualIntent?: unknown }, env: VisualEnv, visitor: string, session: string, generation: number, video: boolean) {
+export async function visualTicket(response: { visualIntent?: unknown }, env: VisualEnv, visitor: string, session: string, generation: number, video: boolean, eventId?:string) {
   const intent = readVisualIntent(response.visualIntent); if (!intent || intent.type === 'none') return { ...response, visualIntent: undefined };
   if (!video) { intent.motion = ''; intent.motionEvidence = ''; }
   const token = crypto.randomUUID();
   if (intent.type === 'background') intent.targetId = 'background';
   else if ((intent.type === 'prop' && intent.action === 'add') || !intent.targetId) intent.targetId = token;
-  const ticket = await sign({ purpose:'visual', visitor, session, generation, token, intent, video, exp: Date.now()+90000 }, env.COOKIE_SECRET);
+  const ticket = await sign({ eventId: eventId&&/^[\w-]{1,80}$/.test(eventId)?eventId:token, purpose:'visual', visitor, session, generation, token, intent, video, exp: Date.now()+90000 }, env.COOKIE_SECRET);
   return { ...response, visualIntent: intent, visualTicket: ticket, visualGeneration: generation };
 }
 async function digest(value: string) { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map(b=>b.toString(16).padStart(2,'0')).join(''); }
@@ -49,12 +49,13 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
     if(asset.range && 'offset' in asset.range && 'length' in asset.range){headers.set('Content-Range',`bytes ${asset.range.offset}-${asset.range.offset!+asset.range.length!-1}/${asset.size}`);return new Response(asset.body,{status:206,headers});}
     return new Response(asset.body,{headers});
   }
-  if(!['/api/visual/generate','/api/visual/cancel'].includes(path)||request.method!=='POST')throw new LimitError('not_found',0,404);
+  if(!['/api/visual/generate','/api/visual/cancel','/api/visual/diagnostic'].includes(path)||request.method!=='POST')throw new LimitError('not_found',0,404);
   const b=JSON.parse(new TextDecoder().decode(await boundedBody(request,14000)));
   const ticket=await verify<VisualTicket>(String(b.ticket??''),env.COOKIE_SECRET);
   if(!ticket||ticket.purpose!=='visual'||ticket.visitor!==visitor||ticket.session!==session)throw new LimitError('invalid_ticket',0,403);
   const permission=await ledger<{enabled:boolean;generation:number}>('visualPermission',who);
   if(!permission.enabled||permission.generation!==ticket.generation)throw new LimitError('visual_disabled',0,409);
+  if(path==='/api/visual/diagnostic')return json(await ledger('visualDiagnostic',{...who,generation:ticket.generation,eventId:ticket.eventId??ticket.token,records:b.records}));
   const intent=readVisualIntent(ticket.intent);if(!intent||intent.type==='none')throw new LimitError('invalid_request',0,400);
   const args={...who,generation:ticket.generation,token:ticket.token};
   if(path==='/api/visual/cancel'||intent.action==='cancel'){await ledger('visualCancel',{...args,token:intent.action==='cancel'?undefined:ticket.token,target:intent.targetId});return json({type:'cancel',targetId:intent.targetId});}
@@ -90,7 +91,8 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
     return json({type:'asset',asset:{id:ticket.token,url:'/staging/manifestation/'+builtin+'.png',kind:'image',composite:'alpha',type:'prop',concept:intent.concept,createdAt:0,expiresAt:Number.MAX_SAFE_INTEGER,scope:'shared'}});
   }
   const decision=cacheDecision(cached,Date.now(),intent.regenerate);
-  if(cached&&decision==='reuse')return json({type:'asset',asset:await resolve(cached)});
+  if(cached&&decision==='reuse')return json({type:'asset',asset:await resolve(cached),cache:true});
+  if(b.cacheOnly===true)return cached?json({type:'asset',asset:await resolve(cached),cache:true}):json({type:'failed',code:'cache_miss'});
   if(intent.type==='background'&&env.VISUAL_BACKGROUND_ENABLED!=='true')return json({type:'failed',code:'background_not_adopted'});
   if(!env.VISUAL_ASSETS)throw new LimitError('storage_unconfigured',0,503);
   const duration=Math.min(intent.type==='background'?60000:30000,Number.isFinite(b.remainingMs)&&b.remainingMs>0?b.remainingMs:Number.MAX_SAFE_INTEGER);
@@ -102,7 +104,7 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
       const timings:Record<string,number>={};const start=performance.now();let code='failed';
       const emit=(value:object)=>{if(!disconnected)controller.enqueue(new TextEncoder().encode(JSON.stringify(value)+'\n'));};
       try {
-        if(cached)emit({type:'asset',asset:await resolve(cached)});
+        if(cached)emit({type:'asset',asset:await resolve(cached),cache:true});
         if(!claim.owner){
           while(!signal.aborted){await new Promise(r=>setTimeout(r,200));const asset=await ledger<VisualAsset|null>('visualLookup',{...args,key});if(asset&&asset.createdAt>(cached?.createdAt??0)){emit({type:'asset',asset:await resolve(asset)});code='shared_cache';return;}}
           signal.throwIfAborted();
@@ -149,7 +151,7 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
         await ledger('visualPublish',{...args,asset});timings.ready=performance.now()-start;
         emit({type:'asset',asset:await resolve(asset)});code='complete';
       }catch(error){code=error instanceof Error?/^[\w-]{1,60}$/.test(error.message)?error.message:'visual_failed':'visual_failed';emit({type:'failed',code});}
-      finally{timings.total=performance.now()-start;await ledger('visualFinish',{...args,code,timings}).catch(()=>{});if(!disconnected)controller.close();}
+      finally{timings.total=performance.now()-start;await ledger('visualFinish',{...args,code,timings,eventId:ticket.eventId}).catch(()=>{});if(!disconnected)controller.close();}
     },cancel(){disconnected=true;abort.abort();}
   }),{headers:{'Content-Type':'application/x-ndjson','Cache-Control':'no-store'}});
 }

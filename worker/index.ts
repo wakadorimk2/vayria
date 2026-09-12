@@ -95,7 +95,12 @@ async function handle(request: Request, env: Env): Promise<Response> {
       headers.set('X-Robots-Tag', 'noindex');
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }
-    return env.ASSETS.fetch(request);
+    const response=await env.ASSETS.fetch(request);
+    if(base && response.headers.get('Content-Type')?.includes('text/html')){
+      const headers=new Headers(response.headers);headers.set('Cache-Control','private, no-store');
+      return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+    }
+    return response;
   }
   if (request.method !== 'GET' && request.headers.get('Origin') !== url.origin) throw new LimitError('invalid_origin', 0, 403);
   if (url.pathname === '/api/admin' && request.method === 'POST') {
@@ -188,7 +193,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (!visualEnabled || !intent || intent.type === 'none') return { visualGeneration: visualPermission.generation, visualDecision: !visualEnabled ? 'disabled' : !intent ? 'invalid' : 'none' };
     const current = await ledger<{enabled:boolean;generation:number}>(env, 'visualPermission', who);
     if (!current.enabled || current.generation !== visualPermission.generation) return { visualGeneration: visualPermission.generation, visualDecision: 'cancelled', visualIntent: undefined };
-    return visualTicket({ visualIntent: intent }, env, visitor.id, id, current.generation, permitsVideo(intent, String(input.message ?? '')));
+    return visualTicket({ visualIntent: intent }, env, visitor.id, id, current.generation, permitsVideo(intent, String(input.message ?? '')), request.headers.get('X-Performer-Turn-Id') ?? undefined);
   };
   const preview = url.pathname === '/api/card-preview';
   const cardReaction = input.mode === 'autonomous' && typeof input.forcedCardId === 'string' &&

@@ -9,7 +9,7 @@ export interface VisualDependencies {
   now(): number;
   generate(job: VisualJob, signal: AbortSignal, asset: (value: VisualAsset) => Promise<void>): Promise<void>;
   cancel?(ticket: string): Promise<void>;
-  prepare(asset: VisualAsset, signal: AbortSignal): Promise<void>;
+  prepare(asset: VisualAsset, signal: AbortSignal, job?:VisualJob): Promise<void>;
   release?(asset:VisualAsset):void;
   notice?(id: string, description: string): void;
   diagnostic?(event: string, id: string, milliseconds: number): void;
@@ -30,10 +30,11 @@ export class VisualSession {
     if(!this.snapshot.enabled||generation!==this.snapshot.generation)return;
     const order=this.orders.get(id)??++this.order;this.orders.set(id,order);
     if(order<this.notificationOrder)return;this.notificationOrder=order;
-    const pending=['deciding','queued','generating','preparing'].includes(code);
-    const message=code==='deciding'?'出すものを確認しています。':code==='queued'?'生成の順番を待っています。':code==='generating'?'小物を準備しています。':code==='preparing'?'素材の表示を確認しています。':code==='displayed'?'表示しました。':code==='cancelled'?'生成を取り消しました。':visualFailureMessage(code);
+    const pending=['deciding','queued','generating','preparing','video_preparing'].includes(code);
+    const message=code==='deciding'?'出すものを確認しています。':code==='queued'?'生成の順番を待っています。':code==='generating'?'小物を準備しています。':code==='preparing'?'素材の表示を確認しています。':code==='video_preparing'?'動画を準備しています。':code==='video_playing'?'動画を再生しました。':code==='displayed'?'表示しました。':code==='cancelled'?'生成を取り消しました。':visualFailureMessage(code);
     this.publish({notification:{id,message,order,until:pending?this.deps.now()+60000:this.deps.now()+6000}});
   }
+  mediaStage(id:string,stage:string){this.deps.diagnostic?.(stage,id,this.deps.now()-(this.inputTimes.get(this.snapshot.ready?.find(o=>o.eventId===id)?.id??id)??this.deps.now()));}
   modeNotice(message:string){this.notificationOrder=++this.order;this.publish({notification:{id:'mode',message,order:this.order,until:this.deps.now()+6000}});}
   placementFailed(id:string,assetId?:string,code='placement_unavailable'){
     const object=this.snapshot.ready?.find(o=>o.id===id);if(!object||(assetId&&object.asset.id!==assetId))return;
@@ -80,7 +81,7 @@ export class VisualSession {
       void this.deps.generate(job,job.controller.signal,async asset=>{
         if(!this.current(job,generation))return;
         this.status(job.id,'preparing',generation);
-        await this.deps.prepare(asset,job.controller!.signal);
+        await this.deps.prepare(asset,job.controller!.signal,job);
         if(!this.current(job,generation)){this.deps.release?.(asset);return;}
         const old=job.intent.type==='background'?this.snapshot.background:this.snapshot.objects.find(o=>o.id===job.target);
         const object:VisualObject={id:job.target,eventId:job.id,asset,at:this.deps.now(),visible:false,effects:[...new Set([...(old?.effects??[]),...job.intent.modifiers.filter(m=>VISUAL_EFFECTS.includes(m as VisualEffect)) as VisualEffect[]])]};
@@ -97,7 +98,8 @@ export class VisualSession {
     const ready=this.snapshot.ready?.filter(o=>o!==object);
     if(id==='background'){if(this.snapshot.background)this.deps.release?.(this.snapshot.background.asset);this.publish({background:updated,ready});}
     else {const objects=[...this.snapshot.objects.filter(o=>o.id!==id),updated].slice(-3);for(const old of this.snapshot.objects)if(!objects.includes(old))this.deps.release?.(old.asset);this.publish({objects,ready});}
-    this.status(object.eventId??id,'displayed',this.snapshot.generation);
+    const waitingVideo=object.asset.kind==='image'&&this.snapshot.pending.some(j=>j.target===id&&j.intent.motion);
+    this.status(object.eventId??id,waitingVideo?'video_preparing':object.asset.kind==='video'?'video_playing':'displayed',this.snapshot.generation);
     const noticeId=(object.eventId??id)+(object.asset.kind==='video'?':video':'');
     if(!this.notices.has(noticeId)){this.notices.add(noticeId);const description=id==='background'?`背景が${object.asset.concept}の画像になった。`:`近くに${object.asset.concept}の${object.asset.kind==='video'?'動画':'小物'}が表示された。握ってはいない。`;
       this.publish({history:[...this.snapshot.history,description].slice(-8)});this.deps.notice?.(noticeId,description);}
