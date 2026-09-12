@@ -23,8 +23,8 @@ function Unplaced({runtime,id,assetId}:{runtime:VisualSession;id:string;assetId:
 }
 export function VisualStage({runtime,snapshot,stage}:{runtime:VisualSession;snapshot:VisualSnapshot;stage:RefObject<VrmStageHandle|null>}){
   const root=useRef<HTMLDivElement>(null);const {layout}=useWorldLayout(root,stage,runtime);const occupied:WorldRect[]=[];
-  const placement=(scale:number,aspect=1)=>{for(const anchor of [{x:.84,y:.55},{x:.16,y:.55},{x:.84,y:.32},{x:.16,y:.32},{x:.84,y:.73},{x:.16,y:.73},{x:.5,y:.65},{x:.38,y:.73},{x:.62,y:.73}]){
-    const p=placeWorldProp(layout,anchor,{bounds:{x:0,y:0,width:1,height:1},pivot:{x:.5,y:.5},aspect,displayWidth:.32,maxWidth:.45},scale,occupied);if(p){occupied.push(p.visible);return p.rect;}}
+  const placement=(scale:number,aspect=1)=>{for(const shrink of [1,.8,.6,.45])for(const anchor of [{x:.84,y:.55},{x:.16,y:.55},{x:.84,y:.32},{x:.16,y:.32},{x:.84,y:.73},{x:.16,y:.73},{x:.5,y:.68},{x:.38,y:.73},{x:.62,y:.73}]){
+    const p=placeWorldProp(layout,anchor,{bounds:{x:0,y:0,width:1,height:1},pivot:{x:.5,y:.5},aspect,displayWidth:.32,maxWidth:.45,shrinkSteps:[1]},scale*shrink,occupied);if(p){occupied.push(p.visible);return p.rect;}}
     return null;};
   const style=(r:WorldRect)=>({left:`${r.x*100}%`,top:`${r.y*100}%`,width:`${r.width*100}%`,height:`${r.height*100}%`});
   return <>
