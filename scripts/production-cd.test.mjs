@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { load } from 'js-yaml';
-import { validateProductionTarget, validateProductionActivation, productionSmoke, PRODUCTION_URL } from './public-cd.mjs';
+import { validateProductionTarget, validateProductionActivation, validateWorldStorage, productionSmoke, PRODUCTION_URL } from './public-cd.mjs';
 
 const config = JSON.parse(await readFile('wrangler.production.jsonc', 'utf8'));
 test('production target rejects staging, aliases, disabled generation and ledger replacement', () => {
@@ -46,7 +46,7 @@ test('actual workflow gates production on activation, successful staging and mai
       for (const event of ['push', 'workflow_dispatch', 'pull_request']) {
         for (const ref of ['refs/heads/main', 'refs/heads/topic']) {
           const actual = runInNewContext(production.if, {
-            vars: { PRODUCTION_DEPLOY_ENABLED: enabled }, needs: { 'deploy-staging': { result } },
+            inputs:{publish_production:false},vars: { PRODUCTION_DEPLOY_ENABLED: enabled }, needs: { 'deploy-staging': { result } },
             github: { event_name: event, ref },
           }, { timeout: 1000 });
           assert.equal(actual, enabled === 'true' && result === 'success' && event !== 'pull_request' && ref === 'refs/heads/main');
@@ -113,4 +113,22 @@ test('production smoke fails on a stale deployment, bad Cookie or stopped genera
     { status: { siteKey: 'staging-key' } }, { status: { session: { id: 'unexpected' } } },
   ]) await assert.rejects(productionSmoke(mockSite(overrides).fetch, pinned, html, script));
   await assert.rejects(productionSmoke(async () => { throw new Error('HTTPS failure'); }, pinned, html, script));
+});
+
+test('one-off production activation cannot enable push deployment',()=>{
+  validateProductionActivation('false','success','true','workflow_dispatch');
+  assert.throws(()=>validateProductionActivation('false','success','true','push'));
+  assert.throws(()=>validateProductionActivation('false','failure','true','workflow_dispatch'));
+});
+
+test('storage validation refuses cross-environment execution bindings',async()=>{
+ const config=JSON.parse(await readFile('wrangler.world-production.jsonc','utf8'));validateWorldStorage(config,'production');assert.throws(()=>validateWorldStorage(config,'staging'));
+ assert.throws(()=>validateWorldStorage({...config,services:[{binding:'WORLD_EXECUTOR',service:'vayria-public-staging',entrypoint:'WorldExecution'}]},'production'));
+});
+
+test('manual workflow input permits only one dispatch on main after successful staging',async()=>{
+ const workflow=load(await readFile('.github/workflows/ci.yml','utf8'));const condition=workflow.jobs['deploy-production'].if;
+ for(const event of ['push','pull_request','workflow_dispatch'])for(const ref of ['refs/heads/main','refs/heads/topic']){
+ const actual=runInNewContext(condition,{inputs:{publish_production:true},vars:{PRODUCTION_DEPLOY_ENABLED:'false'},needs:{'deploy-staging':{result:'success'}},github:{event_name:event,ref}});
+ assert.equal(actual,event==='workflow_dispatch'&&ref==='refs/heads/main');}
 });

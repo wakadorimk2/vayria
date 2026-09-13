@@ -1,4 +1,11 @@
+import { SharedConversation } from './sharedWorld/SharedConversation';
+import { sharedConversationActive } from './sharedWorld/voice';
+import { sharedReplyPlayback } from './sharedWorld/replyPlayback';
 import { useVisualGeneration } from './visual/useVisualGeneration';
+import { useSharedWorld } from './sharedWorld/useSharedWorld';
+import { SharedWorldStage } from './sharedWorld/SharedWorldStage';
+import { WorldCards } from './sharedWorld/WorldCards';
+import { worldAccess } from './sharedWorld/client';
 import { VisualStage } from './visual/VisualStage';
 import { visualContext } from './visual/session';
 import { environmentStorageKey } from './storageKey';
@@ -431,6 +438,10 @@ export default function App() {
   const [sessionGeneration, setSessionGeneration] = useState(0);
   const { runtime: worldRuntime, snapshot: worldSnapshot } = useWorldMutation();
   const visual = useVisualGeneration();
+  const sharedWorld = useSharedWorld();
+  const sharedSequenceRef = useRef(-1);
+  const sharedEpochRef = useRef<number | null>(null);
+  const sharedOutcomeRef = useRef('');
   const resetVisual = visual.reset;
   const { runtime: manifestationRuntime, snapshot: manifestationSnapshot, bind: bindManifestation, newExperiment: newManifestationExperiment } = useManifestation();
   const worldReactionKeyRef = useRef(new Set<string>());
@@ -542,6 +553,7 @@ export default function App() {
     stop,
     stopReaction,
   } = useAudioLipSync(volume, iosAudioSession);
+  useEffect(()=>{if(!sharedWorld.enabled)return;const unlock=()=>{if(!isMuted)void prepare();};window.addEventListener('pointerdown',unlock,{once:true});window.addEventListener('keydown',unlock,{once:true});return()=>{window.removeEventListener('pointerdown',unlock);window.removeEventListener('keydown',unlock);};},[sharedWorld.enabled,isMuted,prepare]);
   const [listeningReaction, setListeningReaction] =
     useState<ListeningReactionCue | undefined>();
   const { cardAttentionPhase, setCardAttentionPhase, cardAttentionStartedAtRef, dragAttentionLastTickAtRef, dragAttentionSpeedRef, dragAttentionControllerRef, cardAttentionEnergyControllerRef, clearCardAttentionTimers, scheduleDragAttentionTick, scheduleCardAttentionSequence, scheduleCardDefaultAttention, finishDragAttention } = useCardAttention({ spatialTargetRegistry });
@@ -696,8 +708,8 @@ export default function App() {
     () =>
       new PerformancePlaybackCoordinator({
         getMotionPort: () => stageMotionPort,
-        playAudio: play,
-        stopAudio: stop,
+        playAudio: async (...args) => { if (!sharedConversationActive()) await play(...args); },
+        stopAudio: () => { if (!sharedConversationActive()) stop(); },
         holdAudioCapture: iosAudioSession ? () => iosAudioSession.holdPlayback().release : undefined,
       }),
     [play, stageMotionPort, stop, iosAudioSession],
@@ -794,6 +806,7 @@ export default function App() {
       // nod for the same short acknowledgement.
       const cue = decision.backchannelCue === 'uun' ? 'uun' : 'un';
       const playCue = () => {
+        if (sharedConversationActive()) return;
         if (voiceReactionIdRef.current !== reactionId) return;
         const candidates = backchannelAudioRef.current.filter(
           (audio) => audio.cue === cue,
@@ -897,6 +910,7 @@ export default function App() {
     onPerformanceCue: handlePerformanceCue,
     onVisualStatus: (eventId, code, generation) => visual.runtime.status(eventId, code, generation),
     onVisualIntent: (eventId, intent, ticket, generation) => {
+      if(sharedWorld.enabled)return;
       if (runtimeConfig.mode === 'public' && runtimeConfig.manifestationEnabled) visual.runtime.dispatch(eventId, intent, ticket, generation);
     },
     onManifestation: (eventId, cardId) => {
@@ -919,7 +933,7 @@ export default function App() {
   }, [status, worldRuntime]);
   useEffect(() => {
     if (runtimeConfig.mode !== 'public') return;
-    const stop = () => { void stopVoiceInput(); interruptCurrentTurn('router_control'); stopReaction(); playbackCoordinator.stop(); };
+    const stop = () => { sharedReplyPlayback.stop(); void stopVoiceInput(); interruptCurrentTurn('router_control'); stopReaction(); playbackCoordinator.stop(); };
     const unlock = () => { void prepare(); };
     const start = () => { void prepare(); };
     window.addEventListener('vayria-public-stop', stop);
@@ -1757,6 +1771,7 @@ export default function App() {
           }
           if (!isMuted) void prepare();
           handleConversationInputReceived(event.segmentId, Date.now());
+          if (sharedConversationActive()) return;
           void sendVoice(
             message,
             voiceCardContext,
@@ -1810,6 +1825,8 @@ export default function App() {
       const isCurrentSession = () =>
         expectedSessionGeneration === sessionGenerationRef.current;
       const stimulus = pendingCardStimulus;
+      if(sharedWorld.snapshot?.sharedConversation)return 'aborted' as AutonomousTurnOutcome;
+      if(sharedWorld.enabled&&(!worldAccess()||worldAccess()!.until<=Date.now()))return 'aborted' as AutonomousTurnOutcome;
 
       if (
         !isCurrentSession() ||
@@ -1955,11 +1972,12 @@ export default function App() {
       setAutonomyState(nextState);
       return decision.externalAction === 'speak' ? 'speak' : 'none';
     },
-    [pendingCardStimulus, exhibitionRegistration, worldRuntime, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleCardReplyDelivered, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, prepare, executeNonSpeechPlan],
+    [sharedWorld.enabled, sharedWorld.snapshot?.sharedConversation, pendingCardStimulus, exhibitionRegistration, worldRuntime, sessionGeneration, isAutonomousLoopEnabled, routerSnapshot.controlState, routerSnapshot.vayriaOutputGate, isMuted, isBusy, autonomyCandidate, autonomyStateRef, setAutonomyState, createPlanForTrigger, getDirectionContribution, isExhibitionMode, beginReply, sendAutonomous, readCardContext, autonomousContext, handleCardReplyDelivered, cardDropReactionControllerRef, cardReactionPlanIdsRef, handlePerformancePlan, handlePerformanceResult, prepare, executeNonSpeechPlan],
   );
 
   const handleCardInserted = useCallback(
     (result: CardSwapResult) => {
+      if(sharedWorld.enabled){void sharedWorld.insert(result.insertedCardId);return;}
       if (runtimeConfig.worldMutationEnabled) {
         worldReactionPendingRef.current = false;
         void worldRuntime.card(result.insertedCardId, result.brainCardIds);
@@ -2038,11 +2056,48 @@ export default function App() {
         },
       });
     },
-    [changeCardsDuringTurn, readCardContext, isVadSpeech, isSttProcessing, worldRuntime, activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
+    [sharedWorld, changeCardsDuringTurn, readCardContext, isVadSpeech, isSttProcessing, worldRuntime, activateCardSwap, cardAttentionEnergyControllerRef, cardDropReactionControllerRef, cardDropReactionPlanIdsRef, createPlanForTrigger, executeNonSpeechPlan, isAutonomousLoopEnabled, isBusy, isMuted, notifyMeaningfulAutonomyEvent, prepare, programContext, recordAutonomyEvidence, scheduleCardDefaultAttention, spatialTargetRegistry],
   );
 
   useEffect(() => {
-    if (!runtimeConfig.manifestationEnabled) return;
+    const receive=(event:Event)=>{
+    const snapshot=(event as CustomEvent<import('./sharedWorld/useSharedWorld').WorldSnapshot>).detail;
+    if(!sharedWorld.enabled||!snapshot)return;
+    const access=worldAccess();
+    if(!snapshot.sharedConversation&&access&&(!snapshot.host||snapshot.host.clientId!==access.clientId||snapshot.host.until<=snapshot.serverNow)){
+      interruptCurrentTurn('router_control');stopReaction();playbackCoordinator.stop();void stopVoiceInput();
+    }
+    if(sharedEpochRef.current!==null&&sharedEpochRef.current!==snapshot.epoch){
+      resetGame();resetCards();setPendingCardStimulus(null);
+      sharedSequenceRef.current=-1;sharedOutcomeRef.current='';
+    }
+    sharedEpochRef.current=snapshot.epoch;
+    const outcome=snapshot.outcomes.at(-1)??'';
+    if(snapshot.sequence===sharedSequenceRef.current){
+      if(!snapshot.sharedConversation&&outcome&&outcome!==sharedOutcomeRef.current){
+        sharedOutcomeRef.current=outcome;
+        recordAutonomyEvidence({id:`world-result:${snapshot.epoch}:${snapshot.revision}`,kind:'environment_change',at:Date.now(),semanticKey:'world:result',content:outcome,wakeConditions:['new_evidence'],reasonProposals:[{kind:'environment_change',content:outcome,semanticKey:'world:result',salience:.8}]});
+        notifyMeaningfulAutonomyEvent('card_change');
+        setPendingCardStimulus(current=>current??{cardContext:readCardContext(),contribution:{directionId:'wildcard',effects:[],constraints:[],semanticCues:[outcome],triggers:[]},programContext:{...programContext,phase:'after_card_change'}});
+      }
+      return;
+    }
+    sharedOutcomeRef.current=outcome;
+    sharedSequenceRef.current=snapshot.sequence;
+    const latest=snapshot.history.at(-1);if(!latest)return;
+    const result=insertSlotCard(latest.cardId);if(!result)return;
+    const contribution=activateCardSwap(result);
+    if(snapshot.sharedConversation)return;
+    recordAutonomyEvidence({id:`shared-world:${snapshot.epoch}:${latest.sequence}`,kind:'environment_change',at:Date.now(),semanticKey:`world:${latest.cardId}`,content:`世界にカードが加わった: ${latest.cardId}`,wakeConditions:['new_evidence','interaction_state_changed'],reasonProposals:[{kind:'environment_change',content:`カードの蓄積を受け止める: ${latest.cardId}`,semanticKey:`world:${latest.cardId}`,salience:.85}]});
+    notifyMeaningfulAutonomyEvent('card_change');
+    changeCardsDuringTurn(readCardContext());
+    setPendingCardStimulus({cardContext:{brainCardIds:result.brainCardIds,forcedCardId:result.forcedCardId,swapRevision:result.animationSequence},contribution,programContext:{...programContext,phase:'after_card_change'}});
+    };
+    window.addEventListener('vayria-world-state',receive);return()=>window.removeEventListener('vayria-world-state',receive);
+  },[sharedWorld.enabled,insertSlotCard,activateCardSwap,recordAutonomyEvidence,notifyMeaningfulAutonomyEvent,changeCardsDuringTurn,readCardContext,programContext,interruptCurrentTurn,stopReaction,playbackCoordinator,stopVoiceInput,resetGame,resetCards]);
+
+  useEffect(() => {
+    if (!runtimeConfig.manifestationEnabled || sharedWorld.enabled) return;
     visual.runtime.bind((id, description) => {
       recordAutonomyEvidence({ id: `visual:${id}`, kind: 'environment_change', at: Date.now(), semanticKey: `visual:${id}`, content: description, wakeConditions: ['new_evidence'], reasonProposals: [] });
     });
@@ -2056,7 +2111,7 @@ export default function App() {
       recordAutonomyEvidence({ id: `manifestation:${id}`, kind: 'environment_change', at: Date.now(), semanticKey: `manifestation:${id}`, content: description, wakeConditions: ['new_evidence', 'interaction_state_changed'], reasonProposals: [{ kind: 'environment_change', content: description, semanticKey: `manifestation:${id}`, salience: .85 }] });
       notifyMeaningfulAutonomyEvent('card_change');
     });
-  }, [visual.runtime, bindManifestation, insertSlotCard, handleCardInserted, recordAutonomyEvidence, notifyMeaningfulAutonomyEvent]);
+  }, [sharedWorld.enabled, visual.runtime, bindManifestation, insertSlotCard, handleCardInserted, recordAutonomyEvidence, notifyMeaningfulAutonomyEvent]);
 
   useEffect(() => {
     if (runtimeConfig.manifestationEnabled && ttsPlaying) manifestationRuntime.markAudioStarted();
@@ -2165,6 +2220,7 @@ export default function App() {
       finally { publicSubmitPendingRef.current = false; setPublicSubmitPending(false); }
     }
     if (admitted) setPublicSubmitPending(false);
+    if(sharedWorld.snapshot?.sharedConversation){const accepted=await sharedWorld.send(text);if(accepted){setInput('');setPublicTextInputOpen(false);setPublicGreetingComplete(true);}return accepted;}
     if (
       runtimeConfig.routerEnabled &&
       routerSnapshot.vayriaOutputGate === 'closed' &&
@@ -2356,7 +2412,7 @@ export default function App() {
   return (
     <main
       className="app-shell"
-      data-app-mode={runtimeConfig.mode} data-world-ui={runtimeConfig.worldMutationEnabled} data-manifestation-ui={runtimeConfig.manifestationEnabled}
+      data-shared-world={sharedWorld.enabled} data-app-mode={runtimeConfig.mode} data-world-ui={runtimeConfig.worldMutationEnabled} data-manifestation-ui={runtimeConfig.manifestationEnabled}
       data-ui-mode={usesExhibitionUi ? 'exhibition' : 'local'}
       data-public-text-input={publicTextInputOpen}
       data-exhibition-state={exhibitionPresentationState}
@@ -2624,7 +2680,7 @@ export default function App() {
             </p>
           </aside>
         )}
-        {runtimeConfig.manifestationEnabled && runtimeConfig.mode === 'public' && <VisualStage runtime={visual.runtime} snapshot={visual.snapshot} stage={stageRef} />}{runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public' && <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} />}{(!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') && <div ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
+        {sharedWorld.enabled && <><SharedConversation onMotion={(asset,id)=>{void stageRef.current?.playReactionMotion(asset,id);}} snapshot={sharedWorld.snapshot} muted={isMuted} play={play} stop={stop} onEmotion={emotion=>setActiveEmotionCue({emotion,intensity:.7})}/><SharedWorldStage world={sharedWorld} stage={stageRef}/><WorldCards world={sharedWorld} compact expanded={publicCardsOpen} onToggle={togglePublicCards}/></>}{!sharedWorld.enabled && runtimeConfig.manifestationEnabled && runtimeConfig.mode === 'public' && <VisualStage runtime={visual.runtime} snapshot={visual.snapshot} stage={stageRef} />}{runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public' && <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} />}{(!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') && <div style={sharedWorld.enabled ? {display:"none"} : undefined} ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
           isExchangeLocked={runtimeConfig.worldMutationEnabled && worldSnapshot.source === 'card' && (worldSnapshot.phase === 'pending' || worldSnapshot.phase === 'ready')}
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
           key={sessionGeneration}
@@ -2778,6 +2834,8 @@ export default function App() {
       )}
       {runtimeConfig.mode === 'public' && (
         <PublicControls
+          sharedWorld={sharedWorld.enabled}
+          queueStatus={sharedWorld.snapshot?.sharedConversation ? (sharedWorld.error || (sharedWorld.snapshot.conversationView?.slot ? (sharedWorld.snapshot.conversationView.slot.status==='running'?'返答を準備中…':`順番待ち ${sharedWorld.snapshot.conversationView.slot.position}`) : '')) : undefined}
           visualObjectPresent={runtimeConfig.manifestationEnabled && [...visual.snapshot.objects,...(visual.snapshot.ready??[])].some(o=>o.id!=='background')}
           generation={runtimeConfig.manifestationEnabled ? { enabled: visual.snapshot.enabled, busy: visual.busy, message: visual.message, toggle: visual.toggle } : undefined}
           settingsLayout={publicSettingsLayout}

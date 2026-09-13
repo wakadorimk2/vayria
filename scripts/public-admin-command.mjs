@@ -1,4 +1,5 @@
 export function adminCommand(action = 'report', argument) {
+  if (['world-create','world-open','world-close','world-reset'].includes(action) && /^[a-zA-Z0-9_-]{1,80}$/.test(argument??'')) return action==='world-create'?{op:action,roomId:argument}:{op:'world-control',roomId:argument,action:action.slice(6)};
   if (action === 'report' || action === 'exhibition-list') return { op: 'report' };
   if (action === 'stop' || action === 'resume') return { op: 'configure', stopped: action === 'stop' };
   if (action === 'configure' && argument) return { op: 'configure', patch: JSON.parse(argument) };

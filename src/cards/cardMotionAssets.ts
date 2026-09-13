@@ -34,7 +34,7 @@ export const CARD_MOTION_ASSET_IDS: Readonly<
 export const CARD_MOTION_ASSET_BY_GESTURE_INTENT: Readonly<
   Record<CardGestureIntent, string>
 > = Object.fromEntries(
-  cardPool.map((card) => [
+  cardPool.filter(card => CARD_MOTION_ASSET_IDS[card.id]).map((card) => [
     CARD_REACTION_PROFILES[card.id].behavior.gestureIntent,
     CARD_MOTION_ASSET_IDS[card.id],
   ]),

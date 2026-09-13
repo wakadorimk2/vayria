@@ -1754,3 +1754,9 @@
   }
 }
 .wildcard-card__status-mark { display: none; }
+
+/* Shared by the original hand and the persistent room hand. */
+.card-zone--hand .wildcard-card[data-hand-index]{--card-rotation:var(--hand-rotation);--card-lift:var(--hand-rest-lift);transform-origin:50% 100%;touch-action:none}
+.card-zone--hand .wildcard-card[data-hand-index]:is(:hover,:focus-visible){transform:translateY(calc(var(--hand-rest-lift) - 16px)) rotate(var(--hand-rotation))}
+.card-zone--hand .wildcard-card[data-hand-index].wildcard-card--selected{transform:translateY(-28px) rotate(var(--hand-rotation))}
+@media(prefers-reduced-motion:reduce){.card-zone--hand .wildcard-card[data-hand-index]{transition:none}}

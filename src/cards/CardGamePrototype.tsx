@@ -4,12 +4,12 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { WildcardCard } from './WildcardCard';
+import { CardSurface, BrainCardFrame } from './CardSurface';
 import { cardInvitations } from './cardInvitation';
 import { runtimeConfig } from '../runtimeConfig';
 import { getPublicInteractionHint, type MicrophoneState } from '../public/microphoneState';
@@ -594,7 +594,7 @@ export function CardGamePrototype({
   const renderCards = (zone: CardZone) => {
     const selectedId =
       zone === 'brain' ? selectedBrainCardId : selectedHandCardId;
-    return zones[zone].map((card) => {
+    return zones[zone].map((card,index) => {
       const isActive =
         zone === 'brain' && zones.activatedCardIds[0] === card.id;
       const isSupporting =
@@ -626,16 +626,9 @@ export function CardGamePrototype({
       }
 
       const dropPreview = isDropTarget ? dragState.dropPreview : null;
-      const brainCardFloatStyle = dropPreview
-        ? ({
-            '--brain-drop-retreat-y': `${dropPreview.retreatY}px`,
-            '--brain-drop-rotation': `${dropPreview.rotationDeg}deg`,
-            '--brain-drop-scale': dropPreview.scale,
-          } as CSSProperties)
-        : undefined;
 
       const renderedCard = (
-        <WildcardCard
+        <CardSurface zone={zone} index={index}
           card={card}
           key={card.id}
           motion={motion}
@@ -661,13 +654,9 @@ export function CardGamePrototype({
       );
 
       return zone === 'brain' ? (
-        <div
-          className={`brain-card-float${dropPreview ? ` brain-card-float--drop-${dropPreview.phase}` : ''}`}
-          key={card.id}
-          style={brainCardFloatStyle}
-        >
+        <BrainCardFrame key={card.id} preview={dropPreview}>
           {renderedCard}
-        </div>
+        </BrainCardFrame>
       ) : (
         renderedCard
       );

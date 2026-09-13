@@ -4,8 +4,8 @@ import { readChatRequest, readCardPreviewRequest } from '../server/chatValidatio
 import { createLlmProviderCallTracker } from '../server/llmProviderTelemetry';
 import type { StreamingReplyCallbacks, LlmRequestContext } from '../server/localApiSupport';
 
-export async function generate(payload: unknown, preview: boolean, apiKey: string, signal: AbortSignal, callbacks: StreamingReplyCallbacks | null, measurements?: ReturnType<typeof createGenerationMeasurements>, manifestationEnabled = false, visualVideoEnabled = false) {
-  const llm: LlmRequestContext = { manifestationEnabled, visualVideoEnabled, apiKey, signal, warmup: false, onFallback: () => {}, runtime: {
+export async function generate(payload: unknown, preview: boolean, apiKey: string, signal: AbortSignal, callbacks: StreamingReplyCallbacks | null, measurements?: ReturnType<typeof createGenerationMeasurements>, manifestationEnabled = false, visualVideoEnabled = false, sharedWorldEnabled = false) {
+  const llm: LlmRequestContext = { sharedWorldEnabled, manifestationEnabled, visualVideoEnabled, apiKey, signal, warmup: false, onFallback: () => {}, runtime: {
     profile: 'nano-implicit', serviceTier: 'standard', fallbackEnabled: false, cacheWarmupEnabled: false,
   } };
   const telemetry = createLlmProviderCallTracker({ turnId: crypto.randomUUID(), provider: 'openai', model: 'gpt-5-nano',
@@ -14,8 +14,8 @@ export async function generate(payload: unknown, preview: boolean, apiKey: strin
     const p = readCardPreviewRequest(payload);
     return generateCardPreviewReply(llm, p.cardId, p.performanceContext, telemetry);
   }
-  const p = readChatRequest(payload);
-  if (p.mode === 'manual') return generateInteractiveResponse(llm, p.mode, p.message!, p.history,
+  const p = readChatRequest(payload,sharedWorldEnabled);
+  if (p.mode === 'manual' && !sharedWorldEnabled) return generateInteractiveResponse(llm, p.mode, p.message!, p.history,
     p.brainCardIds, p.forcedCardId, p.performanceContext, p.characterIdentity, p.programContext,
     telemetry, callbacks, p.earlySpeechLead, p.recentExpressionLevels, p.greeting, p.cardContinuation);
   const result = await generateReply(llm, p.mode, p.message, p.history, p.brainCardIds, p.forcedCardId,

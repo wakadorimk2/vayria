@@ -1,4 +1,5 @@
 import type {
+  CSSProperties,
   KeyboardEvent,
   MouseEvent,
   PointerEventHandler,
@@ -12,6 +13,9 @@ import type {
 import './cards.css';
 
 export interface WildcardCardProps {
+  style?:CSSProperties;
+  handIndex?:number;
+  instanceId?:string;
   card: WildcardCardData;
   interactionDisabled?: boolean;
   onSelect?: (
@@ -20,6 +24,7 @@ export interface WildcardCardProps {
   onPointerDown?: PointerEventHandler<HTMLElement>;
   motion?: CardMotion;
   state?: CardState;
+  pendingLabel?: string;
 }
 
 const KIND_LABELS: Record<CardKind, string> = {
@@ -65,6 +70,8 @@ export function WildcardCard({
   onSelect,
   onPointerDown,
   state = 'normal',
+  pendingLabel,
+  style,handIndex,instanceId,
 }: WildcardCardProps) {
   const isInteractive = Boolean(onSelect);
   const isDisabled = state === 'disabled';
@@ -84,10 +91,14 @@ export function WildcardCard({
     <article
       aria-disabled={isInputDisabled || undefined}
       aria-grabbed={motion === 'dragging' || undefined}
-      aria-label={`${card.label}、${KIND_LABELS[card.kind]}${stateLabel}${MOTION_LABELS[motion]}`}
+      aria-label={`${card.label}、${KIND_LABELS[card.kind]}${stateLabel}${motion==='pending-insertion'&&pendingLabel?pendingLabel:MOTION_LABELS[motion]}`}
       aria-pressed={isInteractive ? state === 'selected' : undefined}
       className={`wildcard-card wildcard-card--${card.kind} wildcard-card--${state} ${motionClass}`.trim()}
       data-card-id={card.id}
+      data-hand-index={handIndex}
+      data-hand-card={instanceId}
+      style={style}
+      aria-busy={motion==='pending-insertion'||undefined}
       data-motion={motion}
       data-state={state}
       onClick={

@@ -12,6 +12,7 @@ export interface VoiceInputAdapter {
 }
 
 export interface VoiceInputAdapterOptions {
+  sharedVoice?: { active:()=>boolean; send:(audio:ArrayBuffer,signal:AbortSignal)=>Promise<Response>; reserve?:()=>{send:(audio:ArrayBuffer,signal:AbortSignal)=>Promise<Response>;cancel:()=>void} };
   language?: string;
   onEvent: (event: VoiceInputEvent) => void;
   onDiagnostic?: (diagnostic: VoiceInputDiagnostic) => void;

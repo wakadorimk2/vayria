@@ -40,7 +40,7 @@ export function useWorldLayout(root: RefObject<HTMLDivElement | null>, stage: Re
         const d = config.offsets[name];
         return { x: Math.max(0, Math.min(1, (p.x - viewport.left) / viewport.width + (d?.x ?? 0))), y: Math.max(0, Math.min(1, (p.y - viewport.top) / viewport.height + (d?.y ?? 0))) };
       };
-      const obstacles = [...document.querySelectorAll<HTMLElement>('.card-zone, .manifestation-slot, .manifestation-picker, .manifestation-actions, .message-form, .conversation-copy, .subtitle, .subtitle-overlay, .speech-caption, .performer-caption, .public-controls__actions, .public-controls__panel, .public-entry, .public-generation-notice, .conversation-error, .playback-permission, .public-voice-notice')].flatMap(node => {
+      const obstacles = [...document.querySelectorAll<HTMLElement>('.shared-world-cards, .card-zone, .manifestation-slot, .manifestation-picker, .manifestation-actions, .message-form, .conversation-copy, .subtitle, .subtitle-overlay, .speech-caption, .performer-caption, .public-controls__actions, .public-controls__panel, .public-entry, .public-generation-notice, .conversation-error, .playback-permission, .public-voice-notice')].flatMap(node => {
         if (!isPlacementObstacleVisible(node) || (!node.textContent?.trim()&&!node.querySelector('input,button,iframe,svg'))) return [];
         // The hold message must not itself keep its object held.
         if (node.matches('.public-generation-notice') && node.textContent === 'UIを閉じると小物が戻ります') return [];

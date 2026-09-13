@@ -877,6 +877,7 @@ input {
 }
 
 .playback-permission {
+  pointer-events: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -896,7 +897,8 @@ input {
 }
 
 .playback-resume-button {
-  min-height: 2.35rem;
+  min-height: 44px;
+  touch-action: manipulation;
   padding: 0.42rem 0.78rem;
   border: 1px solid rgb(236 207 143 / 74%);
   border-radius: 999px;

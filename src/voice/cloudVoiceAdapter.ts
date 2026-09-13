@@ -3,6 +3,9 @@ import { publicActive, publicFetch } from '../public/session';
 import { getIosAudioSession } from '../audio/iosAudioSession';
 import { resumeAudioContext } from '../audio/persistentStreamingAudio';
 export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): VoiceInputAdapter {
+  const sharedConversationActive=()=>options.sharedVoice?.active()??false;
+  const sendSharedVoice=(audio:ArrayBuffer,signal:AbortSignal)=>options.sharedVoice!.send(audio,signal);
+  let sharedReservation:ReturnType<NonNullable<NonNullable<VoiceInputAdapterOptions['sharedVoice']>['reserve']>>|null=null;
   let context: AudioContext | null = null; let media: MediaStream | null = null; let node: AudioWorkletNode | null = null;
   let enabled = false; let playing = false; let busy = false; let manual = false; let pressed = false;
   let chunks: Int16Array[] = []; let samples = 0; let silent = 0; let segmentId = ''; let generation = 0;
@@ -25,7 +28,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
   let waitingSince = 0;
   let waitingFor: 'capture-starting' | 'playback-wait' | null = null;
   const emit = options.onEvent;
-  const reset = () => { chunks = []; samples = 0; silent = 0; segmentId = ''; };
+  const reset = () => { sharedReservation?.cancel();sharedReservation=null;chunks = []; samples = 0; silent = 0; segmentId = ''; };
   // Pending means microphone intent, not proof that audio reaches the worklet.
   const pending = (reason: 'capture-starting' | 'playback-wait') => {
     if (waitingFor === reason) return;
@@ -53,7 +56,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
   const checkCapture = () => {
     if (!wanted || disposed) return;
     if (!publicActive() || document.hidden) { void stop(); return; }
-    if (audioSession?.playbackHeld || playing) {
+    if (audioSession?.playbackHeld || (playing&&!sharedConversationActive())) {
       pending('playback-wait');
       // Never reopen a microphone over a reply whose playback still owns it.
       if (Date.now() - waitingSince >= 60000) void failCapture('playback-timeout');
@@ -77,7 +80,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
   const resumeListening = () => {
     if (!wanted || disposed) return;
     if (!publicActive() || document.hidden) { void stop(); return; }
-    if (playing || audioSession?.playbackHeld || !context || !node || !captureReady) return;
+    if ((playing&&!sharedConversationActive()) || audioSession?.playbackHeld || !context || !node || !captureReady) return;
     if (recoveryAt !== null && recoveryAt > Date.now()) {
       cancelRecoveryTimer();
       const sequence = recoverySequence;
@@ -113,8 +116,8 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
   };
   const flush = async () => {
     if (!samples || busy) { reset(); return; }
-    const id = segmentId; const count = samples; const parts = chunks; const current = generation; reset();
-    if (count < 3200 || !enabled || playing || recoveryAt !== null || !publicActive()) return;
+    const id = segmentId; const count = samples; const parts = chunks; const current = generation;const reservation=sharedReservation;sharedReservation=null; reset();
+    if (count < 3200 || !enabled || (playing&&!sharedConversationActive()) || recoveryAt !== null || !publicActive()){reservation?.cancel();return;}
     busy = true; const request = new AbortController(); transcription = request;
     emit({ type: 'speech_ended', segmentId: id, at: Date.now() });
     let timedOut = false;
@@ -124,7 +127,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
       request.signal.addEventListener('abort', rejectCancelled, { once: true });
     });
     // Include admission waiting and response-body reads in the deadline.
-    const deadline = setTimeout(() => { timedOut = true; request.abort(); }, 45000);
+    const deadline = setTimeout(() => { timedOut = true; request.abort(); }, sharedConversationActive()?150000:45000);
     try {
       const buffer = new ArrayBuffer(44 + count * 2); const view = new DataView(buffer);
       const ascii = (offset: number, text: string) => { for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); };
@@ -135,7 +138,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
       for (const part of parts) for (const sample of part) { view.setInt16(offset, sample, true); offset += 2; }
       const { response, result } = await Promise.race([
         (async () => {
-          const response = await publicFetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: buffer, signal: request.signal });
+          const response = sharedConversationActive()?await (reservation?reservation.send(buffer,request.signal):sendSharedVoice(buffer,request.signal)):await publicFetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: buffer, signal: request.signal });
           const result: unknown = await response.json().catch(error => { if (response.ok) throw error; return null; });
           return { response, result };
         })(), cancelled,
@@ -147,6 +150,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
         await failTranscription(code, current, retryAt);
         return;
       }
+      if(result&&typeof result==='object'&&'shared' in result&&result.shared===true){consecutiveFailures=0;resumeListening();return;}
       if (!result || typeof result !== 'object' || !('text' in result) || typeof result.text !== 'string') {
         await failTranscription('recognition-failed', current);
         return;
@@ -245,11 +249,11 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
           if (Date.now() - healthySince >= 10000) captureAttempts = 0;
           if (!captureReady) { captureReady = true; resumeListening(); }
           else if (waitingFor !== null && !playing && !audioSession?.playbackHeld) resumeListening();
-          if (!enabled || busy || playing || recoveryAt !== null || !publicActive() || document.hidden) { reset(); return; }
+          if (!enabled || busy || (playing&&!sharedConversationActive()) || recoveryAt !== null || !publicActive() || document.hidden) { reset(); return; }
           const pcm = new Int16Array(event.data); const rms = Math.sqrt(pcm.reduce((sum, value) => sum + (value / 32768) ** 2, 0) / pcm.length);
           const speaking = manual ? pressed : rms >= .015;
           if (!speaking && !samples) return;
-          if (!segmentId) { segmentId = crypto.randomUUID(); emit({ type: 'speech_started', segmentId, at: Date.now() }); }
+          if (!segmentId) { segmentId = crypto.randomUUID();if(sharedConversationActive())sharedReservation=options.sharedVoice?.reserve?.()??null; emit({ type: 'speech_started', segmentId, at: Date.now() }); }
           chunks.push(pcm); samples += pcm.length; silent = speaking ? 0 : silent + pcm.length;
           if (samples >= 320000 || (!manual && silent >= 9600)) void flush();
         };
@@ -275,7 +279,7 @@ export function createCloudVoiceAdapter(options: VoiceInputAdapterOptions): Voic
       });
       opening = attempt;
       return attempt;
-    }, stop, setTtsPlaying(value) { playing = value; if (value) reset(); else if (recoveryAt !== null) resumeListening(); },
+    }, stop, setTtsPlaying(value) { playing = value; if (value&&!sharedConversationActive()) reset(); else if (recoveryAt !== null) resumeListening(); },
     dispose() { disposed = true; document.removeEventListener('visibilitychange', hidden); window.removeEventListener('vayria-public-stop', pause); window.removeEventListener('vayria-public-microphone', control); void stop(); unregister?.(); },
   };
   const unregister = audioSession?.register({

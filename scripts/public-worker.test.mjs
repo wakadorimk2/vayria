@@ -139,7 +139,7 @@ test('Worker admission, SQLite serialization, tickets and budget reject before p
 
 test('measurement persistence failures do not fail successful generation or replace a rejection', async () => {
   const isolated = await build({ entryPoints: ['worker/index.ts'], bundle: true, write: false, format: 'esm', platform: 'node', target: 'es2023',
-    plugins: [{ name: 'ledger-stub', setup(b) { b.onLoad({ filter: /worker[\\/]usage\.ts$/ }, () => ({ contents: 'export class PublicUsage {}', loader: 'ts' })); } }] });
+    plugins: [{ name: 'ledger-stub', setup(b) { b.onLoad({filter:/worker[\\/]worldRoom\.ts$/},()=>({contents:'export class WorldRoom {}',loader:'ts'})); b.onLoad({ filter: /worker[\\/]usage\.ts$/ }, () => ({ contents: 'export class PublicUsage {}', loader: 'ts' })); } }] });
   const { mkdir, writeFile } = await import('node:fs/promises');
   await mkdir('node_modules/.tmp/public-isolated', { recursive: true });
   await writeFile('node_modules/.tmp/public-isolated/worker.mjs', isolated.outputFiles[0].text);
@@ -228,7 +228,7 @@ test('staging visual routes pass through the real Worker entry and never invoke 
 
 
 test('visual decision is signed before speech, survives malformed tail, and is issued only once', async()=>{
- const isolated=await build({entryPoints:['worker/index.ts'],bundle:true,write:false,format:'esm',platform:'node',target:'es2023',plugins:[{name:'ledger-stub',setup(b){b.onLoad({filter:/worker[\\/]usage\.ts$/},()=>({contents:'export class PublicUsage {}',loader:'ts'}));}}]});
+ const isolated=await build({entryPoints:['worker/index.ts'],bundle:true,write:false,format:'esm',platform:'node',target:'es2023',plugins:[{name:'ledger-stub',setup(b){b.onLoad({filter:/worker[\\/]worldRoom\.ts$/},()=>({contents:'export class WorldRoom {}',loader:'ts'}));b.onLoad({filter:/worker[\\/]usage\.ts$/},()=>({contents:'export class PublicUsage {}',loader:'ts'}));}}]});
  const {mkdir,writeFile}=await import('node:fs/promises');await mkdir('node_modules/.tmp/visual-worker',{recursive:true});await writeFile('node_modules/.tmp/visual-worker/index.mjs',isolated.outputFiles[0].text);
  const {default:worker}=await import('../node_modules/.tmp/visual-worker/index.mjs');
  const secret='visual-test-'.repeat(4),sign=value=>{const p=Buffer.from(JSON.stringify(value)).toString('base64url');return p+'.'+createHmac('sha256',secret).update(p).digest('base64url');};
