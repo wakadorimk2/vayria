@@ -1,4 +1,5 @@
 import { visualAccess } from '../visual/access';
+import { addWorldHeaders } from '../sharedWorld/client';
 import { publicUrl } from './paths';
 import { publicErrorMessage } from './errors';
 import { runtimeConfig } from '../runtimeConfig';
@@ -77,6 +78,7 @@ async function performFetch(path: string, init: RequestInit = {}): Promise<Respo
     pausePublic(); return Response.json({ code: 'session_required', error: publicErrorMessage({ code: 'session_required' }) }, { status: 401 });
   }
   const headers = new Headers(init.headers); headers.set('X-Vayria-Session', session.id);
+  addWorldHeaders(headers);
   const visualGeneration = visualAccess();
   if (visualGeneration !== null) headers.set('X-Vayria-Visual-Generation', String(visualGeneration));
   let body = init.body;

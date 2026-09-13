@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "vayria-public-staging",
   "account_id": "7414797104d7aca62f03fbd4faf7e5df",
-  "main": "worker/index.ts",
+  "main": "worker/shared/index.ts",
   "compatibility_date": "2026-09-07",
   "compatibility_flags": [
     "nodejs_compat"
@@ -28,6 +28,11 @@
   "durable_objects": {
     "bindings": [
       {
+        "name": "WORLD_ROOMS",
+        "class_name": "WorldRoom",
+        "script_name": "vayria-shared-world-staging"
+      },
+      {
         "name": "USAGE",
         "class_name": "PublicUsage"
       }
@@ -42,6 +47,8 @@
     }
   ],
   "vars": {
+    "SHARED_WORLD_ENABLED": "false",
+    "SHARED_CONVERSATION_ENABLED": "false",
     "GENERATION_ENABLED": "true",
     "REQUIRE_PREVIEW_ACCESS": "true",
     "PUBLIC_HOSTNAME": "vayria.me",

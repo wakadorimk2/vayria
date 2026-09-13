@@ -745,6 +745,7 @@ export function useAudioLipSync(volume = 1, audioSession: IosAudioSession | null
         };
 
         await waitForAudioContext(context, generation, options);
+        if (generation !== generationRef.current) { source.disconnect(); return; }
         if (context.state !== 'running') {
           throw new Error('AudioContext is not running');
         }

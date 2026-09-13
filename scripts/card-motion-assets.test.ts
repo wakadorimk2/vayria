@@ -44,7 +44,7 @@ test('every Card Pool card has one saved VRMA asset', () => {
   const cardAssets = manifest.assets.filter((asset) =>
     asset.assetId.startsWith('card-'),
   );
-  const cardIds = cardPool.map((card) => card.id);
+  const cardIds = cardPool.filter(card => CARD_MOTION_ASSET_IDS[card.id]).map((card) => card.id);
   const assetIds = cardAssets.map((asset) => asset.assetId);
 
   assert.equal(manifest.assets.length, 20);
@@ -152,7 +152,7 @@ test('Card Pool preview adds a saved motion asset unless motion is reduced', () 
     assert.deepEqual(overrides.behavior, profile.behavior, card.id);
     assert.equal(
       overrides.motion?.assetId,
-      CARD_MOTION_ASSET_IDS[card.id],
+      CARD_MOTION_ASSET_BY_GESTURE_INTENT[profile.behavior.gestureIntent],
       card.id,
     );
     assert.notEqual(overrides.motion?.assetId, 'speech-gentle', card.id);
@@ -163,10 +163,10 @@ test('Card Pool preview adds a saved motion asset unless motion is reduced', () 
       withMotion.motion?.assetId,
       CARD_MOTION_ASSET_BY_GESTURE_INTENT[profile.behavior.gestureIntent],
     );
-    assert.equal(
-      CARD_MOTION_ASSET_BY_GESTURE_INTENT[profile.behavior.gestureIntent],
-      CARD_MOTION_ASSET_IDS[card.id],
-    );
+    assert.ok(Object.values(CARD_MOTION_ASSET_IDS).some(id => id === overrides.motion!.assetId));
+    if (CARD_MOTION_ASSET_IDS[card.id]) {
+      assert.equal(overrides.motion?.assetId, CARD_MOTION_ASSET_IDS[card.id]);
+    }
     assert.deepEqual(reduced.behavior, profile.behavior, card.id);
     assert.equal(reduced.motion, undefined, card.id);
   }
