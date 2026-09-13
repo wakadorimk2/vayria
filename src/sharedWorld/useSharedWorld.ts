@@ -13,7 +13,8 @@ export function useSharedWorld(guestRoom?:string){
   const [snapshot,setSnapshot]=useState<WorldSnapshot|null>(null);const [error,setError]=useState('');const [receipt,setReceipt]=useState('');
   const [connected,setConnected]=useState(false);const [role,setRole]=useState<'guest'|'host'>('guest');
   const [sweepElements,setSweepElements]=useState<WorldElement[]>([]);
-  const [clientId]=useState(()=>{const k='vayria-world-client';let id=sessionStorage.getItem(k);if(!id){id=crypto.randomUUID();sessionStorage.setItem(k,id);}return id;});
+  // A duplicated tab must not inherit the exhibition lease of its opener.
+  const [clientId]=useState(()=>crypto.randomUUID());
   const current=useRef(snapshot);const previousEpoch=useRef<number|null>(null);const attempted=useRef(new Set<string>());const activeJobs=useRef(new Map<string,AbortController>());
   const receive=useCallback((next:WorldSnapshot)=>{
     if(!next?.roomId)return;
