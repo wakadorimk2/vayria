@@ -26,20 +26,20 @@ export function validateRevision(event, ref, revision, head, latest) {
 }
 export function validateProductionTarget(config) {
   if (config.name !== 'vayria-web' || config.account_id !== '7414797104d7aca62f03fbd4faf7e5df' ||
-      config.main !== 'worker/index.ts' || config.routes?.length !== 1 ||
+      config.main !== 'worker/shared/index.ts' || config.routes?.length !== 1 ||
       config.routes[0].pattern !== 'vayria.me' || config.routes[0].custom_domain !== true ||
-      config.vars?.PUBLIC_HOSTNAME !== 'vayria.me' || config.vars?.REQUIRE_PREVIEW_ACCESS !== 'false' ||
+      config.vars?.PUBLIC_WORLD_ROOM !== 'main-world' || config.vars?.SHARED_WORLD_ENABLED !== 'true' || config.vars?.SHARED_CONVERSATION_ENABLED !== 'true' || config.vars?.PUBLIC_HOSTNAME !== 'vayria.me' || config.vars?.REQUIRE_PREVIEW_ACCESS !== 'false' ||
       !!config.vars?.PUBLIC_BASE_PATH || config.vars?.GENERATION_ENABLED !== 'true' || config.vars?.SERVE_PLACEHOLDER === 'true' ||
       config.vars?.TURNSTILE_SITE_KEY !== '0x4AAAAAAErpgvhBvYpnRm71' ||
       config.workers_dev !== false || config.preview_urls !== false ||
       config.assets?.directory !== 'dist-public' || config.assets?.binding !== 'ASSETS' ||
       config.assets?.run_worker_first !== true || config.assets?.not_found_handling !== 'none' ||
-      JSON.stringify(config.durable_objects) !== JSON.stringify({ bindings: [{ name: 'USAGE', class_name: 'PublicUsage' }] }) ||
+      JSON.stringify(config.durable_objects) !== JSON.stringify({ bindings: [{ name: 'USAGE', class_name: 'PublicUsage' },{name:'WORLD_ROOMS',class_name:'WorldRoom',script_name:'vayria-shared-world-production'}] }) ||
       JSON.stringify(config.migrations) !== JSON.stringify([{ tag: 'v1', new_sqlite_classes: ['PublicUsage'] }]))
     throw new Error('Deployment target must be the public production Worker with the existing ledger.');
 }
-export function validateProductionActivation(enabled, stagingResult) {
-  if (enabled !== 'true' || stagingResult !== 'success') throw new Error('Production CD must be enabled and staging must succeed.');
+export function validateProductionActivation(enabled, stagingResult, manual = 'false', event = '') {
+  if ((enabled !== 'true' && !(manual === 'true' && event === 'workflow_dispatch')) || stagingResult !== 'success') throw new Error('Production CD must be enabled and staging must succeed.');
 }
 
 // GET only: verify the deployed build and Cookie bootstrap without starting a paid session.
@@ -111,19 +111,29 @@ export async function runCd(action, environment = 'staging') {
   }
   if (action === 'guard') {
     validateBuildBase(await readFile('dist-public/index.html', 'utf8'), environment);
-    if (production) validateProductionActivation(process.env.PRODUCTION_DEPLOY_ENABLED, process.env.STAGING_RESULT);
+    if (production) validateProductionActivation(process.env.PRODUCTION_DEPLOY_ENABLED, process.env.STAGING_RESULT, process.env.PRODUCTION_MANUAL_RELEASE, process.env.GITHUB_EVENT_NAME);
     validateVrm(await readFile('dist-public/avatar/model.vrm'), pinned);
     const latest = run('gh', ['api', 'repos/wakadorimk2/vayria/git/ref/heads/main', '--jq', '.object.sha'], true);
     validateRevision(process.env.GITHUB_EVENT_NAME, process.env.GITHUB_REF, process.env.GITHUB_SHA,
       run('git', ['rev-parse', 'HEAD'], true), latest);
     return;
   }
+  if(action==='storage-bootstrap'){
+    if(!production)throw new Error('Production bootstrap only');await runCd('guard',environment);
+    const storage=JSON.parse(await readFile('wrangler.world-production.jsonc','utf8'));validateWorldStorage(storage,environment);
+    storage.main=resolve(storage.main);storage.services=[];storage.vars={SHARED_CONVERSATION_ENABLED:'false',SHARED_HAND_ENABLED:'false'};
+    await writeFile('.wrangler/world-production-bootstrap.json',JSON.stringify(storage));
+    run(process.execPath,['node_modules/wrangler/wrangler-dist/cli.js','deploy','--config','.wrangler/world-production-bootstrap.json','--env-file','deploy/placeholder.env']);return;
+  }
   if (action === 'deploy') {
     await runCd('guard', environment);
-    const result = run(process.execPath, ['node_modules/wrangler/wrangler-dist/cli.js', 'deploy', '--config', configPath, '--env-file', 'deploy/placeholder.env'], true);
+    const storageConfig=production?'wrangler.world-production.jsonc':'wrangler.world.jsonc';
+    validateWorldStorage(JSON.parse(await readFile(storageConfig,'utf8')),environment);
+    const result = run(process.execPath, ['node_modules/wrangler/wrangler-dist/cli.js', 'deploy', '--config', configPath, '--env-file', 'deploy/placeholder.env', '--keep-vars'], true);
     // Wrangler output contains deployment metadata only; never print environment values.
     const version = result.match(/Current Version ID:\s*([a-f0-9-]{36})/i)?.[1];
     if (!version) throw new Error('Deployment returned no Worker Version ID. Inspect Cloudflare before retrying.');
+    run(process.execPath,['node_modules/wrangler/wrangler-dist/cli.js','deploy','--config',storageConfig,'--env-file','deploy/placeholder.env','--keep-vars']);
     const summary = label + ' deployed\n\nCommit: ' + process.env.GITHUB_SHA + '\n\nWorker Version: ' + version + '\n\nURL: ' + url + '\n';
     console.log(summary);
     if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, summary);
@@ -164,3 +174,5 @@ export async function runCd(action, environment = 'staging') {
   }
   else throw new Error('Expected fixture, download, guard, deploy, or smoke.');
 }
+
+export function validateWorldStorage(config,environment){const production=environment==='production';if(config.name!==(production?'vayria-shared-world-production':'vayria-shared-world-staging')||config.account_id!=='7414797104d7aca62f03fbd4faf7e5df'||config.main!=='worker/worldWorker.ts'||config.workers_dev!==false||config.preview_urls!==false||JSON.stringify(config.routes)!=='[]'||JSON.stringify(config.services)!==JSON.stringify([{binding:'WORLD_EXECUTOR',service:production?'vayria-web':'vayria-public-staging',entrypoint:'WorldExecution'}])||JSON.stringify(config.migrations)!==JSON.stringify([{tag:'world-v1',new_sqlite_classes:['WorldRoom']}]))throw new Error('Invalid world storage target');}

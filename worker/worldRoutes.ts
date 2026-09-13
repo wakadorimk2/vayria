@@ -4,7 +4,7 @@ import { validId } from '../src/sharedWorld/state';
 import { visualTicket, type VisualEnv, type VisualLedger } from './visual';
 import type { VisualAsset } from '../src/visual/types';
 
-export interface WorldEnv extends VisualEnv { WORLD_ROOMS?:DurableObjectNamespace; SHARED_WORLD_ENABLED?:string; SHARED_CONVERSATION_ENABLED?:string }
+export interface WorldEnv extends VisualEnv { WORLD_ROOMS?:DurableObjectNamespace; SHARED_WORLD_ENABLED?:string; SHARED_CONVERSATION_ENABLED?:string; PUBLIC_WORLD_ROOM?:string }
 type Credential={purpose:'world-member';roomId:string;actor:string;role:'guest'|'host';exp:number};
 const cookieName=(env:WorldEnv)=>env.PUBLIC_BASE_PATH?'__Host-vayria-world-staging':'__Host-vayria-world';
 export async function worldMember(request:Request,env:WorldEnv){const c=await verify<Credential>(cookie(request,cookieName(env)),env.COOKIE_SECRET);return c?.purpose==='world-member'?c:null;}
@@ -24,7 +24,7 @@ export async function createWorld(env:WorldEnv,roomId:string,origin:string){
 export function worldLease(request:Request){return {clientId:request.headers.get('X-World-Client'),lease:request.headers.get('X-World-Lease'),epoch:Number(request.headers.get('X-World-Epoch'))};}
 export async function guardWorldRequest(request:Request,env:WorldEnv){
   const member=await worldMember(request,env);if(!member)return null;
-  if(member.role!=='host')throw new LimitError('world_guest_read_only',0,403);
+  if(env.SHARED_CONVERSATION_ENABLED==='true'||member.role!=='host')throw new LimitError('world_guest_read_only',0,403);
   const context=await worldCall(env,member.roomId,member.actor,member.role,{op:'guard',...worldLease(request)});return {member,context:String(context.context)};
 }
 export async function worldRoute(request:Request,env:WorldEnv,ledger:VisualLedger,visitor:string,session:string){
@@ -35,9 +35,10 @@ export async function worldRoute(request:Request,env:WorldEnv,ledger:VisualLedge
   if(op==='join'&&request.method==='POST'){
     const grant=await verify<{purpose:string;roomId:string;exp:number}>(String(input.grant??''),env.COOKIE_SECRET);
     const old=await worldMember(request,env);
-    if((!grant||grant.roomId!==roomId||!['world-host','world-invite'].includes(grant.purpose))&&old?.roomId!==roomId)throw new LimitError('invalid_invite',0,403);
-    const role=grant?.purpose==='world-host'?'host':old?.roomId===roomId?old.role:'guest';
+    if((!grant||grant.roomId!==roomId||!['world-host','world-invite'].includes(grant.purpose))&&old?.roomId!==roomId&&env.PUBLIC_WORLD_ROOM!==roomId)throw new LimitError('invalid_invite',0,403);
+    const role=grant?.roomId===roomId&&grant.purpose==='world-host'?'host':old?.roomId===roomId?old.role:'guest';
     const actor=old?.roomId===roomId?old.actor:crypto.randomUUID();
+    if(env.PUBLIC_WORLD_ROOM===roomId)await worldCall(env,roomId,'admin','admin',{op:'create',roomId});
     const state=await worldCall(env,roomId,actor,role,{op:'join'});
     const credential:Credential={purpose:'world-member',roomId,actor,role,exp:Date.now()+7*86400000};
     const response=Response.json({state,role,name:`参加者${actor.slice(0,4)}`});
@@ -85,6 +86,7 @@ export async function worldRoute(request:Request,env:WorldEnv,ledger:VisualLedge
   if(member.role!=='host')throw new LimitError('forbidden',0,403);
   if(op==='lease')return Response.json(await call({...input,op}));
   await call({op:'guard',...worldLease(request)});
+  if(env.SHARED_CONVERSATION_ENABLED==='true'&&['prepare','asset','element'].includes(op))throw new LimitError('room_execution_required',0,403);
   if(op==='prepare'){
     const state=await call({op:'state'});const element=(state.elements as {id:string;concept:string;kind:'prop'|'background';status:string}[]).find(e=>e.id===input.elementId&&e.status==='preparing');
     if(!element)throw new LimitError('element_not_found',0,404);

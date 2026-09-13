@@ -18,7 +18,7 @@ export class WorldExecution extends WorkerEntrypoint<Env> {
     if(this.env.SHARED_CONVERSATION_ENABLED!=='true')throw new LimitError('conversation_disabled',0,409);
     const base=this.env.PUBLIC_BASE_PATH??'';const origin='https://'+this.env.PUBLIC_HOSTNAME;
     const credential=await sign({purpose:'visitor',id:slot.visitor,exp:Date.now()+300000},this.env.COOKIE_SECRET);
-    const response=await handle(new Request(origin+base+path,{method:'POST',signal:AbortSignal.timeout(Math.max(1,Math.min(90000,slot.expires-Date.now()))),headers:{Origin:origin,Cookie:`${base?'__Host-vayria-staging':'__Host-vayria'}=${credential}`,'X-Vayria-Session':slot.session,'Content-Type':payload instanceof ArrayBuffer?'audio/wav':'application/json'},body:payload instanceof ArrayBuffer?payload:JSON.stringify(payload)}),{...this.env,REQUIRE_PREVIEW_ACCESS:'false'},this.ctx,context);
+    const response=await handle(new Request(origin+base+path,{method:'POST',signal:AbortSignal.timeout(Math.max(1,Math.min(90000,slot.expires-Date.now()))),headers:{Origin:origin,Cookie:`${base?'__Host-vayria-staging':'__Host-vayria'}=${credential}`,'X-Vayria-Session':slot.session,'Content-Type':payload instanceof ArrayBuffer?'audio/wav':'application/json'},body:payload instanceof ArrayBuffer?payload:JSON.stringify(payload)}),{...this.env,REQUIRE_PREVIEW_ACCESS:'false'},this.ctx,context,true);
     if(!response.ok){const error=await response.json() as {code?:string};throw new Error(error.code??'execution_failed');}return response;
   }
   async conversation(input:WorldExecutionInput,audio?:ArrayBuffer):Promise<WorldExecutionResult>{
@@ -48,16 +48,16 @@ export class WorldExecution extends WorkerEntrypoint<Env> {
     }catch{output.error='speech_unavailable';}}
     return output;
   }
-  async visual(input:{roomId:string;epoch:number;slot:ConversationSlot;element:WorldElement}):Promise<WorldVisualResult>{
+  async visual(input:{roomId:string;epoch:number;slot:ConversationSlot;element:WorldElement;mode?:'cache'|'generate'}):Promise<WorldVisualResult>{
     try{
       const startedAt=Date.now();
       const p=await ledger<{enabled:boolean;generation:number}>(this.env,'visualPermission',{visitor:input.slot.visitor,id:input.slot.session});
       if(!p.enabled)return {error:'visual_disabled'};
       const ticket=await visualTicket({visualIntent:{type:input.element.kind,action:'add',concept:input.element.concept,modifiers:[],targetId:input.element.id,motion:'',motionEvidence:'',sharing:'general',regenerate:false}},this.env,input.slot.visitor,input.slot.session,p.generation,false,input.element.id);
       if(!('visualTicket' in ticket))return {error:'visual_disabled'};
-      const response=await this.request(input.slot,'/api/visual/generate',{ticket:ticket.visualTicket,portrait:false,remainingMs:input.element.kind==='background'?60000:30000});
+      const response=await this.request(input.slot,'/api/visual/generate',{ticket:ticket.visualTicket,cacheOnly:input.mode==='cache',portrait:false,remainingMs:input.element.kind==='background'?60000:30000});
       const events=(await response.text()).trim().split('\n').map(line=>JSON.parse(line) as {type:string;asset?:{id:string;url:string;createdAt?:number};cache?:boolean;code?:string});
-      const assetEvent=events.find(e=>e.type==='asset');const asset=assetEvent?.asset;if(!asset)return {error:events.find(e=>e.type==='failed')?.code??'asset_unavailable'};
+      const assetEvent=events.find(e=>e.type==='asset');const asset=assetEvent?.asset;if(!asset)return {error:events.find(e=>e.type==='failed')?.code??'asset_unavailable',cacheOnly:this.env.VISUAL_CACHE_ONLY==='true'};
       const assetSource:WorldElement['assetSource']=assetEvent?.cache?'cache':asset.createdAt===undefined?'unknown':asset.createdAt>=startedAt?'generated':'reused';
       if(asset.id.startsWith('stock-'))return {assetUrl:asset.url,assetSource:'stock'};
       const source=await this.env.VISUAL_ASSETS?.get(asset.id);if(!source||!this.env.VISUAL_ASSETS)return {error:'asset_unavailable'};

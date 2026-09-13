@@ -39,11 +39,11 @@ const app=await build({entryPoints:['worker/shared/index.ts'],bundle:true,write:
 const storage=await build({entryPoints:['worker/worldWorker.ts'],bundle:true,write:false,format:'esm',platform:'node',external:['cloudflare:workers']});
 const key='room-conversation-fixture-not-a-secret';
 const signed=payload=>{const b=Buffer.from(JSON.stringify(payload)).toString('base64url');return b+'.'+createHmac('sha256',key).update(b).digest('base64url');};
-async function fixture({holdModel,intent,handMode=false}={}){
+async function fixture({holdModel,intent,handMode=false,publicRoom=''}={}){
   const calls=[];
   const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'public',modules:true,script:app.outputFiles[0].text,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],
     durableObjects:{USAGE:{className:'PublicUsage',useSQLite:true},WORLD_ROOMS:{className:'WorldRoom',scriptName:'storage',useSQLite:true}},
-    bindings:{SHARED_WORLD_ENABLED:'true',SHARED_CONVERSATION_ENABLED:'true',COOKIE_SECRET:key,IP_SECRET:key,ADMIN_SECRET:key,GENERATION_ENABLED:'true',MANIFESTATION_ENABLED:'true',VISUAL_CACHE_ONLY:'true',VISUAL_BACKGROUND_ENABLED:'true',REQUIRE_PREVIEW_ACCESS:'false',PUBLIC_HOSTNAME:'test.example',OPENAI_API_KEY:'fixture',AIVIS_API_KEY:'fixture',AIVIS_MODEL_UUID:'7fc08a41-b64d-456d-8b22-8e1284674775',AIVIS_SPEAKER_UUID:'8e2dfde9-a155-4bd8-b451-80832ad5e8ac'},
+    bindings:{PUBLIC_WORLD_ROOM:publicRoom,SHARED_WORLD_ENABLED:'true',SHARED_CONVERSATION_ENABLED:'true',COOKIE_SECRET:key,IP_SECRET:key,ADMIN_SECRET:key,GENERATION_ENABLED:'true',MANIFESTATION_ENABLED:'true',VISUAL_CACHE_ONLY:'true',VISUAL_BACKGROUND_ENABLED:'true',REQUIRE_PREVIEW_ACCESS:'false',PUBLIC_HOSTNAME:'test.example',OPENAI_API_KEY:'fixture',AIVIS_API_KEY:'fixture',AIVIS_MODEL_UUID:'7fc08a41-b64d-456d-8b22-8e1284674775',AIVIS_SPEAKER_UUID:'8e2dfde9-a155-4bd8-b451-80832ad5e8ac'},
     serviceBindings:{ASSETS:()=>new Response('scene')},r2Buckets:['VISUAL_ASSETS'],
     outboundService:async request=>{const path=new URL(request.url).pathname;calls.push(path);
       if(path.endsWith('/siteverify'))return Response.json({success:true,hostname:'test.example',action:'session'});
@@ -117,7 +117,7 @@ test('voice slot requires grant before STT and duplicate uploads do not run anot
     assert.equal((await send('wrong')).status,403);assert.equal(f.calls.includes('/v1/audio/transcriptions'),false);
     assert.equal((await send('voice-one')).status,200);
     assert.equal((await send('voice-one')).status,403);
-    let next;for(let i=0;i<100;i++){next=await f.snapshot(a);if(next.conversationView.reply)break;await new Promise(r=>setTimeout(r,20));}
+    let next;for(let i=0;i<320;i++){next=await f.snapshot(a);if(next.conversationView.reply)break;await new Promise(r=>setTimeout(r,20));}
     assert.ok(next.conversationView.reply,JSON.stringify(next.outcomes));assert.equal(f.calls.filter(p=>p==='/v1/audio/transcriptions').length,1);
     assert.equal(f.calls.filter(p=>p==='/v1/responses').length,1);
   }finally{await f.mf.dispose();}
@@ -145,12 +145,26 @@ test('cache-only background and prop misses do not call a provider or undo room 
   const action={targetId:'',concept:'crab',sourceCardIds:['crab'],effects:[],count:1};
   const f=await fixture({intent:{actions:[{...action,type:'prop'},{...action,type:'background',concept:'underwater'},{...action,type:'physics',concept:'zero'}]}});
   try{
-    const a=await f.join();await f.request('/api/world-room/room/card',{eventId:'crab',cardId:'crab',epoch:0},a.cookie);
+    const a=await f.join();const socket=await f.mf.dispatchFetch('https://test.example/api/world-room/room/events',{headers:{Upgrade:'websocket',Origin:'https://test.example',Cookie:a.cookie}});socket.webSocket.accept();await f.request('/api/world-room/room/presence',{active:true},a.cookie,a.headers);await f.request('/api/world-room/room/card',{eventId:'crab',cardId:'crab',epoch:0},a.cookie);
     assert.equal((await f.request('/api/world-room/room/generation',{enabled:true,generation:0},a.cookie,a.headers)).status,200);
     await f.request('/api/world-room/room/conversation',{id:'visual-turn',kind:'text',text:'カニを浮かべて',epoch:0},a.cookie,a.headers);
-    let next;for(let i=0;i<100;i++){next=await f.snapshot(a);if(next.elements.length===2&&next.elements.every(e=>e.status==='failed'))break;await new Promise(r=>setTimeout(r,20));}
+    let next;for(let i=0;i<320;i++){next=await f.snapshot(a);if(next.elements.length===2&&next.elements.every(e=>e.status==='failed'))break;await new Promise(r=>setTimeout(r,20));}
     assert.equal(next.physics.mode,'zero');assert.equal(next.elements.length,2);
     assert.ok(next.elements.every(e=>e.status==='failed'&&e.error==='cache_miss'),JSON.stringify(next.elements));
     assert.ok(f.calls.every(p=>['/siteverify','/turnstile/v0/siteverify','/v1/responses','/v1/tts/synthesize'].includes(p)),JSON.stringify(f.calls));
   }finally{await f.mf.dispose();}
+});
+
+test('public room anonymous entry is isolated, guest-only and idempotent',async()=>{
+ const f=await fixture({handMode:true,publicRoom:'main-world'});try{
+  const a=await f.request('/api/world-room/main-world/join',{});assert.equal(a.status,200);const av=await a.json();assert.equal(av.role,'guest');assert.equal(av.state.epoch,0);assert.equal(av.state.cardSlots.length,5);assert.equal(av.state.history.length,0);
+  const cookie=a.headers.get('Set-Cookie').split(';')[0];
+  const input={eventId:'public-card',epoch:0,handCardId:av.state.hand[0].id,slotId:av.state.cardSlots[0].id,slotVersion:0};assert.equal((await f.request('/api/world-room/main-world/insert',input,cookie)).status,200);
+  const b=await(await f.request('/api/world-room/main-world/join',{})).json();assert.equal(b.state.sequence,1);assert.equal(b.state.cardSlots[0].cardId,av.state.hand[0].cardId);
+  assert.equal((await f.request('/api/world-room/arbitrary/join',{})).status,403);
+  assert.equal((await f.request('/api/world-room/main-world/lease',{},cookie)).status,403);
+  assert.equal((await f.request('/api/admin',{op:'world-create',roomId:'arbitrary'},cookie)).status,401);
+  assert.equal((await f.request('/api/visual/generate',{},cookie)).status,403);
+  assert.equal(f.calls.length,0);
+ }finally{await f.mf.dispose();}
 });

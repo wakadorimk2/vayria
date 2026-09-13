@@ -3,8 +3,20 @@ import { worldCardMeaning, worldCardVisual } from './cards.js';
 import type { SharedWorldState, WorldElement, WorldIntent } from './state.js';
 
 export const CARD_GENERATION_DELAY = 4000;
+export const IMAGE_GENERATION_INTERVAL = 30000;
+export interface GenerationBudget { resource:'image_generation'; tokens:number; updatedAt:number; next:'background'|'prop' }
+export function imageBudget(q:WorldGeneration,now:number){
+  const budget=q.budget??={resource:'image_generation',tokens:1,updatedAt:now,next:'background'};
+  if(now>=budget.updatedAt+IMAGE_GENERATION_INTERVAL){budget.tokens=1;budget.updatedAt=now;}
+  return budget;
+}
+export function consumeImageToken(q:WorldGeneration,now:number,kind:'background'|'prop'){
+  const budget=imageBudget(q,now);if(budget.tokens<1)return false;
+  budget.tokens=0;budget.updatedAt=now;budget.next=kind==='background'?'prop':'background';return true;
+}
 type Action = WorldIntent['actions'][number];
 export interface WorldGeneration {
+  budget?:GenerationBudget;
   dueAt:number; sequence:number; dirty:boolean;
   blockedUntil?:number;
   proposals:Action[];
@@ -24,13 +36,12 @@ export function cardVisualActions(state:SharedWorldState):Action[]{
 }
 export function reserveCardGeneration(state:SharedWorldState,now:number){
   const q=state.generation??={dueAt:0,sequence:0,dirty:false,proposals:[],attempted:[]};
-  q.sequence=state.sequence;q.dueAt=now+CARD_GENERATION_DELAY;q.dirty=true;q.blockedUntil=undefined;
+  q.sequence=state.sequence;if(!q.dirty)q.dueAt=now+CARD_GENERATION_DELAY;q.dirty=true;
 }
 export function queueConversationVisuals(state:SharedWorldState,intent:WorldIntent,now:number):WorldIntent{
-  if(!state.cardSlots)return intent;
   const visuals=intent.actions.filter(a=>a.type==='background'||a.type==='prop');
   if(visuals.length){
-    const q=state.generation??={dueAt:now,sequence:state.sequence,dirty:false,proposals:[],attempted:[]};
+    const q=state.generation??={dueAt:now+CARD_GENERATION_DELAY,sequence:state.sequence,dirty:false,proposals:[],attempted:[]};
     const canonical=cardVisualActions(state);
     for(const proposal of visuals){
       // Card-driven and conversation-driven appearances share one material key.
@@ -48,7 +59,7 @@ export function queueConversationVisuals(state:SharedWorldState,intent:WorldInte
 export function prepareGeneration(state:SharedWorldState,now:number,id:string){
   const q=state.generation;if(!q||!q.dirty||q.running||q.dueAt>now)return false;
   const canonical=cardVisualActions(state);
-  const current=new Set((state.cardSlots??[]).flatMap(s=>s.cardId?[s.cardId]:[]));
+  const current=new Set(state.cardSlots?state.cardSlots.flatMap(s=>s.cardId?[s.cardId]:[]):Object.keys(state.weights));
   const proposals=q.proposals.filter(a=>a.sourceCardIds.every(id=>current.has(id)));
   const actions=[...canonical,...proposals.filter(a=>a.type!=='background'||!canonical.some(c=>c.type==='background'))];
   q.dirty=false;q.proposals=[];q.running={id,sequence:state.sequence,startedAt:now};

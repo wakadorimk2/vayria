@@ -3,7 +3,7 @@ import { publicSessionId } from '../public/session';
 import { runtimeConfig } from '../runtimeConfig';
 export interface WorldAccess {roomId:string;clientId:string;lease:string;epoch:number;until:number}
 let access:WorldAccess|null=null;
-export const sharedWorldRoomId=()=>runtimeConfig.mode==='public'&&import.meta.env.VITE_SHARED_WORLD_ENABLED==='true'?(new URLSearchParams(location.search).get('world')??/\/world\/([\w-]+)/.exec(location.pathname)?.[1]??null):null;
+export const sharedWorldRoomId=()=>runtimeConfig.mode==='public'&&import.meta.env.VITE_SHARED_WORLD_ENABLED==='true'?(new URLSearchParams(location.search).get('world')??/\/world\/([\w-]+)/.exec(location.pathname)?.[1]??import.meta.env.VITE_PUBLIC_WORLD_ROOM??null):null;
 export const worldAccess=()=>access;
 export function setWorldAccess(value:WorldAccess|null){access=value;}
 export function addWorldHeaders(headers:Headers){if(access){headers.set('X-World-Client',access.clientId);headers.set('X-World-Lease',access.lease);headers.set('X-World-Epoch',String(access.epoch));}}

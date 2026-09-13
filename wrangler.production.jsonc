@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "vayria-web",
   "account_id": "7414797104d7aca62f03fbd4faf7e5df",
-  "main": "worker/index.ts",
+  "main": "worker/shared/index.ts",
   "compatibility_date": "2026-09-07",
   "compatibility_flags": [
     "nodejs_compat"
@@ -26,6 +26,11 @@
       {
         "name": "USAGE",
         "class_name": "PublicUsage"
+      },
+      {
+        "name": "WORLD_ROOMS",
+        "class_name": "WorldRoom",
+        "script_name": "vayria-shared-world-production"
       }
     ]
   },
@@ -44,7 +49,10 @@
     "TURNSTILE_SITE_KEY": "0x4AAAAAAErpgvhBvYpnRm71",
     "AIVIS_MODEL_UUID": "7fc08a41-b64d-456d-8b22-8e1284674775",
     "AIVIS_SPEAKER_UUID": "8e2dfde9-a155-4bd8-b451-80832ad5e8ac",
-    "VISUAL_VIDEO_ENABLED": "true"
+    "VISUAL_VIDEO_ENABLED": "true",
+    "SHARED_WORLD_ENABLED": "true",
+    "SHARED_CONVERSATION_ENABLED": "true",
+    "PUBLIC_WORLD_ROOM": "main-world"
   },
   "observability": {
     "enabled": false

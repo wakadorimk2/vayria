@@ -47,8 +47,8 @@
     }
   ],
   "vars": {
-    "SHARED_WORLD_ENABLED": "false",
-    "SHARED_CONVERSATION_ENABLED": "false",
+    "SHARED_WORLD_ENABLED": "true",
+    "SHARED_CONVERSATION_ENABLED": "true",
     "GENERATION_ENABLED": "true",
     "REQUIRE_PREVIEW_ACCESS": "true",
     "PUBLIC_HOSTNAME": "vayria.me",

@@ -6,10 +6,10 @@ const load=async path=>{const b=await build({entryPoints:[path],bundle:true,writ
 const g=await load('src/sharedWorld/generation.ts'),w=await load('src/sharedWorld/state.ts'),h=await load('src/sharedWorld/hand.ts');
 function put(s,id,index,at){w.insertWorldCard(s,{cardId:id,eventId:`event-${s.sequence}`,participant:'p',name:'p'},at);h.updateCardSlot(s,s.cardSlots[index],id,`slot-${s.sequence}`,at);g.immediateCardReaction(s,id,at);g.reserveCardGeneration(s,at);}
 function room(){const s=w.createSharedWorld('test');h.ensureCardSlots(s);return s;}
-test('one card reacts immediately; four quiet seconds coalesce background, prop and physics',()=>{
+test('one card reacts immediately; four bounded seconds coalesce background, prop and physics',()=>{
   const s=room();put(s,'underwater',0,1000);put(s,'chicken',1,3000);put(s,'gigantic',2,4000);
-  assert.equal(s.elements[0].simplified,true);assert.equal(s.elements[0].status,'ready');assert.equal(s.generation.dueAt,8000);
-  assert.equal(g.prepareGeneration(s,7999,'early'),false);assert.equal(g.prepareGeneration(s,8000,'batch'),true);
+  assert.equal(s.elements[0].simplified,true);assert.equal(s.elements[0].status,'ready');assert.equal(s.generation.dueAt,5000);
+  assert.equal(g.prepareGeneration(s,4999,'early'),false);assert.equal(g.prepareGeneration(s,5000,'batch'),true);
   assert.deepEqual(s.elements.filter(e=>e.status==='preparing').map(e=>[e.kind,e.concept]),[['background','underwater'],['prop','chicken']]);
   assert.deepEqual(h.activeCardPhysics(s.cardSlots),{mode:'water',effects:['grow']});
 });
@@ -44,6 +44,7 @@ export class TestRoom extends WorldRoom {
  if(path==='/test'){const input=await r.json();const rows=this.ctx.storage.sql.exec('SELECT state FROM world WHERE id=1').toArray();const s=JSON.parse(rows[0].state);
  if(input.card){let row=this.ctx.storage.sql.exec('SELECT data FROM hands WHERE actor=?','p').toArray()[0];let hand=JSON.parse(row.data);hand.cards[0].cardId=input.card;this.ctx.storage.sql.exec('UPDATE hands SET data=? WHERE actor=?',JSON.stringify(hand),'p');}
  if(input.due&&s.generation){s.generation.dueAt=0;s.generation.blockedUntil=0;}
+ if(input.refill&&s.generation?.budget)s.generation.budget.updatedAt=Date.now()-30001;
  if(input.expire&&s.generation?.running)s.generation.running.startedAt=Date.now()-181000;
  this.ctx.storage.sql.exec('UPDATE world SET state=? WHERE id=1',JSON.stringify(s));return Response.json(s);}
  if(path==='/tick'){await this.alarm();return new Response('ok');}return super.fetch(r);}
@@ -56,7 +57,7 @@ export class TestRoom extends WorldRoom {
 } export default {fetch(){return new Response('ok')}};`;
   const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'room',modules:true,script,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],bindings:{SHARED_HAND_ENABLED:'true',SHARED_CONVERSATION_ENABLED:'true'},durableObjects:{ROOM:{className:'TestRoom',useSQLite:true}},serviceBindings:{WORLD_EXECUTOR:{name:'executor',entrypoint:'Executor'}}},{name:'executor',modules:true,script:executor,compatibilityDate:'2026-09-07',outboundService:async request=>{
     if(new URL(request.url).pathname==='/permission')return Response.json({enabled:permission});
-    const input=await request.json();calls.push(input);if(hold&&input.element.kind==='background')await hold;
+    const input=await request.json();if(input.mode==='cache')return Response.json({error:'cache_miss'});calls.push(input);if(hold&&input.element.kind==='background')await hold;
     return Response.json({assetUrl:'/fixture-'+input.element.concept+'.png'});
   }}]}));
   const ns=await mf.getDurableObjectNamespace('ROOM','room'),stub=ns.get(ns.idFromName('test'));
@@ -90,12 +91,14 @@ test('room: three bodies per accepted object card survive replay and material co
     assert.equal(f.calls.length,1);
   }finally{await f.close();}
 });
-test('room: background delay does not block props; running changes coalesce and old background cannot win',async()=>{
-  const f=await fixture();try{f.hold();await f.insert('underwater');await f.insert('chicken',1);await f.tick();await until(()=>f.calls.length===2);
-    await f.insert('space');await f.insert('gigantic',2);await f.tick();assert.equal(f.calls.length,2);
-    f.release();await until(async()=>!(await f.call({},'/test')).value.generation.running);await f.tick();await until(()=>f.calls.length===3);
-    assert.equal(f.calls[2].element.concept,'outer space');const s=(await f.call({},'/test')).value;
-    assert.equal(s.elements.find(e=>e.concept==='underwater').error,'superseded');assert.equal(f.calls.filter(c=>c.element.kind==='prop').length,1);
+test('room: one paid material per refill and current-state round robin',async()=>{
+  const f=await fixture();try{f.hold();await f.insert('underwater');await f.insert('chicken',1);await f.tick();await until(()=>f.calls.length===1);
+    await f.insert('space');await f.insert('gigantic',2);await f.tick();assert.equal(f.calls.length,1);
+    f.release();await until(async()=>!(await f.call({},'/test')).value.generation.running);await f.tick();assert.equal(f.calls.length,1);
+    await f.call({refill:true},'/test');await f.tick();await until(()=>f.calls.length===2);assert.equal(f.calls[1].element.kind,'prop');
+    await until(async()=>!(await f.call({},'/test')).value.generation.running);
+    await f.call({refill:true},'/test');await f.tick();await until(()=>f.calls.length===3);assert.equal(f.calls[2].element.concept,'outer space');
+    const s=(await f.call({},'/test')).value;assert.equal(s.elements.find(e=>e.concept==='underwater').error,'superseded');
   }finally{await f.close();}
 });
 test('room: generation off, no people, reset and unknown completion do not replay paid work',async()=>{
@@ -118,3 +121,16 @@ test('room: image load failure does not claim display or invalidate another view
     const shown=await f.call({op:'display',elementId:e.id,status:'displayed',epoch:s.epoch});assert.equal(shown.value.displayedWorld.location,'underwater');
   }finally{await f.close();}
 });
+
+test('image budget has one token, refills without bursts, and survives serialization',()=>{
+  const q={dueAt:0,sequence:0,dirty:false,proposals:[],attempted:[]};
+  assert.equal(g.consumeImageToken(q,1000,'background'),true);assert.equal(q.budget.next,'prop');
+  for(let i=0;i<50;i++)assert.equal(g.consumeImageToken(q,30999,'prop'),false);
+  const restored=JSON.parse(JSON.stringify(q));assert.equal(g.consumeImageToken(restored,31000,'prop'),true);assert.equal(restored.budget.next,'background');
+  assert.equal(g.imageBudget(restored,1000000).tokens,1);assert.equal(g.consumeImageToken(restored,1000000,'prop'),true);assert.equal(g.consumeImageToken(restored,1000000,'prop'),false);
+});
+test('reset preserves a spent image token',async()=>{const f=await fixture();try{
+  await f.insert('underwater');await f.tick();await until(()=>f.calls.length===1);await until(async()=>!(await f.call({},'/test')).value.generation.running);
+  const before=(await f.call({},'/test')).value.generation.budget;
+  await f.call({op:'control',action:'reset'});const after=(await f.call({},'/test')).value.generation.budget;assert.deepEqual(after,before);
+}finally{await f.close();}});

@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { reserveCardGeneration, immediateCardReaction, prepareGeneration, queueConversationVisuals, cardVisualActions, visualKey } from '../src/sharedWorld/generation';
+import { imageBudget, consumeImageToken, IMAGE_GENERATION_INTERVAL, reserveCardGeneration, immediateCardReaction, prepareGeneration, queueConversationVisuals, cardVisualActions, visualKey } from '../src/sharedWorld/generation';
 import { createHand, consumeHand, ensureCardSlots, updateCardSlot, type WorldHand } from '../src/sharedWorld/hand';
 import { advanceConversation, cancelConversation, conversationView, createRoomConversation, reserveConversation, type ConversationSlot } from '../src/sharedWorld/conversation';
 import { executionInput, type RoomEnv } from './worldExecution';
@@ -40,6 +40,7 @@ export class WorldRoom extends DurableObject<RoomEnv> {
   private async driveGeneration(){
     let state=this.read();if(!state||!state.open||state.resetUntil>Date.now()||!this.env.WORLD_EXECUTOR||this.env.SHARED_CONVERSATION_ENABLED!=='true')return;
     const q=state.generation;if(!q)return;
+    if(!q.budget){const previous=Math.max(0,...state.elements.map(e=>e.requestedAt??0));q.budget={resource:'image_generation',tokens:previous&&Date.now()-previous<IMAGE_GENERATION_INTERVAL?0:1,updatedAt:previous||Date.now(),next:'background'};this.save(state);}
     if(q.running&&Date.now()-q.running.startedAt>=180000){
       for(const e of state.elements)if(e.status==='preparing'&&e.requestedAt){e.status='failed';e.error='generation_interrupted';}
       q.running=undefined;state.revision++;this.save(state);this.broadcast(state);
@@ -89,7 +90,7 @@ export class WorldRoom extends DurableObject<RoomEnv> {
       const intent=readWorldIntent(result.worldIntent);
       if(intent){try{applyWorldIntent(latest,queueConversationVisuals(latest,intent,now),slot.id,now);}catch{latest.outcomes=[...latest.outcomes,'演出提案を適用できなかった。'].slice(-12);}}
       latest.revision++;this.save(latest);this.broadcast(latest);
-      this.ctx.waitUntil(latest.cardSlots?this.driveGeneration():this.generateElements(slot,epoch));
+      this.ctx.waitUntil(this.driveGeneration());
       await this.schedule(conversation.reply.endsAt);
     }catch(error){
       const latest=this.read();if(!latest||latest.epoch!==epoch||latest.conversation?.active?.id!==slot.id)return;
@@ -98,26 +99,41 @@ export class WorldRoom extends DurableObject<RoomEnv> {
     }
   }
   private async generateElements(slot:ConversationSlot,epoch:number){
-    // Two independent lanes, with at most two provider jobs across the room.
-    await Promise.all((['background','prop'] as const).map(async kind=>{
-      for(;;){const state=this.read();if(!state||state.epoch!==epoch||!this.env.WORLD_EXECUTOR)return;
-        if(state.cardSlots&&(!this.participants().length||state.generation?.running?.id!==slot.id||state.generation?.dirty&&state.sequence>state.generation.running.sequence))return;
-        if(state.elements.some(e=>e.kind===kind&&e.status==='preparing'&&e.requestedAt))return;
+    const initial=this.read();if(!initial)return;
+    const preferred=initial.generation?imageBudget(initial.generation,Date.now()).next:'background';
+    const order=preferred==='background'?['background','prop'] as const:['prop','background'] as const;
+    for(const kind of order){
+      for(;;){let state=this.read();if(!state||state.epoch!==epoch||!this.env.WORLD_EXECUTOR)return;
+        if(!this.participants().length||state.generation?.running?.id!==slot.id||state.generation.dirty&&state.sequence>state.generation.running.sequence)return;
         const element=state.elements.find(e=>e.kind===kind&&e.status==='preparing'&&!e.requestedAt);
-        if(!element)return;element.requestedAt=Date.now();
-        if(state.generation)state.generation.attempted=[...state.generation.attempted,visualKey(element.kind,element.concept)].slice(-512);
-        this.save(state);
-        const result=await this.env.WORLD_EXECUTOR.visual({roomId:state.roomId,epoch,slot,element}).catch(()=>({error:'generation_failed'}));
-        const latest=this.read();if(!latest||latest.epoch!==epoch)return;
+        if(!element)break;
+        let result=await this.env.WORLD_EXECUTOR.visual({roomId:state.roomId,epoch,slot,element,mode:'cache'}).catch(()=>({error:'cache_lookup_failed'}));
+        state=this.read();if(!state||state.epoch!==epoch||state.generation?.running?.id!==slot.id)return;
+        if(state.generation.dirty&&state.sequence>state.generation.running.sequence)return;
+        const pending=state.elements.find(e=>e.id===element.id);if(!pending||pending.status!=='preparing')continue;
+        if(result.error==='cache_miss'&&!('cacheOnly' in result&&result.cacheOnly)){
+          if(!this.participants().some(p=>p.actor===slot.actor))return;
+          if(!await this.env.WORLD_EXECUTOR.visualPermission(slot).catch(()=>false)){state.generation.blockedUntil=Date.now()+10000;this.save(state);return;}
+          state=this.read();if(!state||state.epoch!==epoch||state.generation?.running?.id!==slot.id||state.generation.dirty&&state.sequence>state.generation.running.sequence)return;
+          const target=state.elements.find(e=>e.id===element.id);if(!target||target.status!=='preparing')return;
+          if(!consumeImageToken(state.generation,Date.now(),kind)){
+            state.generation.blockedUntil=state.generation.budget!.updatedAt+IMAGE_GENERATION_INTERVAL;this.save(state);break;
+          }
+          target.requestedAt=Date.now();state.generation.attempted=[...state.generation.attempted,visualKey(target.kind,target.concept)].slice(-512);
+          this.save(state); // Persist the claim before a possibly billable RPC. Unknown results are never replayed.
+          result=await this.env.WORLD_EXECUTOR.visual({roomId:state.roomId,epoch,slot,element:target,mode:'generate'}).catch(()=>({error:'generation_failed'}));
+        }
+        const latest=this.read();if(!latest||latest.epoch!==epoch||latest.generation?.running?.id!==slot.id)return;
         const target=latest.elements.find(e=>e.id===element.id);if(!target||target.status!=='preparing')continue;
         const currentBackground=cardVisualActions(latest).find(a=>a.type==='background');
         if(kind==='background'&&(latest.desiredBackgroundId&&latest.desiredBackgroundId!==target.id||latest.generation?.dirty&&(!currentBackground||visualKey(kind,currentBackground.concept)!==visualKey(kind,target.concept)))){target.status='failed';target.error='superseded';}
-        else if('assetUrl' in result&&result.assetUrl){target.assetUrl=result.assetUrl;target.assetSource=result.assetSource;target.status='ready';if(kind==='prop')for(const e of latest.elements)if(e.simplified&&e.sourceCardIds[0]===target.sourceCardIds[0]){e.assetUrl=result.assetUrl;target.materialOnly=true;}}
+        else if('assetUrl' in result&&result.assetUrl){target.assetUrl=result.assetUrl;target.assetSource='assetSource' in result?result.assetSource:undefined;target.status='ready';if(kind==='prop')for(const e of latest.elements)if(e.simplified&&e.sourceCardIds[0]===target.sourceCardIds[0]){e.assetUrl=result.assetUrl;target.materialOnly=true;}}
         else{target.status='failed';target.error=result.error??'generation_failed';latest.outcomes=[...latest.outcomes,`${target.concept}: 未表示 (${target.error})`].slice(-12);}
         latest.revision++;this.save(latest);this.broadcast(latest);
       }
-    }));
+    }
   }
+
   async alarm(){const state=this.read();if(!state)return;const c=state.conversation??=createRoomConversation();
     advanceConversation(c,Date.now(),new Set(this.ctx.getWebSockets().map(s=>s.deserializeAttachment()?.actor)));
     state.revision++;this.save(state);this.broadcast(state);this.ctx.waitUntil(this.driveGeneration());await this.drive();
@@ -168,7 +184,7 @@ export class WorldRoom extends DurableObject<RoomEnv> {
       const admin=role==='admin';
       if(op==='control'){
         if(!admin)throw new WorldError('forbidden',403);
-        if(input.action==='reset'){const old=state;state=createSharedWorld(old.roomId);state.epoch=old.epoch+1;state.revision=old.revision+1;state.resetUntil=now+1500;state.host=old.host;state.open=old.open;if(this.env.SHARED_HAND_ENABLED==='true')ensureCardSlots(state);this.ctx.storage.sql.exec('DELETE FROM rates');this.ctx.storage.sql.exec('DELETE FROM hands');this.ctx.storage.sql.exec('DELETE FROM hand_receipts');this.ctx.storage.sql.exec('DELETE FROM receipts');}
+        if(input.action==='reset'){const old=state;state=createSharedWorld(old.roomId);state.epoch=old.epoch+1;if(old.generation?.budget)state.generation={dueAt:0,sequence:0,dirty:false,proposals:[],attempted:[],budget:{...old.generation.budget}};state.revision=old.revision+1;state.resetUntil=now+1500;state.host=old.host;state.open=old.open;if(this.env.SHARED_HAND_ENABLED==='true')ensureCardSlots(state);this.ctx.storage.sql.exec('DELETE FROM rates');this.ctx.storage.sql.exec('DELETE FROM hands');this.ctx.storage.sql.exec('DELETE FROM hand_receipts');this.ctx.storage.sql.exec('DELETE FROM receipts');}
         else if(input.action==='open'||input.action==='close'){state.open=input.action==='open';state.revision++;}
         else throw new WorldError('invalid_control',400);
       }else if(op==='insert'){

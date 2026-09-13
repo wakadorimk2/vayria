@@ -52,7 +52,7 @@ async function codeHash(code: string) {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
   return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
 }
-export async function handle(request: Request, env: Env, ctx?: ExecutionContext, sharedContext?:string): Promise<Response> {
+export async function handle(request: Request, env: Env, ctx?: ExecutionContext, sharedContext?:string, trustedWorldExecution=false): Promise<Response> {
   const url = new URL(request.url);
   const base = env.PUBLIC_BASE_PATH ?? '';
   if (base !== '' && base !== '/staging') return json({ code: 'configuration_unavailable' }, 503);
@@ -140,6 +140,7 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
   }
   if(roomMember?.role==='guest'&&!(env.SHARED_CONVERSATION_ENABLED==='true'&&url.pathname==='/api/session'))throw new LimitError('world_guest_read_only',0,403);
   if(roomMember&&env.SHARED_CONVERSATION_ENABLED==='true'&&['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname))throw new LimitError('use_room_conversation',0,403);
+  if(env.PUBLIC_WORLD_ROOM&&!trustedWorldExecution&&['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname))throw new LimitError('room_execution_required',0,403);
   const worldGuard=roomMember?.role==='host' && ['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname)?await guardWorldRequest(request,env):null;
   const known = ['/api/session', '/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts', '/api/exhibition/enroll', '/api/exhibition/next'];
   if (!known.includes(url.pathname) && !url.pathname.startsWith('/api/manifestation/') && !url.pathname.startsWith('/api/visual/')) return json({ code: 'not_found' }, 404);
