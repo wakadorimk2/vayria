@@ -1,4 +1,6 @@
 import { SharedConversation } from './sharedWorld/SharedConversation';
+import { sharedConversationActive } from './sharedWorld/voice';
+import { sharedReplyPlayback } from './sharedWorld/replyPlayback';
 import { useVisualGeneration } from './visual/useVisualGeneration';
 import { useSharedWorld } from './sharedWorld/useSharedWorld';
 import { SharedWorldStage } from './sharedWorld/SharedWorldStage';
@@ -706,8 +708,8 @@ export default function App() {
     () =>
       new PerformancePlaybackCoordinator({
         getMotionPort: () => stageMotionPort,
-        playAudio: play,
-        stopAudio: stop,
+        playAudio: async (...args) => { if (!sharedConversationActive()) await play(...args); },
+        stopAudio: () => { if (!sharedConversationActive()) stop(); },
         holdAudioCapture: iosAudioSession ? () => iosAudioSession.holdPlayback().release : undefined,
       }),
     [play, stageMotionPort, stop, iosAudioSession],
@@ -804,6 +806,7 @@ export default function App() {
       // nod for the same short acknowledgement.
       const cue = decision.backchannelCue === 'uun' ? 'uun' : 'un';
       const playCue = () => {
+        if (sharedConversationActive()) return;
         if (voiceReactionIdRef.current !== reactionId) return;
         const candidates = backchannelAudioRef.current.filter(
           (audio) => audio.cue === cue,
@@ -930,7 +933,7 @@ export default function App() {
   }, [status, worldRuntime]);
   useEffect(() => {
     if (runtimeConfig.mode !== 'public') return;
-    const stop = () => { void stopVoiceInput(); interruptCurrentTurn('router_control'); stopReaction(); playbackCoordinator.stop(); };
+    const stop = () => { sharedReplyPlayback.stop(); void stopVoiceInput(); interruptCurrentTurn('router_control'); stopReaction(); playbackCoordinator.stop(); };
     const unlock = () => { void prepare(); };
     const start = () => { void prepare(); };
     window.addEventListener('vayria-public-stop', stop);
@@ -1768,6 +1771,7 @@ export default function App() {
           }
           if (!isMuted) void prepare();
           handleConversationInputReceived(event.segmentId, Date.now());
+          if (sharedConversationActive()) return;
           void sendVoice(
             message,
             voiceCardContext,
@@ -2831,7 +2835,7 @@ export default function App() {
       {runtimeConfig.mode === 'public' && (
         <PublicControls
           sharedWorld={sharedWorld.enabled}
-          queueStatus={sharedWorld.snapshot?.sharedConversation ? (sharedWorld.error || (sharedWorld.snapshot.conversationView?.slot ? `待機 ${sharedWorld.snapshot.conversationView.slot.position} 人・${sharedWorld.snapshot.conversationView.slot.status==='running'?'返答を準備中':'受付済み'}` : '会話できます')) : undefined}
+          queueStatus={sharedWorld.snapshot?.sharedConversation ? (sharedWorld.error || (sharedWorld.snapshot.conversationView?.slot ? (sharedWorld.snapshot.conversationView.slot.status==='running'?'返答を準備中…':`順番待ち ${sharedWorld.snapshot.conversationView.slot.position}`) : '')) : undefined}
           visualObjectPresent={runtimeConfig.manifestationEnabled && [...visual.snapshot.objects,...(visual.snapshot.ready??[])].some(o=>o.id!=='background')}
           generation={runtimeConfig.manifestationEnabled ? { enabled: visual.snapshot.enabled, busy: visual.busy, message: visual.message, toggle: visual.toggle } : undefined}
           settingsLayout={publicSettingsLayout}

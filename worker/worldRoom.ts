@@ -112,7 +112,7 @@ export class WorldRoom extends DurableObject<RoomEnv> {
         const target=latest.elements.find(e=>e.id===element.id);if(!target||target.status!=='preparing')continue;
         const currentBackground=cardVisualActions(latest).find(a=>a.type==='background');
         if(kind==='background'&&(latest.desiredBackgroundId&&latest.desiredBackgroundId!==target.id||latest.generation?.dirty&&(!currentBackground||visualKey(kind,currentBackground.concept)!==visualKey(kind,target.concept)))){target.status='failed';target.error='superseded';}
-        else if('assetUrl' in result&&result.assetUrl){target.assetUrl=result.assetUrl;target.assetSource=result.assetSource;target.status='ready';if(kind==='prop')for(const e of latest.elements)if(e.simplified&&e.sourceCardIds[0]===target.sourceCardIds[0])e.assetUrl=result.assetUrl;}
+        else if('assetUrl' in result&&result.assetUrl){target.assetUrl=result.assetUrl;target.assetSource=result.assetSource;target.status='ready';if(kind==='prop')for(const e of latest.elements)if(e.simplified&&e.sourceCardIds[0]===target.sourceCardIds[0]){e.assetUrl=result.assetUrl;target.materialOnly=true;}}
         else{target.status='failed';target.error=result.error??'generation_failed';latest.outcomes=[...latest.outcomes,`${target.concept}: 未表示 (${target.error})`].slice(-12);}
         latest.revision++;this.save(latest);this.broadcast(latest);
       }

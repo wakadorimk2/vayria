@@ -10,9 +10,10 @@ import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicExhibition, publicSessionId, registerPublicSessionRequest, subscribePublic, updatePublicStatus, type PublicStatus } from './session';
 import ExhibitionControls from './ExhibitionControls';
+import { dismissTutorial, tutorialDismissed } from './tutorial';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ sharedWorld = false, queueStatus, visualObjectPresent = false, generation, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+export default function PublicControls({ sharedWorld = false, queueStatus, generation, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
   sharedWorld?: boolean;
   queueStatus?: string;
   visualObjectPresent?: boolean;
@@ -46,6 +47,14 @@ export default function PublicControls({ sharedWorld = false, queueStatus, visua
   const [token, setToken] = useState(''); const [pending, setPending] = useState(false);
   const [requested, setRequested] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(() => !tutorialDismissed());
+  const [helpOpen, setHelpOpen] = useState(false);
+  useEffect(() => {
+    const close = () => { setGuideOpen(false); setHelpOpen(false); };
+    window.addEventListener('vayria-tutorial-dismiss', close);
+    return () => window.removeEventListener('vayria-tutorial-dismiss', close);
+  }, []);
+  useEffect(() => { if (greetingComplete) dismissTutorial(); }, [greetingComplete]);
   const microphoneLabel = microphoneStateLabels[microphoneState];
   const microphoneAction = microphoneOn ? 'マイクを止める' : 'マイクで話す';
   const microphonePending = microphoneState === 'starting' || microphoneState === 'stopping';
@@ -165,12 +174,11 @@ export default function PublicControls({ sharedWorld = false, queueStatus, visua
       <button onClick={() => { cancelRequest(); window.dispatchEvent(new Event('vayria-exhibition-next')); }}>体験を終える</button>
       {(!exhibition.available || status?.stopped || status?.enabled === false) && <span className="public-exhibition-paused" role="status">展示を休止しています。設定を確認してください。</span>}
     </div>}
-    {!noticeOpen && !cardsOpen && !textOpen && !expanded && (!greetingComplete || !visualObjectPresent) && <div className="public-entry" aria-label="Vayriaとの会話を始める">
-      {!greetingComplete ? <>
+    {!noticeOpen && !cardsOpen && !textOpen && !expanded && guideOpen && <div className="public-entry" aria-label="Vayriaとの会話を始める">
+      <button className="public-entry__close" aria-label="案内を閉じる" onClick={() => { dismissTutorial(); document.querySelector<HTMLElement>('.public-controls__disclosure')?.focus(); }}>×</button>
         <p className="public-entry__title">Vayriaに、ひとこと。</p>
         <button className="public-entry__greeting" disabled={greetingBusy} onClick={onGreeting}>{greetingBusy ? '返答を待っています…' : '挨拶してみる'}</button>
-        <p>{isMuted ? '字幕で返事します' : '声と字幕で返事します'}</p>
-      </> : !visualObjectPresent && <p className="public-entry__continue">文字・マイク・カードから続けられます</p>}
+        {helpOpen && <p>マイクで話すか、吹き出しから文字を送れます。カードは手札から枠へドラッグ、または手札と枠を順にタップします。</p>}
     </div>}
     {noticeOpen && <section className="public-entry public-entry--notice" aria-label="会話の接続と案内">
       <p role="status">{message}</p>
@@ -203,6 +211,7 @@ export default function PublicControls({ sharedWorld = false, queueStatus, visua
       </button>
     </div>
     <PublicSettingsPanel layout={settingsLayout} open={expanded} onClose={closeSettings}>
+    <button onClick={() => { closeSettings(); setGuideOpen(true); setHelpOpen(true); }}>使い方</button>
     {sharedWorld&&<button onClick={()=>{cancelRequest();window.dispatchEvent(new Event('vayria-exhibition-next'));closeSettings();}}>次の参加者</button>}
     <fieldset className="public-theme" data-resolved-theme={resolvedTheme}><legend>テーマ</legend>
       {(['auto', 'light', 'dark'] as const).map((value, index) => <label key={value} title={['自動（端末の設定に合わせる）', 'ライト', 'ダーク'][index]}>

@@ -346,3 +346,4 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-handoff h1 { font-size: clamp(20px, 3vw, 28px); }
 .public-handoff button { min-height: 48px; padding: 12px 24px; font: inherit; }
 .public-exhibition-welcome { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 90vw; padding: 8px 16px; border-radius: 20px; background: var(--public-surface); color: var(--public-ink); pointer-events: none; }
+.public-entry__close{position:absolute;right:.4rem;top:.3rem;width:2.75rem;height:2.75rem;padding:0;font-size:1.4rem}

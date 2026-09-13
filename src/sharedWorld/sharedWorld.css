@@ -34,3 +34,7 @@
 .shared-card-feedback{position:absolute;right:7%;top:40%;display:grid;place-items:center;width:5rem;height:5rem;border-radius:50%;font-size:2rem;background:radial-gradient(circle,hsl(var(--reaction-hue) 70% 60% / .3),transparent 70%);animation:shared-card-feedback 1.5s ease-out both;animation-delay:var(--reaction-elapsed);pointer-events:none}
 @keyframes shared-card-feedback{0%{opacity:0;scale:.75}20%{opacity:1;scale:1}100%{opacity:0;scale:1.2}}
 @media(prefers-reduced-motion:reduce){.shared-card-feedback{animation:none;opacity:.6}}
+.shared-world-sprite[data-physics-id]>div{width:100%;height:100%}
+.shared-world-sprite[data-physics-id]{container-type:size}
+.shared-world-sprite[data-physics-id] span{font-size:80cqmin;line-height:1}
+.shared-world-sprite[data-physics-id] .world-effect{width:100%;height:100%;display:grid;place-items:center}

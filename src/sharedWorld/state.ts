@@ -10,7 +10,7 @@ export const WORLD_DEFAULTS = { halfLife:180000, foregroundMs:180000, background
 export type WorldIntent = { actions: { type:'prop'|'background'|'effect'|'duplicate'|'physics'; targetId:string; concept:string;
   sourceCardIds:string[]; effects:WorldEffect[]; count:number }[] };
 export interface WorldElement { id:string; concept:string; sourceCardIds:string[]; effects:WorldEffect[]; count:number;
-  kind:'prop'|'background'; reinforcedAt:number; status:'preparing'|'ready'|'displayed'|'failed'; requestedAt?:number; assetUrl?:string; assetSource?:'cache'|'generated'|'reused'|'stock'|'unknown'; error?:string; simplified?:boolean }
+  kind:'prop'|'background'; reinforcedAt:number; status:'preparing'|'ready'|'displayed'|'failed'; requestedAt?:number; assetUrl?:string; assetSource?:'cache'|'generated'|'reused'|'stock'|'unknown'; error?:string; simplified?:boolean; materialOnly?:boolean }
 export interface WorldInput { eventId:string; participant:string; name:string; cardId:string; at:number; sequence:number }
 export interface SharedWorldState {
   generation?:WorldGeneration;
@@ -37,7 +37,7 @@ export function elementStage(element:WorldElement,now:number){const age=Math.max
 export function traceWeight(element:WorldElement,now:number){return 2**(-Math.max(0,now-element.reinforcedAt-WORLD_DEFAULTS.backgroundMs)/WORLD_DEFAULTS.traceHalfLife);}
 export function worldSpriteGroups(elements:WorldElement[],now:number,chaos:boolean){
   let foreground=0,backgrounds=0;const limit=chaos?WORLD_DEFAULTS.chaosLimit:WORLD_DEFAULTS.foregroundLimit;
-  return elements.filter(e=>e.kind==='prop').flatMap(element=>{
+  return elements.filter(e=>e.kind==='prop'&&!e.materialOnly).flatMap(element=>{
     const natural=elementStage(element,now);const phase=natural==='foreground'&&foreground>=limit?'background':natural;
     if(phase!=='foreground'){if(backgrounds++>=WORLD_DEFAULTS.backgroundLimit)return [];return [{element,phase,copies:Math.min(3,element.count)}];}
     const copies=Math.min(element.count,limit-foreground);foreground+=copies;return [{element,phase,copies}];

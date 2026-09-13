@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { WorldPhysics, type SpriteBody } from './physics';
 import type { WorldEffect } from './cards';
 import type { WorldRect } from '../world/worldLayout';
+import { spriteSize, restingPosition, spawnPosition } from './spriteLayout';
 
 export function PhysicsLayer({root,epoch,mode,effects,protectedRects}:{root:React.RefObject<HTMLDivElement|null>;epoch:number;mode:'normal'|'water'|'zero';effects:WorldEffect[];protectedRects:WorldRect[]}){
   const config=useRef({mode,effects,protectedRects});
@@ -17,14 +18,21 @@ export function PhysicsLayer({root,epoch,mode,effects,protectedRects}:{root:Reac
       const bounds=element.getBoundingClientRect();engine.resize(bounds.width,bounds.height);
       engine.protect(config.current.protectedRects.map(r=>({x:r.x*bounds.width,y:r.y*bounds.height,width:r.width*bounds.width,height:r.height*bounds.height})));
       if(time-scanAt>200){scanAt=time;nodes=[...element.querySelectorAll<HTMLElement>('[data-physics-id]')];
-        const specs:SpriteBody[]=nodes.map(node=>({id:node.dataset.physicsId!,x:Number(node.dataset.x)*bounds.width,y:Number(node.dataset.y)*bounds.height,size:Number(node.dataset.size)*Math.min(bounds.width,bounds.height),effects:JSON.parse(node.dataset.effects??'[]')}));engine.sync(specs);}
+        const specs:SpriteBody[]=nodes.map(node=>{const size=spriteSize(bounds.width,bounds.height,Number(node.dataset.size));return {id:node.dataset.physicsId!,...spawnPosition(Number(node.dataset.x)*bounds.width,Number(node.dataset.y)*bounds.height,size,bounds.width,bounds.height,config.current.protectedRects),size,effects:JSON.parse(node.dataset.effects??'[]')};});engine.sync(specs);}
       if(!reduced.matches&&!document.hidden){engine.step(last?time-last:0,config.current.mode,config.current.effects);
         for(const node of nodes){const entry=engine.bodies.get(node.dataset.physicsId!);if(!entry)continue;const {body,spec}=entry;
           node.style.left='0';node.style.top='0';node.style.width=`${spec.size}px`;node.style.height=`${spec.size}px`;
           node.style.transform=`translate(${body.position.x-spec.size/2}px,${body.position.y-spec.size/2}px) rotate(${body.angle}rad)`;
           node.style.opacity=pointer.until>time&&Math.hypot(body.position.x+bounds.x-pointer.x,body.position.y+bounds.y-pointer.y)<150?'.08':'1';
         }
-      }else{for(const node of nodes){node.style.transform='';node.style.left=`${Number(node.dataset.x)*100}%`;node.style.top=`${Number(node.dataset.y)*100}%`;}}
+      }else if(reduced.matches){
+        const cellSize=Math.max(1,...nodes.map(node=>engine.bodies.get(node.dataset.physicsId!)?.spec.size??1));let cell=0;
+        for(const node of nodes){const entry=engine.bodies.get(node.dataset.physicsId!);if(!entry)continue;const size=entry.spec.size;
+          let position=restingPosition(cell++,bounds.width,bounds.height,cellSize);
+          while(position.y>cellSize&&config.current.protectedRects.some(r=>Math.abs(position.x-(r.x+r.width/2)*bounds.width)<(r.width*bounds.width+size)/2&&Math.abs(position.y-(r.y+r.height/2)*bounds.height)<(r.height*bounds.height+size)/2))position=restingPosition(cell++,bounds.width,bounds.height,cellSize);
+          node.style.left='0';node.style.top='0';node.style.width=`${size}px`;node.style.height=`${size}px`;node.style.transform=`translate(${position.x-size/2}px,${position.y-size/2}px)`;
+        }
+      }
       last=time;frame=requestAnimationFrame(tick);
     };frame=requestAnimationFrame(tick);
     return()=>{cancelAnimationFrame(frame);engine.dispose();document.removeEventListener('pointermove',point);document.removeEventListener('pointerdown',point);document.removeEventListener('focusin',focus);};

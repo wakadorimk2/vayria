@@ -61,7 +61,7 @@ export function SharedHandCards({world}:{world:SharedWorldClient}){
       </BrainCardFrame>;})}</div>
     </section>
     <section className="card-zone card-zone--hand" aria-label="あなたの手札5枚"><div className="card-zone__cards">{hand.map((item,index)=>{const card=cardPool.find(c=>c.id===item.cardId)!;return <CardSurface key={item.id} instanceId={item.id} zone="hand" index={index} card={card} pendingLabel="、受付中" interactionDisabled={blocked} state={selectedId===item.id?'selected':'normal'} motion={pending===item.id?'pending-insertion':ghost?.id===item.id?'dragging':'none'} onPointerDown={event=>pointerDown(item.id,event)} onSelect={()=>{if(!suppressClick.current)setSelected(selectedId===item.id?null:item.id);}}/>;})}</div>
-    <div className="card-zone__action" role="status">{pending?'カードを差し込んでいます…':selectedId?'差し込む枠を選んでください':'手札をドラッグ、または手札と枠を順にタップ'}</div></section>
+    <div className="card-zone__action" role="status">{pending?'受付中…':''}</div></section>
     {ghost&&ghostCard&&<div className="shared-hand-ghost" style={{left:ghost.x,top:ghost.y,width:ghost.width,height:ghost.height}} aria-hidden><WildcardCard card={ghostCard}/></div>}
   </div>;
 }

@@ -72,7 +72,7 @@ export function immediateCardReaction(state:SharedWorldState,cardId:string,now:n
   if(worldCardMeaning(card).category!=='モノ')return;
   const material=state.elements.find(e=>e.kind==='prop'&&!e.simplified&&e.assetUrl&&['ready','displayed'].includes(e.status)&&e.sourceCardIds.includes(cardId));
   const id=`immediate-${cardId}`;let element=state.elements.find(e=>e.id===id);
-  if(!element){element={id,kind:'prop',concept:worldCardMeaning(card).subject,sourceCardIds:[cardId],effects:[],count:1,reinforcedAt:now,status:'ready',simplified:true};state.elements.push(element);}
-  else{element.count=Math.min(24,element.count+1);element.reinforcedAt=now;element.status='ready';}
+    if(!element){element={id,kind:'prop',concept:worldCardMeaning(card).subject,sourceCardIds:[cardId],effects:[],count:3,reinforcedAt:now,status:'ready',simplified:true};state.elements.push(element);}
+    else{element.count=Math.min(24,element.count+3);element.reinforcedAt=now;element.status='ready';}
   if(material)element.assetUrl=material.assetUrl;
 }

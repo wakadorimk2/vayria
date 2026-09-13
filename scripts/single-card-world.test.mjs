@@ -79,6 +79,17 @@ test('room: one card, no immediate provider; duplicate/rejected events preserve 
     await f.tick();assert.equal(f.calls.length,1);
   }finally{await f.close();}
 });
+test('room: three bodies per accepted object card survive replay and material completion',async()=>{
+  const f=await fixture();try{const input=await f.insert('chicken');
+    const current=async()=>(await f.call({op:'state'})).value;
+    assert.equal((await current()).elements.find(e=>e.simplified).count,3);
+    await f.call(input);assert.equal((await current()).elements.find(e=>e.simplified).count,3);
+    await f.tick();await until(async()=>(await current()).elements.some(e=>e.materialOnly));
+    const s=await current();assert.equal(s.elements.find(e=>e.simplified).count,3);
+    assert.equal(w.worldSpriteGroups(s.elements,Date.now(),false).reduce((n,g)=>n+g.copies,0),3);
+    assert.equal(f.calls.length,1);
+  }finally{await f.close();}
+});
 test('room: background delay does not block props; running changes coalesce and old background cannot win',async()=>{
   const f=await fixture();try{f.hold();await f.insert('underwater');await f.insert('chicken',1);await f.tick();await until(()=>f.calls.length===2);
     await f.insert('space');await f.insert('gigantic',2);await f.tick();assert.equal(f.calls.length,2);

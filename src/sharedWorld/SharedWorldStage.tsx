@@ -49,6 +49,7 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
   const visible=source.filter(e=>e.status==='ready'||e.status==='displayed').sort((a,b)=>b.reinforcedAt-a.reinforcedAt);
   if(match&&matchCard&&presentation?.flock){const existing=visible.find(e=>e.kind==='prop'&&e.sourceCardIds.includes(match.cardId)&&e.assetUrl);visible.unshift({id:`match-${match.id}`,concept:worldCardMeaning(matchCard).subject,kind:'prop',status:'displayed',sourceCardIds:[match.cardId],count:32,effects:[],reinforcedAt:match.at,...(existing?.assetUrl?{assetUrl:existing.assetUrl}:{})});}
   const displayed=(e:WorldElement)=>{
+    if(!e.materialOnly){const material=visible.find(t=>t.materialOnly&&t.assetUrl===e.assetUrl&&t.status==='ready');if(material)displayed(material);}
     const key=`${state.epoch}:${e.id}`;
     if(resetting||e.status!=='ready'||(acknowledgements.current.get(key)??0)>localNow)return;
     acknowledgements.current.set(key,Infinity);
@@ -62,14 +63,14 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
     {match&&presentation&&<div className="shared-match-decoration" style={{'--match-hue':presentation.hue,'--match-elapsed':`${-(now-match.at)/1000}s`} as CSSProperties} aria-hidden>{Array.from({length:12},(_,i)=><span key={i} style={{left:`${(i*29+match.seed)%94}%`,top:`${(i*17+match.seed)%90}%`}}>{presentation.icon==='🃏'?presentation.label:presentation.icon}</span>)}</div>}
     <div ref={root} className={`shared-world-layer ${chaos?'chaos':''} ${resetting?'sweeping':''}`} aria-label="共有世界の小物">
       {!resetting&&reaction&&worldCardMeaning(reaction).category!=='モノ'&&<div key={state.cardReaction!.id} className="shared-card-feedback" style={{'--reaction-hue':worldMatchPresentation(reaction).hue,'--reaction-elapsed':`${-(now-state.cardReaction!.at)/1000}s`} as CSSProperties} aria-hidden>{worldCardMeaning(reaction).icon}</div>}
-      {physics&&!resetting&&<PhysicsLayer protectedRects={chaos?[]:[...protectedRects,layout.body,layout.face]} root={root} epoch={state.epoch} mode={activePhysics.mode} effects={[...activePhysics.effects,...(presentation?.effects??[])]}/>}
+      {physics&&!resetting&&<PhysicsLayer protectedRects={chaos?[]:[layout.face]} root={root} epoch={state.epoch} mode={activePhysics.mode} effects={[...activePhysics.effects,...(presentation?.effects??[])]}/>}
       {worldSpriteGroups(visible,now,chaos).flatMap(({element,phase,copies},group)=>{
         const background=phase!=='foreground';
         return Array.from({length:Math.max(0,copies)},(_,i)=>{
           let rect:WorldRect|null;
           if(background)rect={x:((group*.17+i*.23)% .88),y:.72+(group%3)*.07,width:.06,height:.07};
           else if(chaos)rect={x:((i*37+group*13)%90)/100,y:((i*23+group*7)%78)/100,width:.09,height:.12};
-          else if(physics)rect={x:((i*37+group*13)%80)/100+.05,y:((i*23+group*7)%55)/100,width:.08,height:.1};
+          else if(physics)rect={x:((i*37+group*13)%70)/100+.15,y:.06+((i*13+group*7)%12)/100,width:.18,height:.18};
           else rect=placeVisualProp(layout,false,.35,1,occupied);
           if(!rect||(!physics||background)&&protectedRects.some(r=>overlaps(r,rect!)))return null;if(!chaos&&!background)occupied.push(rect);
           const x=(bounds?.x??0)+(rect.x+rect.width/2)*(bounds?.width??1);const y=(bounds?.y??0)+(rect.y+rect.height/2)*(bounds?.height??1);
@@ -81,7 +82,7 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
           const intrinsic=element.effects.filter(e=>!sizeOverride||e!=='grow'&&e!=='shrink');
           const effects=[...new Set([...intrinsic,...activePhysics.effects,...(presentation?.effects??[])])];
           const animated=effects.filter(effect=>!physics||background||!['fall','dance','float','rotate','bounce','sway','slide','grow','shrink'].includes(effect)).reduce<ReactNode>((child,e)=><div className={`world-effect world-${e}`}>{child}</div>,sprite);
-          return <div data-physics-id={physics&&!background&&!resetting?`${element.id}:${i}`:undefined} data-x={rect.x} data-y={rect.y} data-size={effects.includes('grow')?.14:effects.includes('shrink')?.05:.09} data-effects={JSON.stringify(element.effects)} className={`shared-world-sprite ${background?'distant':''}`} key={`${element.id}:${i}`} style={style}><div>{animated}</div></div>;
+          return <div data-physics-id={physics&&!background&&!resetting?`${element.id}:${i}`:undefined} data-x={rect.x} data-y={rect.y} data-size={effects.includes('grow')?1.5:effects.includes('shrink')?.65:1} data-effects={JSON.stringify(intrinsic)} className={`shared-world-sprite ${background?'distant':''}`} key={`${element.id}:${i}`} style={style}><div>{animated}</div></div>;
         });
       })}
       {chaos&&<p className="shared-world-chaos">{match?`${presentation?.label}、5枚揃い！`: `${cardPool.find(c=>c.id===state.chaos?.cardId)?.label}群予告`}</p>}

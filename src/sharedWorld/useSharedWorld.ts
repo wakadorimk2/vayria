@@ -5,6 +5,7 @@ import { addWorldHeaders, setWorldAccess, worldAccess, worldFetch, sharedWorldRo
 import type { SharedWorldState, WorldElement } from './state';
 import type { VisualAsset } from '../visual/types';
 import { cardPool } from '../cards/cardPool';
+import { dismissTutorial } from '../public/tutorial';
 import type { conversationView } from './conversation';
 import type { HandCard, WorldCardSlot } from './hand';
 export type WorldSnapshot=Omit<SharedWorldState,'host'>&{hand?:HandCard[];host:{clientId:string;until:number}|null;serverNow:number;receivedAt?:number;sharedConversation?:boolean;conversationView?:ReturnType<typeof conversationView>};
@@ -14,6 +15,7 @@ export function useSharedWorld(guestRoom?:string){
   const roomId=guestRoom??sharedWorldRoomId();const enabled=!!roomId;
   const [snapshot,setSnapshot]=useState<WorldSnapshot|null>(null);const [error,setError]=useState('');const [receipt,setReceipt]=useState('');
   const [connected,setConnected]=useState(false);const [role,setRole]=useState<'guest'|'host'>('guest');
+  useEffect(()=>{if(!receipt)return;const timer=setTimeout(()=>setReceipt(''),2200);return()=>clearTimeout(timer);},[receipt,snapshot?.sequence]);
   const [sweepElements,setSweepElements]=useState<WorldElement[]>([]);
   // A duplicated tab must not inherit the exhibition lease of its opener.
   const [clientId]=useState(()=>crypto.randomUUID());
@@ -57,13 +59,13 @@ export function useSharedWorld(guestRoom?:string){
   useEffect(()=>{const failed=(event:Event)=>setError(worldMessage((event as CustomEvent<string>).detail));window.addEventListener('vayria-world-input-error',failed);return()=>window.removeEventListener('vayria-world-input-error',failed);},[]);
   const insert=useCallback(async(cardId:string)=>{
     if(!roomId||!current.current)return;const eventId=crypto.randomUUID();
-    try{await worldFetch(roomId,'card',{eventId,cardId,epoch:current.current.epoch});setReceipt(`${cardPool.find(c=>c.id===cardId)?.label??cardId} を受け付けました`);setError('');}catch(e){setError(worldMessage(e instanceof Error?e.message:'world_unavailable'));}
+    try{await worldFetch(roomId,'card',{eventId,cardId,epoch:current.current.epoch});dismissTutorial();setReceipt(`${cardPool.find(c=>c.id===cardId)?.label??cardId} を受け付けました`);setError('');}catch(e){setError(worldMessage(e instanceof Error?e.message:'world_unavailable'));}
   },[roomId]);
   const insertHand=useCallback(async(handCardId:string,slot:WorldCardSlot,eventId:string)=>{
     if(!roomId||!current.current)return false;
     try{const next=await worldFetch(roomId,'insert',{eventId,handCardId,slotId:slot.id,slotVersion:slot.version,epoch:current.current.epoch});receive(next);
       if(next.accepted===false){setError('その枠は先に変更されました。差し込み先を選び直してください。');return false;}
-      setReceipt('カードを受け付けました');setError('');return true;
+      dismissTutorial();setReceipt('受け付けました');setError('');return true;
     }catch(e){setError(worldMessage(e instanceof Error?e.message:'world_unavailable'));return false;}
   },[roomId,receive]);
   const nextParticipant=useCallback(async()=>{if(!roomId||!current.current?.cardSlots)return;try{receive(await worldFetch(roomId,'hand-reset',{epoch:current.current.epoch,eventId:crypto.randomUUID()}));setReceipt('次の方の手札を引きました');}catch{setError('手札を更新できませんでした。接続を確認してください。');}},[roomId,receive]);

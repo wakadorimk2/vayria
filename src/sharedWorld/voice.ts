@@ -2,6 +2,7 @@ import { publicSessionId } from '../public/session';
 import { publicUrl } from '../public/paths';
 import { sharedWorldRoomId, worldFetch } from './client';
 import type { WorldSnapshot } from './useSharedWorld';
+import { dismissTutorial } from '../public/tutorial';
 
 let state:WorldSnapshot|null=null;
 if(typeof window!=='undefined')window.addEventListener('vayria-world-state',event=>{state=(event as CustomEvent<WorldSnapshot>).detail;});
@@ -27,7 +28,7 @@ export function reserveSharedVoice(){
       next=await worldFetch(roomId,'state',undefined,signal);
     }
     const response=await fetch(publicUrl(`/api/world-room/${roomId}/voice`),{method:'POST',headers:{'Content-Type':'audio/wav','X-Vayria-Session':publicSessionId(),'X-World-Slot':id,'X-World-Epoch':String(epoch)},body:audio,signal});
-    submitted=response.ok;return response;
+    submitted=response.ok;if(submitted)dismissTutorial();return response;
   }finally{if(!submitted)cancel();}
   };
   return {send,cancel};
