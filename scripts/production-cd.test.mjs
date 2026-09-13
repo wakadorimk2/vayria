@@ -125,3 +125,10 @@ test('storage validation refuses cross-environment execution bindings',async()=>
  const config=JSON.parse(await readFile('wrangler.world-production.jsonc','utf8'));validateWorldStorage(config,'production');assert.throws(()=>validateWorldStorage(config,'staging'));
  assert.throws(()=>validateWorldStorage({...config,services:[{binding:'WORLD_EXECUTOR',service:'vayria-public-staging',entrypoint:'WorldExecution'}]},'production'));
 });
+
+test('manual workflow input permits only one dispatch on main after successful staging',async()=>{
+ const workflow=load(await readFile('.github/workflows/ci.yml','utf8'));const condition=workflow.jobs['deploy-production'].if;
+ for(const event of ['push','pull_request','workflow_dispatch'])for(const ref of ['refs/heads/main','refs/heads/topic']){
+ const actual=runInNewContext(condition,{inputs:{publish_production:true},vars:{PRODUCTION_DEPLOY_ENABLED:'false'},needs:{'deploy-staging':{result:'success'}},github:{event_name:event,ref}});
+ assert.equal(actual,event==='workflow_dispatch'&&ref==='refs/heads/main');}
+});

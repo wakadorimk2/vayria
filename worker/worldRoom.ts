@@ -113,8 +113,9 @@ export class WorldRoom extends DurableObject<RoomEnv> {
         const pending=state.elements.find(e=>e.id===element.id);if(!pending||pending.status!=='preparing')continue;
         if(result.error==='cache_miss'&&!('cacheOnly' in result&&result.cacheOnly)){
           if(!this.participants().some(p=>p.actor===slot.actor))return;
-          if(!await this.env.WORLD_EXECUTOR.visualPermission(slot).catch(()=>false)){state.generation.blockedUntil=Date.now()+10000;this.save(state);return;}
+          if(!await this.env.WORLD_EXECUTOR.visualPermission(slot).catch(()=>false)){const latest=this.read();if(latest?.epoch===epoch&&latest.generation?.running?.id===slot.id){latest.generation.blockedUntil=Date.now()+10000;this.save(latest);}return;}
           state=this.read();if(!state||state.epoch!==epoch||state.generation?.running?.id!==slot.id||state.generation.dirty&&state.sequence>state.generation.running.sequence)return;
+          if(!this.participants().some(p=>p.actor===slot.actor))return;
           const target=state.elements.find(e=>e.id===element.id);if(!target||target.status!=='preparing')return;
           if(!consumeImageToken(state.generation,Date.now(),kind)){
             state.generation.blockedUntil=state.generation.budget!.updatedAt+IMAGE_GENERATION_INTERVAL;this.save(state);break;
