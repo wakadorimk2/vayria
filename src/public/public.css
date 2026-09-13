@@ -128,7 +128,6 @@
   .public-layout .app-shell .card-zone--brain .wildcard-card__label { font-size: .65rem; }
   .public-layout .app-shell .conversation { position: absolute; z-index: 3; bottom: var(--exhibition-hand-reserved-height); left: 0; right: 0; background: transparent; pointer-events: none; }
   .public-layout .app-shell .conversation-copy { max-width: 92vw; }
-  .public-layout .playback-permission { pointer-events: auto; }
 }
 @media (min-width: 600px) and (max-height: 500px) {
   .public-layout .app-shell { --exhibition-hand-card-width: clamp(48px, 14dvh, 64px); }
@@ -347,3 +346,5 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-handoff button { min-height: 48px; padding: 12px 24px; font: inherit; }
 .public-exhibition-welcome { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 90vw; padding: 8px 16px; border-radius: 20px; background: var(--public-surface); color: var(--public-ink); pointer-events: none; }
 .public-entry__close{position:absolute;right:.4rem;top:.3rem;width:2.75rem;height:2.75rem;padding:0;font-size:1.4rem}
+/* Recovery must remain touchable above cards at every viewport width. */
+.public-layout .app-shell .conversation:has(.playback-permission){z-index:60}
