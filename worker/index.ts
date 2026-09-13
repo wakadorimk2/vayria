@@ -16,7 +16,7 @@ import { readChatRequest, readCardPreviewRequest } from '../server/chatValidatio
 import { normalizeEmotion, VOICE_STYLE_BY_EMOTION } from '../src/character/emotion';
 export { PublicUsage };
 
-interface Env extends VisualEnv, WorldEnv {
+export interface Env extends VisualEnv, WorldEnv {
   FAL_KEY?: string; MANIFESTATION_ENABLED?: string;
   ASSETS: Fetcher; USAGE: DurableObjectNamespace;
   COOKIE_SECRET: string; IP_SECRET: string; ADMIN_SECRET: string;
@@ -36,7 +36,7 @@ const previewRedirect = (base: string, ticket?: string) => new Response(`<!docty
   headers: { Location: `${base}/`, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
     ...(ticket ? { 'Set-Cookie': `${base ? '__Host-vayria-staging-preview' : '__Host-vayria-preview'}=${ticket}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400` } : {}) },
 });
-async function ledger<T>(env: Env, op: string, args: object = {}): Promise<T> {
+export async function ledger<T>(env: Env, op: string, args: object = {}): Promise<T> {
   const response = await env.USAGE.get(env.USAGE.idFromName('public-ledger-v1')).fetch('https://ledger/', {
     method: 'POST', body: JSON.stringify({ op, ...args }),
   });
@@ -52,7 +52,7 @@ async function codeHash(code: string) {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
   return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
 }
-async function handle(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
+export async function handle(request: Request, env: Env, ctx?: ExecutionContext, sharedContext?:string): Promise<Response> {
   const url = new URL(request.url);
   const base = env.PUBLIC_BASE_PATH ?? '';
   if (base !== '' && base !== '/staging') return json({ code: 'configuration_unavailable' }, 503);
@@ -73,7 +73,7 @@ async function handle(request: Request, env: Env, ctx?: ExecutionContext): Promi
   const roomMember = env.SHARED_WORLD_ENABLED === 'true' ? await worldMember(request,env) : null;
   const roomPage=env.SHARED_WORLD_ENABLED==='true' && (/^\/world\/[\w-]+\/?$/.test(url.pathname)||(url.pathname==='/'&&/^[\w-]{1,80}$/.test(url.searchParams.get('world')??'')));
   const roomEntry = roomPage || (env.SHARED_WORLD_ENABLED === 'true' && /^\/api\/world-room\/[\w-]+\/join$/.test(url.pathname));
-  const roomAsset = roomMember && (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/api/world-room/') || roomMember.role==='host');
+  const roomAsset = roomMember && (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/api/world-room/') || (env.SHARED_CONVERSATION_ENABLED==='true'&&(url.pathname==='/api/session'||!url.pathname.startsWith('/api/'))) || roomMember.role==='host');
   if(roomPage&&!roomMember){
     const roomId=url.searchParams.get('world')??url.pathname.split('/')[2];
     return new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VAYRIAの部屋</title><body style="background:#171925;color:#f1ede8;font:18px system-ui;padding:24px"><p id="status">部屋につないでいます…</p><script>const grant=new URLSearchParams(location.hash.slice(1));fetch(${JSON.stringify(base+'/api/world-room/'+roomId+'/join')},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant:grant.get('host')||grant.get('invite')||''})}).then(r=>{if(!r.ok)throw Error();location.reload()}).catch(()=>{document.getElementById('status').textContent='参加リンクを確認してください。'})</script></body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
@@ -138,7 +138,8 @@ async function handle(request: Request, env: Env, ctx?: ExecutionContext): Promi
     const currentVisitor=await verify<Visitor>(cookie(request,visitorCookie),env.COOKIE_SECRET);
     return worldRoute(request,env,(op,args)=>ledger(env,op,args),currentVisitor?.id??'',request.headers.get('X-Vayria-Session')??'');
   }
-  if(roomMember?.role==='guest')throw new LimitError('world_guest_read_only',0,403);
+  if(roomMember?.role==='guest'&&!(env.SHARED_CONVERSATION_ENABLED==='true'&&url.pathname==='/api/session'))throw new LimitError('world_guest_read_only',0,403);
+  if(roomMember&&env.SHARED_CONVERSATION_ENABLED==='true'&&['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname))throw new LimitError('use_room_conversation',0,403);
   const worldGuard=roomMember?.role==='host' && ['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname)?await guardWorldRequest(request,env):null;
   const known = ['/api/session', '/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts', '/api/exhibition/enroll', '/api/exhibition/next'];
   if (!known.includes(url.pathname) && !url.pathname.startsWith('/api/manifestation/') && !url.pathname.startsWith('/api/visual/')) return json({ code: 'not_found' }, 404);
@@ -194,6 +195,7 @@ async function handle(request: Request, env: Env, ctx?: ExecutionContext): Promi
   const visualEnabled = visualPermission.enabled && request.headers.get('X-Vayria-Visual-Generation') === String(visualPermission.generation);
   const audio = url.pathname === '/api/transcribe' ? await boundedBody(request, 640044) : null;
   const input = audio ? {} : await body(request);
+  if(sharedContext&&url.pathname==='/api/chat')input.programContext={...DEFAULT_PROGRAM_CONTEXT,worldContext:sharedContext};
   if(worldGuard&&url.pathname==='/api/chat'){
     const program=typeof input.programContext==='object'&&input.programContext!==null?input.programContext:{};
     input.programContext={...DEFAULT_PROGRAM_CONTEXT,...program,worldContext:worldGuard.context};
@@ -323,7 +325,7 @@ async function handle(request: Request, env: Env, ctx?: ExecutionContext): Promi
     }
     const generation = createGenerationMeasurements();
     let response: Awaited<ReturnType<typeof generate>>;
-    try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation, visualEnabled && !worldGuard, env.VISUAL_VIDEO_ENABLED === 'true', !!worldGuard)); await attachWorld(response); }
+    try { response = await llmExecutionScope.run(execution, () => generate(input, preview, env.OPENAI_API_KEY, signal, null, generation, visualEnabled && !worldGuard && !sharedContext, env.VISUAL_VIDEO_ENABLED === 'true' && !sharedContext, !!worldGuard || !!sharedContext)); await attachWorld(response); }
     finally { generation.finish(); Object.assign(measurements, generation.values); }
     const text = 'text' in response && typeof response.text === 'string' ? response.text : '';
     const ttsTickets = !preview && text ? await Promise.all(splitSpeechAtBoundaries(text).map(async unit => ({ text: unit, ttsTicket: await issue(unit, response.emotion) }))) : [];

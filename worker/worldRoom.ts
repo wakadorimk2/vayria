@@ -1,24 +1,89 @@
 import { DurableObject } from 'cloudflare:workers';
+import { advanceConversation, cancelConversation, conversationView, createRoomConversation, reserveConversation, type ConversationSlot } from '../src/sharedWorld/conversation';
+import { executionInput, type RoomEnv } from './worldExecution';
 import { applyWorldIntent, assertHost, createSharedWorld, insertWorldCard, readWorldIntent, sharedWorldContext, validId, WorldError, type SharedWorldState } from '../src/sharedWorld/state';
 
-export class WorldRoom extends DurableObject {
-  constructor(ctx:DurableObjectState,env:object){super(ctx,env);
+export class WorldRoom extends DurableObject<RoomEnv> {
+  constructor(ctx:DurableObjectState,env:RoomEnv){super(ctx,env);
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS world (id INTEGER PRIMARY KEY, state TEXT NOT NULL)');
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS receipts (participant TEXT, event TEXT, sequence INTEGER, PRIMARY KEY(participant,event))');
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS rates (participant TEXT PRIMARY KEY, tokens REAL, at REAL)');
+    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS presence (actor TEXT PRIMARY KEY, visitor TEXT, session TEXT, until REAL)');
   }
   private read(){const rows=this.ctx.storage.sql.exec<{state:string}>('SELECT state FROM world WHERE id=1').toArray();return rows[0]?JSON.parse(rows[0].state) as SharedWorldState:null;}
   private save(state:SharedWorldState){this.ctx.storage.sql.exec('INSERT OR REPLACE INTO world VALUES(1,?)',JSON.stringify(state));}
-  private snapshot(state:SharedWorldState,role:string){return {...state,host:state.host?{clientId:state.host.clientId,until:state.host.until}:null,
+  private snapshot(state:SharedWorldState,role:string,actor=''){return {...state,conversation:undefined,conversationView:conversationView(state.conversation??createRoomConversation(),actor),sharedConversation:this.env.SHARED_CONVERSATION_ENABLED==='true',host:state.host?{clientId:state.host.clientId,until:state.host.until}:null,
     history:state.history.slice(-32).map(e=>({...e,participant:undefined})),daily:undefined,decisions:undefined,
-    ...(role==='guest'?{elements:state.elements.map(e=>({...e,assetUrl:undefined})),displayedWorld:undefined}:{}),serverNow:Date.now()};}
-  private broadcast(state:SharedWorldState){for(const socket of this.ctx.getWebSockets()){try{const a=socket.deserializeAttachment();socket.send(JSON.stringify(this.snapshot(state,a.role)));}catch{socket.close(1011,'reconnect');}}}
+    ...(role==='guest'&&this.env.SHARED_CONVERSATION_ENABLED!=='true'?{elements:state.elements.map(e=>({...e,assetUrl:undefined})),displayedWorld:undefined}:{}),serverNow:Date.now()};}
+  private broadcast(state:SharedWorldState){for(const socket of this.ctx.getWebSockets()){try{const a=socket.deserializeAttachment();socket.send(JSON.stringify(this.snapshot(state,a.role,a.actor)));}catch{socket.close(1011,'reconnect');}}}
+  private async drive(audio?:ArrayBuffer) {
+    if(this.env.SHARED_CONVERSATION_ENABLED!=='true'||!this.env.WORLD_EXECUTOR)return;
+    const state=this.read();if(!state||!state.open||state.resetUntil>Date.now())return;
+    const c=state.conversation??=createRoomConversation();advanceConversation(c,Date.now());
+    const viewers=new Set(this.ctx.getWebSockets().map(s=>s.deserializeAttachment()?.actor));
+    const people=this.ctx.storage.sql.exec<{actor:string;visitor:string;session:string}>('SELECT actor,visitor,session FROM presence WHERE until>? ORDER BY actor LIMIT 50',Date.now()).toArray().filter(p=>viewers.has(p.actor));
+    if(!c.active&&!c.reply&&!c.queue.length&&people.length&&state.sequence>(c.lastAutonomousSequence??0)&&Date.now()-c.lastAutonomousAt>=10000&&Date.now()-(state.history.find(e=>e.sequence>(c.lastAutonomousSequence??0))?.at??Date.now())>=10000){
+      const person=people[0];c.lastAutonomousAt=Date.now();c.lastAutonomousSequence=state.sequence;
+      reserveConversation(c,{...person,id:crypto.randomUUID(),kind:'autonomous'},Date.now());
+    }
+    const slot=c.active;
+    if(!slot||slot.status!=='granted'||(slot.kind==='voice'&&!audio)){this.save(state);if(slot||c.reply||c.queue.length||people.length)await this.ctx.storage.setAlarm(Date.now()+10000);return;}
+    slot.status='running';slot.expires=Date.now()+180000;state.revision++;this.save(state);this.broadcast(state);
+    await this.ctx.storage.setAlarm(slot.expires);
+    const epoch=state.epoch;
+    try{
+      const result=await this.env.WORLD_EXECUTOR.conversation(executionInput(state,slot,sharedWorldContext(state,Date.now())),audio);
+      const latest=this.read();if(!latest||latest.epoch!==epoch||latest.conversation?.active?.id!==slot.id)return;
+      const conversation=latest.conversation;const now=Date.now();
+      if(result.inputText)conversation.history.push({role:'user',content:result.inputText});
+      if(result.text)conversation.history.push({role:'assistant',content:result.text});
+      conversation.history=conversation.history.slice(-100);
+      conversation.reply={id:slot.id,text:result.text,emotion:result.emotion,motion:result.motion,audioUrl:result.audioUrl,error:result.error,startsAt:now+750,endsAt:now+750+Math.max(3000,result.durationMs)};
+      conversation.active=null;
+      const intent=readWorldIntent(result.worldIntent);
+      if(intent){try{applyWorldIntent(latest,intent,slot.id,now);}catch{latest.outcomes=[...latest.outcomes,'演出提案を適用できなかった。'].slice(-12);}}
+      latest.revision++;this.save(latest);this.broadcast(latest);
+      this.ctx.waitUntil(this.generateElements(slot,epoch));
+      await this.ctx.storage.setAlarm(conversation.reply.endsAt);
+    }catch(error){
+      const latest=this.read();if(!latest||latest.epoch!==epoch||latest.conversation?.active?.id!==slot.id)return;
+      latest.conversation.active=null;latest.outcomes=[...latest.outcomes,`会話は未完了 (${error instanceof Error&&/^[a-z_]{1,80}$/.test(error.message)?error.message:'execution_failed'})`].slice(-12);
+      latest.revision++;this.save(latest);this.broadcast(latest);await this.ctx.storage.setAlarm(Date.now()+1000);
+    }
+  }
+  private async generateElements(slot:ConversationSlot,epoch:number){
+    // Two independent lanes, with at most two provider jobs across the room.
+    await Promise.all((['background','prop'] as const).map(async kind=>{
+      for(;;){const state=this.read();if(!state||state.epoch!==epoch||!this.env.WORLD_EXECUTOR)return;
+        if(state.elements.some(e=>e.kind===kind&&e.status==='preparing'&&e.requestedAt))return;
+        const element=state.elements.find(e=>e.kind===kind&&e.status==='preparing'&&!e.requestedAt);
+        if(!element)return;element.requestedAt=Date.now();this.save(state);
+        const result=await this.env.WORLD_EXECUTOR.visual({roomId:state.roomId,epoch,slot,element}).catch(()=>({error:'generation_failed'}));
+        const latest=this.read();if(!latest||latest.epoch!==epoch)return;
+        const target=latest.elements.find(e=>e.id===element.id);if(!target||target.status!=='preparing')continue;
+        if(kind==='background'&&latest.desiredBackgroundId&&latest.desiredBackgroundId!==target.id){target.status='failed';target.error='superseded';}
+        else if('assetUrl' in result&&result.assetUrl){target.assetUrl=result.assetUrl;target.status='ready';}
+        else{target.status='failed';target.error=result.error??'generation_failed';latest.outcomes=[...latest.outcomes,`${target.concept}: 未表示 (${target.error})`].slice(-12);}
+        latest.revision++;this.save(latest);this.broadcast(latest);
+      }
+    }));
+  }
+  async alarm(){const state=this.read();if(!state)return;const c=state.conversation??=createRoomConversation();
+    advanceConversation(c,Date.now(),new Set(this.ctx.getWebSockets().map(s=>s.deserializeAttachment()?.actor)));
+    state.revision++;this.save(state);this.broadcast(state);await this.drive();
+  }
   async fetch(request:Request){try{
     const url=new URL(request.url);const actor=request.headers.get('X-World-Actor')??'';const role=request.headers.get('X-World-Role')??'guest';
     if(url.pathname==='/events'){
       const state=this.read();if(!state)throw new WorldError('room_not_found',404);
-      const pair=new WebSocketPair();this.ctx.acceptWebSocket(pair[1]);pair[1].serializeAttachment({role,actor});pair[1].send(JSON.stringify(this.snapshot(state,role)));
+      const pair=new WebSocketPair();this.ctx.acceptWebSocket(pair[1]);pair[1].serializeAttachment({role,actor});pair[1].send(JSON.stringify(this.snapshot(state,role,actor)));
       return new Response(null,{status:101,webSocket:pair[0]});
+    }
+    if(url.pathname==='/voice'){
+      const state=this.read();const slot=state?.conversation?.active;
+      if(this.env.SHARED_CONVERSATION_ENABLED!=='true'||!slot||slot.actor!==actor||slot.id!==request.headers.get('X-World-Slot')||slot.status!=='granted'||slot.expires<=Date.now()||state?.epoch!==Number(request.headers.get('X-World-Epoch')))throw new WorldError('slot_not_granted',403);
+      const audio=await request.arrayBuffer();if(audio.byteLength>640044)throw new WorldError('audio_too_large',413);
+      this.ctx.waitUntil(this.drive(audio));return Response.json({shared:true});
     }
     const input=await request.json() as Record<string,unknown>;const op=String(input.op);const now=Date.now();
     let changed:SharedWorldState|null=null;
@@ -26,9 +91,23 @@ export class WorldRoom extends DurableObject {
       let state=this.read();
       if(op==='create'){if(role!=='admin')throw new WorldError('forbidden',403);if(!state){state=createSharedWorld(String(input.roomId));this.save(state);}return this.snapshot(state,'host');}
       if(!state)throw new WorldError('room_not_found',404);
+      if(op==='presence'){
+        this.ctx.storage.sql.exec('DELETE FROM presence WHERE until<=?',now);
+        if(input.session&&input.visitor)this.ctx.storage.sql.exec('INSERT OR REPLACE INTO presence VALUES(?,?,?,?)',actor,String(input.visitor),String(input.session),now+25000);
+        else this.ctx.storage.sql.exec('DELETE FROM presence WHERE actor=?',actor);
+        return this.snapshot(state,role,actor);
+      }
+      if(op==='conversation'||op==='cancel'){
+        if(this.env.SHARED_CONVERSATION_ENABLED!=='true'||!state.open||state.resetUntil>now)throw new WorldError('conversation_disabled',409);
+        if(input.epoch!==state.epoch)throw new WorldError('stale_world');
+        const c=state.conversation??=createRoomConversation();advanceConversation(c,now);
+        if(op==='cancel')cancelConversation(c,actor,String(input.id));
+        else reserveConversation(c,{id:String(input.id),actor,visitor:String(input.visitor??''),session:String(input.session??''),kind:input.kind==='voice'?'voice':'text',text:typeof input.text==='string'?input.text:undefined},now);
+        state.revision++;this.save(state);changed=state;return this.snapshot(state,role,actor);
+      }
       for(const element of state.elements){if(element.status==='preparing'&&element.requestedAt&&now-element.requestedAt>90000){element.status='failed';element.error='generation_interrupted';state.revision++;this.save(state);}}
       if(state.resetUntil&&state.resetUntil<=now){state.resetUntil=0;state.revision++;this.save(state);}
-      if(op==='state')return this.snapshot(state,role);
+      if(op==='state')return this.snapshot(state,role,actor);
       if(op==='join'){if(!state.open)throw new WorldError('room_closed');return this.snapshot(state,role);}
       const admin=role==='admin';
       if(op==='control'){
@@ -53,6 +132,11 @@ export class WorldRoom extends DurableObject {
         if(existing&&existing.until>now&&(existing.clientId!==input.clientId||existing.visitor!==actor)&&input.takeover!==true)throw new WorldError('host_already_active');
         const token=existing&&existing.clientId===input.clientId&&existing.visitor===actor&&existing.until>now?existing.token:crypto.randomUUID();
         state.host={visitor:actor,clientId:input.clientId,token,until:now+30000};state.revision++;this.save(state);changed=state;return {token,epoch:state.epoch,until:state.host.until,serverNow:now};
+      }else if(op==='display'&&this.env.SHARED_CONVERSATION_ENABLED==='true'){
+        if(input.epoch!==state.epoch)throw new WorldError('stale_world');
+        const e=state.elements.find(e=>e.id===input.elementId);if(!e||!['ready','displayed'].includes(e.status))throw new WorldError('element_not_ready');
+        if(e.kind==='background'&&state.desiredBackgroundId&&state.desiredBackgroundId!==e.id)throw new WorldError('superseded');
+        if(e.status==='ready'){e.status='displayed';state.outcomes=[...state.outcomes,`${e.concept}が表示された。`].slice(-12);if(e.kind==='background')state.displayedWorld.location=e.concept;else state.displayedWorld.props=[...state.displayedWorld.props.filter(p=>p.id!==e.id),{id:e.id,label:e.concept,count:e.count,scale:1,placement:'foreground' as const,asset:e.assetUrl?'generated' as const:'none' as const}].slice(-12);state.displayedWorld.revision++;state.revision++;}
       }else{
         if(role!=='host'&&!admin)throw new WorldError('forbidden',403);
         assertHost(state,actor,String(input.clientId),String(input.lease),Number(input.epoch),now);
@@ -84,6 +168,8 @@ export class WorldRoom extends DurableObject {
       this.save(state);changed=state;return this.snapshot(state,role);
     });
     if(changed)this.broadcast(changed);
+    if(op==='conversation'||op==='cancel'||op==='presence')this.ctx.waitUntil(this.drive());
+    if(op==='card'&&this.env.SHARED_CONVERSATION_ENABLED==='true')await this.ctx.storage.setAlarm(Date.now()+10000);
     return Response.json(result,{headers:{'Cache-Control':'no-store'}});
   }catch(error){return Response.json({code:error instanceof WorldError?error.code:'world_unavailable'},{status:error instanceof WorldError?error.status:503});}}
   webSocketMessage(ws:WebSocket){ws.send(JSON.stringify({type:'pong',serverNow:Date.now()}));}

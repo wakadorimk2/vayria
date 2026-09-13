@@ -4,7 +4,7 @@ import { validId } from '../src/sharedWorld/state';
 import { visualTicket, type VisualEnv, type VisualLedger } from './visual';
 import type { VisualAsset } from '../src/visual/types';
 
-export interface WorldEnv extends VisualEnv { WORLD_ROOMS?:DurableObjectNamespace; SHARED_WORLD_ENABLED?:string }
+export interface WorldEnv extends VisualEnv { WORLD_ROOMS?:DurableObjectNamespace; SHARED_WORLD_ENABLED?:string; SHARED_CONVERSATION_ENABLED?:string }
 type Credential={purpose:'world-member';roomId:string;actor:string;role:'guest'|'host';exp:number};
 const cookieName=(env:WorldEnv)=>env.PUBLIC_BASE_PATH?'__Host-vayria-world-staging':'__Host-vayria-world';
 export async function worldMember(request:Request,env:WorldEnv){const c=await verify<Credential>(cookie(request,cookieName(env)),env.COOKIE_SECRET);return c?.purpose==='world-member'?c:null;}
@@ -29,9 +29,9 @@ export async function guardWorldRequest(request:Request,env:WorldEnv){
 }
 export async function worldRoute(request:Request,env:WorldEnv,ledger:VisualLedger,visitor:string,session:string){
   if(env.SHARED_WORLD_ENABLED!=='true'||!env.WORLD_ROOMS)throw new LimitError('world_disabled',0,404);
-  const url=new URL(request.url);const match=/^\/api\/world-room\/([\w-]+)\/(join|state|events|card|lease|element|prepare|asset|media)(?:\/([\w-]+))?$/.exec(url.pathname);
+  const url=new URL(request.url);const match=/^\/api\/world-room\/([\w-]+)\/(join|state|events|card|lease|element|prepare|asset|media|conversation|cancel|voice|display|presence|generation)(?:\/([\w-]+))?$/.exec(url.pathname);
   if(!match)throw new LimitError('not_found',0,404);const [,roomId,op,assetId]=match;
-  const input=request.method==='POST'?JSON.parse(new TextDecoder().decode(await boundedBody(request,18000))) as Record<string,unknown>:{};
+  const input=request.method==='POST'&&op!=='voice'?JSON.parse(new TextDecoder().decode(await boundedBody(request,18000))) as Record<string,unknown>:{};
   if(op==='join'&&request.method==='POST'){
     const grant=await verify<{purpose:string;roomId:string;exp:number}>(String(input.grant??''),env.COOKIE_SECRET);
     const old=await worldMember(request,env);
@@ -49,10 +49,35 @@ export async function worldRoute(request:Request,env:WorldEnv,ledger:VisualLedge
     return env.WORLD_ROOMS.get(env.WORLD_ROOMS.idFromName(roomId)).fetch(new Request('https://world/events',{headers:{Upgrade:'websocket','X-World-Actor':member.actor,'X-World-Role':member.role}}));
   }
   const call=(value:object)=>worldCall(env,roomId,member.actor,member.role,value);
+  if(op==='generation'&&request.method==='POST'){
+    if(env.SHARED_CONVERSATION_ENABLED!=='true'||env.MANIFESTATION_ENABLED!=='true'||typeof input.enabled!=='boolean'||!Number.isSafeInteger(input.generation))throw new LimitError('invalid_permission',0,400);
+    return Response.json(await ledger('visualMode',{visitor,id:session,enabled:input.enabled,generation:input.generation}));
+  }
+  if(op==='presence'&&request.method==='POST'){
+    if(env.SHARED_CONVERSATION_ENABLED!=='true')throw new LimitError('conversation_disabled',0,409);
+    const status=session?await ledger<{stopped:boolean;session:{id:string;expires:number}|null}>('status',{visitor}):null;
+    const active=input.active===true&&env.GENERATION_ENABLED==='true'&&!status?.stopped&&status?.session?.id===session&&status.session.expires>Date.now();
+    return Response.json(await call({op,visitor:active?visitor:'',session:active?session:''}));
+  }
+  if(['conversation','voice','cancel','display'].includes(op)){
+    if(request.method!=='POST')throw new LimitError('method_not_allowed',0,405);
+    if(env.SHARED_CONVERSATION_ENABLED!=='true')throw new LimitError('conversation_disabled',0,409);
+    if(op==='conversation'||op==='voice'){
+      if(env.GENERATION_ENABLED!=='true')throw new LimitError('generation_stopped',0,503);
+      const status=await ledger<{stopped:boolean;session:{id:string;expires:number}|null}>('status',{visitor});
+      if(status.stopped||!status.session||status.session.id!==session||status.session.expires<=Date.now())throw new LimitError('session_required',0,403);
+    }
+    if(op==='voice'){
+      const audio=await boundedBody(request,640044);
+      return env.WORLD_ROOMS.get(env.WORLD_ROOMS.idFromName(roomId)).fetch('https://world/voice',{method:'POST',headers:{'X-World-Actor':member.actor,'X-World-Slot':request.headers.get('X-World-Slot')??'','X-World-Epoch':request.headers.get('X-World-Epoch')??''},body:audio as Uint8Array<ArrayBuffer>});
+    }
+    return Response.json(await call({...input,op,visitor,session}));
+  }
   if(op==='media'&&request.method==='GET'){
-    if(member.role!=='host'||!assetId)throw new LimitError('forbidden',0,403);
+    if((member.role!=='host'&&env.SHARED_CONVERSATION_ENABLED!=='true')||!assetId)throw new LimitError('forbidden',0,403);
     const asset=await env.VISUAL_ASSETS?.get(`world/${roomId}/${assetId}`);if(!asset)throw new LimitError('not_found',0,404);
-    return new Response(asset.body,{headers:{'Content-Type':'image/png','Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'}});
+    if(asset.customMetadata?.expires&&Number(asset.customMetadata.expires)<Date.now()){await env.VISUAL_ASSETS?.delete(`world/${roomId}/${assetId}`);throw new LimitError('not_found',0,404);}
+    return new Response(asset.body,{headers:{'Content-Type':asset.httpMetadata?.contentType??'image/png','Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'}});
   }
   if(op==='state'&&request.method==='GET')return Response.json(await call({op}));
   if(request.method!=='POST')throw new LimitError('method_not_allowed',0,405);

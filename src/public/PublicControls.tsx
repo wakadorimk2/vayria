@@ -12,7 +12,9 @@ import { activatePublic, cancelPublicAction, pausePublic, publicActive, publicEx
 import ExhibitionControls from './ExhibitionControls';
 type Turnstile = { render(element: HTMLElement, options: object): string; remove(id: string): void; reset(id: string): void };
 declare global { interface Window { turnstile?: Turnstile } }
-export default function PublicControls({ visualObjectPresent = false, generation, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+export default function PublicControls({ sharedWorld = false, queueStatus, visualObjectPresent = false, generation, settingsLayout, onSettingsOpenChange, cardsOpen, textOpen, onCardsToggle, greetingComplete, greetingBusy, onGreeting, themePreference, resolvedTheme, onThemeChange, isMuted, onMuteToggle, microphoneOn, microphoneState, microphoneLevel, microphoneNotice, onMicrophoneToggle }: {
+  sharedWorld?: boolean;
+  queueStatus?: string;
   visualObjectPresent?: boolean;
   generation?: { enabled: boolean; busy: boolean; message: string; toggle: () => Promise<void> };
   settingsLayout: SettingsLayout;
@@ -177,8 +179,9 @@ export default function PublicControls({ visualObjectPresent = false, generation
       <button onClick={() => { cancelRequest(); setNoticeOpen(false); }}>{requested ? 'キャンセル' : '操作を選び直す'}</button>
     </section>}
     {generation?.message && <p className="public-generation-notice" role="status">{generation.message}</p>}
+    {queueStatus&&!cardsOpen&&<p className="shared-conversation-status" role="status">{queueStatus}</p>}
     <div className="public-controls__actions">
-      <button className="public-controls__cards" aria-label="カードで遊ぶ" title="カードで遊ぶ" aria-expanded={cardsOpen} aria-controls="public-card-panel" onClick={() => { setExpanded(false); if (!expanded || !cardsOpen) onCardsToggle(); }}>
+      <button className="public-controls__cards" aria-label={sharedWorld?"世界にいたずら":"カードで遊ぶ"} title={sharedWorld?"世界にいたずら":"カードで遊ぶ"} aria-expanded={cardsOpen} aria-controls={sharedWorld?"shared-world-card-panel":"public-card-panel"} onClick={() => { setExpanded(false); if (!expanded || !cardsOpen) onCardsToggle(); }}>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="3" width="13" height="18" rx="2" /><path d="m4 6-2 1 3 14M13.5 8l3 4-3 4-3-4Z" /></svg>
       </button>
       <button className="public-controls__text" aria-expanded={textOpen} aria-controls="public-text-panel" aria-label="文字で話す" title="文字で話す" onClick={() => { setExpanded(false); window.dispatchEvent(new Event('vayria-public-prepare')); if (!expanded || !textOpen) window.dispatchEvent(new Event('vayria-public-text-input')); }}>
@@ -218,7 +221,7 @@ export default function PublicControls({ visualObjectPresent = false, generation
     <label><input type="checkbox" checked={manual} onChange={event => { setManual(event.target.checked); window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: event.target.checked, pressed: false } })); }} />押して話す（オフで自動検出）</label>
     {manual && <button disabled={!active} onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: true, pressed: true } })); }} onPointerUp={() => window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: true, pressed: false } }))} onPointerCancel={() => window.dispatchEvent(new CustomEvent('vayria-public-microphone', { detail: { manual: true, pressed: false } }))}>押している間に話す</button>}
     </>}
-    <details><summary>送信先・利用条件</summary>音声認識と文章生成はOpenAI、音声合成はAivis Cloudへ送信します。匿名Cookieを90日間保存し、利用回数を管理します。会話本文と音声はアプリの永続ログへ保存しません。<br />アバター作者: わかどり。このアプリでの表示を許可しています。第三者への再利用許諾ではありません。<br />音声: zonoko / zgock（配布元の表示: CC0）。<a href="https://hub.aivis-project.com/aivm-models/7fc08a41-b64d-456d-8b22-8e1284674775" target="_blank" rel="noreferrer">モデル情報</a></details>
+    <details><summary>送信先・利用条件</summary>音声認識と文章生成はOpenAI、音声合成はAivis Cloudへ送信します。匿名Cookieを90日間保存し、利用回数を管理します。{sharedWorld?'この部屋では最近の会話本文を共有・保存します。録音は文字起こし後に破棄します。返答音声は一時保存します。':'会話本文と音声はアプリの永続ログへ保存しません。'}<br />アバター作者: わかどり。このアプリでの表示を許可しています。第三者への再利用許諾ではありません。<br />音声: zonoko / zgock（配布元の表示: CC0）。<a href="https://hub.aivis-project.com/aivm-models/7fc08a41-b64d-456d-8b22-8e1284674775" target="_blank" rel="noreferrer">モデル情報</a></details>
     </PublicSettingsPanel>
   </aside>;
 }

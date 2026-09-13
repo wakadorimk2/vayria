@@ -11,7 +11,21 @@ await build({ stdin: { contents: 'export { createCloudVoiceAdapter } from "./src
 } }] });
 const { createCloudVoiceAdapter, getIosAudioSession } = await import(pathToFileURL(outfile));
 const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
-function fixture(ios = false, initialPacket = true) {
+test('shared automatic VAD reserves on speech start, buffers audio, and does not resubmit a transcript',async()=>{
+  let reserved=0,sent=0,cancelled=0;
+  const sharedVoice={active:()=>true,send:()=>{throw Error('reservation must be reused');},reserve:()=>{reserved++;return {cancel:()=>{cancelled++;},send:async audio=>{sent++;assert.ok(audio.byteLength>44);return Response.json({shared:true});}};}};
+  const f=fixture(false,true,sharedVoice);try{
+    await f.adapter.start();const packet=f.nodes.at(-1).port.onmessage;
+    packet({data:new Int16Array(320).fill(4000).buffer});assert.equal(reserved,1);assert.equal(sent,0);
+    f.utterance();await settle();assert.equal(sent,1);assert.equal(f.requests.length,0);
+    assert.equal(f.events.some(e=>e.type==='utterance_finalized'),false);assert.equal(cancelled,0);
+    // The shared reply is queued globally. Other speakers can still reserve a
+    // turn while desktop AEC capture continues; iOS retains its capture hold.
+    f.adapter.setTtsPlaying(true);packet({data:new Int16Array(320).fill(4000).buffer});assert.equal(reserved,2);
+    await f.adapter.stop();assert.equal(cancelled,1);
+  }finally{f.adapter.dispose();await settle();}
+});
+function fixture(ios = false, initialPacket = true, sharedVoice) {
   const events = [], requests = [], tracks = [], nodes = [], contexts = [];
   let captureFailure = false;
   let captureWait = null;
@@ -37,7 +51,7 @@ function fixture(ios = false, initialPacket = true) {
     constructor() { nodes.push(this); } connect() {} disconnect() { this.disconnected = true; }
   };
   globalThis.cloudVoiceFixture = { active: true, fetch(path, init) { return new Promise((resolve, reject) => requests.push({ path, init, resolve, reject })); } };
-  const adapter = createCloudVoiceAdapter({ onEvent: event => events.push(event) });
+  const adapter = createCloudVoiceAdapter({ sharedVoice, onEvent: event => events.push(event) });
   const utterance = (callback = nodes.at(-1).port.onmessage) => {
     for (let i = 0; i < 40; i++) callback?.({ data: new Int16Array(320).fill(i < 10 ? 4000 : 0).buffer });
   };

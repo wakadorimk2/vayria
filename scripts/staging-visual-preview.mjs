@@ -17,12 +17,15 @@ export function enableSharedWorld(config){
  result.vars.SHARED_WORLD_ENABLED='true';return result;
 }
 export function checkWorldStorageConfig(config){
- if(config.name!=='vayria-shared-world-staging'||config.account_id!=='7414797104d7aca62f03fbd4faf7e5df'||config.main!=='worker/worldWorker.ts'||config.workers_dev!==false||config.preview_urls!==false||!Array.isArray(config.routes)||config.routes.length||config.vars||config.assets||JSON.stringify(config.migrations)!==JSON.stringify([{tag:'world-v1',new_sqlite_classes:['WorldRoom']}]))throw new Error('World storage must remain private and staging-only');
+ if(config.name!=='vayria-shared-world-staging'||config.account_id!=='7414797104d7aca62f03fbd4faf7e5df'||config.main!=='worker/worldWorker.ts'||config.workers_dev!==false||config.preview_urls!==false||!Array.isArray(config.routes)||config.routes.length||config.assets||JSON.stringify(config.migrations)!==JSON.stringify([{tag:'world-v1',new_sqlite_classes:['WorldRoom']}]))throw new Error('World storage must remain private and staging-only');
+ if(config.vars&&(Object.keys(config.vars).length!==1||!['true','false'].includes(config.vars.SHARED_CONVERSATION_ENABLED)))throw new Error('Unexpected storage settings');
+ if(config.services&&JSON.stringify(config.services)!==JSON.stringify([{binding:'WORLD_EXECUTOR',service:'vayria-public-staging',entrypoint:'WorldExecution'}]))throw new Error('Unexpected execution binding');
 }
-export async function deployVisualPreview(source,pr,sha,control,sharedWorld=false){
+export function enableSharedConversation(config){const next=enableSharedWorld(config);next.vars.SHARED_CONVERSATION_ENABLED='true';return next;}
+export async function deployVisualPreview(source,pr,sha,control,sharedWorld=false,sharedConversation=false){
  source=resolve(source);control=resolve(control);
  let config=JSON.parse(await readFile(join(control,'wrangler.public.jsonc'),'utf8'));checkVisualConfig(config);
- if(sharedWorld)config=enableSharedWorld(config);
+ if(sharedConversation)config=enableSharedConversation(config);else if(sharedWorld)config=enableSharedWorld(config);
  if(!Number.isInteger(pr)||!/^\d+$/.test(String(pr))||!/^[a-f0-9]{40}$/.test(sha))throw new Error('Explicit PR and full SHA required');
  if(run('git',['rev-parse','HEAD'],source).trim()!==sha||run('git',['status','--porcelain'],source).trim())throw new Error('Source must be clean at exact PR SHA');
  const verify=()=>{
@@ -41,8 +44,17 @@ export async function deployVisualPreview(source,pr,sha,control,sharedWorld=fals
  const common=['--config',path,'--env-file',join(control,'deploy/placeholder.env')];
  await writeFile(join(control,'.wrangler/visual-before.txt'),run(process.execPath,[wrangler,'deployments','list',...common],control));
  verify();
- if(sharedWorld){
-  const worldConfig=join(source,'wrangler.world.jsonc');checkWorldStorageConfig(JSON.parse(await readFile(worldConfig,'utf8')));
+ if(sharedWorld||sharedConversation){
+  let worldConfig=join(source,'wrangler.world.jsonc');const storage=JSON.parse(await readFile(worldConfig,'utf8'));checkWorldStorageConfig(storage);
+  if(sharedConversation){
+   // Publish the private entrypoint before another Worker binds to it. Keep the
+   // public feature off until storage and its execution binding are ready.
+   const preparation=structuredClone(deployConfig);preparation.vars.SHARED_CONVERSATION_ENABLED='false';
+   const prepPath=join(control,'.wrangler/conversation-prepare.json');await writeFile(prepPath,JSON.stringify(preparation));
+   run(process.execPath,[wrangler,'deploy','--config',prepPath,'--env-file',join(control,'deploy/placeholder.env')],control);
+   storage.vars.SHARED_CONVERSATION_ENABLED='true';storage.main=resolve(source,storage.main);
+   worldConfig=join(control,'.wrangler/conversation-storage.json');await writeFile(worldConfig,JSON.stringify(storage));
+  }
   const worldOutput=run(process.execPath,[wrangler,'deploy','--config',worldConfig,'--env-file',join(control,'deploy/placeholder.env')],source);
   await writeFile(join(control,'.wrangler/world-storage-deployed.txt'),`PR ${pr}\nSHA ${sha}\n${worldOutput}`);
   verify();
@@ -50,5 +62,5 @@ export async function deployVisualPreview(source,pr,sha,control,sharedWorld=fals
  const output=run(process.execPath,[wrangler,'deploy',...common],control);await writeFile(join(control,'.wrangler/visual-deployed.txt'),`PR ${pr}\nSHA ${sha}\n${output}`);console.log(output);
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- const [source,pr,sha,mode]=process.argv.slice(2);if(mode&&mode!=='--shared-world')throw new Error('Unknown preview mode');await deployVisualPreview(source,Number(pr),sha,resolve(fileURLToPath(new URL('..',import.meta.url))),mode==='--shared-world');
+ const [source,pr,sha,mode]=process.argv.slice(2);if(mode&&!['--shared-world','--shared-conversation'].includes(mode))throw new Error('Unknown preview mode');await deployVisualPreview(source,Number(pr),sha,resolve(fileURLToPath(new URL('..',import.meta.url))),mode==='--shared-world',mode==='--shared-conversation');
 }

@@ -49,19 +49,20 @@
     "test:cd": "node --test scripts/staging-cd.test.mjs scripts/production-cd.test.mjs scripts/staging-preview.test.mjs scripts/staging-visual-preview.test.mjs",
     "production:check": "wrangler deploy --config wrangler.production.jsonc --env-file deploy/placeholder.env --dry-run",
     "production:recovery:check": "wrangler deploy --config wrangler.recovery.jsonc --env-file deploy/placeholder.env --dry-run",
-    "test:public": "tsc -p tsconfig.worker.json && node --test scripts/public-ledger.test.mjs scripts/public-worker.test.mjs scripts/public-errors.test.mjs scripts/cloud-voice.test.mjs scripts/public-theme.test.mjs scripts/public-entry.test.mjs scripts/public-exhibition.test.mjs scripts/public-exhibition-worker.test.mjs scripts/public-settings-layout.test.mjs scripts/staging-paths.test.mjs scripts/card-concurrency-public.test.mjs scripts/manifestation-public.test.mjs scripts/visual.test.mjs scripts/shared-world.test.mjs",
+    "test:public": "tsc -p tsconfig.worker.json && node --test scripts/public-ledger.test.mjs scripts/public-worker.test.mjs scripts/public-errors.test.mjs scripts/cloud-voice.test.mjs scripts/public-theme.test.mjs scripts/public-entry.test.mjs scripts/public-exhibition.test.mjs scripts/public-exhibition-worker.test.mjs scripts/public-settings-layout.test.mjs scripts/staging-paths.test.mjs scripts/card-concurrency-public.test.mjs scripts/manifestation-public.test.mjs scripts/visual.test.mjs scripts/shared-world.test.mjs scripts/shared-conversation.test.mjs",
     "public:admin": "node scripts/public-admin.mjs",
     "test:manifestation": "tsc -p tsconfig.manifestation-test.json && node scripts/run-manifestation-tests.mjs",
     "dev:manifestation": "node scripts/start-manifestation.mjs",
     "dev:manifestation:op": "pwsh -NoProfile -File .\\scripts\\Start-VayriaWithOnePassword.ps1 -CommandPath npm.cmd -CommandArguments \"run dev:manifestation\"",
     "staging:build": "npm run public:build -- --mode staging",
-    "test:shared-world": "node --test scripts/shared-world.test.mjs"
+    "test:shared-world": "node --test scripts/shared-world.test.mjs scripts/shared-conversation.test.mjs"
   },
   "dependencies": {
     "@aituber-onair/chat": "0.52.0",
     "@mediapipe/tasks-vision": "1.0.1",
     "@pixiv/three-vrm": "2.1.3",
     "@pixiv/three-vrm-animation": "2.1.3",
+    "matter-js": "0.20.0",
     "multicast-dns": "^7.2.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -72,6 +73,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260907.1",
     "@eslint/js": "^9.39.1",
+    "@types/matter-js": "0.20.2",
     "@types/multicast-dns": "^7.2.4",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",

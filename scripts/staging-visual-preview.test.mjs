@@ -1,4 +1,11 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {checkVisualConfig,enableSharedWorld,checkWorldStorageConfig} from './staging-visual-preview.mjs';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {checkVisualConfig,enableSharedWorld,enableSharedConversation,checkWorldStorageConfig} from './staging-visual-preview.mjs';
+test('shared conversation changes only feature flags and accepts only the private staging RPC binding',async()=>{
+ const original=JSON.parse(await readFile('wrangler.public.jsonc','utf8'));const next=enableSharedConversation(original);
+ assert.deepEqual({...next.vars,SHARED_WORLD_ENABLED:'false',SHARED_CONVERSATION_ENABLED:'false'},original.vars);
+ const storage=JSON.parse(await readFile('wrangler.world.jsonc','utf8'));checkWorldStorageConfig(storage);
+ assert.throws(()=>checkWorldStorageConfig({...storage,services:[{binding:'WORLD_EXECUTOR',service:'vayria-web',entrypoint:'WorldExecution'}]}));
+ assert.throws(()=>checkWorldStorageConfig({...storage,vars:{SHARED_CONVERSATION_ENABLED:'true',GENERATION_ENABLED:'true'}}));
+});
 test('shared preview adds one room namespace without changing generation budgets or production',async()=>{
  const original=JSON.parse(await readFile('wrangler.public.jsonc','utf8'));const next=enableSharedWorld(original);
  assert.equal(original.vars.SHARED_WORLD_ENABLED,'false');assert.equal(next.vars.SHARED_WORLD_ENABLED,'true');
