@@ -13,9 +13,11 @@ function run(command,args,cwd){const r=spawnSync(command,args,{cwd,encoding:'utf
 export function enableSharedWorld(config){
  checkVisualConfig(config);const result=structuredClone(config);
  result.durable_objects.bindings=result.durable_objects.bindings.filter(b=>b.name!=='WORLD_ROOMS');
- result.durable_objects.bindings.push({name:'WORLD_ROOMS',class_name:'WorldRoom'});
- if(!result.migrations.some(m=>m.new_sqlite_classes?.includes('WorldRoom')))result.migrations.push({tag:'world-v1',new_sqlite_classes:['WorldRoom']});
+ result.durable_objects.bindings.push({name:'WORLD_ROOMS',class_name:'WorldRoom',script_name:'vayria-shared-world-staging'});
  result.vars.SHARED_WORLD_ENABLED='true';return result;
+}
+export function checkWorldStorageConfig(config){
+ if(config.name!=='vayria-shared-world-staging'||config.account_id!=='7414797104d7aca62f03fbd4faf7e5df'||config.main!=='worker/worldWorker.ts'||config.workers_dev!==false||config.preview_urls!==false||!Array.isArray(config.routes)||config.routes.length||config.vars||config.assets||JSON.stringify(config.migrations)!==JSON.stringify([{tag:'world-v1',new_sqlite_classes:['WorldRoom']}]))throw new Error('World storage must remain private and staging-only');
 }
 export async function deployVisualPreview(source,pr,sha,control,sharedWorld=false){
  source=resolve(source);control=resolve(control);
@@ -39,6 +41,12 @@ export async function deployVisualPreview(source,pr,sha,control,sharedWorld=fals
  const common=['--config',path,'--env-file',join(control,'deploy/placeholder.env')];
  await writeFile(join(control,'.wrangler/visual-before.txt'),run(process.execPath,[wrangler,'deployments','list',...common],control));
  verify();
+ if(sharedWorld){
+  const worldConfig=join(source,'wrangler.world.jsonc');checkWorldStorageConfig(JSON.parse(await readFile(worldConfig,'utf8')));
+  const worldOutput=run(process.execPath,[wrangler,'deploy','--config',worldConfig,'--env-file',join(control,'deploy/placeholder.env')],source);
+  await writeFile(join(control,'.wrangler/world-storage-deployed.txt'),`PR ${pr}\nSHA ${sha}\n${worldOutput}`);
+  verify();
+ }
  const output=run(process.execPath,[wrangler,'deploy',...common],control);await writeFile(join(control,'.wrangler/visual-deployed.txt'),`PR ${pr}\nSHA ${sha}\n${output}`);console.log(output);
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){

@@ -32,7 +32,9 @@
 
 ## 保存と互換性
 
-既存のPublicUsageとは別のSQLite-backed WorldRoomを追加します。既存の台帳を移行しません。新しいDurable Objectのマイグレーションは既存のものの後に追加します。
+既存のPublicUsageとは別のSQLite-backed WorldRoomを追加します。保存先は外部HTTP経路を持たない `vayria-shared-world-staging` Workerです。展示Workerは `script_name` を指定したバインディングで接続します。ステージング画面を以前の版へ戻しても、保存Workerと世界を残せます。既存台帳のマイグレーションは変更しません。
+
+保存Workerの削除やWorldRoomの削除マイグレーションは行いません。クラス削除は保存データも削除します。[CloudflareのDurable Object管理仕様](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/)を参照してください。通常の世界初期化には世代付きの `world-reset` を使います。
 
 詳細投入履歴は10,000件です。古い項目は日別・カード別に集約します。重複防止の受領記録は別テーブルに残します。世界の描画要素は128グループまでです。上限を超えた古い概念も投入集計には残ります。
 

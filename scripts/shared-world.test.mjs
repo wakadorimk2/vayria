@@ -9,6 +9,8 @@ const state=await import('data:text/javascript;base64,'+Buffer.from(moduleBundle
 const cardsBundle=await build({entryPoints:['src/cards/cardPool.ts'],bundle:true,write:false,format:'esm',platform:'node'});
 const {cardPool}=await import('data:text/javascript;base64,'+Buffer.from(cardsBundle.outputFiles[0].text).toString('base64'));
 const bundle=await build({entryPoints:['worker/index.ts'],bundle:true,write:false,format:'esm',platform:'node',external:['cloudflare:workers']});
+const storageBundle=await build({entryPoints:['worker/worldWorker.ts'],bundle:true,write:false,format:'esm',platform:'node',external:['cloudflare:workers']});
+const storageWorker={name:'world-storage',modules:true,script:storageBundle.outputFiles[0].text,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],durableObjects:{WORLD_STORAGE:{className:'WorldRoom',useSQLite:true}}};
 const key='shared-world-fixture-not-a-secret';
 const signed=payload=>{const b=Buffer.from(JSON.stringify(payload)).toString('base64url');return b+'.'+createHmac('sha256',key).update(b).digest('base64url');};
 const add=(s,cardId,index,now=100000)=>state.insertWorldCard(s,{cardId,eventId:`e${index}`,participant:'p1',name:'参加者1'},now);
@@ -72,9 +74,9 @@ test('history compacts while totals persist, and context fits the existing contr
 });
 
 async function fixture(){const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'world',modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],
-  durableObjects:{USAGE:{className:'PublicUsage',useSQLite:true},WORLD_ROOMS:{className:'WorldRoom',useSQLite:true}},
+  durableObjects:{USAGE:{className:'PublicUsage',useSQLite:true},WORLD_ROOMS:{className:'WorldRoom',scriptName:'world-storage',useSQLite:true}},
   bindings:{COOKIE_SECRET:key,ADMIN_SECRET:key,SHARED_WORLD_ENABLED:'true',GENERATION_ENABLED:'false',REQUIRE_PREVIEW_ACCESS:'false'},
-  serviceBindings:{ASSETS:()=>new Response('fixture',{headers:{'Content-Type':'text/html'}})},r2Buckets:['VISUAL_ASSETS']}]}));
+  serviceBindings:{ASSETS:()=>new Response('fixture',{headers:{'Content-Type':'text/html'}})},r2Buckets:['VISUAL_ASSETS']},storageWorker]}));
   const origin='https://test.example';const request=(path,body,cookie='',headers={})=>mf.dispatchFetch(origin+path,{method:body?'POST':'GET',headers:{Origin:origin,'Content-Type':'application/json',Cookie:cookie,...headers},body:body?JSON.stringify(body):undefined});
   const admin={Authorization:'Bearer '+signed({purpose:'admin',exp:Date.now()+600000})};
   const created=await request('/api/admin',{op:'world-create',roomId:'room'},'',admin);assert.equal(created.status,200);const links=await created.json();

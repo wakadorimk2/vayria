@@ -29,7 +29,8 @@
     "bindings": [
       {
         "name": "WORLD_ROOMS",
-        "class_name": "WorldRoom"
+        "class_name": "WorldRoom",
+        "script_name": "vayria-shared-world-staging"
       },
       {
         "name": "USAGE",
@@ -42,12 +43,6 @@
       "tag": "v1",
       "new_sqlite_classes": [
         "PublicUsage"
-      ]
-    },
-    {
-      "tag": "world-v1",
-      "new_sqlite_classes": [
-        "WorldRoom"
       ]
     }
   ],

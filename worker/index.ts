@@ -1,6 +1,5 @@
 import { visualRoute, visualTicket, type VisualEnv } from './visual';
 import { createWorld, guardWorldRequest, worldCall, worldLease, worldMember, worldRoute, type WorldEnv } from './worldRoutes';
-import { WorldRoom } from './worldRoom';
 import { DEFAULT_PROGRAM_CONTEXT } from '../src/conversation/programContext';
 import { permitsVideo, readVisualIntent } from '../src/visual/types';
 import { manifestation } from './manifestation';
@@ -15,7 +14,7 @@ import { synthesizeAivisCloudSpeech } from '../server/tts/aivisCloud';
 import { RequestError } from '../server/localApiSupport';
 import { readChatRequest, readCardPreviewRequest } from '../server/chatValidation';
 import { normalizeEmotion, VOICE_STYLE_BY_EMOTION } from '../src/character/emotion';
-export { PublicUsage, WorldRoom };
+export { PublicUsage };
 
 interface Env extends VisualEnv, WorldEnv {
   FAL_KEY?: string; MANIFESTATION_ENABLED?: string;
