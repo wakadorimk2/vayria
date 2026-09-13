@@ -44,6 +44,7 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
   const activePhysics=state.cardSlots?activeCardPhysics(state.cardSlots):state.physics??{mode:'normal' as const,effects:[]};
   const environment=[...(state.cardSlots??[])].sort((a,b)=>b.sequence-a.sequence).map(s=>cardPool.find(c=>c.id===s.cardId)).find(c=>c&&worldCardMeaning(c).category==='環境');
   const atmosphere=environment?worldMatchPresentation(environment):null;
+  const reaction=state.cardReaction&&now-state.cardReaction.at<1500?cardPool.find(c=>c.id===state.cardReaction!.cardId):null;
   const source=resetting?world.sweepElements:state.elements;
   const visible=source.filter(e=>e.status==='ready'||e.status==='displayed').sort((a,b)=>b.reinforcedAt-a.reinforcedAt);
   if(match&&matchCard&&presentation?.flock){const existing=visible.find(e=>e.kind==='prop'&&e.sourceCardIds.includes(match.cardId)&&e.assetUrl);visible.unshift({id:`match-${match.id}`,concept:worldCardMeaning(matchCard).subject,kind:'prop',status:'displayed',sourceCardIds:[match.cardId],count:32,effects:[],reinforcedAt:match.at,...(existing?.assetUrl?{assetUrl:existing.assetUrl}:{})});}
@@ -60,6 +61,7 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
     {atmosphere&&!resetting&&<div className="shared-card-atmosphere" style={{'--atmosphere-hue':environment?.id==='underwater'?205:environment?.id==='space'?265:atmosphere.hue} as CSSProperties} aria-hidden/>}
     {match&&presentation&&<div className="shared-match-decoration" style={{'--match-hue':presentation.hue,'--match-elapsed':`${-(now-match.at)/1000}s`} as CSSProperties} aria-hidden>{Array.from({length:12},(_,i)=><span key={i} style={{left:`${(i*29+match.seed)%94}%`,top:`${(i*17+match.seed)%90}%`}}>{presentation.icon==='🃏'?presentation.label:presentation.icon}</span>)}</div>}
     <div ref={root} className={`shared-world-layer ${chaos?'chaos':''} ${resetting?'sweeping':''}`} aria-label="共有世界の小物">
+      {!resetting&&reaction&&worldCardMeaning(reaction).category!=='モノ'&&<div key={state.cardReaction!.id} className="shared-card-feedback" style={{'--reaction-hue':worldMatchPresentation(reaction).hue,'--reaction-elapsed':`${-(now-state.cardReaction!.at)/1000}s`} as CSSProperties} aria-hidden>{worldCardMeaning(reaction).icon}</div>}
       {physics&&!resetting&&<PhysicsLayer protectedRects={chaos?[]:[...protectedRects,layout.body,layout.face]} root={root} epoch={state.epoch} mode={activePhysics.mode} effects={[...activePhysics.effects,...(presentation?.effects??[])]}/>}
       {worldSpriteGroups(visible,now,chaos).flatMap(({element,phase,copies},group)=>{
         const background=phase!=='foreground';

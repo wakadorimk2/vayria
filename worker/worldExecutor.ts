@@ -4,7 +4,7 @@ import { LimitError } from './ledger';
 import { sign } from './security';
 import { visualTicket } from './visual';
 import { cardPool } from '../src/cards/cardPool';
-import type { WorldExecutionInput, WorldExecutionResult } from './worldExecution';
+import type { WorldExecutionInput, WorldExecutionResult, WorldVisualResult } from './worldExecution';
 import type { ConversationSlot } from '../src/sharedWorld/conversation';
 import type { WorldElement } from '../src/sharedWorld/state';
 // Only the private storage Worker binds this entrypoint. No browser route accepts
@@ -48,19 +48,21 @@ export class WorldExecution extends WorkerEntrypoint<Env> {
     }catch{output.error='speech_unavailable';}}
     return output;
   }
-  async visual(input:{roomId:string;epoch:number;slot:ConversationSlot;element:WorldElement}):Promise<{assetUrl?:string;error?:string}>{
+  async visual(input:{roomId:string;epoch:number;slot:ConversationSlot;element:WorldElement}):Promise<WorldVisualResult>{
     try{
+      const startedAt=Date.now();
       const p=await ledger<{enabled:boolean;generation:number}>(this.env,'visualPermission',{visitor:input.slot.visitor,id:input.slot.session});
       if(!p.enabled)return {error:'visual_disabled'};
       const ticket=await visualTicket({visualIntent:{type:input.element.kind,action:'add',concept:input.element.concept,modifiers:[],targetId:input.element.id,motion:'',motionEvidence:'',sharing:'general',regenerate:false}},this.env,input.slot.visitor,input.slot.session,p.generation,false,input.element.id);
       if(!('visualTicket' in ticket))return {error:'visual_disabled'};
       const response=await this.request(input.slot,'/api/visual/generate',{ticket:ticket.visualTicket,portrait:false,remainingMs:input.element.kind==='background'?60000:30000});
-      const events=(await response.text()).trim().split('\n').map(line=>JSON.parse(line) as {type:string;asset?:{id:string;url:string};code?:string});
-      const asset=events.find(e=>e.type==='asset')?.asset;if(!asset)return {error:events.find(e=>e.type==='failed')?.code??'asset_unavailable'};
-      if(asset.id.startsWith('stock-'))return {assetUrl:asset.url};
+      const events=(await response.text()).trim().split('\n').map(line=>JSON.parse(line) as {type:string;asset?:{id:string;url:string;createdAt?:number};cache?:boolean;code?:string});
+      const assetEvent=events.find(e=>e.type==='asset');const asset=assetEvent?.asset;if(!asset)return {error:events.find(e=>e.type==='failed')?.code??'asset_unavailable'};
+      const assetSource:WorldElement['assetSource']=assetEvent?.cache?'cache':asset.createdAt===undefined?'unknown':asset.createdAt>=startedAt?'generated':'reused';
+      if(asset.id.startsWith('stock-'))return {assetUrl:asset.url,assetSource:'stock'};
       const source=await this.env.VISUAL_ASSETS?.get(asset.id);if(!source||!this.env.VISUAL_ASSETS)return {error:'asset_unavailable'};
       await this.env.VISUAL_ASSETS.put(`world/${input.roomId}/${asset.id}`,source.body,{httpMetadata:{contentType:'image/png'}});
-      return {assetUrl:`${this.env.PUBLIC_BASE_PATH??''}/api/world-room/${input.roomId}/media/${asset.id}`};
+      return {assetUrl:`${this.env.PUBLIC_BASE_PATH??''}/api/world-room/${input.roomId}/media/${asset.id}`,assetSource};
     }catch(error){return {error:error instanceof Error?error.message:'generation_failed'};}
   }
 }

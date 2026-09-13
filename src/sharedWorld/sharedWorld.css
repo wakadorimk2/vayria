@@ -31,3 +31,6 @@
 .shared-card-atmosphere{position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.3;background:radial-gradient(ellipse at bottom,hsl(var(--atmosphere-hue) 65% 50% / .65),transparent 70%)}
 .public-layout .app-shell[data-shared-world="true"]:is([data-app-mode="public"],[data-world-ui="true"]) .vrm-stage{background:transparent;z-index:2}
 .shared-background-layer{position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse at 30% 25%,var(--public-glow-one),transparent 58%),linear-gradient(155deg,var(--public-bg-one),var(--public-bg-two) 72%,var(--public-bg-three))}
+.shared-card-feedback{position:absolute;right:7%;top:40%;display:grid;place-items:center;width:5rem;height:5rem;border-radius:50%;font-size:2rem;background:radial-gradient(circle,hsl(var(--reaction-hue) 70% 60% / .3),transparent 70%);animation:shared-card-feedback 1.5s ease-out both;animation-delay:var(--reaction-elapsed);pointer-events:none}
+@keyframes shared-card-feedback{0%{opacity:0;scale:.75}20%{opacity:1;scale:1}100%{opacity:0;scale:1.2}}
+@media(prefers-reduced-motion:reduce){.shared-card-feedback{animation:none;opacity:.6}}
