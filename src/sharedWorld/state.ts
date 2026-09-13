@@ -70,11 +70,12 @@ export function applyWorldIntent(state:SharedWorldState,intent:WorldIntent,decis
   const created:WorldElement[]=[];
   for(const [i,a]of intent.actions.entries()){
     const target=state.elements.find(e=>e.id===a.targetId);
-    if((a.type==='effect'||a.type==='duplicate')&&target){target.effects=[...new Set([...target.effects,...a.effects])];target.count=a.type==='duplicate'?Math.min(1000,target.count+a.count):target.count;target.sourceCardIds=[...new Set([...target.sourceCardIds,...a.sourceCardIds])];target.reinforcedAt=now;continue;}
+    if((a.type==='effect'||a.type==='duplicate')&&target){target.effects=[...new Set([...target.effects,...a.effects])];target.count=a.type==='duplicate'?Math.min(1000,target.count+a.count):a.effects.includes('multiply')?Math.min(1000,target.count*Math.max(2,a.count)):target.count;target.sourceCardIds=[...new Set([...target.sourceCardIds,...a.sourceCardIds])];target.reinforcedAt=now;continue;}
+    const count=a.effects.includes('multiply')?Math.max(2,a.count):a.count;
     const same=state.elements.find(e=>e.concept===a.concept&&e.kind===a.type&&e.status==='displayed'&&[...e.effects].sort().join() === [...a.effects].sort().join());
-    if(same){same.count=Math.min(1000,same.count+a.count);same.effects=[...new Set([...same.effects,...a.effects])];same.reinforcedAt=now;same.sourceCardIds=[...new Set([...same.sourceCardIds,...a.sourceCardIds])];continue;}
+    if(same){same.count=Math.min(1000,same.count+count);same.effects=[...new Set([...same.effects,...a.effects])];same.reinforcedAt=now;same.sourceCardIds=[...new Set([...same.sourceCardIds,...a.sourceCardIds])];continue;}
     const reusable=state.elements.find(e=>e.concept===a.concept&&e.kind===a.type&&e.status==='displayed');
-    const element:WorldElement={id:`${decisionId.slice(0,70)}-${i}`,concept:a.concept,kind:a.type==='background'?'background':'prop',sourceCardIds:a.sourceCardIds,effects:a.effects,count:a.count,reinforcedAt:now,status:reusable?'ready':'preparing',...(reusable?.assetUrl?{assetUrl:reusable.assetUrl}:{})};
+    const element:WorldElement={id:`${decisionId.slice(0,70)}-${i}`,concept:a.concept,kind:a.type==='background'?'background':'prop',sourceCardIds:a.sourceCardIds,effects:a.effects,count,reinforcedAt:now,status:reusable?'ready':'preparing',...(reusable?.assetUrl?{assetUrl:reusable.assetUrl}:{})};
     state.elements.push(element);created.push(element);
   }
   state.decisions=[...state.decisions,decisionId].slice(-256);state.revision++;

@@ -58,6 +58,9 @@ test('minority composition, effects, duplicates, displayed boundary and elapsed-
   assert.equal(s.elements.length,2);assert.equal(s.elements[1].count,1);
   assert.equal(s.elements[1].status,'ready');assert.equal(s.elements[1].assetUrl,s.elements[0].assetUrl);
   assert.deepEqual(s.elements[0].effects,['dance','float']);
+  add(s,'multiply',9);
+  state.applyWorldIntent(s,{actions:[{type:'effect',targetId:s.elements[0].id,concept:'',sourceCardIds:['multiply'],effects:['multiply'],count:2}]},'multiply',100000);
+  assert.equal(s.elements[0].count,20);assert.equal(s.elements.length,2);
 });
 test('history compacts while totals persist, and context fits the existing contract',()=>{
   const s=state.createSharedWorld('room');for(let i=0;i<10002;i++)add(s,'quiet',i,100000+i);
