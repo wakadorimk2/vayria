@@ -35,7 +35,9 @@ export function queueConversationVisuals(state:SharedWorldState,intent:WorldInte
     for(const proposal of visuals){
       // Card-driven and conversation-driven appearances share one material key.
       const derived=new Set(proposal.sourceCardIds.flatMap(id=>{const card=cardPool.find(c=>c.id===id);return card?worldCardMeaning(card).effects:[];}));
-      const action=canonical.find(a=>a.type===proposal.type&&proposal.sourceCardIds.includes(a.sourceCardIds[0]))??{...proposal,effects:proposal.effects.filter(e=>!derived.has(e)||e==='multiply')};
+      const matches=canonical.filter(a=>proposal.sourceCardIds.includes(a.sourceCardIds[0]));
+      // The card's material destination also corrects a model's misclassified scenery.
+      const action=matches.find(a=>a.type===proposal.type)??matches[0]??{...proposal,effects:proposal.effects.filter(e=>!derived.has(e)||e==='multiply')};
       q.proposals=q.proposals.filter(a=>a.type==='background'&&action.type==='background'?false:visualKey(a.type,a.concept)!==visualKey(action.type,action.concept));
       q.proposals.push(action);
     }

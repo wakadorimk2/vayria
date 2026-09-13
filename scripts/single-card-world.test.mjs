@@ -21,6 +21,7 @@ test('motion-only cards create no material, duplicate cards use one material, ap
 test('conversation and cards share requests; failed or unknown paid requests are not retried',()=>{
   const s=room();put(s,'underwater',0,1000);put(s,'chicken',1,1000);
   const rest=g.queueConversationVisuals(s,{actions:[{type:'prop',concept:'a bird chicken',sourceCardIds:['chicken'],count:1,effects:[],targetId:''}]},2000);
+  g.queueConversationVisuals(s,{actions:[{type:'prop',concept:'underwater',sourceCardIds:['underwater'],count:1,effects:[],targetId:''}]},2000);
   assert.deepEqual(rest.actions,[]);assert.equal(s.generation.dueAt,5000);g.prepareGeneration(s,5000,'one');
   assert.equal(s.elements.filter(e=>e.status==='preparing').length,2);
   for(const e of s.elements.filter(e=>e.status==='preparing')){e.status='failed';e.requestedAt=5000;s.generation.attempted.push(g.visualKey(e.kind,e.concept));}
