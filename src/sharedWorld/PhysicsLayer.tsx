@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { imageContour, type SpriteContour } from './spriteContour';
 import { WorldPhysics, type SpriteBody } from './physics';
 import type { WorldEffect } from './cards';
 import type { WorldRect } from '../world/worldLayout';
@@ -10,6 +11,7 @@ export function PhysicsLayer({root,epoch,mode,effects,protectedRects}:{root:Reac
   useEffect(()=>{
     const element=root.current;if(!element)return;
     const engine=new WorldPhysics();const reduced=matchMedia('(prefers-reduced-motion: reduce)');
+    let disposed=false;const contours=new Map<string,SpriteContour|null>();const requested=new Set<string>();
     let frame=0;let last=0;let scanAt=0;let nodes:HTMLElement[]=[];let pointer={x:-1000,y:-1000,until:0};
     const point=(event:PointerEvent)=>{pointer={x:event.clientX,y:event.clientY,until:performance.now()+900};};
     const focus=(event:FocusEvent)=>{if(event.target instanceof HTMLElement){const r=event.target.getBoundingClientRect();pointer={x:r.x+r.width/2,y:r.y+r.height/2,until:performance.now()+3000};}};
@@ -18,11 +20,14 @@ export function PhysicsLayer({root,epoch,mode,effects,protectedRects}:{root:Reac
       const bounds=element.getBoundingClientRect();engine.resize(bounds.width,bounds.height);
       engine.protect(config.current.protectedRects.map(r=>({x:r.x*bounds.width,y:r.y*bounds.height,width:r.width*bounds.width,height:r.height*bounds.height})));
       if(time-scanAt>200){scanAt=time;nodes=[...element.querySelectorAll<HTMLElement>('[data-physics-id]')];
-        const specs:SpriteBody[]=nodes.map(node=>{const size=spriteSize(bounds.width,bounds.height,Number(node.dataset.size));return {id:node.dataset.physicsId!,...spawnPosition(Number(node.dataset.x)*bounds.width,Number(node.dataset.y)*bounds.height,size,bounds.width,bounds.height,config.current.protectedRects),size,effects:JSON.parse(node.dataset.effects??'[]')};});engine.sync(specs);}
+        const specs:SpriteBody[]=nodes.map(node=>{const size=spriteSize(bounds.width,bounds.height,Number(node.dataset.size));const img=node.querySelector('img');const material=img?.currentSrc||img?.src;
+          if(img?.complete&&img.naturalWidth&&material&&!requested.has(material)){requested.add(material);void imageContour(img).then(shape=>{if(!disposed)contours.set(material,shape);});}
+          return {id:node.dataset.physicsId!,material,contour:material?contours.get(material):null,...spawnPosition(Number(node.dataset.x)*bounds.width,Number(node.dataset.y)*bounds.height,size,bounds.width,bounds.height,config.current.protectedRects),size,effects:JSON.parse(node.dataset.effects??'[]')};});engine.sync(specs);}
       if(!reduced.matches&&!document.hidden){engine.step(last?time-last:0,config.current.mode,config.current.effects);
-        for(const node of nodes){const entry=engine.bodies.get(node.dataset.physicsId!);if(!entry)continue;const {body,spec}=entry;
+        for(const node of nodes){const entry=engine.bodies.get(node.dataset.physicsId!);if(!entry)continue;const {body,spec,offset}=entry;
           node.style.left='0';node.style.top='0';node.style.width=`${spec.size}px`;node.style.height=`${spec.size}px`;
-          node.style.transform=`translate(${body.position.x-spec.size/2}px,${body.position.y-spec.size/2}px) rotate(${body.angle}rad)`;
+          const c=Math.cos(body.angle),s=Math.sin(body.angle);
+          node.style.transform=`translate(${body.position.x-c*offset.x+s*offset.y-spec.size/2}px,${body.position.y-s*offset.x-c*offset.y-spec.size/2}px) rotate(${body.angle}rad)`;
           node.style.opacity=pointer.until>time&&Math.hypot(body.position.x+bounds.x-pointer.x,body.position.y+bounds.y-pointer.y)<150?'.08':'1';
         }
       }else if(reduced.matches){
@@ -35,7 +40,7 @@ export function PhysicsLayer({root,epoch,mode,effects,protectedRects}:{root:Reac
       }
       last=time;frame=requestAnimationFrame(tick);
     };frame=requestAnimationFrame(tick);
-    return()=>{cancelAnimationFrame(frame);engine.dispose();document.removeEventListener('pointermove',point);document.removeEventListener('pointerdown',point);document.removeEventListener('focusin',focus);};
+    return()=>{disposed=true;cancelAnimationFrame(frame);engine.dispose();document.removeEventListener('pointermove',point);document.removeEventListener('pointerdown',point);document.removeEventListener('focusin',focus);};
   },[root,epoch]);
   return null;
 }

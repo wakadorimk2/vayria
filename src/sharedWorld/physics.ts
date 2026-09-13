@@ -1,9 +1,10 @@
 import Matter from 'matter-js';
+import type { SpriteContour, Point } from './spriteContour';
 import type { WorldEffect } from './cards';
-export interface SpriteBody {id:string;x:number;y:number;size:number;effects:WorldEffect[]}
+export interface SpriteBody {id:string;x:number;y:number;size:number;effects:WorldEffect[];contour?:SpriteContour|null;material?:string}
 export class WorldPhysics {
   readonly engine=Matter.Engine.create({enableSleeping:true});
-  readonly bodies=new Map<string,{body:Matter.Body;spec:SpriteBody}>();
+  readonly bodies=new Map<string,{body:Matter.Body;spec:SpriteBody;offset:Point}>();
   private walls:Matter.Body[]=[];
   private width=1;private height=1;private elapsed=0;
   private obstacles:Matter.Body[]=[];private obstacleKey='';
@@ -26,9 +27,16 @@ export class WorldPhysics {
     const ids=new Set(specs.map(s=>s.id));
     for(const [id,{body}] of this.bodies)if(!ids.has(id)){Matter.Composite.remove(this.engine.world,body);this.bodies.delete(id);this.transitions.delete(id);}
     for(const spec of specs){const old=this.bodies.get(spec.id);
-      if(old){if(old.spec.size!==spec.size)Matter.Body.scale(old.body,spec.size/old.spec.size,spec.size/old.spec.size);old.spec=spec;continue;}
-      const body=Matter.Bodies.circle(spec.x,spec.y,spec.size*.42,{restitution:spec.effects.includes('bounce')?.8:.25,friction:.4,frictionAir:.015});
-      this.bodies.set(spec.id,{body,spec});Matter.Composite.add(this.engine.world,body);
+      if(old&&old.spec.contour===spec.contour){if(old.spec.size!==spec.size){const ratio=spec.size/old.spec.size;Matter.Body.scale(old.body,ratio,ratio);old.offset={x:old.offset.x*ratio,y:old.offset.y*ratio};}old.spec=spec;continue;}
+      const parts=spec.contour?.parts.map(points=>{const vertices=points.map(p=>({x:p.x*spec.size,y:p.y*spec.size}));const center=Matter.Vertices.centre(vertices);return Matter.Bodies.fromVertices(center.x,center.y,[vertices],{},true,.01,0);});
+      const body=parts?.length?Matter.Body.create({parts}):Matter.Bodies.circle(0,0,spec.size*.42);
+      const offset={x:body.position.x,y:body.position.y};
+      body.restitution=spec.effects.includes('bounce')?.8:.25;body.friction=.4;body.frictionAir=.015;
+      if(old){const angle=old.body.angle,c=Math.cos(angle),s=Math.sin(angle),dx=offset.x-old.offset.x,dy=offset.y-old.offset.y;
+        Matter.Body.setPosition(body,{x:old.body.position.x+c*dx-s*dy,y:old.body.position.y+s*dx+c*dy});Matter.Body.setAngle(body,angle);
+        Matter.Body.setVelocity(body,old.body.velocity);Matter.Body.setAngularVelocity(body,old.body.angularVelocity);Matter.Composite.remove(this.engine.world,old.body);
+      }else Matter.Body.setPosition(body,{x:spec.x+offset.x,y:spec.y+offset.y});
+      this.bodies.set(spec.id,{body,spec,offset});Matter.Composite.add(this.engine.world,body);
     }
   }
   step(delta:number,mode:'normal'|'water'|'zero',effects:WorldEffect[]=[]){

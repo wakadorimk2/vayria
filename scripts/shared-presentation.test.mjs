@@ -48,3 +48,35 @@ test('tutorial dismissal persists, restores on reads, and tolerates disabled sto
     assert.equal(t.tutorialDismissed(),false);t.dismissTutorial();assert.equal(events,2);
   }finally{Object.assign(globalThis,previous);}
 });
+
+const {alphaContour}=await load('src/sharedWorld/spriteContour.ts');
+const {InterventionFeed}=await load('src/sharedWorld/interventions.ts');
+const silhouette=()=>{const data=new Uint8ClampedArray(64*64*4);for(let y=8;y<56;y++)for(let x=20;x<(y<32?44:30);x++)data[(y*64+x)*4+3]=255;data[3]=255;return alphaContour(data,64,64);};
+test('alpha contour excludes padding and isolated pixels, preserves a concavity in bounded parts',()=>{
+  const shape=silhouette();assert.ok(shape.parts.length<=16);const points=shape.parts.flat();
+  assert.ok(Math.min(...points.map(p=>p.x))>=20/64-.5);assert.ok(Math.max(...points.map(p=>p.y))<=56/64-.5);
+  const lower=shape.parts.filter(p=>Math.min(...p.map(v=>v.y))>=0);assert.ok(lower.length);assert.ok(lower.flat().every(v=>v.x<=30/64-.5));
+  assert.equal(alphaContour(new Uint8ClampedArray(16*32*4),16,32),null);
+});
+test('contour replacement preserves rendered origin, angle, velocity and count',()=>{
+  const p=new WorldPhysics();const spec={id:'one',x:200,y:200,size:128,effects:[]};p.sync([spec]);
+  const before=p.bodies.get('one');before.body.angle=.4;before.body.velocity.x=2;before.body.velocity.y=3;before.body.angularVelocity=.01;
+  p.sync([{...spec,contour:silhouette()}]);const after=p.bodies.get('one');const c=Math.cos(.4),s=Math.sin(.4);
+  assert.ok(Math.abs(after.body.position.x-c*after.offset.x+s*after.offset.y-200)<.001);
+  assert.ok(Math.abs(after.body.position.y-s*after.offset.x-c*after.offset.y-200)<.001);
+  assert.equal(after.body.angle,.4);assert.equal(after.body.velocity.x,2);assert.equal(after.body.velocity.y,3);assert.equal(p.bodies.size,1);p.dispose();
+});
+test('96 compound silhouettes stay finite through gravity changes',()=>{
+  const p=new WorldPhysics();p.resize(1024,1366);const contour=silhouette();p.sync(Array.from({length:96},(_,i)=>({id:String(i),x:100+i%8*110,y:20+Math.floor(i/8)*70,size:128,effects:[],contour})));
+  for(const mode of ['normal','water','zero'])for(let i=0;i<120;i++)p.step(1000/60,mode);
+  for(const {body} of p.bodies.values())assert.ok(Number.isFinite(body.position.x)&&Number.isFinite(body.position.y));p.dispose();
+});
+test('interventions baseline, deduplicate, aggregate, expire and reset without replay',()=>{
+  const f=new InterventionFeed();const state={roomId:'r',epoch:0,sequence:1,history:[]};f.update(state,0);
+  const input=(n,name='A')=>({eventId:String(n),sequence:n,name,participant:name,cardId:'chicken',at:n});
+  state.history=[input(1),input(2)];state.sequence=2;assert.equal(f.update(state,100).length,1);
+  assert.equal(f.update(state,200)[0].count,1);state.history.push(input(3));state.sequence=3;assert.equal(f.update(state,300)[0].count,2);
+  for(let i=4;i<54;i++)state.history.push(input(i,String(i)));state.sequence=53;assert.equal(f.update(state,500).length,3);
+  assert.equal(f.update(state,5000).length,0);state.history.push(input(54));state.sequence=54;assert.equal(f.update(state,6000,true).length,0);
+  assert.equal(f.update({...state,epoch:1},7000).length,0);
+});

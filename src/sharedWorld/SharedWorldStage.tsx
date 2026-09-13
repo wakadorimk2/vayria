@@ -1,3 +1,4 @@
+import { InterventionComments } from './InterventionComments';
 import { PhysicsLayer } from './PhysicsLayer';
 import { SharedBackground } from './SharedBackground';
 import { useEffect, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from 'react';
@@ -8,7 +9,7 @@ import { placeVisualProp } from '../visual/placement';
 import { cardPool } from '../cards/cardPool';
 import { worldCardMeaning, worldMatchPresentation } from './cards';
 import { activeCardPhysics } from './hand';
-import { elementStage, traceWeight, worldSpriteGroups, type WorldElement } from './state';
+import { elementStage, worldSpriteGroups, type WorldElement } from './state';
 import type { SharedWorldClient } from './useSharedWorld';
 import './sharedWorld.css';
 const layoutSink={setLayout:()=>{}};
@@ -44,7 +45,6 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
   const activePhysics=state.cardSlots?activeCardPhysics(state.cardSlots):state.physics??{mode:'normal' as const,effects:[]};
   const environment=[...(state.cardSlots??[])].sort((a,b)=>b.sequence-a.sequence).map(s=>cardPool.find(c=>c.id===s.cardId)).find(c=>c&&worldCardMeaning(c).category==='環境');
   const atmosphere=environment?worldMatchPresentation(environment):null;
-  const reaction=state.cardReaction&&now-state.cardReaction.at<1500?cardPool.find(c=>c.id===state.cardReaction!.cardId):null;
   const source=resetting?world.sweepElements:state.elements;
   const visible=source.filter(e=>e.status==='ready'||e.status==='displayed').sort((a,b)=>b.reinforcedAt-a.reinforcedAt);
   if(match&&matchCard&&presentation?.flock){const existing=visible.find(e=>e.kind==='prop'&&e.sourceCardIds.includes(match.cardId)&&e.assetUrl);visible.unshift({id:`match-${match.id}`,concept:worldCardMeaning(matchCard).subject,kind:'prop',status:'displayed',sourceCardIds:[match.cardId],count:32,effects:[],reinforcedAt:match.at,...(existing?.assetUrl?{assetUrl:existing.assetUrl}:{})});}
@@ -58,13 +58,13 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
   const occupied:WorldRect[]=[];
   const {bounds,protectedRects}=geometry;
   return <>
+    <InterventionComments key={`${state.roomId}:${state.epoch}`} face={layout.face}/>
     <SharedBackground key={state.epoch} elements={visible.filter(e=>elementStage(e,now)!=='trace')} desiredId={state.desiredBackgroundId} onDisplayed={displayed} onFailed={id=>{void world.displayed(id,true);}}/>
     {atmosphere&&!resetting&&<div className="shared-card-atmosphere" style={{'--atmosphere-hue':environment?.id==='underwater'?205:environment?.id==='space'?265:atmosphere.hue} as CSSProperties} aria-hidden/>}
     {match&&presentation&&<div className="shared-match-decoration" style={{'--match-hue':presentation.hue,'--match-elapsed':`${-(now-match.at)/1000}s`} as CSSProperties} aria-hidden>{Array.from({length:12},(_,i)=><span key={i} style={{left:`${(i*29+match.seed)%94}%`,top:`${(i*17+match.seed)%90}%`}}>{presentation.icon==='🃏'?presentation.label:presentation.icon}</span>)}</div>}
     <div ref={root} className={`shared-world-layer ${chaos?'chaos':''} ${resetting?'sweeping':''}`} aria-label="共有世界の小物">
-      {!resetting&&reaction&&worldCardMeaning(reaction).category!=='モノ'&&<div key={state.cardReaction!.id} className="shared-card-feedback" style={{'--reaction-hue':worldMatchPresentation(reaction).hue,'--reaction-elapsed':`${-(now-state.cardReaction!.at)/1000}s`} as CSSProperties} aria-hidden>{worldCardMeaning(reaction).icon}</div>}
       {physics&&!resetting&&<PhysicsLayer protectedRects={chaos?[]:[layout.face]} root={root} epoch={state.epoch} mode={activePhysics.mode} effects={[...activePhysics.effects,...(presentation?.effects??[])]}/>}
-      {worldSpriteGroups(visible,now,chaos).flatMap(({element,phase,copies},group)=>{
+      {worldSpriteGroups(visible,now,chaos).filter(group=>group.phase==='foreground').flatMap(({element,phase,copies},group)=>{
         const background=phase!=='foreground';
         return Array.from({length:Math.max(0,copies)},(_,i)=>{
           let rect:WorldRect|null;
@@ -75,7 +75,7 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
           if(!rect||(!physics||background)&&protectedRects.some(r=>overlaps(r,rect!)))return null;if(!chaos&&!background)occupied.push(rect);
           const x=(bounds?.x??0)+(rect.x+rect.width/2)*(bounds?.width??1);const y=(bounds?.y??0)+(rect.y+rect.height/2)*(bounds?.height??1);
           const retreat=pointer.until>localNow&&Math.hypot(x-pointer.x,y-pointer.y)<150;
-          const opacity=retreat?.08:phase==='trace'?Math.max(.03,.2*traceWeight(element,now)):background?.4:1;
+          const opacity=retreat?.08:background?.4:1;
           const style={left:`${rect.x*100}%`,top:`${rect.y*100}%`,width:`${rect.width*100}%`,height:`${rect.height*100}%`,opacity,'--delay':`${-i*.23}s`} as CSSProperties;
           const sprite:ReactNode=<Sprite element={element} onDisplayed={()=>displayed(element)}/>;
           const sizeOverride=activePhysics.effects.some(e=>e==='grow'||e==='shrink');

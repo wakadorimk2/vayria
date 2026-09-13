@@ -1,3 +1,4 @@
+import { InterventionFeed } from './interventions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { publicUrl } from '../public/paths';
 import { publicFetch, publicSessionId, publicActive } from '../public/session';
@@ -20,11 +21,14 @@ export function useSharedWorld(guestRoom?:string){
   // A duplicated tab must not inherit the exhibition lease of its opener.
   const [clientId]=useState(()=>crypto.randomUUID());
   const current=useRef(snapshot);const previousEpoch=useRef<number|null>(null);const attempted=useRef(new Set<string>());const activeJobs=useRef(new Map<string,AbortController>());
+  const feed=useRef(new InterventionFeed());const feedBaseline=useRef(true);
   const receive=useCallback((next:WorldSnapshot)=>{
     if(!next?.roomId)return;
     next={...next,receivedAt:Date.now()};
     if(current.current&&next.revision<current.current.revision)return;
     if(previousEpoch.current!==null&&previousEpoch.current!==next.epoch){setSweepElements(current.current?.elements??[]);for(const controller of activeJobs.current.values())controller.abort();attempted.current.clear();}
+    const comments=feed.current.update(next,Date.now(),feedBaseline.current);feedBaseline.current=false;
+    window.dispatchEvent(new CustomEvent('vayria-world-interventions',{detail:comments}));
     previousEpoch.current=next.epoch;current.current=next;setSnapshot(next);
     window.dispatchEvent(new CustomEvent('vayria-world-state',{detail:next}));
     const auth=worldAccess();if(auth&&auth.roomId===next.roomId&&auth.epoch!==next.epoch)setWorldAccess({...auth,epoch:next.epoch});
@@ -37,8 +41,8 @@ export function useSharedWorld(guestRoom?:string){
     let heartbeat:ReturnType<typeof setInterval>|undefined;let poll:ReturnType<typeof setInterval>|undefined;let retryMs=1000;
     const connect=()=>{
       if(stopped)return;const url=new URL(publicUrl(`/api/world-room/${roomId}/events`),location.origin);url.protocol=url.protocol==='https:'?'wss:':'ws:';
-      socket=new WebSocket(url);socket.onopen=()=>{retryMs=1000;setConnected(true);};socket.onmessage=e=>{const value=JSON.parse(e.data);if(value.roomId)receive(value);};
-      socket.onclose=()=>{setConnected(false);if(!stopped){reconnect=setTimeout(connect,retryMs);retryMs=Math.min(15000,retryMs*2);}};
+      feedBaseline.current=true;socket=new WebSocket(url);socket.onopen=()=>{retryMs=1000;setConnected(true);};socket.onmessage=e=>{const value=JSON.parse(e.data);if(value.roomId)receive(value);};
+      socket.onclose=()=>{feedBaseline.current=true;setConnected(false);if(!stopped){reconnect=setTimeout(connect,retryMs);retryMs=Math.min(15000,retryMs*2);}};
       socket.onerror=()=>socket?.close();
     };
     void(async()=>{try{
@@ -50,7 +54,7 @@ export function useSharedWorld(guestRoom?:string){
         if(stopped)return;
         heartbeat=setInterval(()=>{void lease().catch(e=>{setWorldAccess(null);if(!current.current?.sharedConversation)setError(worldMessage(e.message));});},10000);
       }
-      connect();poll=setInterval(()=>{void worldFetch(roomId,'state').then(receive).catch(()=>{});},15000);
+      connect();poll=setInterval(()=>{void worldFetch(roomId,'state').then(value=>{if(socket?.readyState===WebSocket.OPEN)receive(value);}).catch(()=>{});},15000);
     }catch(e){if(!stopped)setError(worldMessage(e instanceof Error?e.message:'world_unavailable'));}})();
     const jobs=activeJobs.current;
     return()=>{stopped=true;socket?.close();clearTimeout(reconnect);clearInterval(heartbeat);clearInterval(poll);setWorldAccess(null);for(const controller of jobs.values())controller.abort();};
