@@ -39,7 +39,7 @@ const app=await build({entryPoints:['worker/shared/index.ts'],bundle:true,write:
 const storage=await build({entryPoints:['worker/worldWorker.ts'],bundle:true,write:false,format:'esm',platform:'node',external:['cloudflare:workers']});
 const key='room-conversation-fixture-not-a-secret';
 const signed=payload=>{const b=Buffer.from(JSON.stringify(payload)).toString('base64url');return b+'.'+createHmac('sha256',key).update(b).digest('base64url');};
-async function fixture({holdModel,intent}={}){
+async function fixture({holdModel,intent,handMode=false}={}){
   const calls=[];
   const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'public',modules:true,script:app.outputFiles[0].text,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],
     durableObjects:{USAGE:{className:'PublicUsage',useSQLite:true},WORLD_ROOMS:{className:'WorldRoom',scriptName:'storage',useSQLite:true}},
@@ -50,7 +50,7 @@ async function fixture({holdModel,intent}={}){
       if(path==='/v1/responses'){
         if(holdModel)await holdModel;
         const body=await request.json();const properties=body.text.format.schema.properties;assert.ok(properties.worldIntent);assert.equal(properties.visualIntent,undefined);
-        const result={text:'カニが気になるね。',emotion:'neutral',activatedCards:['chicken'],interactionAction:'take_floor',voiceAction:'take_floor',backchannelCue:'none',speechAct:'answer',expressionLevel:'low',worldIntent:intent??{actions:[]},externalAction:'none',usedReasonIds:[],internalDelta:{reasonUpdates:[]}};
+        const result={text:'カニが気になるね。',emotion:'neutral',activatedCards:[intent?.actions[0]?.sourceCardIds[0]??'chicken'],interactionAction:'take_floor',voiceAction:'take_floor',backchannelCue:'none',speechAct:'answer',expressionLevel:'low',worldIntent:intent??{actions:[]},externalAction:'none',usedReasonIds:[],internalDelta:{reasonUpdates:[]}};
         if(properties.externalAction){result.text='';result.activatedCards=[];result.speechAct=null;result.expressionLevel=null;}
         for(const field of Object.keys(result))if(!properties[field])delete result[field];
         return new Response([{type:'response.output_text.delta',delta:JSON.stringify(result)},{type:'response.completed',response:{model:'gpt-5-nano',usage:{input_tokens:10,output_tokens:10},service_tier:'default'}}].map(e=>'data: '+JSON.stringify(e)+'\n\n').join(''),{headers:{'Content-Type':'text/event-stream'}});
@@ -59,7 +59,7 @@ async function fixture({holdModel,intent}={}){
       if(path==='/v1/audio/transcriptions')return Response.json({text:'こんにちは',usage:{input_tokens:1,output_tokens:1}});
       throw new Error('unexpected provider '+path);
     }},
-    {name:'storage',modules:true,script:storage.outputFiles[0].text,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],bindings:{SHARED_CONVERSATION_ENABLED:'true'},durableObjects:{ROOM:{className:'WorldRoom',useSQLite:true}},serviceBindings:{WORLD_EXECUTOR:{name:'public',entrypoint:'WorldExecution'}}}]}));
+    {name:'storage',modules:true,script:storage.outputFiles[0].text,compatibilityDate:'2026-09-07',compatibilityFlags:['nodejs_compat'],bindings:{SHARED_CONVERSATION_ENABLED:'true',SHARED_HAND_ENABLED:String(handMode)},durableObjects:{ROOM:{className:'WorldRoom',useSQLite:true}},serviceBindings:{WORLD_EXECUTOR:{name:'public',entrypoint:'WorldExecution'}}}]}));
   const origin='https://test.example';const request=(path,body,cookie='',headers={})=>mf.dispatchFetch(origin+path,{method:body?'POST':'GET',headers:{Origin:origin,'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.1',Cookie:cookie,...headers},body:body?JSON.stringify(body):undefined});
   const admin={Authorization:'Bearer '+signed({purpose:'admin',exp:Date.now()+600000})};
   const created=await request('/api/admin',{op:'world-create',roomId:'room'},'',admin);const links=await created.json();if(created.status!==200){await mf.dispose();assert.fail(JSON.stringify(links));}
@@ -73,6 +73,14 @@ async function fixture({holdModel,intent}={}){
   const snapshot=async person=>(await request('/api/world-room/room/state',null,person.cookie)).json();
   return {mf,request,join,calls,snapshot,admin};
 }
+test('hand HTTP routes authenticate participants and normal insertion calls no provider',async()=>{
+  const f=await fixture({handMode:true});try{const person=await f.join();const state=await f.snapshot(person);assert.equal(state.hand.length,5);
+    const input={epoch:state.epoch,eventId:'hand-http',handCardId:state.hand[0].id,slotId:state.cardSlots[0].id,slotVersion:state.cardSlots[0].version};
+    assert.equal((await f.request('/api/world-room/room/insert',input)).status,403);
+    const r=await f.request('/api/world-room/room/insert',input,person.cookie);assert.equal(r.status,200);const next=await r.json();assert.equal(next.cardSlots[0].cardId,state.hand[0].cardId);assert.equal(next.hand.length,5);
+    assert.equal(f.calls.filter(p=>p==='/v1/responses'||p==='/v1/tts/synthesize').length,0);
+  }finally{await f.mf.dispose();}
+});
 test('hostless shared turn generates one LLM and one TTS; viewers reuse audio and raw APIs stay denied',async()=>{
   const f=await fixture();try{
     const a=await f.join(),b=await f.join();

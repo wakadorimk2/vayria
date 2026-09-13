@@ -18,7 +18,7 @@ export function enableSharedWorld(config){
 }
 export function checkWorldStorageConfig(config){
  if(config.name!=='vayria-shared-world-staging'||config.account_id!=='7414797104d7aca62f03fbd4faf7e5df'||config.main!=='worker/worldWorker.ts'||config.workers_dev!==false||config.preview_urls!==false||!Array.isArray(config.routes)||config.routes.length||config.assets||JSON.stringify(config.migrations)!==JSON.stringify([{tag:'world-v1',new_sqlite_classes:['WorldRoom']}]))throw new Error('World storage must remain private and staging-only');
- if(config.vars&&(Object.keys(config.vars).length!==1||!['true','false'].includes(config.vars.SHARED_CONVERSATION_ENABLED)))throw new Error('Unexpected storage settings');
+ if(config.vars&&(Object.keys(config.vars).some(k=>!['SHARED_CONVERSATION_ENABLED','SHARED_HAND_ENABLED'].includes(k))||Object.values(config.vars).some(v=>!['true','false'].includes(v))))throw new Error('Unexpected storage settings');
  if(config.services&&JSON.stringify(config.services)!==JSON.stringify([{binding:'WORLD_EXECUTOR',service:'vayria-public-staging',entrypoint:'WorldExecution'}]))throw new Error('Unexpected execution binding');
 }
 export function enableSharedConversation(config){const next=enableSharedWorld(config);next.vars.SHARED_CONVERSATION_ENABLED='true';return next;}
@@ -52,7 +52,7 @@ export async function deployVisualPreview(source,pr,sha,control,sharedWorld=fals
    const preparation=structuredClone(deployConfig);preparation.vars.SHARED_CONVERSATION_ENABLED='false';
    const prepPath=join(control,'.wrangler/conversation-prepare.json');await writeFile(prepPath,JSON.stringify(preparation));
    run(process.execPath,[wrangler,'deploy','--config',prepPath,'--env-file',join(control,'deploy/placeholder.env')],control);
-   storage.vars.SHARED_CONVERSATION_ENABLED='true';storage.main=resolve(source,storage.main);
+   storage.vars.SHARED_CONVERSATION_ENABLED='true';storage.vars.SHARED_HAND_ENABLED='true';storage.main=resolve(source,storage.main);
    worldConfig=join(control,'.wrangler/conversation-storage.json');await writeFile(worldConfig,JSON.stringify(storage));
   }
   const worldOutput=run(process.execPath,[wrangler,'deploy','--config',worldConfig,'--env-file',join(control,'deploy/placeholder.env')],source);

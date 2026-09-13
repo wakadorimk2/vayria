@@ -201,7 +201,7 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
     input.programContext={...DEFAULT_PROGRAM_CONTEXT,...program,worldContext:worldGuard.context};
     await worldCall(env,worldGuard.member.roomId,worldGuard.member.actor,'host',{op:'decision',...worldLease(request),decisionId:request.headers.get('X-Performer-Turn-Id')??crypto.randomUUID(),autonomous:input.mode==='autonomous'});
   }
-  if (url.pathname === '/api/chat') readChatRequest(input);
+  if (url.pathname === '/api/chat') readChatRequest(input,!!sharedContext);
   if (url.pathname === '/api/card-preview') readCardPreviewRequest(input);
   let ticket: Ticket | null = null;
   if (url.pathname === '/api/tts') {

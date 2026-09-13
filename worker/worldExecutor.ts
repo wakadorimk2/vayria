@@ -20,7 +20,10 @@ export class WorldExecution extends WorkerEntrypoint<Env> {
   async conversation(input:WorldExecutionInput,audio?:ArrayBuffer):Promise<WorldExecutionResult>{
     let text=input.slot.text??'';
     if(audio){const result=await(await this.request(input.slot,'/api/transcribe',audio)).json() as {text:string};text=result.text.trim();if(!text)throw new Error('no-speech');}
-    const brainCardIds=[...new Set([...input.brainCardIds,...cardPool.map(c=>c.id)])].slice(0,5);
+    // The legacy speech contract still takes five IDs. Pad only with a current
+    // card; exact occupied slots and multiplicities remain in the room context.
+    const brainCardIds=(input.brainCardIds.length?input.brainCardIds:cardPool.slice(0,5).map(c=>c.id)).slice(0,5);
+    while(brainCardIds.length<5)brainCardIds.push(brainCardIds[0]);
     const episodeId=`world-${input.slot.id}`;
     const payload={mode:input.slot.kind==='autonomous'?'autonomous':input.slot.kind==='voice'?'voice':'manual',...(input.slot.kind==='autonomous'?{
       topic:null,topicTurns:0,viewerIntent:null,viewerTurnsSince:0,viewerEngagement:'available',

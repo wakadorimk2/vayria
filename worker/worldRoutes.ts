@@ -29,7 +29,7 @@ export async function guardWorldRequest(request:Request,env:WorldEnv){
 }
 export async function worldRoute(request:Request,env:WorldEnv,ledger:VisualLedger,visitor:string,session:string){
   if(env.SHARED_WORLD_ENABLED!=='true'||!env.WORLD_ROOMS)throw new LimitError('world_disabled',0,404);
-  const url=new URL(request.url);const match=/^\/api\/world-room\/([\w-]+)\/(join|state|events|card|lease|element|prepare|asset|media|conversation|cancel|voice|display|presence|generation)(?:\/([\w-]+))?$/.exec(url.pathname);
+  const url=new URL(request.url);const match=/^\/api\/world-room\/([\w-]+)\/(join|state|events|card|insert|hand-reset|lease|element|prepare|asset|media|conversation|cancel|voice|display|presence|generation)(?:\/([\w-]+))?$/.exec(url.pathname);
   if(!match)throw new LimitError('not_found',0,404);const [,roomId,op,assetId]=match;
   const input=request.method==='POST'&&op!=='voice'?JSON.parse(new TextDecoder().decode(await boundedBody(request,18000))) as Record<string,unknown>:{};
   if(op==='join'&&request.method==='POST'){
@@ -81,7 +81,7 @@ export async function worldRoute(request:Request,env:WorldEnv,ledger:VisualLedge
   }
   if(op==='state'&&request.method==='GET')return Response.json(await call({op}));
   if(request.method!=='POST')throw new LimitError('method_not_allowed',0,405);
-  if(op==='card')return Response.json(await call({...input,op}));
+  if(['card','insert','hand-reset'].includes(op))return Response.json(await call({...input,op}));
   if(member.role!=='host')throw new LimitError('forbidden',0,403);
   if(op==='lease')return Response.json(await call({...input,op}));
   await call({op:'guard',...worldLease(request)});

@@ -6,7 +6,8 @@ import type { SharedWorldState, WorldElement } from './state';
 import type { VisualAsset } from '../visual/types';
 import { cardPool } from '../cards/cardPool';
 import type { conversationView } from './conversation';
-export type WorldSnapshot=Omit<SharedWorldState,'host'>&{host:{clientId:string;until:number}|null;serverNow:number;receivedAt?:number;sharedConversation?:boolean;conversationView?:ReturnType<typeof conversationView>};
+import type { HandCard, WorldCardSlot } from './hand';
+export type WorldSnapshot=Omit<SharedWorldState,'host'>&{hand?:HandCard[];host:{clientId:string;until:number}|null;serverNow:number;receivedAt?:number;sharedConversation?:boolean;conversationView?:ReturnType<typeof conversationView>};
 const messages:Record<string,string>={conversation_disabled:'共有会話は休止中です。',conversation_full:'ただいま会話の順番待ちがいっぱいです。',already_waiting:'あなたの入力は受付済みです。',conversation_cooldown:'少し待ってから話しかけてください。',slot_expired:'順番待ちの期限が切れました。',card_rate_limited:'少し待ってから、もう一度どうぞ。',host_already_active:'別の展示端末が動作中です。',host_lease_lost:'展示端末の接続を確認してください。',room_closed:'ただいまカードの受付を休止しています。',invalid_invite:'参加リンクを確認してください。',world_disabled:'共有世界は現在無効です。',visual_disabled:'画像生成はOFFです。カードと既存の演出は使えます。'};
 export const worldMessage=(code:string)=>messages[code]??`接続を確認してください (${code})`;
 export function useSharedWorld(guestRoom?:string){
@@ -58,6 +59,15 @@ export function useSharedWorld(guestRoom?:string){
     if(!roomId||!current.current)return;const eventId=crypto.randomUUID();
     try{await worldFetch(roomId,'card',{eventId,cardId,epoch:current.current.epoch});setReceipt(`${cardPool.find(c=>c.id===cardId)?.label??cardId} を受け付けました`);setError('');}catch(e){setError(worldMessage(e instanceof Error?e.message:'world_unavailable'));}
   },[roomId]);
+  const insertHand=useCallback(async(handCardId:string,slot:WorldCardSlot,eventId:string)=>{
+    if(!roomId||!current.current)return false;
+    try{const next=await worldFetch(roomId,'insert',{eventId,handCardId,slotId:slot.id,slotVersion:slot.version,epoch:current.current.epoch});receive(next);
+      if(next.accepted===false){setError('その枠は先に変更されました。差し込み先を選び直してください。');return false;}
+      setReceipt('カードを受け付けました');setError('');return true;
+    }catch(e){setError(worldMessage(e instanceof Error?e.message:'world_unavailable'));return false;}
+  },[roomId,receive]);
+  const nextParticipant=useCallback(async()=>{if(!roomId||!current.current?.cardSlots)return;try{receive(await worldFetch(roomId,'hand-reset',{epoch:current.current.epoch,eventId:crypto.randomUUID()}));setReceipt('次の方の手札を引きました');}catch{setError('手札を更新できませんでした。接続を確認してください。');}},[roomId,receive]);
+  useEffect(()=>{const next=()=>{void nextParticipant();};window.addEventListener('vayria-exhibition-next',next);return()=>window.removeEventListener('vayria-exhibition-next',next);},[nextParticipant]);
   const displayed=useCallback(async(elementId:string)=>{
     if(!roomId||(!current.current?.sharedConversation&&!worldAccess()))return false;
     try{await worldFetch(roomId,current.current?.sharedConversation?'display':'element',{elementId,status:'displayed',epoch:current.current?.epoch});return true;}catch{return false;}
@@ -85,7 +95,7 @@ export function useSharedWorld(guestRoom?:string){
     }
   },[roomId,role,snapshot]);
   const send=useCallback(async(text:string)=>{if(!roomId||!current.current)return false;try{receive(await worldFetch(roomId,'conversation',{id:crypto.randomUUID(),kind:'text',text,epoch:current.current.epoch}));setError('');return true;}catch(e){setError(worldMessage(e instanceof Error?e.message:'world_unavailable'));return false;}},[roomId,receive]);
-  return {send,enabled,roomId,snapshot,sweepElements,error,receipt,connected,role,insert,displayed,takeover:()=>lease(true)};
+  return {send,enabled,roomId,snapshot,sweepElements,error,receipt,connected,role,insert,insertHand,nextParticipant,displayed,takeover:()=>lease(true)};
 }
 export type SharedWorldClient=ReturnType<typeof useSharedWorld>;
 export function worldElementIcon(element:WorldElement){return element.sourceCardIds[0]??element.concept;}

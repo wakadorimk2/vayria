@@ -14,7 +14,7 @@ export async function generate(payload: unknown, preview: boolean, apiKey: strin
     const p = readCardPreviewRequest(payload);
     return generateCardPreviewReply(llm, p.cardId, p.performanceContext, telemetry);
   }
-  const p = readChatRequest(payload);
+  const p = readChatRequest(payload,sharedWorldEnabled);
   if (p.mode === 'manual' && !sharedWorldEnabled) return generateInteractiveResponse(llm, p.mode, p.message!, p.history,
     p.brainCardIds, p.forcedCardId, p.performanceContext, p.characterIdentity, p.programContext,
     telemetry, callbacks, p.earlySpeechLead, p.recentExpressionLevels, p.greeting, p.cardContinuation);

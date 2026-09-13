@@ -761,7 +761,7 @@ export function readPerformerStateContext(
   };
 }
 
-export function readChatRequest(payload: unknown): ChatRequestPayload {
+export function readChatRequest(payload: unknown, allowRepeatedCards = false): ChatRequestPayload {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new RequestError('Request body must be a JSON object.', 400);
   }
@@ -913,7 +913,7 @@ export function readChatRequest(payload: unknown): ChatRequestPayload {
       400,
     );
   }
-  if (new Set(brainCardIds).size !== BRAIN_CARD_COUNT) {
+  if (!allowRepeatedCards && new Set(brainCardIds).size !== BRAIN_CARD_COUNT) {
     throw new RequestError('brainCardIds must not contain duplicates.', 400);
   }
   if (brainCardIds.some((id) => !CARD_BY_ID.has(id))) {

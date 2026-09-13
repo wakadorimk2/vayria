@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { createHand, consumeHand, ensureCardSlots, updateCardSlot, type WorldHand } from '../src/sharedWorld/hand';
 import { advanceConversation, cancelConversation, conversationView, createRoomConversation, reserveConversation, type ConversationSlot } from '../src/sharedWorld/conversation';
 import { executionInput, type RoomEnv } from './worldExecution';
 import { applyWorldIntent, assertHost, createSharedWorld, insertWorldCard, readWorldIntent, sharedWorldContext, validId, WorldError, type SharedWorldState } from '../src/sharedWorld/state';
@@ -8,11 +9,20 @@ export class WorldRoom extends DurableObject<RoomEnv> {
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS world (id INTEGER PRIMARY KEY, state TEXT NOT NULL)');
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS receipts (participant TEXT, event TEXT, sequence INTEGER, PRIMARY KEY(participant,event))');
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS rates (participant TEXT PRIMARY KEY, tokens REAL, at REAL)');
+    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS hands (actor TEXT PRIMARY KEY, data TEXT NOT NULL)');
+    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS hand_receipts (actor TEXT, event TEXT, epoch INTEGER, PRIMARY KEY(actor,event,epoch))');
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS presence (actor TEXT PRIMARY KEY, visitor TEXT, session TEXT, until REAL)');
   }
-  private read(){const rows=this.ctx.storage.sql.exec<{state:string}>('SELECT state FROM world WHERE id=1').toArray();return rows[0]?JSON.parse(rows[0].state) as SharedWorldState:null;}
+  private read(){const rows=this.ctx.storage.sql.exec<{state:string}>('SELECT state FROM world WHERE id=1').toArray();const state=rows[0]?JSON.parse(rows[0].state) as SharedWorldState:null;if(state&&this.env.SHARED_HAND_ENABLED==='true'&&ensureCardSlots(state))this.save(state);return state;}
+  private hand(actor:string,epoch:number){
+    const row=this.ctx.storage.sql.exec<{data:string}>('SELECT data FROM hands WHERE actor=?',actor).toArray()[0];
+    const old=row?JSON.parse(row.data) as WorldHand:null;
+    if(old?.epoch===epoch)return old;
+    const hand=createHand(epoch);this.saveHand(actor,hand);return hand;
+  }
+  private saveHand(actor:string,hand:WorldHand){this.ctx.storage.sql.exec('INSERT OR REPLACE INTO hands VALUES(?,?)',actor,JSON.stringify(hand));}
   private save(state:SharedWorldState){this.ctx.storage.sql.exec('INSERT OR REPLACE INTO world VALUES(1,?)',JSON.stringify(state));}
-  private snapshot(state:SharedWorldState,role:string,actor=''){return {...state,conversation:undefined,conversationView:conversationView(state.conversation??createRoomConversation(),actor),sharedConversation:this.env.SHARED_CONVERSATION_ENABLED==='true',host:state.host?{clientId:state.host.clientId,until:state.host.until}:null,
+  private snapshot(state:SharedWorldState,role:string,actor=''){return {...state,hand:actor&&this.env.SHARED_HAND_ENABLED==='true'?this.hand(actor,state.epoch).cards:undefined,conversation:undefined,conversationView:conversationView(state.conversation??createRoomConversation(),actor),sharedConversation:this.env.SHARED_CONVERSATION_ENABLED==='true',host:state.host?{clientId:state.host.clientId,until:state.host.until}:null,
     history:state.history.slice(-32).map(e=>({...e,participant:undefined})),daily:undefined,decisions:undefined,
     ...(role==='guest'&&this.env.SHARED_CONVERSATION_ENABLED!=='true'?{elements:state.elements.map(e=>({...e,assetUrl:undefined})),displayedWorld:undefined}:{}),serverNow:Date.now()};}
   private broadcast(state:SharedWorldState){for(const socket of this.ctx.getWebSockets()){try{const a=socket.deserializeAttachment();socket.send(JSON.stringify(this.snapshot(state,a.role,a.actor)));}catch{socket.close(1011,'reconnect');}}}
@@ -108,14 +118,34 @@ export class WorldRoom extends DurableObject<RoomEnv> {
       for(const element of state.elements){if(element.status==='preparing'&&element.requestedAt&&now-element.requestedAt>90000){element.status='failed';element.error='generation_interrupted';state.revision++;this.save(state);}}
       if(state.resetUntil&&state.resetUntil<=now){state.resetUntil=0;state.revision++;this.save(state);}
       if(op==='state')return this.snapshot(state,role,actor);
-      if(op==='join'){if(!state.open)throw new WorldError('room_closed');return this.snapshot(state,role);}
+      if(op==='join'){if(!state.open)throw new WorldError('room_closed');return this.snapshot(state,role,actor);}
+      if(op==='hand-reset'){
+        if(this.env.SHARED_HAND_ENABLED!=='true'||input.epoch!==state.epoch||!validId(input.eventId))throw new WorldError('stale_world');
+        const exists=this.ctx.storage.sql.exec('SELECT event FROM hand_receipts WHERE actor=? AND event=? AND epoch=?',actor,input.eventId,state.epoch).toArray().length;
+        if(!exists){this.saveHand(actor,createHand(state.epoch));this.ctx.storage.sql.exec('INSERT INTO hand_receipts VALUES(?,?,?)',actor,input.eventId,state.epoch);state.revision++;this.save(state);changed=state;}
+        return this.snapshot(state,role,actor);
+      }
       const admin=role==='admin';
       if(op==='control'){
         if(!admin)throw new WorldError('forbidden',403);
-        if(input.action==='reset'){const old=state;state=createSharedWorld(old.roomId);state.epoch=old.epoch+1;state.revision=old.revision+1;state.resetUntil=now+1500;state.host=old.host;state.open=old.open;this.ctx.storage.sql.exec('DELETE FROM rates');}
+        if(input.action==='reset'){const old=state;state=createSharedWorld(old.roomId);state.epoch=old.epoch+1;state.revision=old.revision+1;state.resetUntil=now+1500;state.host=old.host;state.open=old.open;if(this.env.SHARED_HAND_ENABLED==='true')ensureCardSlots(state);this.ctx.storage.sql.exec('DELETE FROM rates');this.ctx.storage.sql.exec('DELETE FROM hands');this.ctx.storage.sql.exec('DELETE FROM hand_receipts');this.ctx.storage.sql.exec('DELETE FROM receipts');}
         else if(input.action==='open'||input.action==='close'){state.open=input.action==='open';state.revision++;}
         else throw new WorldError('invalid_control',400);
+      }else if(op==='insert'){
+        if(this.env.SHARED_HAND_ENABLED!=='true'||!validId(input.eventId)||input.epoch!==state.epoch||!state.open||state.resetUntil>now)throw new WorldError('stale_world');
+        const receipt=this.ctx.storage.sql.exec('SELECT event FROM hand_receipts WHERE actor=? AND event=? AND epoch=?',actor,input.eventId,state.epoch).toArray()[0];
+        if(receipt)return {...this.snapshot(state,role,actor),accepted:true,duplicate:true};
+        const slot=state.cardSlots?.find(s=>s.id===input.slotId);
+        if(!slot||slot.version!==input.slotVersion)return {...this.snapshot(state,role,actor),accepted:false,code:'slot_changed'};
+        const hand=this.hand(actor,state.epoch);const card=hand.cards.find(c=>c.id===input.handCardId);if(!card)throw new WorldError('hand_card_missing');
+        const rate=this.ctx.storage.sql.exec<{tokens:number;at:number}>('SELECT tokens,at FROM rates WHERE participant=?',actor).toArray()[0];
+        const tokens=rate?Math.min(10,rate.tokens+Math.max(0,now-rate.at)*.003):10;if(tokens<1)throw new WorldError('card_rate_limited',429);
+        insertWorldCard(state,{eventId:input.eventId,cardId:card.cardId,participant:actor,name:`参加者${actor.slice(0,4)}`},now);
+        updateCardSlot(state,slot,card.cardId,input.eventId,now);consumeHand(hand,card.id);this.saveHand(actor,hand);
+        this.ctx.storage.sql.exec('INSERT INTO hand_receipts VALUES(?,?,?)',actor,input.eventId,state.epoch);
+        this.ctx.storage.sql.exec('INSERT OR REPLACE INTO rates VALUES(?,?,?)',actor,tokens-1,now);
       }else if(op==='card'){
+        if(this.env.SHARED_HAND_ENABLED==='true')throw new WorldError('use_hand_card',409);
         if(!validId(input.eventId)||!validId(input.cardId)||!Number.isInteger(input.epoch)||input.epoch!==state.epoch)throw new WorldError('stale_world');
         const receipt=this.ctx.storage.sql.exec<{sequence:number}>('SELECT sequence FROM receipts WHERE participant=? AND event=?',actor,input.eventId).toArray()[0];
         if(receipt)return {accepted:true,duplicate:true,sequence:receipt.sequence};
@@ -165,11 +195,11 @@ export class WorldRoom extends DurableObject<RoomEnv> {
           state.revision++;
         }else throw new WorldError('invalid_operation',400);
       }
-      this.save(state);changed=state;return this.snapshot(state,role);
+      this.save(state);changed=state;return this.snapshot(state,role,actor);
     });
     if(changed)this.broadcast(changed);
     if(op==='conversation'||op==='cancel'||op==='presence')this.ctx.waitUntil(this.drive());
-    if(op==='card'&&this.env.SHARED_CONVERSATION_ENABLED==='true')await this.ctx.storage.setAlarm(Date.now()+10000);
+    if((op==='card'||op==='insert')&&this.env.SHARED_CONVERSATION_ENABLED==='true')await this.ctx.storage.setAlarm(Date.now()+10000);
     return Response.json(result,{headers:{'Cache-Control':'no-store'}});
   }catch(error){return Response.json({code:error instanceof WorldError?error.code:'world_unavailable'},{status:error instanceof WorldError?error.status:503});}}
   webSocketMessage(ws:WebSocket){ws.send(JSON.stringify({type:'pong',serverNow:Date.now()}));}

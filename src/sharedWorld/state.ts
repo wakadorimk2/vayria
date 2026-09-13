@@ -1,6 +1,7 @@
 import { cardPool } from '../cards/cardPool.js';
 import { initialWorld, type WorldState } from '../world/worldState.js';
 import { WORLD_EFFECTS, worldCardMeaning, type WorldEffect } from './cards.js';
+import { activeCardPhysics, type WorldCardSlot, type MatchBonus } from './hand.js';
 import type { RoomConversation } from './conversation.js';
 
 export const WORLD_DEFAULTS = { halfLife:180000, foregroundMs:180000, backgroundMs:1800000, traceHalfLife:86400000,
@@ -11,6 +12,7 @@ export interface WorldElement { id:string; concept:string; sourceCardIds:string[
   kind:'prop'|'background'; reinforcedAt:number; status:'preparing'|'ready'|'displayed'|'failed'; requestedAt?:number; assetUrl?:string; error?:string }
 export interface WorldInput { eventId:string; participant:string; name:string; cardId:string; at:number; sequence:number }
 export interface SharedWorldState {
+  cardSlots?:WorldCardSlot[]; matchingCardId?:string|null; matchBonus?:MatchBonus;
   schemaVersion:1; roomId:string; epoch:number; revision:number; sequence:number; open:boolean;
   weights:Record<string,{value:number;at:number;total:number}>; history:WorldInput[]; daily:Record<string,Record<string,number>>;
   elements:WorldElement[]; displayedWorld:WorldState; outcomes:string[];
@@ -68,6 +70,12 @@ export function readWorldIntent(value:unknown):WorldIntent|null{
 export const worldIntentSchema={type:'object',additionalProperties:false,properties:{actions:{type:'array',maxItems:4,items:{type:'object',additionalProperties:false,
   properties:{type:{type:'string',enum:['prop','background','effect','duplicate','physics']},targetId:{type:'string'},concept:{type:'string'},sourceCardIds:{type:'array',items:{type:'string',enum:cardPool.map(c=>c.id)},minItems:1,maxItems:8},effects:{type:'array',items:{type:'string',enum:WORLD_EFFECTS},maxItems:6},count:{type:'integer',minimum:1,maximum:1000}},required:['type','targetId','concept','sourceCardIds','effects','count']}}},required:['actions']};
 export function applyWorldIntent(state:SharedWorldState,intent:WorldIntent,decisionId:string,now:number){
+  // Active card effects are computed from the current slots, never baked into
+  // late generation results. Other model-authored object effects remain intrinsic.
+  if(state.cardSlots)intent={actions:intent.actions.filter(a=>a.type!=='physics'||a.targetId!==''&&!a.sourceCardIds.some(id=>['zero-gravity','space','underwater','float'].includes(id))).map(a=>{
+    const cardEffects=new Set(a.sourceCardIds.flatMap(id=>{const card=cardPool.find(c=>c.id===id);return card?worldCardMeaning(card).effects:[];}));
+    return {...a,effects:a.effects.filter(effect=>!cardEffects.has(effect)||effect==='multiply')};
+  })};
   if(state.decisions.includes(decisionId))return [];
   for(const a of intent.actions){if(a.sourceCardIds.some(id=>!state.weights[id]))throw new WorldError('unknown_card_source',400);
     if(a.type==='physics'&&!['normal','water','zero'].includes(a.concept))throw new WorldError('invalid_physics_mode',400);
@@ -97,10 +105,13 @@ export function assertHost(state:SharedWorldState,visitor:string,clientId:string
   if(!state.host||state.host.visitor!==visitor||state.host.clientId!==clientId||state.host.token!==token||state.host.until<=now||state.epoch!==epoch||state.resetUntil>now)throw new WorldError('host_lease_lost',403);
 }
 export function sharedWorldContext(state:SharedWorldState,now:number){const context={
+  activeSlots:state.cardSlots?.map(s=>({slot:s.id,cardId:s.cardId,sequence:s.sequence})),
+  activeCounts:state.cardSlots?.reduce<Record<string,number>>((counts,s)=>{if(s.cardId)counts[s.cardId]=(counts[s.cardId]??0)+1;return counts;},{}),
+  activeInstruction:state.cardSlots?'The five active slots are the strong current rules. Preserve duplicates and slot order. Historical cards below are weak residual traces, not active rules. Do not restore an ejected rule. Existing objects and backgrounds may remain. Physical slot effects are applied by the server; do not bake them into generated appearances.':undefined,
   cards:Object.entries(state.weights).map(([id,e])=>({id,weight:Math.round(cardWeight(e,now)*1000)/1000,total:e.total,unexpressed:!state.elements.some(x=>x.status!=='failed'&&x.sourceCardIds.includes(id))})),
   recentOrder:state.history.slice(-32).map(e=>({cardId:e.cardId,sequence:e.sequence})),
   elements:[...state.elements].sort((a,b)=>b.reinforcedAt-a.reinforcedAt).slice(0,16).map(e=>({id:e.id,concept:e.concept,count:e.count,effects:e.effects,status:e.status,stage:elementStage(e,now),influence:Math.round(traceWeight(e,now)*1000)/1000,sourceCardIds:e.sourceCardIds})),
-  physics:state.physics??{mode:'normal',effects:[]},
+  physics:state.cardSlots?activeCardPhysics(state.cardSlots):state.physics??{mode:'normal',effects:[]},
   displayedWorld:{location:state.elements.some(e=>e.kind==='background'&&e.status==='displayed'&&elementStage(e,now)!=='trace')?state.displayedWorld.location:initialWorld().location},outcomes:state.outcomes.slice(-6).map(text=>text.slice(0,240)),
   instruction:'Cards seed possibilities, not immediate generation. Interpret minority cards and order too. Choose your own moment, or actions []. Use worldIntent (up to four actions) for props, effects, duplicates, backgrounds, physics. Physics uses concept normal, water, or zero; empty targetId applies to the room. A single decision may combine background and physics actions. Use generic English concepts. Source IDs must be present. Dancing is sprite dance, never video. Do not claim preparing/ready/failed objects are visible. Refer only to displayed objects as seen. Never claim to hold them. Acknowledge an attempt rather than promise success.',
 };

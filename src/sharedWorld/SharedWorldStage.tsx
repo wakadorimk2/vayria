@@ -5,7 +5,8 @@ import { useWorldLayout } from '../world/useWorldLayout';
 import { overlaps, type WorldRect } from '../world/worldLayout';
 import { placeVisualProp } from '../visual/placement';
 import { cardPool } from '../cards/cardPool';
-import { worldCardMeaning } from './cards';
+import { worldCardMeaning, worldMatchPresentation } from './cards';
+import { activeCardPhysics } from './hand';
 import { elementStage, traceWeight, worldSpriteGroups, type WorldElement } from './state';
 import type { SharedWorldClient } from './useSharedWorld';
 import './sharedWorld.css';
@@ -35,9 +36,14 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
   const state=world.snapshot;if(!state)return null;
   const physics=import.meta.env.VITE_SHARED_PHYSICS_ENABLED==='true';
   const now=localNow+state.serverNow-(state.receivedAt??state.serverNow);
-  const resetting=state.resetUntil>now;const chaos=!!state.chaos&&now-state.chaos.at<10000;
+  const resetting=state.resetUntil>now;
+  const match=!resetting&&state.matchBonus&&now-state.matchBonus.at<8000?state.matchBonus:null;
+  const matchCard=cardPool.find(c=>c.id===match?.cardId);const presentation=matchCard?worldMatchPresentation(matchCard):null;
+  const chaos=!!match||!!state.chaos&&now-state.chaos.at<10000;
+  const activePhysics=state.cardSlots?activeCardPhysics(state.cardSlots):state.physics??{mode:'normal' as const,effects:[]};
   const source=resetting?world.sweepElements:state.elements;
   const visible=source.filter(e=>e.status==='ready'||e.status==='displayed').sort((a,b)=>b.reinforcedAt-a.reinforcedAt);
+  if(match&&matchCard&&presentation?.flock){const existing=visible.find(e=>e.kind==='prop'&&e.sourceCardIds.includes(match.cardId)&&e.assetUrl);visible.unshift({id:`match-${match.id}`,concept:worldCardMeaning(matchCard).subject,kind:'prop',status:'displayed',sourceCardIds:[match.cardId],count:32,effects:[],reinforcedAt:match.at,...(existing?.assetUrl?{assetUrl:existing.assetUrl}:{})});}
   const displayed=(e:WorldElement)=>{
     const key=`${state.epoch}:${e.id}`;
     if(resetting||e.status!=='ready'||(acknowledgements.current.get(key)??0)>localNow)return;
@@ -48,8 +54,9 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
   const {bounds,protectedRects}=geometry;
   return <>
     {visible.filter(e=>e.kind==='background'&&elementStage(e,now)!=='trace'&&(e.status==='displayed'||!state.desiredBackgroundId||e.id===state.desiredBackgroundId)).slice(0,2).reverse().map(e=>e.assetUrl&&<Sprite key={e.id} element={e} background onDisplayed={()=>displayed(e)}/>)}
+    {match&&presentation&&<div className="shared-match-decoration" style={{'--match-hue':presentation.hue,'--match-elapsed':`${-(now-match.at)/1000}s`} as CSSProperties} aria-hidden>{Array.from({length:12},(_,i)=><span key={i} style={{left:`${(i*29+match.seed)%94}%`,top:`${(i*17+match.seed)%90}%`}}>{presentation.icon==='🃏'?presentation.label:presentation.icon}</span>)}</div>}
     <div ref={root} className={`shared-world-layer ${chaos?'chaos':''} ${resetting?'sweeping':''}`} aria-label="共有世界の小物">
-      {physics&&!resetting&&<PhysicsLayer protectedRects={chaos?[]:[...protectedRects,layout.body,layout.face]} root={root} epoch={state.epoch} mode={state.physics?.mode??'normal'} effects={state.physics?.effects??[]}/>}
+      {physics&&!resetting&&<PhysicsLayer protectedRects={chaos?[]:[...protectedRects,layout.body,layout.face]} root={root} epoch={state.epoch} mode={activePhysics.mode} effects={[...activePhysics.effects,...(presentation?.effects??[])]}/>}
       {worldSpriteGroups(visible,now,chaos).flatMap(({element,phase,copies},group)=>{
         const background=phase!=='foreground';
         return Array.from({length:Math.max(0,copies)},(_,i)=>{
@@ -64,11 +71,14 @@ export function SharedWorldStage({world,stage}:{world:SharedWorldClient;stage:Re
           const opacity=retreat?.08:phase==='trace'?Math.max(.03,.2*traceWeight(element,now)):background?.4:1;
           const style={left:`${rect.x*100}%`,top:`${rect.y*100}%`,width:`${rect.width*100}%`,height:`${rect.height*100}%`,opacity,'--delay':`${-i*.23}s`} as CSSProperties;
           const sprite:ReactNode=<Sprite element={element} onDisplayed={()=>displayed(element)}/>;
-          const animated=element.effects.filter(effect=>!physics||background||!['fall','dance','float','rotate','bounce','sway','slide','grow','shrink'].includes(effect)).reduce<ReactNode>((child,e)=><div className={`world-effect world-${e}`}>{child}</div>,sprite);
-          return <div data-physics-id={physics&&!background&&!resetting?`${element.id}:${i}`:undefined} data-x={rect.x} data-y={rect.y} data-size={element.effects.includes('grow')?.14:element.effects.includes('shrink')?.05:.09} data-effects={JSON.stringify(element.effects)} className={`shared-world-sprite ${background?'distant':''}`} key={`${element.id}:${i}`} style={style}><div>{animated}</div></div>;
+          const sizeOverride=activePhysics.effects.some(e=>e==='grow'||e==='shrink');
+          const intrinsic=element.effects.filter(e=>!sizeOverride||e!=='grow'&&e!=='shrink');
+          const effects=[...new Set([...intrinsic,...activePhysics.effects,...(presentation?.effects??[])])];
+          const animated=effects.filter(effect=>!physics||background||!['fall','dance','float','rotate','bounce','sway','slide','grow','shrink'].includes(effect)).reduce<ReactNode>((child,e)=><div className={`world-effect world-${e}`}>{child}</div>,sprite);
+          return <div data-physics-id={physics&&!background&&!resetting?`${element.id}:${i}`:undefined} data-x={rect.x} data-y={rect.y} data-size={effects.includes('grow')?.14:effects.includes('shrink')?.05:.09} data-effects={JSON.stringify(element.effects)} className={`shared-world-sprite ${background?'distant':''}`} key={`${element.id}:${i}`} style={style}><div>{animated}</div></div>;
         });
       })}
-      {chaos&&<p className="shared-world-chaos">{cardPool.find(c=>c.id===state.chaos?.cardId)?.label}群予告</p>}
+      {chaos&&<p className="shared-world-chaos">{match?`${presentation?.label}、5枚揃い！`: `${cardPool.find(c=>c.id===state.chaos?.cardId)?.label}群予告`}</p>}
       {resetting&&<p className="shared-world-chaos">🌪️ お片づけ！</p>}
     </div>
   </>;

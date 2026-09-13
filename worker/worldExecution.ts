@@ -10,8 +10,8 @@ export interface WorldExecutor {
   conversation(input:WorldExecutionInput, audio?:ArrayBuffer):Promise<WorldExecutionResult>;
   visual(input:{roomId:string;epoch:number;slot:ConversationSlot;element:WorldElement}):Promise<{assetUrl?:string;error?:string}>;
 }
-export interface RoomEnv { WORLD_EXECUTOR?:WorldExecutor; SHARED_CONVERSATION_ENABLED?:string }
+export interface RoomEnv { WORLD_EXECUTOR?:WorldExecutor; SHARED_CONVERSATION_ENABLED?:string; SHARED_HAND_ENABLED?:string }
 export function executionInput(state:SharedWorldState,slot:ConversationSlot,context:string):WorldExecutionInput {
   return {roomId:state.roomId,epoch:state.epoch,slot,context,history:state.conversation?.history.slice(-20)??[],
-    brainCardIds:Object.keys(state.weights).slice(-5)};
+    brainCardIds:state.cardSlots?state.cardSlots.flatMap(s=>s.cardId?[s.cardId]:[]):Object.keys(state.weights).slice(-5)};
 }
