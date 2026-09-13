@@ -3,15 +3,18 @@ import { initialWorld, type WorldState } from '../world/worldState.js';
 import { WORLD_EFFECTS, worldCardMeaning, type WorldEffect } from './cards.js';
 import { activeCardPhysics, type WorldCardSlot, type MatchBonus } from './hand.js';
 import type { RoomConversation } from './conversation.js';
+import type { WorldGeneration } from './generation.js';
 
 export const WORLD_DEFAULTS = { halfLife:180000, foregroundMs:180000, backgroundMs:1800000, traceHalfLife:86400000,
   foregroundLimit:24, chaosLimit:96, backgroundLimit:6, historyLimit:10000, threshold:10, windowMs:30000, leaseMs:30000 };
 export type WorldIntent = { actions: { type:'prop'|'background'|'effect'|'duplicate'|'physics'; targetId:string; concept:string;
   sourceCardIds:string[]; effects:WorldEffect[]; count:number }[] };
 export interface WorldElement { id:string; concept:string; sourceCardIds:string[]; effects:WorldEffect[]; count:number;
-  kind:'prop'|'background'; reinforcedAt:number; status:'preparing'|'ready'|'displayed'|'failed'; requestedAt?:number; assetUrl?:string; error?:string }
+  kind:'prop'|'background'; reinforcedAt:number; status:'preparing'|'ready'|'displayed'|'failed'; requestedAt?:number; assetUrl?:string; error?:string; simplified?:boolean }
 export interface WorldInput { eventId:string; participant:string; name:string; cardId:string; at:number; sequence:number }
 export interface SharedWorldState {
+  generation?:WorldGeneration;
+  cardReaction?:{id:string;cardId:string;at:number};
   cardSlots?:WorldCardSlot[]; matchingCardId?:string|null; matchBonus?:MatchBonus;
   schemaVersion:1; roomId:string; epoch:number; revision:number; sequence:number; open:boolean;
   weights:Record<string,{value:number;at:number;total:number}>; history:WorldInput[]; daily:Record<string,Record<string,number>>;

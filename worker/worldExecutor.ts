@@ -10,6 +10,10 @@ import type { WorldElement } from '../src/sharedWorld/state';
 // Only the private storage Worker binds this entrypoint. No browser route accepts
 // a visitor identity, model context, or generation command on its behalf.
 export class WorldExecution extends WorkerEntrypoint<Env> {
+  async visualPermission(input:{visitor:string;session:string}){
+    if(this.env.GENERATION_ENABLED!=='true'||this.env.MANIFESTATION_ENABLED!=='true')return false;
+    try{return (await ledger<{enabled:boolean}>(this.env,'visualPermission',{visitor:input.visitor,id:input.session})).enabled;}catch{return false;}
+  }
   private async request(slot:ConversationSlot,path:string,payload:object|ArrayBuffer,context?:string){
     if(this.env.SHARED_CONVERSATION_ENABLED!=='true')throw new LimitError('conversation_disabled',0,409);
     const base=this.env.PUBLIC_BASE_PATH??'';const origin='https://'+this.env.PUBLIC_HOSTNAME;

@@ -39,6 +39,14 @@ const meanings = new Map(additions.map(([id,,category,subject,icon,effects]) => 
 export function worldCardMeaning(card: WildcardCardData): WorldCardMeaning {
   return meanings.get(card.id) ?? {category:'雰囲気',subject:card.label,icon:'🃏',effects:[],examples:['会話','現在の世界'],...legacy[card.id]};
 }
+/** Rendering-only changes deliberately do not create new material requests. */
+export function worldCardVisual(card:WildcardCardData):{target?:'background'|'prop';modifier?:string}{
+  const meaning=worldCardMeaning(card);
+  if(meaning.category==='モノ')return {target:'prop'};
+  if(['underwater','space','desert','snow','forest','rain','distant-thunder'].includes(card.id))return {target:'background'};
+  const modifiers:Record<string,string>={fluffy:'fluffy',golden:'golden',ice:'icy',cute:'cute',ominous:'ominous',luxurious:'luxurious',quiet:'serene'};
+  return {modifier:modifiers[card.id]};
+}
 // Each card has a stable motif and colour; effects reuse its semantic definition.
 export function worldMatchPresentation(card:WildcardCardData){
   const meaning=worldCardMeaning(card);

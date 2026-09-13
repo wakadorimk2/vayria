@@ -68,9 +68,9 @@ export function useSharedWorld(guestRoom?:string){
   },[roomId,receive]);
   const nextParticipant=useCallback(async()=>{if(!roomId||!current.current?.cardSlots)return;try{receive(await worldFetch(roomId,'hand-reset',{epoch:current.current.epoch,eventId:crypto.randomUUID()}));setReceipt('次の方の手札を引きました');}catch{setError('手札を更新できませんでした。接続を確認してください。');}},[roomId,receive]);
   useEffect(()=>{const next=()=>{void nextParticipant();};window.addEventListener('vayria-exhibition-next',next);return()=>window.removeEventListener('vayria-exhibition-next',next);},[nextParticipant]);
-  const displayed=useCallback(async(elementId:string)=>{
+  const displayed=useCallback(async(elementId:string,failed=false)=>{
     if(!roomId||(!current.current?.sharedConversation&&!worldAccess()))return false;
-    try{await worldFetch(roomId,current.current?.sharedConversation?'display':'element',{elementId,status:'displayed',epoch:current.current?.epoch});return true;}catch{return false;}
+    try{await worldFetch(roomId,current.current?.sharedConversation?'display':'element',{elementId,status:failed?'load_failed':'displayed',epoch:current.current?.epoch});return true;}catch{return false;}
   },[roomId]);
   useEffect(()=>{
     if(snapshot?.sharedConversation)return;

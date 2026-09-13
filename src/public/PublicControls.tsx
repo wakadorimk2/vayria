@@ -203,6 +203,7 @@ export default function PublicControls({ sharedWorld = false, queueStatus, visua
       </button>
     </div>
     <PublicSettingsPanel layout={settingsLayout} open={expanded} onClose={closeSettings}>
+    {sharedWorld&&<button onClick={()=>{cancelRequest();window.dispatchEvent(new Event('vayria-exhibition-next'));closeSettings();}}>次の参加者</button>}
     <fieldset className="public-theme" data-resolved-theme={resolvedTheme}><legend>テーマ</legend>
       {(['auto', 'light', 'dark'] as const).map((value, index) => <label key={value} title={['自動（端末の設定に合わせる）', 'ライト', 'ダーク'][index]}>
         <input className="visually-hidden" aria-label={['自動', 'ライト', 'ダーク'][index]} type="radio" name="public-theme" value={value} checked={themePreference === value} onChange={() => onThemeChange(value)} />

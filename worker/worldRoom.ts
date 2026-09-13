@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { reserveCardGeneration, immediateCardReaction, prepareGeneration, queueConversationVisuals, cardVisualActions, visualKey } from '../src/sharedWorld/generation';
 import { createHand, consumeHand, ensureCardSlots, updateCardSlot, type WorldHand } from '../src/sharedWorld/hand';
 import { advanceConversation, cancelConversation, conversationView, createRoomConversation, reserveConversation, type ConversationSlot } from '../src/sharedWorld/conversation';
 import { executionInput, type RoomEnv } from './worldExecution';
@@ -22,10 +23,45 @@ export class WorldRoom extends DurableObject<RoomEnv> {
   }
   private saveHand(actor:string,hand:WorldHand){this.ctx.storage.sql.exec('INSERT OR REPLACE INTO hands VALUES(?,?)',actor,JSON.stringify(hand));}
   private save(state:SharedWorldState){this.ctx.storage.sql.exec('INSERT OR REPLACE INTO world VALUES(1,?)',JSON.stringify(state));}
-  private snapshot(state:SharedWorldState,role:string,actor=''){return {...state,hand:actor&&this.env.SHARED_HAND_ENABLED==='true'?this.hand(actor,state.epoch).cards:undefined,conversation:undefined,conversationView:conversationView(state.conversation??createRoomConversation(),actor),sharedConversation:this.env.SHARED_CONVERSATION_ENABLED==='true',host:state.host?{clientId:state.host.clientId,until:state.host.until}:null,
+  private snapshot(state:SharedWorldState,role:string,actor=''){return {...state,generation:undefined,hand:actor&&this.env.SHARED_HAND_ENABLED==='true'?this.hand(actor,state.epoch).cards:undefined,conversation:undefined,conversationView:conversationView(state.conversation??createRoomConversation(),actor),sharedConversation:this.env.SHARED_CONVERSATION_ENABLED==='true',host:state.host?{clientId:state.host.clientId,until:state.host.until}:null,
     history:state.history.slice(-32).map(e=>({...e,participant:undefined})),daily:undefined,decisions:undefined,
     ...(role==='guest'&&this.env.SHARED_CONVERSATION_ENABLED!=='true'?{elements:state.elements.map(e=>({...e,assetUrl:undefined})),displayedWorld:undefined}:{}),serverNow:Date.now()};}
   private broadcast(state:SharedWorldState){for(const socket of this.ctx.getWebSockets()){try{const a=socket.deserializeAttachment();socket.send(JSON.stringify(this.snapshot(state,a.role,a.actor)));}catch{socket.close(1011,'reconnect');}}}
+  private participants(){
+    const viewers=new Set(this.ctx.getWebSockets().map(s=>s.deserializeAttachment()?.actor));
+    return this.ctx.storage.sql.exec<{actor:string;visitor:string;session:string}>('SELECT actor,visitor,session FROM presence WHERE until>? ORDER BY actor LIMIT 50',Date.now()).toArray().filter(p=>viewers.has(p.actor));
+  }
+  private async schedule(at=Date.now()+10000){
+    const q=this.read()?.generation;
+    if(q?.running)at=Math.min(at,q.running.startedAt+180000);
+    else if(q?.dirty&&this.participants().length)at=Math.min(at,Math.max(q.dueAt,q.blockedUntil??0));
+    await this.ctx.storage.setAlarm(Math.max(Date.now()+100,at));
+  }
+  private async driveGeneration(){
+    let state=this.read();if(!state||!state.open||state.resetUntil>Date.now()||!this.env.WORLD_EXECUTOR||this.env.SHARED_CONVERSATION_ENABLED!=='true')return;
+    const q=state.generation;if(!q)return;
+    if(q.running&&Date.now()-q.running.startedAt>=180000){
+      for(const e of state.elements)if(e.status==='preparing'&&e.requestedAt){e.status='failed';e.error='generation_interrupted';}
+      q.running=undefined;state.revision++;this.save(state);this.broadcast(state);
+    }
+    if(q.running||!q.dirty||q.dueAt>Date.now()||(q.blockedUntil??0)>Date.now())return;
+    const candidates=this.participants();if(!candidates.length)return;
+    let person:ReturnType<WorldRoom['participants']>[number]|undefined;
+    for(const candidate of candidates)if(await this.env.WORLD_EXECUTOR.visualPermission(candidate).catch(()=>false)){person=candidate;break;}
+    const epochBefore=state.epoch;state=this.read();if(!state||state.epoch!==epochBefore||!state.open||state.resetUntil>Date.now())return;
+    if(!person){if(state.generation){state.generation.blockedUntil=Date.now()+10000;this.save(state);}await this.schedule();return;}
+    if(!this.participants().some(p=>p.actor===person.actor))return;
+    const id=crypto.randomUUID();if(!prepareGeneration(state,Date.now(),id))return;
+    this.save(state);this.broadcast(state);await this.schedule();
+    const slot:ConversationSlot={...person,id,priority:0,at:Date.now(),expires:Date.now()+180000,kind:'autonomous',status:'running'};
+    const epoch=state.epoch;
+    await this.generateElements(slot,epoch);
+    const latest=this.read();if(!latest||latest.epoch!==epoch||latest.generation?.running?.id!==id)return;
+    latest.generation.running=undefined;
+    const pending=latest.elements.filter(e=>e.status==='preparing'&&!e.requestedAt);
+    if(pending.length){latest.generation.dirty=true;latest.generation.proposals=[...latest.generation.proposals,...pending.map(e=>({type:e.kind,targetId:'',concept:e.concept,sourceCardIds:e.sourceCardIds,effects:e.effects,count:e.count}))].slice(-8);}
+    this.save(latest);await this.schedule();
+  }
   private async drive(audio?:ArrayBuffer) {
     if(this.env.SHARED_CONVERSATION_ENABLED!=='true'||!this.env.WORLD_EXECUTOR)return;
     const state=this.read();if(!state||!state.open||state.resetUntil>Date.now())return;
@@ -37,9 +73,9 @@ export class WorldRoom extends DurableObject<RoomEnv> {
       reserveConversation(c,{...person,id:crypto.randomUUID(),kind:'autonomous'},Date.now());
     }
     const slot=c.active;
-    if(!slot||slot.status!=='granted'||(slot.kind==='voice'&&!audio)){this.save(state);if(slot||c.reply||c.queue.length||people.length)await this.ctx.storage.setAlarm(Date.now()+10000);return;}
+    if(!slot||slot.status!=='granted'||(slot.kind==='voice'&&!audio)){this.save(state);if(slot||c.reply||c.queue.length||people.length)await this.schedule();return;}
     slot.status='running';slot.expires=Date.now()+180000;state.revision++;this.save(state);this.broadcast(state);
-    await this.ctx.storage.setAlarm(slot.expires);
+    await this.schedule(slot.expires);
     const epoch=state.epoch;
     try{
       const result=await this.env.WORLD_EXECUTOR.conversation(executionInput(state,slot,sharedWorldContext(state,Date.now())),audio);
@@ -51,28 +87,32 @@ export class WorldRoom extends DurableObject<RoomEnv> {
       conversation.reply={id:slot.id,text:result.text,emotion:result.emotion,motion:result.motion,audioUrl:result.audioUrl,error:result.error,startsAt:now+750,endsAt:now+750+Math.max(3000,result.durationMs)};
       conversation.active=null;
       const intent=readWorldIntent(result.worldIntent);
-      if(intent){try{applyWorldIntent(latest,intent,slot.id,now);}catch{latest.outcomes=[...latest.outcomes,'演出提案を適用できなかった。'].slice(-12);}}
+      if(intent){try{applyWorldIntent(latest,queueConversationVisuals(latest,intent,now),slot.id,now);}catch{latest.outcomes=[...latest.outcomes,'演出提案を適用できなかった。'].slice(-12);}}
       latest.revision++;this.save(latest);this.broadcast(latest);
-      this.ctx.waitUntil(this.generateElements(slot,epoch));
-      await this.ctx.storage.setAlarm(conversation.reply.endsAt);
+      this.ctx.waitUntil(latest.cardSlots?this.driveGeneration():this.generateElements(slot,epoch));
+      await this.schedule(conversation.reply.endsAt);
     }catch(error){
       const latest=this.read();if(!latest||latest.epoch!==epoch||latest.conversation?.active?.id!==slot.id)return;
       latest.conversation.active=null;latest.outcomes=[...latest.outcomes,`会話は未完了 (${error instanceof Error&&/^[a-z_]{1,80}$/.test(error.message)?error.message:'execution_failed'})`].slice(-12);
-      latest.revision++;this.save(latest);this.broadcast(latest);await this.ctx.storage.setAlarm(Date.now()+1000);
+      latest.revision++;this.save(latest);this.broadcast(latest);await this.schedule(Date.now()+1000);
     }
   }
   private async generateElements(slot:ConversationSlot,epoch:number){
     // Two independent lanes, with at most two provider jobs across the room.
     await Promise.all((['background','prop'] as const).map(async kind=>{
       for(;;){const state=this.read();if(!state||state.epoch!==epoch||!this.env.WORLD_EXECUTOR)return;
+        if(state.cardSlots&&(!this.participants().length||state.generation?.running?.id!==slot.id||state.generation?.dirty&&state.sequence>state.generation.running.sequence))return;
         if(state.elements.some(e=>e.kind===kind&&e.status==='preparing'&&e.requestedAt))return;
         const element=state.elements.find(e=>e.kind===kind&&e.status==='preparing'&&!e.requestedAt);
-        if(!element)return;element.requestedAt=Date.now();this.save(state);
+        if(!element)return;element.requestedAt=Date.now();
+        if(state.generation)state.generation.attempted=[...state.generation.attempted,visualKey(element.kind,element.concept)].slice(-512);
+        this.save(state);
         const result=await this.env.WORLD_EXECUTOR.visual({roomId:state.roomId,epoch,slot,element}).catch(()=>({error:'generation_failed'}));
         const latest=this.read();if(!latest||latest.epoch!==epoch)return;
         const target=latest.elements.find(e=>e.id===element.id);if(!target||target.status!=='preparing')continue;
-        if(kind==='background'&&latest.desiredBackgroundId&&latest.desiredBackgroundId!==target.id){target.status='failed';target.error='superseded';}
-        else if('assetUrl' in result&&result.assetUrl){target.assetUrl=result.assetUrl;target.status='ready';}
+        const currentBackground=cardVisualActions(latest).find(a=>a.type==='background');
+        if(kind==='background'&&(latest.desiredBackgroundId&&latest.desiredBackgroundId!==target.id||latest.generation?.dirty&&(!currentBackground||visualKey(kind,currentBackground.concept)!==visualKey(kind,target.concept)))){target.status='failed';target.error='superseded';}
+        else if('assetUrl' in result&&result.assetUrl){target.assetUrl=result.assetUrl;target.status='ready';if(kind==='prop')for(const e of latest.elements)if(e.simplified&&e.sourceCardIds[0]===target.sourceCardIds[0])e.assetUrl=result.assetUrl;}
         else{target.status='failed';target.error=result.error??'generation_failed';latest.outcomes=[...latest.outcomes,`${target.concept}: 未表示 (${target.error})`].slice(-12);}
         latest.revision++;this.save(latest);this.broadcast(latest);
       }
@@ -80,7 +120,7 @@ export class WorldRoom extends DurableObject<RoomEnv> {
   }
   async alarm(){const state=this.read();if(!state)return;const c=state.conversation??=createRoomConversation();
     advanceConversation(c,Date.now(),new Set(this.ctx.getWebSockets().map(s=>s.deserializeAttachment()?.actor)));
-    state.revision++;this.save(state);this.broadcast(state);await this.drive();
+    state.revision++;this.save(state);this.broadcast(state);this.ctx.waitUntil(this.driveGeneration());await this.drive();
   }
   async fetch(request:Request){try{
     const url=new URL(request.url);const actor=request.headers.get('X-World-Actor')??'';const role=request.headers.get('X-World-Role')??'guest';
@@ -141,7 +181,7 @@ export class WorldRoom extends DurableObject<RoomEnv> {
         const rate=this.ctx.storage.sql.exec<{tokens:number;at:number}>('SELECT tokens,at FROM rates WHERE participant=?',actor).toArray()[0];
         const tokens=rate?Math.min(10,rate.tokens+Math.max(0,now-rate.at)*.003):10;if(tokens<1)throw new WorldError('card_rate_limited',429);
         insertWorldCard(state,{eventId:input.eventId,cardId:card.cardId,participant:actor,name:`参加者${actor.slice(0,4)}`},now);
-        updateCardSlot(state,slot,card.cardId,input.eventId,now);consumeHand(hand,card.id);this.saveHand(actor,hand);
+        updateCardSlot(state,slot,card.cardId,input.eventId,now);immediateCardReaction(state,card.cardId,now);reserveCardGeneration(state,now);consumeHand(hand,card.id);this.saveHand(actor,hand);
         this.ctx.storage.sql.exec('INSERT INTO hand_receipts VALUES(?,?,?)',actor,input.eventId,state.epoch);
         this.ctx.storage.sql.exec('INSERT OR REPLACE INTO rates VALUES(?,?,?)',actor,tokens-1,now);
       }else if(op==='card'){
@@ -165,6 +205,7 @@ export class WorldRoom extends DurableObject<RoomEnv> {
       }else if(op==='display'&&this.env.SHARED_CONVERSATION_ENABLED==='true'){
         if(input.epoch!==state.epoch)throw new WorldError('stale_world');
         const e=state.elements.find(e=>e.id===input.elementId);if(!e||!['ready','displayed'].includes(e.status))throw new WorldError('element_not_ready');
+        if(input.status==='load_failed'){const message=`${e.concept}: 一つの画面で画像を読み込めなかった。`;if(!state.outcomes.includes(message)){state.outcomes=[...state.outcomes,message].slice(-12);state.revision++;this.save(state);changed=state;}return this.snapshot(state,role,actor);}
         if(e.kind==='background'&&state.desiredBackgroundId&&state.desiredBackgroundId!==e.id)throw new WorldError('superseded');
         if(e.status==='ready'){e.status='displayed';state.outcomes=[...state.outcomes,`${e.concept}が表示された。`].slice(-12);if(e.kind==='background')state.displayedWorld.location=e.concept;else state.displayedWorld.props=[...state.displayedWorld.props.filter(p=>p.id!==e.id),{id:e.id,label:e.concept,count:e.count,scale:1,placement:'foreground' as const,asset:e.assetUrl?'generated' as const:'none' as const}].slice(-12);state.displayedWorld.revision++;state.revision++;}
       }else{
@@ -198,8 +239,8 @@ export class WorldRoom extends DurableObject<RoomEnv> {
       this.save(state);changed=state;return this.snapshot(state,role,actor);
     });
     if(changed)this.broadcast(changed);
-    if(op==='conversation'||op==='cancel'||op==='presence')this.ctx.waitUntil(this.drive());
-    if((op==='card'||op==='insert')&&this.env.SHARED_CONVERSATION_ENABLED==='true')await this.ctx.storage.setAlarm(Date.now()+10000);
+    if(op==='conversation'||op==='cancel'||op==='presence'){this.ctx.waitUntil(this.drive());if(op==='presence')this.ctx.waitUntil(this.driveGeneration());}
+    if(changed&&(op==='card'||op==='insert')&&this.env.SHARED_CONVERSATION_ENABLED==='true')await this.schedule();
     return Response.json(result,{headers:{'Cache-Control':'no-store'}});
   }catch(error){return Response.json({code:error instanceof WorldError?error.code:'world_unavailable'},{status:error instanceof WorldError?error.status:503});}}
   webSocketMessage(ws:WebSocket){ws.send(JSON.stringify({type:'pong',serverNow:Date.now()}));}
