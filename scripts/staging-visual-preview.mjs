@@ -10,9 +10,17 @@ export function checkVisualConfig(config){
  if(config.r2_buckets?.length!==1||config.r2_buckets[0].binding!=='VISUAL_ASSETS'||config.r2_buckets[0].bucket_name!=='vayria-staging-visual-assets')throw new Error('Unexpected storage binding');
 }
 function run(command,args,cwd){const r=spawnSync(command,args,{cwd,encoding:'utf8',windowsHide:true});if(r.status!==0)throw new Error(`${command} failed: ${r.stderr}`);return r.stdout;}
-export async function deployVisualPreview(source,pr,sha,control){
+export function enableSharedWorld(config){
+ checkVisualConfig(config);const result=structuredClone(config);
+ result.durable_objects.bindings=result.durable_objects.bindings.filter(b=>b.name!=='WORLD_ROOMS');
+ result.durable_objects.bindings.push({name:'WORLD_ROOMS',class_name:'WorldRoom'});
+ if(!result.migrations.some(m=>m.new_sqlite_classes?.includes('WorldRoom')))result.migrations.push({tag:'world-v1',new_sqlite_classes:['WorldRoom']});
+ result.vars.SHARED_WORLD_ENABLED='true';return result;
+}
+export async function deployVisualPreview(source,pr,sha,control,sharedWorld=false){
  source=resolve(source);control=resolve(control);
- const config=JSON.parse(await readFile(join(control,'wrangler.public.jsonc'),'utf8'));checkVisualConfig(config);
+ let config=JSON.parse(await readFile(join(control,'wrangler.public.jsonc'),'utf8'));checkVisualConfig(config);
+ if(sharedWorld)config=enableSharedWorld(config);
  if(!Number.isInteger(pr)||!/^\d+$/.test(String(pr))||!/^[a-f0-9]{40}$/.test(sha))throw new Error('Explicit PR and full SHA required');
  if(run('git',['rev-parse','HEAD'],source).trim()!==sha||run('git',['status','--porcelain'],source).trim())throw new Error('Source must be clean at exact PR SHA');
  const verify=()=>{
@@ -34,5 +42,5 @@ export async function deployVisualPreview(source,pr,sha,control){
  const output=run(process.execPath,[wrangler,'deploy',...common],control);await writeFile(join(control,'.wrangler/visual-deployed.txt'),`PR ${pr}\nSHA ${sha}\n${output}`);console.log(output);
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- const [source,pr,sha]=process.argv.slice(2);await deployVisualPreview(source,Number(pr),sha,resolve(fileURLToPath(new URL('..',import.meta.url))));
+ const [source,pr,sha,mode]=process.argv.slice(2);if(mode&&mode!=='--shared-world')throw new Error('Unknown preview mode');await deployVisualPreview(source,Number(pr),sha,resolve(fileURLToPath(new URL('..',import.meta.url))),mode==='--shared-world');
 }

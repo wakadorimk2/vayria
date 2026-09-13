@@ -7,7 +7,7 @@ import { createHmac } from 'node:crypto';
 const directory = 'node_modules/.tmp/card-concurrency-public';
 await mkdir(directory, { recursive: true });
 const client = await build({ entryPoints: ['src/public/session.ts'], bundle: true, write: false, format: 'esm', platform: 'node',
-  plugins: [{ name: 'public-mode', setup(b) { b.onLoad({ filter: /runtimeConfig\.ts$/ }, () => ({ contents: "export const runtimeConfig = { mode: 'public' };", loader: 'ts' })); } }] });
+  plugins: [{ name: 'public-mode', setup(b) { b.onLoad({filter:/worker[\\/]worldRoom\.ts$/},()=>({contents:'export class WorldRoom {}',loader:'ts'})); b.onLoad({ filter: /runtimeConfig\.ts$/ }, () => ({ contents: "export const runtimeConfig = { mode: 'public' };", loader: 'ts' })); } }] });
 await writeFile(`${directory}/session.mjs`, client.outputFiles[0].text);
 const { publicFetch, activatePublic } = await import('../node_modules/.tmp/card-concurrency-public/session.mjs');
 
@@ -57,7 +57,7 @@ test('continuation retries only transient busy admission and remains bounded', a
 
 test('public worker signs the exact sentence text for JSON and streaming replies', async () => {
   const bundle = await build({ entryPoints: ['worker/index.ts'], bundle: true, write: false, format: 'esm', platform: 'node', target: 'es2023',
-    plugins: [{ name: 'generation-stub', setup(b) {
+    plugins: [{ name: 'generation-stub', setup(b) { b.onLoad({filter:/worker[\\/]worldRoom\.ts$/},()=>({contents:'export class WorldRoom {}',loader:'ts'}));
       b.onLoad({ filter: /worker[\\/]usage\.ts$/ }, () => ({ contents: 'export class PublicUsage {}', loader: 'ts' }));
       b.onLoad({ filter: /worker[\\/]generation\.ts$/ }, () => ({ contents: `export async function generate(input, preview, key, signal, callbacks) {
         const response = { text: 'あ、カードありがとう。元の話を続けるね。', emotion: 'neutral', activatedCards: ['chicken'], interactionAction: 'take_floor', speechAct: 'answer', expressionLevel: 'low' };

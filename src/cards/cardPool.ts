@@ -1,4 +1,5 @@
 import type { WildcardCardData } from './cardTypes.js';
+import { addedWorldCards } from '../sharedWorld/cards.js';
 
 export const cardPool = [
   {
@@ -128,4 +129,5 @@ export const cardPool = [
     prompt: '上下や常識が反転した観点から連想する。',
     stylePrompt: '常識や因果を一箇所だけ反転させる。',
   },
+  ...addedWorldCards,
 ] as const satisfies readonly WildcardCardData[];

@@ -4,8 +4,8 @@ import { readChatRequest, readCardPreviewRequest } from '../server/chatValidatio
 import { createLlmProviderCallTracker } from '../server/llmProviderTelemetry';
 import type { StreamingReplyCallbacks, LlmRequestContext } from '../server/localApiSupport';
 
-export async function generate(payload: unknown, preview: boolean, apiKey: string, signal: AbortSignal, callbacks: StreamingReplyCallbacks | null, measurements?: ReturnType<typeof createGenerationMeasurements>, manifestationEnabled = false, visualVideoEnabled = false) {
-  const llm: LlmRequestContext = { manifestationEnabled, visualVideoEnabled, apiKey, signal, warmup: false, onFallback: () => {}, runtime: {
+export async function generate(payload: unknown, preview: boolean, apiKey: string, signal: AbortSignal, callbacks: StreamingReplyCallbacks | null, measurements?: ReturnType<typeof createGenerationMeasurements>, manifestationEnabled = false, visualVideoEnabled = false, sharedWorldEnabled = false) {
+  const llm: LlmRequestContext = { sharedWorldEnabled, manifestationEnabled, visualVideoEnabled, apiKey, signal, warmup: false, onFallback: () => {}, runtime: {
     profile: 'nano-implicit', serviceTier: 'standard', fallbackEnabled: false, cacheWarmupEnabled: false,
   } };
   const telemetry = createLlmProviderCallTracker({ turnId: crypto.randomUUID(), provider: 'openai', model: 'gpt-5-nano',

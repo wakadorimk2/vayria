@@ -232,6 +232,7 @@ export interface LocalApiConfig {
 }
 
 export interface LlmRequestContext {
+  sharedWorldEnabled?: boolean;
   manifestationEnabled?: boolean;
   visualVideoEnabled?: boolean;
   apiKey: string;
@@ -397,6 +398,7 @@ export interface CardPreviewRequestPayload {
 }
 
 export interface CardAssistantResponse extends AssistantResponse {
+  worldIntent?: import('../src/sharedWorld/state.js').WorldIntent;
   visualIntent?: import('../src/visual/types.js').VisualIntent;
   manifestation?: 'none' | 'chicken' | 'gigantic' | 'sparkle' | 'underwater';
   activatedCards: string[];

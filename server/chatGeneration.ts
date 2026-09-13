@@ -1,4 +1,5 @@
 import { type VisualIntent } from '../src/visual/types.js';
+import { readWorldIntent, worldIntentSchema } from '../src/sharedWorld/state.js';
 import { explicitVisualSubject, explicitMotionSubject, validVisualDecision, visualDecisionSchema } from '../src/visual/decision.js';
 import type { CardContinuation } from '../src/conversation/cardContinuation.js';
 import { randomUUID } from 'node:crypto';
@@ -910,8 +911,8 @@ export async function generateReply(
     ];
   const responseSchema = {
     type: 'object',
-    properties: { ...(llm.manifestationEnabled && !streamingEnabled ? { visualIntent: decisionProperty } : {}), ...responseProperties },
-    required: [...responseRequired, ...(llm.manifestationEnabled && !streamingEnabled ? ['visualIntent'] : [])],
+    properties: { ...(llm.sharedWorldEnabled ? {worldIntent:worldIntentSchema}:{}), ...(llm.manifestationEnabled && !streamingEnabled ? { visualIntent: decisionProperty } : {}), ...responseProperties },
+    required: [...responseRequired, ...(llm.sharedWorldEnabled?['worldIntent']:[]), ...(llm.manifestationEnabled && !streamingEnabled ? ['visualIntent'] : [])],
     additionalProperties: false,
   };
   const brainCards = brainCardIds.map((id) => CARD_BY_ID.get(id)!);
@@ -1434,6 +1435,10 @@ export async function generateReply(
   );
 
   const parseWithManifestation = (value: string): CardAssistantResponse => {
+    if(llm.sharedWorldEnabled){
+      const raw=JSON.parse(value) as Record<string,unknown>;const intent=readWorldIntent(raw.worldIntent);delete raw.worldIntent;
+      const response=parseAttempt(JSON.stringify(raw));return {...response,worldIntent:intent??{actions:[]}};
+    }
     if (!llm.manifestationEnabled) return parseAttempt(value);
     const raw = JSON.parse(value) as Record<string, unknown>;
     const header = raw.deliveryHeader as Record<string, unknown> | undefined;

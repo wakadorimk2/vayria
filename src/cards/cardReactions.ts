@@ -4,6 +4,7 @@ import type {
   PerformanceBehavior,
   PerformerTrigger,
 } from '../performer/types.js';
+import { addedWorldCards, worldCardMeaning } from '../sharedWorld/cards.js';
 
 export const M1_INITIAL_BRAIN_CARD_IDS = [
   'chicken',
@@ -467,6 +468,15 @@ const CARD_AXIS_SUMMARIES: Readonly<
     motion: '首振りとアイドル動作を強める',
   },
 };
+
+// New vocabulary reuses tested performer gestures; semantic meaning remains card-specific.
+for(const card of addedWorldCards){
+  const category=worldCardMeaning(card).category;
+  const base=card.id==='quiet'?'sleepy':card.id==='ominous'?'suspicious':category==='動き'?'curious':category==='環境'?'underwater':category==='性質'?'sparkle':'chicken';
+  (CARD_BEHAVIORS as Record<string,PerformanceBehavior>)[card.id]={...CARD_BEHAVIORS[base]};
+  (CARD_MODIFIERS as Record<string,Partial<DirectionModifiers>>)[card.id]={...CARD_MODIFIERS[base],semanticBiases:[card.prompt]};
+  (CARD_AXIS_SUMMARIES as Record<string,Record<CardReactionAxis,string>>)[card.id]={...CARD_AXIS_SUMMARIES[base],meaning:card.prompt};
+}
 
 export const CARD_REACTION_PROFILES: Readonly<
   Record<string, CardReactionProfile>

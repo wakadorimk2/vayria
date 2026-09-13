@@ -28,6 +28,10 @@
   "durable_objects": {
     "bindings": [
       {
+        "name": "WORLD_ROOMS",
+        "class_name": "WorldRoom"
+      },
+      {
         "name": "USAGE",
         "class_name": "PublicUsage"
       }
@@ -39,9 +43,16 @@
       "new_sqlite_classes": [
         "PublicUsage"
       ]
+    },
+    {
+      "tag": "world-v1",
+      "new_sqlite_classes": [
+        "WorldRoom"
+      ]
     }
   ],
   "vars": {
+    "SHARED_WORLD_ENABLED": "false",
     "GENERATION_ENABLED": "true",
     "REQUIRE_PREVIEW_ACCESS": "true",
     "PUBLIC_HOSTNAME": "vayria.me",
