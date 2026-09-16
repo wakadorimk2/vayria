@@ -25,15 +25,20 @@ export interface Env extends VisualEnv, WorldEnv {
   TURNSTILE_SECRET: string; TURNSTILE_SITE_KEY: string;
   GENERATION_ENABLED: string; PUBLIC_HOSTNAME: string;
   REQUIRE_PREVIEW_ACCESS: string; PREVIEW_SECRET: string;
+  EXHIBITION_AUTO_ENROLL?: string;
   SERVE_PLACEHOLDER?: string;
   PUBLIC_BASE_PATH?: string;
 }
 type Visitor = { id: string; exp: number; purpose: 'visitor' };
 type Ticket = { exp: number; purpose: 'tts'; visitor: string; session: string; nonce: string; issuedAt?:number; text: string; emotion: string };
+// Auto-enrolled staging visitors share a rolling daily exhibition with this micro-yen budget.
+const AUTO_ENROLL_BUDGET = 1_000_000_000;
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
-const previewRedirect = (base: string, ticket?: string) => new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><title>Vayria</title><a href="${base}/">Vayriaを開く</a></html>`, {
-  status: 303,
-  headers: { Location: `${base}/`, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+// iPad Safari can treat a bodied 303 POST response as a file download, so the
+// preview handoff is a plain page that refreshes into the app instead.
+const previewRedirect = (base: string, ticket?: string) => new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=${base}/"><title>Vayria</title><a href="${base}/">Vayriaを開く</a></html>`, {
+  status: 200,
+  headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
     ...(ticket ? { 'Set-Cookie': `${base ? '__Host-vayria-staging-preview' : '__Host-vayria-preview'}=${ticket}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400` } : {}) },
 });
 export async function ledger<T>(env: Env, op: string, args: object = {}): Promise<T> {
@@ -72,13 +77,9 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
   if (env.SERVE_PLACEHOLDER === 'true') return url.pathname.startsWith('/api/') ? json({ code: 'generation_stopped' }, 503) : env.ASSETS.fetch(request);
   const roomMember = env.SHARED_WORLD_ENABLED === 'true' ? await worldMember(request,env) : null;
   const roomPage=env.SHARED_WORLD_ENABLED==='true' && (/^\/world\/[\w-]+\/?$/.test(url.pathname)||(url.pathname==='/'&&/^[\w-]{1,80}$/.test(url.searchParams.get('world')??'')));
-  const roomEntry = roomPage || (env.SHARED_WORLD_ENABLED === 'true' && /^\/api\/world-room\/[\w-]+\/join$/.test(url.pathname));
-  const roomAsset = roomMember && (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/api/world-room/') || (env.SHARED_CONVERSATION_ENABLED==='true'&&(url.pathname==='/api/session'||!url.pathname.startsWith('/api/'))) || roomMember.role==='host');
-  if(roomPage&&!roomMember){
-    const roomId=url.searchParams.get('world')??url.pathname.split('/')[2];
-    return new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VAYRIAの部屋</title><body style="background:#171925;color:#f1ede8;font:18px system-ui;padding:24px"><p id="status">部屋につないでいます…</p><script>const grant=new URLSearchParams(location.hash.slice(1));fetch(${JSON.stringify(base+'/api/world-room/'+roomId+'/join')},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant:grant.get('host')||grant.get('invite')||''})}).then(r=>{if(!r.ok)throw Error();location.reload()}).catch(()=>{document.getElementById('status').textContent='参加リンクを確認してください。'})</script></body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
-  }
-  if (env.REQUIRE_PREVIEW_ACCESS === 'true' && url.pathname !== '/api/admin' && !roomEntry && !roomAsset) {
+  // Public-room joins need no invite grant, so a member cookie must never
+  // substitute for the ticket on a protected deployment.
+  if (env.REQUIRE_PREVIEW_ACCESS === 'true' && url.pathname !== '/api/admin') {
     const access = await verify<{ exp: number; purpose: string }>(cookie(request, previewCookie), env.PREVIEW_SECRET);
     // Never pass the form endpoint to Static Assets, including on repeated submissions.
     if (url.pathname === '/preview' && access?.purpose === 'preview') {
@@ -95,6 +96,10 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
       if (url.pathname.startsWith('/api/')) return json({ code: 'preview_access_required' }, 403);
       return new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#201c30;color:#f4efe6}form{max-width:360px}input,button{box-sizing:border-box;font:inherit;min-height:44px}input{display:block;width:100%;margin:12px 0}button{padding:8px 24px}</style><h1>Vayria 検証環境</h1><form method="post" action="/preview"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"></label><button>開く</button></form></html>'.replace('action="/preview"', `action="${base}/preview"`), { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
+  }
+  if(roomPage&&!roomMember){
+    const roomId=url.searchParams.get('world')??url.pathname.split('/')[2];
+    return new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VAYRIAの部屋</title><body style="background:#171925;color:#f1ede8;font:18px system-ui;padding:24px"><p id="status">部屋につないでいます…</p><script>const grant=new URLSearchParams(location.hash.slice(1));fetch(${JSON.stringify(base+'/api/world-room/'+roomId+'/join')},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant:grant.get('host')||grant.get('invite')||''})}).then(r=>{if(!r.ok)throw Error();location.reload()}).catch(()=>{document.getElementById('status').textContent='参加リンクを確認してください。'})</script></body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
   }
   if (!url.pathname.startsWith('/api/')) {
     if (/^\/exhibition\/?$/.test(url.pathname) || (env.SHARED_WORLD_ENABLED==='true' && /^\/world\/[\w-]+\/?$/.test(url.pathname))) {
@@ -149,7 +154,10 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
   if (url.pathname === '/api/session' && request.method === 'GET') {
     const fresh = !visitor;
     visitor ??= { id: crypto.randomUUID(), exp: Date.now() + 90 * 86400000, purpose: 'visitor' };
-    const response = json({ ...await ledger<object>(env, 'status', { visitor: visitor.id }), cookieReady: !fresh,
+    const status = env.EXHIBITION_AUTO_ENROLL === 'true'
+      ? await ledger<object>(env, 'exhibition-ensure', { visitor: visitor.id, budget: AUTO_ENROLL_BUDGET })
+      : await ledger<object>(env, 'status', { visitor: visitor.id });
+    const response = json({ ...status, cookieReady: !fresh,
       enabled: env.GENERATION_ENABLED === 'true', siteKey: env.TURNSTILE_SITE_KEY });
     if (fresh) response.headers.set('Set-Cookie', `${visitorCookie}=${await sign(visitor, env.COOKIE_SECRET)}; Path=/; Max-Age=7776000; Secure; HttpOnly; SameSite=Strict`);
     return response;
@@ -175,7 +183,9 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
   if (env.GENERATION_ENABLED !== 'true') throw new LimitError('generation_stopped', 0, 503);
   if (url.pathname === '/api/session') {
     const ip = await ipKey(request, env.IP_SECRET);
-    const status = await ledger<{ session: unknown; exhibition: unknown }>(env, 'status', { visitor: visitor.id });
+    const status = env.EXHIBITION_AUTO_ENROLL === 'true'
+      ? await ledger<{ session: unknown; exhibition: unknown }>(env, 'exhibition-ensure', { visitor: visitor.id, budget: AUTO_ENROLL_BUDGET })
+      : await ledger<{ session: unknown; exhibition: unknown }>(env, 'status', { visitor: visitor.id });
     await ledger(env, 'attempt', { ip: status.exhibition ? `exhibition:${visitor.id}` : ip });
     if (status.exhibition) {
       const input = await body(request);
@@ -196,7 +206,7 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
   const visualEnabled = visualPermission.enabled && request.headers.get('X-Vayria-Visual-Generation') === String(visualPermission.generation);
   const audio = url.pathname === '/api/transcribe' ? await boundedBody(request, 640044) : null;
   const input = audio ? {} : await body(request);
-  if(sharedContext&&url.pathname==='/api/chat')input.programContext={...DEFAULT_PROGRAM_CONTEXT,worldContext:sharedContext};
+  if(sharedContext&&url.pathname==='/api/chat')input.programContext={...DEFAULT_PROGRAM_CONTEXT,...(typeof input.programContext==='object'&&input.programContext!==null?input.programContext:{}),worldContext:sharedContext};
   if(worldGuard&&url.pathname==='/api/chat'){
     const program=typeof input.programContext==='object'&&input.programContext!==null?input.programContext:{};
     input.programContext={...DEFAULT_PROGRAM_CONTEXT,...program,worldContext:worldGuard.context};

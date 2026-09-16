@@ -1,7 +1,7 @@
 # 公開版の展示モード
 
 展示でも一般公開と同じURL・ビルド・会話処理を使う。登録したブラウザーだけに展示枠を付ける。
-検証URL移行後は `https://vayria.me/staging/exhibition` で検証端末を登録する。移行手順は [検証URLの移行](staging-url-migration.md) を参照する。
+検証環境 `https://vayria.me/staging/` は検証用アクセスチケットを通った全ブラウザーを自動で展示端末として扱う。登録コードは不要。
 この機能の実装はローカル変更。配信、本番展示枠の作成、有料生成はまだ実施していない。
 
 ## 当日の操作
@@ -59,6 +59,19 @@ npm run public:admin -- exhibition-stop expo-20260923
 全体の緊急停止 `public:admin -- stop` とWorkerの `GENERATION_ENABLED=false` は展示にも適用する。
 本番の配信・認証設定は既存の公開手順に従う。検証環境では検証用アクセスチケットも必要。
 
+## 検証環境（staging）での確認
+
+`https://vayria.me/staging/` は「チケットで守られた自由な展示相当環境」として扱う。環境（本番/検証）と端末ロール（一般/展示）は直交するが、検証環境では以下のとおり展示相当を既定にする。
+
+- 検証用アクセスチケットを通ったブラウザーは `EXHIBITION_AUTO_ENROLL` により自動で展示端末へ登録される。登録コードとTurnstileは不要。
+- 自動登録はローリング日次イベント `open-YYYY-MM-DD`（JST）へ紐付ける。予算はイベントごと（現在は1日あたり1,000円相当）。日をまたぐと新しいイベントへ自動的に移る。
+- `PUBLIC_WORLD_ROOM=main-world` を検証環境にも設定し、本番と同じ共有ワールド構成にする。ワールド・台帳・R2は全て検証用の別Worker・別名前空間で、本番とは物理的に分離されている。
+- 世代番号・引き継ぎ・`exhibition_idle`（展示中の自律会話の制限）・イベント予算の規則は本番と同じ実レコードで動く。
+- `exhibition-stop` と `exhibition-revoke` は検証環境でも有効。revoke した端末は自動登録されない。stop した当日イベントは翌日のイベントまで戻らない。
+- 登録コード入力の導線そのものは、常に登録済みになる検証環境では試せない。実コードの登録試験は `test:e2e:exhibition` または本番で行う。
+- 検証環境は `staging-preview` ラベルを付けたPRのコードがデプロイされる。同時に1件だけ。ラベルが外れるとmainへ戻る。
+- チケットは24時間で失効する。再発行は `.wrangler/renew-staging-ticket.mjs`（要 1Password CLI と `CLOUDFLARE_API_TOKEN`・`STAGING_ADMIN`）。
+
 ## 利用枠と費用
 
 - 展示は一般向けの開始回数、180秒、会話・カード・音声の累積回数制限を使わない。
@@ -91,6 +104,18 @@ npm run public:build
 任意のブラウザー確認は `scripts/public-exhibition-browser-check.mjs`。
 Playwrightの場所を `PLAYWRIGHT_MODULE_PATH`、ブラウザーchannelを `PLAYWRIGHT_CHANNEL`（既定msedge）で指定できる。
 先に公開ビルドを作る。APIはすべて模擬応答へ置き換える。画面記録は `.project-view/exhibition-check/`。
+
+### 実スタック E2E（`test:e2e:exhibition`）
+
+`npm run public:build` のあと `npm run test:e2e:exhibition` で、`dist-public` を Miniflare 上の実Worker（SQLite Durable Objects・`WorldExecution` エントリポイント含む）とインストール済み Edge で動かす。
+外部プロバイダは Miniflare の `outboundService` で模擬し、LLM/TTS/STT/画像生成の500・ハング・タイムアウトを注入できる。`npm test` には含まない。
+
+`npm run e2e:exhibition:soak` は乱択アクションの耐久実行（`SOAK_MINUTES`・`SOAK_TURNS`・`SOAK_SEED` で調整、既定30分）。失敗時はスクリーンショットを `.project-view/exhibition-soak/` に残す。
+
+この試験で見つけて直した展示停止系の不具合:
+
+- 共有会話が有効な部屋ではリース競合エラーを表示しない設計だったため、2台目の展示端末に「この端末へ展示を引き継ぐ」が出ず、相手のリースが生きている限り永久に操作不能だった。リース拒否を `leaseDenied` として別途保持し、カード面に引き継ぎボタンを表示するようにした。
+- 共有部屋の自律ターン（カード投入への反応）が常に `kind: 'autonomous'` で課金台帳へ流れ、展示セッションでは `exhibition_idle` で必ず失敗し「会話は未完了」が残っていた。直近のカード投入が起点の自律ターンを `after_card_change` として `kind: 'card'` に分類するようにした。
 
 自動・模擬試験は実機の合格を意味しない。iPad実機の音声、長時間運転、会場回線、合計100W枠は未確認。
 会場回線と充電を確保する。有線ハブを持っているだけでは、インターネット接続は保証されない。
