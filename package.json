@@ -55,7 +55,9 @@
     "dev:manifestation": "node scripts/start-manifestation.mjs",
     "dev:manifestation:op": "pwsh -NoProfile -File .\\scripts\\Start-VayriaWithOnePassword.ps1 -CommandPath npm.cmd -CommandArguments \"run dev:manifestation\"",
     "staging:build": "npm run public:build -- --mode staging",
-    "test:shared-world": "node --test scripts/shared-world.test.mjs scripts/shared-conversation.test.mjs scripts/shared-hand.test.mjs scripts/single-card-world.test.mjs scripts/shared-presentation.test.mjs"
+    "test:shared-world": "node --test scripts/shared-world.test.mjs scripts/shared-conversation.test.mjs scripts/shared-hand.test.mjs scripts/single-card-world.test.mjs scripts/shared-presentation.test.mjs",
+    "test:e2e:exhibition": "node --test scripts/public-exhibition-e2e.test.mjs",
+    "e2e:exhibition:soak": "node scripts/public-exhibition-soak.mjs"
   },
   "dependencies": {
     "@aituber-onair/chat": "0.52.0",
@@ -88,6 +90,7 @@
     "globals": "^16.5.0",
     "js-yaml": "4.3.1",
     "miniflare": "5.20260903.0-alpha",
+    "playwright-core": "1.63.0",
     "qrcode": "^1.5.4",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",

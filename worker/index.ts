@@ -196,7 +196,7 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
   const visualEnabled = visualPermission.enabled && request.headers.get('X-Vayria-Visual-Generation') === String(visualPermission.generation);
   const audio = url.pathname === '/api/transcribe' ? await boundedBody(request, 640044) : null;
   const input = audio ? {} : await body(request);
-  if(sharedContext&&url.pathname==='/api/chat')input.programContext={...DEFAULT_PROGRAM_CONTEXT,worldContext:sharedContext};
+  if(sharedContext&&url.pathname==='/api/chat')input.programContext={...DEFAULT_PROGRAM_CONTEXT,...(typeof input.programContext==='object'&&input.programContext!==null?input.programContext:{}),worldContext:sharedContext};
   if(worldGuard&&url.pathname==='/api/chat'){
     const program=typeof input.programContext==='object'&&input.programContext!==null?input.programContext:{};
     input.programContext={...DEFAULT_PROGRAM_CONTEXT,...program,worldContext:worldGuard.context};

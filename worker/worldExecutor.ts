@@ -19,9 +19,12 @@ export class WorldExecution extends WorkerEntrypoint<Env> {
     const base=this.env.PUBLIC_BASE_PATH??'';const origin='https://'+this.env.PUBLIC_HOSTNAME;
     const credential=await sign({purpose:'visitor',id:slot.visitor,exp:Date.now()+300000},this.env.COOKIE_SECRET);
     const response=await handle(new Request(origin+base+path,{method:'POST',signal:AbortSignal.timeout(Math.max(1,Math.min(90000,slot.expires-Date.now()))),headers:{Origin:origin,Cookie:`${base?'__Host-vayria-staging':'__Host-vayria'}=${credential}`,'X-Vayria-Session':slot.session,'Content-Type':payload instanceof ArrayBuffer?'audio/wav':'application/json'},body:payload instanceof ArrayBuffer?payload:JSON.stringify(payload)}),{...this.env,REQUIRE_PREVIEW_ACCESS:'false'},this.ctx,context,true);
-    if(!response.ok){const error=await response.json() as {code?:string};throw new Error(error.code??'execution_failed');}return response;
+    if(!response.ok){const raw=await response.text();console.error('[world-exec]',path,response.status,raw.slice(0,300));let error:{code?:string}={};try{error=JSON.parse(raw);}catch{/* The error body is not always JSON. */}throw new Error(error.code??'execution_failed');}return response;
   }
   async conversation(input:WorldExecutionInput,audio?:ArrayBuffer):Promise<WorldExecutionResult>{
+    try{return await this.runConversation(input,audio);}catch(error){console.error('[world-exec] conversation failed:',error instanceof Error?error.stack??error.message:error);throw error;}
+  }
+  private async runConversation(input:WorldExecutionInput,audio?:ArrayBuffer):Promise<WorldExecutionResult>{
     let text=input.slot.text??'';
     if(audio){const result=await(await this.request(input.slot,'/api/transcribe',audio)).json() as {text:string};text=result.text.trim();if(!text)throw new Error('no-speech');}
     // The legacy speech contract still takes five IDs. Pad only with a current
@@ -30,10 +33,11 @@ export class WorldExecution extends WorkerEntrypoint<Env> {
     while(brainCardIds.length<5)brainCardIds.push(brainCardIds[0]);
     const episodeId=`world-${input.slot.id}`;
     const payload={mode:input.slot.kind==='autonomous'?'autonomous':input.slot.kind==='voice'?'voice':'manual',...(input.slot.kind==='autonomous'?{
+      ...(input.reactionCardId?{programContext:{phase:'after_card_change'}}:{}),
       topic:null,topicTurns:0,viewerIntent:null,viewerTurnsSince:0,viewerEngagement:'available',
       performerState:{phase:'idle',energy:.5,emotion:'neutral',emotionActivation:.3,attentionTarget:'viewer',attentionStrength:.5},
       autonomyCandidate:{episodeId,decisionEvidenceIds:[episodeId],reasons:[{id:episodeId,episodeId,parentReasonId:null,kind:'environment_change',content:'世界に投入されたカードと表示済みの変化を受け止める',semanticKey:'shared-world',salience:.8,status:'active',deferCause:null,wakeOn:['new_evidence'],decisionEvidenceIds:[episodeId]}]},
-    }:{message:text}),history:input.history.slice(-10),brainCardIds,forcedCardId:null,recentExpressionLevels:[],streamSpeech:false};
+    }:{message:text}),history:input.history.slice(-10),brainCardIds,forcedCardId:input.reactionCardId??null,recentExpressionLevels:[],streamSpeech:false};
     const result=await(await this.request(input.slot,'/api/chat',payload,input.context)).json() as {text?:string;emotion?:string;motion?:string;ttsTicket?:string;worldIntent?:unknown};
     const output:WorldExecutionResult={text:result.text??'',emotion:result.emotion??'neutral',motion:result.text?'speech-gentle':undefined,worldIntent:result.worldIntent,inputText:text,durationMs:Math.min(60000,Math.max(3000,(result.text?.length??0)*180))};
     if(result.ttsTicket&&this.env.VISUAL_ASSETS){try{

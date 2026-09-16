@@ -92,6 +92,18 @@ npm run public:build
 Playwrightの場所を `PLAYWRIGHT_MODULE_PATH`、ブラウザーchannelを `PLAYWRIGHT_CHANNEL`（既定msedge）で指定できる。
 先に公開ビルドを作る。APIはすべて模擬応答へ置き換える。画面記録は `.project-view/exhibition-check/`。
 
+### 実スタック E2E（`test:e2e:exhibition`）
+
+`npm run public:build` のあと `npm run test:e2e:exhibition` で、`dist-public` を Miniflare 上の実Worker（SQLite Durable Objects・`WorldExecution` エントリポイント含む）とインストール済み Edge で動かす。
+外部プロバイダは Miniflare の `outboundService` で模擬し、LLM/TTS/STT/画像生成の500・ハング・タイムアウトを注入できる。`npm test` には含まない。
+
+`npm run e2e:exhibition:soak` は乱択アクションの耐久実行（`SOAK_MINUTES`・`SOAK_TURNS`・`SOAK_SEED` で調整、既定30分）。失敗時はスクリーンショットを `.project-view/exhibition-soak/` に残す。
+
+この試験で見つけて直した展示停止系の不具合:
+
+- 共有会話が有効な部屋ではリース競合エラーを表示しない設計だったため、2台目の展示端末に「この端末へ展示を引き継ぐ」が出ず、相手のリースが生きている限り永久に操作不能だった。リース拒否を `leaseDenied` として別途保持し、カード面に引き継ぎボタンを表示するようにした。
+- 共有部屋の自律ターン（カード投入への反応）が常に `kind: 'autonomous'` で課金台帳へ流れ、展示セッションでは `exhibition_idle` で必ず失敗し「会話は未完了」が残っていた。直近のカード投入が起点の自律ターンを `after_card_change` として `kind: 'card'` に分類するようにした。
+
 自動・模擬試験は実機の合格を意味しない。iPad実機の音声、長時間運転、会場回線、合計100W枠は未確認。
 会場回線と充電を確保する。有線ハブを持っているだけでは、インターネット接続は保証されない。
 
