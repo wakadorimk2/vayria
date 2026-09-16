@@ -164,6 +164,11 @@ test('handoff request survives reload and retries with exactly the same ID until
   assert.deepEqual(prepareHandoff(storage, 2), request);
   completeHandoff(storage); assert.equal(readHandoff(storage), null);
   assert.notEqual(prepareHandoff(storage, 2).requestId, request.requestId);
+  const key = [...data.keys()].find(k => k.includes('handoff'));
+  data.set(key, '{corrupt'); assert.throws(() => readHandoff(storage));
+  const fresh = prepareHandoff(storage, 7);
+  assert.equal(fresh.epoch, 7);
+  assert.deepEqual(readHandoff(storage), fresh);
 });
 test('late public replies and buffered stream chunks cannot cross a participant handoff', async () => {
   const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };

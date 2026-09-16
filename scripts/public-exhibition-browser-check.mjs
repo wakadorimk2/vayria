@@ -28,7 +28,7 @@ const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL 
   args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
 const context = await browser.newContext({ viewport: { width: 1024, height: 1366 }, hasTouch: true, permissions: ['microphone'] });
 let enrolled = true;
-let epoch = 1, session = null, failHandoff = false, failStatus = false, usedYen = 0, handoffs = [], generations = [], microphoneAcquisitions = 0;
+let epoch = 1, session = null, failHandoff = false, failStatus = false, denyPreview = false, usedYen = 0, handoffs = [], generations = [], microphoneAcquisitions = 0;
 let delayedReply;
 let delayManual = true;
 const replyGate = new Promise(done => { delayedReply = done; });
@@ -69,6 +69,7 @@ await page.route('**/*', async route => {
   if (mount && url.pathname.startsWith(mount + '/')) url.pathname = url.pathname.slice(mount.length);
   if (!url.pathname.startsWith('/api/')) { await route.continue(); return; }
   const json = (body, code = 200) => route.fulfill({ status: code, contentType: 'application/json', body: JSON.stringify(body) });
+  if (denyPreview) return json({ code: 'preview_access_required' }, 403);
   if (url.pathname === '/api/session') {
     if (request.method() === 'POST') { session = { id: `session-${epoch}`, expires: Date.now() + 3600000 }; return json(status()); }
     if (failStatus) return json({ code: 'service_unavailable' }, 503);
@@ -127,6 +128,15 @@ try {
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.equal(page.url(), base + mount + '/');
   assert.notEqual(handoffs.at(-1).requestId, '11111111-1111-4111-8111-111111111111');
+  // An expired preview ticket keeps the stored request and asks the operator to re-enter it.
+  denyPreview = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
+  const ticketLink = page.getByRole('link', { name: 'チケットを入力し直す' });
+  await ticketLink.waitFor();
+  assert.equal(await ticketLink.getAttribute('href'), mount + '/');
+  denyPreview = false;
+  await page.goto(base + mount + '/');
+  await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   await page.getByRole('button', { name: '文字で話す', exact: true }).click();
   const input = page.locator('.message-form input');
   await input.fill('前の参加者の入力');
@@ -219,7 +229,7 @@ try {
     await rootPage.close();
   }
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests', 'unenrolled-handoff-local-reset'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'stale-handoff-replaced-via-handoff-param', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
+  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests', 'unenrolled-handoff-local-reset'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'stale-handoff-replaced-via-handoff-param', 'preview-ticket-keeps-handoff', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
 } catch (error) {
   console.error(JSON.stringify({ generations, errors, ui: await page.locator('body').innerText(), sources: await page.evaluate(() => window.exhibitSources) }));
   await page.screenshot({ path: resolve(output, 'failure.png') });

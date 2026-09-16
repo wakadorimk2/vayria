@@ -31,9 +31,11 @@ export interface Env extends VisualEnv, WorldEnv {
 type Visitor = { id: string; exp: number; purpose: 'visitor' };
 type Ticket = { exp: number; purpose: 'tts'; visitor: string; session: string; nonce: string; issuedAt?:number; text: string; emotion: string };
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
-const previewRedirect = (base: string, ticket?: string) => new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><title>Vayria</title><a href="${base}/">Vayriaを開く</a></html>`, {
+const escapeAttribute = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+const previewTarget = (value: string | null) => value && /^\/[\w\-./?=&%]*$/.test(value) && !value.startsWith('//') && !value.startsWith('/api') && !value.startsWith('/preview') ? value : '/';
+const previewRedirect = (base: string, ticket?: string, target = '/') => new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><title>Vayria</title><a href="${base}${target}">Vayriaを開く</a></html>`, {
   status: 303,
-  headers: { Location: `${base}/`, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+  headers: { Location: `${base}${target}`, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
     ...(ticket ? { 'Set-Cookie': `${base ? '__Host-vayria-staging-preview' : '__Host-vayria-preview'}=${ticket}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400` } : {}) },
 });
 export async function ledger<T>(env: Env, op: string, args: object = {}): Promise<T> {
@@ -87,13 +89,13 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
     }
     if (access?.purpose !== 'preview') {
       if (url.pathname === '/preview' && request.method === 'POST' && request.headers.get('Origin') === url.origin) {
-        const form = new URLSearchParams(new TextDecoder().decode(await boundedBody(request, 1024)));
+        const form = new URLSearchParams(new TextDecoder().decode(await boundedBody(request, 2048)));
         // The preview credential is a random signed ticket, never an API credential.
         const provided = await verify<{ exp: number; purpose: string }>(form.get('ticket') ?? '', env.PREVIEW_SECRET);
-        if (provided?.purpose === 'preview') return previewRedirect(base, form.get('ticket')!);
+        if (provided?.purpose === 'preview') return previewRedirect(base, form.get('ticket')!, previewTarget(form.get('return')));
       }
       if (url.pathname.startsWith('/api/')) return json({ code: 'preview_access_required' }, 403);
-      return new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#201c30;color:#f4efe6}form{max-width:360px}input,button{box-sizing:border-box;font:inherit;min-height:44px}input{display:block;width:100%;margin:12px 0}button{padding:8px 24px}</style><h1>Vayria 検証環境</h1><form method="post" action="/preview"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"></label><button>開く</button></form></html>'.replace('action="/preview"', `action="${base}/preview"`), { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+      return new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#201c30;color:#f4efe6}form{max-width:360px}input,button{box-sizing:border-box;font:inherit;min-height:44px}input{display:block;width:100%;margin:12px 0}button{padding:8px 24px}</style><h1>Vayria 検証環境</h1><form method="post" action="${base}/preview"><input name="return" type="hidden" value="${escapeAttribute(url.pathname + url.search)}"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"></label><button>開く</button></form></html>`, { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
   }
   if (!url.pathname.startsWith('/api/')) {
