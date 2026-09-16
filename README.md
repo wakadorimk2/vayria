@@ -12,7 +12,7 @@
   <a href="docs/images/vayria-kv-poster.jpg"><img src="docs/images/vayria-kv-poster.jpg" width="420" alt="カードを差し出すVayria。『カードを選ぶ。会話が変わる。』と書かれたキービジュアル"></a>
 </p>
 
-<p align="center">立ち絵：wakadori／キービジュアルデザイン：共同制作</p>
+<p align="center">立ち絵：wakadori／キービジュアルデザイン：sugaさん</p>
 
 ## できること
 
