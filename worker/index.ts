@@ -145,7 +145,8 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
     const currentVisitor=await verify<Visitor>(cookie(request,visitorCookie),env.COOKIE_SECRET);
     return worldRoute(request,env,(op,args)=>ledger(env,op,args),currentVisitor?.id??'',request.headers.get('X-Vayria-Session')??'');
   }
-  if(roomMember?.role==='guest'&&!(env.SHARED_CONVERSATION_ENABLED==='true'&&url.pathname==='/api/session'))throw new LimitError('world_guest_read_only',0,403);
+  // Exhibition calls bind only the caller's own device, so guests keep them for participant handoff.
+  if(roomMember?.role==='guest'&&!(env.SHARED_CONVERSATION_ENABLED==='true'&&url.pathname==='/api/session')&&!url.pathname.startsWith('/api/exhibition/'))throw new LimitError('world_guest_read_only',0,403);
   if(roomMember&&env.SHARED_CONVERSATION_ENABLED==='true'&&['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname))throw new LimitError('use_room_conversation',0,403);
   if(env.PUBLIC_WORLD_ROOM&&!trustedWorldExecution&&['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname))throw new LimitError('room_execution_required',0,403);
   const worldGuard=roomMember?.role==='host' && ['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname)?await guardWorldRequest(request,env):null;
