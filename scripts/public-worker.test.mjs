@@ -21,12 +21,17 @@ test('Preview admission and repeated visits redirect to the app without serving 
     for (const path of ['/exhibition', '/exhibition/']) {
       assert.equal((await mf.dispatchFetch(base + path)).status, 401);
     }
-    const submit = (value, cookie = '', origin = base) => mf.dispatchFetch(base + '/preview', {
+    const submit = (value, cookie = '', origin = base, ret = '') => mf.dispatchFetch(base + '/preview', {
       method: 'POST', redirect: 'manual', headers: { Origin: origin, Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ ticket: value }).toString(),
+      body: new URLSearchParams(ret ? { ticket: value, return: ret } : { ticket: value }).toString(),
     });
     assert.equal((await submit('invalid')).status, 401);
     assert.equal((await submit(ticket, '', 'https://other.example')).status, 401);
+    const kept = await submit(ticket, '', base, '/?handoff');
+    assert.equal(kept.status, 200);
+    assert.match(await kept.text(), /content="0; url=\/\?handoff"/);
+    for (const unsafe of ['//evil.example', '/api/session', '/preview', 'https://evil.example'])
+      assert.match(await (await submit(ticket, '', base, unsafe)).text(), /content="0; url=\/"/);
     const first = await submit(ticket);
     assert.equal(first.status, 200);
     assert.match(await first.text(), /http-equiv="refresh" content="0; url=\/"/);

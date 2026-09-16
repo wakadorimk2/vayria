@@ -34,9 +34,11 @@ type Ticket = { exp: number; purpose: 'tts'; visitor: string; session: string; n
 // Auto-enrolled staging visitors share a rolling daily exhibition with this micro-yen budget.
 const AUTO_ENROLL_BUDGET = 1_000_000_000;
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
+const escapeAttribute = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+const previewTarget = (value: string | null) => value && /^\/[\w\-./?=&%]*$/.test(value) && !value.startsWith('//') && !value.startsWith('/api') && !value.startsWith('/preview') ? value : '/';
 // iPad Safari can treat a bodied 303 POST response as a file download, so the
 // preview handoff is a plain page that refreshes into the app instead.
-const previewRedirect = (base: string, ticket?: string) => new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=${base}/"><title>Vayria</title><a href="${base}/">Vayriaを開く</a></html>`, {
+const previewRedirect = (base: string, ticket?: string, target = '/') => new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=${escapeAttribute(base + target)}"><title>Vayria</title><a href="${escapeAttribute(base + target)}">Vayriaを開く</a></html>`, {
   status: 200,
   headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
     ...(ticket ? { 'Set-Cookie': `${base ? '__Host-vayria-staging-preview' : '__Host-vayria-preview'}=${ticket}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400` } : {}) },
@@ -88,13 +90,13 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
     }
     if (access?.purpose !== 'preview') {
       if (url.pathname === '/preview' && request.method === 'POST' && request.headers.get('Origin') === url.origin) {
-        const form = new URLSearchParams(new TextDecoder().decode(await boundedBody(request, 1024)));
+        const form = new URLSearchParams(new TextDecoder().decode(await boundedBody(request, 2048)));
         // The preview credential is a random signed ticket, never an API credential.
         const provided = await verify<{ exp: number; purpose: string }>(form.get('ticket') ?? '', env.PREVIEW_SECRET);
-        if (provided?.purpose === 'preview') return previewRedirect(base, form.get('ticket')!);
+        if (provided?.purpose === 'preview') return previewRedirect(base, form.get('ticket')!, previewTarget(form.get('return')));
       }
       if (url.pathname.startsWith('/api/')) return json({ code: 'preview_access_required' }, 403);
-      return new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#201c30;color:#f4efe6}form{max-width:360px}input,button{box-sizing:border-box;font:inherit;min-height:44px}input{display:block;width:100%;margin:12px 0}button{padding:8px 24px}</style><h1>Vayria 検証環境</h1><form method="post" action="/preview"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"></label><button>開く</button></form></html>'.replace('action="/preview"', `action="${base}/preview"`), { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+      return new Response(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="noindex"><title>Vayria 検証環境</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#201c30;color:#f4efe6}form{max-width:360px}input,button{box-sizing:border-box;font:inherit;min-height:44px}input{display:block;width:100%;margin:12px 0}button{padding:8px 24px}</style><h1>Vayria 検証環境</h1><form method="post" action="${base}/preview"><input name="return" type="hidden" value="${escapeAttribute(url.pathname + url.search)}"><label>検証用アクセスチケット <input name="ticket" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"></label><button>開く</button></form></html>`, { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
   }
   if(roomPage&&!roomMember){
@@ -143,7 +145,8 @@ export async function handle(request: Request, env: Env, ctx?: ExecutionContext,
     const currentVisitor=await verify<Visitor>(cookie(request,visitorCookie),env.COOKIE_SECRET);
     return worldRoute(request,env,(op,args)=>ledger(env,op,args),currentVisitor?.id??'',request.headers.get('X-Vayria-Session')??'');
   }
-  if(roomMember?.role==='guest'&&!(env.SHARED_CONVERSATION_ENABLED==='true'&&url.pathname==='/api/session'))throw new LimitError('world_guest_read_only',0,403);
+  // Exhibition calls bind only the caller's own device, so guests keep them for participant handoff.
+  if(roomMember?.role==='guest'&&!(env.SHARED_CONVERSATION_ENABLED==='true'&&url.pathname==='/api/session')&&!url.pathname.startsWith('/api/exhibition/'))throw new LimitError('world_guest_read_only',0,403);
   if(roomMember&&env.SHARED_CONVERSATION_ENABLED==='true'&&['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname))throw new LimitError('use_room_conversation',0,403);
   if(env.PUBLIC_WORLD_ROOM&&!trustedWorldExecution&&['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname))throw new LimitError('room_execution_required',0,403);
   const worldGuard=roomMember?.role==='host' && ['/api/chat','/api/transcribe','/api/tts','/api/visual/generate'].includes(url.pathname)?await guardWorldRequest(request,env):null;

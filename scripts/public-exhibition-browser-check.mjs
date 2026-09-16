@@ -28,7 +28,7 @@ const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL 
   args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
 const context = await browser.newContext({ viewport: { width: 1024, height: 1366 }, hasTouch: true, permissions: ['microphone'] });
 let enrolled = true;
-let epoch = 1, session = null, failHandoff = false, failStatus = false, usedYen = 0, handoffs = [], generations = [], microphoneAcquisitions = 0;
+let epoch = 1, session = null, failHandoff = false, failStatus = false, denyPreview = false, usedYen = 0, handoffs = [], generations = [], microphoneAcquisitions = 0;
 let delayedReply;
 let delayManual = true;
 const replyGate = new Promise(done => { delayedReply = done; });
@@ -69,6 +69,7 @@ await page.route('**/*', async route => {
   if (mount && url.pathname.startsWith(mount + '/')) url.pathname = url.pathname.slice(mount.length);
   if (!url.pathname.startsWith('/api/')) { await route.continue(); return; }
   const json = (body, code = 200) => route.fulfill({ status: code, contentType: 'application/json', body: JSON.stringify(body) });
+  if (denyPreview) return json({ code: 'preview_access_required' }, 403);
   if (url.pathname === '/api/session') {
     if (request.method() === 'POST') { session = { id: `session-${epoch}`, expires: Date.now() + 3600000 }; return json(status()); }
     if (failStatus) return json({ code: 'service_unavailable' }, 503);
@@ -77,7 +78,9 @@ await page.route('**/*', async route => {
   if (url.pathname === '/api/exhibition/enroll') { enrolled = true; return json(status()); }
   if (url.pathname === '/api/exhibition/next') {
     const input = request.postDataJSON(); handoffs.push(input);
+    if (!enrolled) return json({ code: 'exhibition_required' }, 403);
     if (failHandoff) return json({ code: 'network_error' }, 503);
+    if (input.epoch !== epoch) return json({ code: 'exhibition_stale' }, 409);
     epoch++; session = null; return json(status());
   }
   if (['/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts'].includes(url.pathname)) {
@@ -96,7 +99,7 @@ await page.route('**/*', async route => {
 });
 try {
   await page.goto(base + mount + '/');
-  await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor();
+  await page.locator('.public-controls__actions').waitFor();
   await page.waitForTimeout(5000);
   assert.equal(generations.length, 0, JSON.stringify(generations)); assert.equal(microphoneAcquisitions, 0);
   const initialCards = await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId));
@@ -116,16 +119,31 @@ try {
   await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/chat')), tapCard('.card-zone--brain [data-card-id]')]);
   assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).mode === 'autonomous' && JSON.parse(g.body).forcedCardId));
   assert.notDeepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.deepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
+  // A stored handoff the server can never confirm is replaced instead of trapping the screen.
+  await page.evaluate(key => sessionStorage.setItem(key, JSON.stringify({ requestId: '11111111-1111-4111-8111-111111111111', epoch: 0 })), mount ? 'staging:vayria-exhibition-handoff' : 'vayria-exhibition-handoff');
+  await page.goto(base + mount + '/?handoff');
+  await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
+  assert.equal(page.url(), base + mount + '/');
+  assert.notEqual(handoffs.at(-1).requestId, '11111111-1111-4111-8111-111111111111');
+  // An expired preview ticket keeps the stored request and asks the operator to re-enter it.
+  denyPreview = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
+  const ticketLink = page.getByRole('link', { name: 'チケットを入力し直す' });
+  await ticketLink.waitFor();
+  assert.equal(await ticketLink.getAttribute('href'), mount + '/');
+  denyPreview = false;
+  await page.goto(base + mount + '/');
+  await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   await page.getByRole('button', { name: '文字で話す', exact: true }).click();
   const input = page.locator('.message-form input');
   await input.fill('前の参加者の入力');
   await page.getByRole('button', { name: '送信', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.message-form button[type="submit"]')?.disabled === true);
   failHandoff = true;
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByRole('button', { name: 'もう一度確認する' }).waitFor();
   assert.equal(await page.locator('.app-shell').count(), 0);
   const first = handoffs.at(-1);
@@ -145,7 +163,7 @@ try {
   await input.fill('音声再生の停止を確認');
   await page.getByRole('button', { name: '送信', exact: true }).click();
   await page.waitForFunction(() => window.exhibitSources.some(s => s.started && !s.stopped && !s.ended));
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.exhibitSources.filter(s => s.started).every(s => s.stopped || s.ended)), true);
   await page.getByRole('button', { name: '文字で話す', exact: true }).click();
@@ -153,13 +171,13 @@ try {
   // Real browser capture of a fake microphone; stopping must end every acquired track.
   await page.getByRole('button', { name: /^マイクで話す/ }).click();
   await page.waitForFunction(() => window.exhibitTracks.length > 0);
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.exhibitTracks.every(t => t.readyState === 'ended')), true);
   await page.getByRole('button', { name: '挨拶してみる', exact: true }).click();
   await page.getByText('文字・マイク・カードから続けられます', { exact: true }).waitFor();
   assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).greeting === true));
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByRole('button', { name: '挨拶してみる', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'カードで遊ぶ', exact: true }).getAttribute('aria-expanded'), 'false');
   usedYen = 8000;
@@ -192,21 +210,26 @@ try {
     assert.equal(await rootPage.evaluate(() => localStorage.getItem('vayria-public-theme')), 'dark');
     await page.evaluate(() => sessionStorage.setItem('vayria-exhibition-handoff', JSON.stringify({ requestId: 'production-only', epoch: 9 })));
     await page.reload();
-    await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor();
+    await page.locator('.public-controls__actions').waitFor();
     assert.equal(await page.evaluate(() => sessionStorage.getItem('staging:vayria-exhibition-handoff')), null);
     enrolled = false;
+    // Without enrollment a pending handoff is dropped and the app resets locally.
+    await page.evaluate(key => sessionStorage.setItem(key, JSON.stringify({ requestId: '22222222-2222-4222-8222-222222222222', epoch: 0 })), mount ? 'staging:vayria-exhibition-handoff' : 'vayria-exhibition-handoff');
+    await page.goto(base + mount + '/?handoff');
+    await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), mount ? 'staging:vayria-exhibition-handoff' : 'vayria-exhibition-handoff'), null);
     await page.goto(base + mount + '/exhibition');
     await page.getByRole('button', { name: 'この端末を登録', exact: true }).waitFor();
     assert.equal(await page.getByRole('link', { name: '体験画面へ戻る' }).getAttribute('href'), mount + '/');
     await page.locator('input').fill('a'.repeat(32));
     await page.getByRole('button', { name: 'この端末を登録', exact: true }).click();
     await page.waitForURL(base + mount + '/');
-    await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor();
+    await page.locator('.public-controls__actions').waitFor();
     assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('vayria-exhibition-handoff')).requestId), 'production-only');
     await rootPage.close();
   }
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
+  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests', 'unenrolled-handoff-local-reset'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'stale-handoff-replaced-via-handoff-param', 'preview-ticket-keeps-handoff', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
 } catch (error) {
   console.error(JSON.stringify({ generations, errors, ui: await page.locator('body').innerText(), sources: await page.evaluate(() => window.exhibitSources) }));
   await page.screenshot({ path: resolve(output, 'failure.png') });

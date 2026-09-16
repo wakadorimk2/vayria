@@ -93,6 +93,10 @@ test('50 participants share exact counts; dedup, guest authorization and hiberna
     const repeat=await f.request('/api/world-room/room/card',{eventId:'input0',cardId:'chicken',epoch:0},guests[0]);assert.equal((await repeat.json()).duplicate,true);
     const snapshot=await(await f.request('/api/world-room/room/state',null,guests[0])).json();assert.equal(snapshot.weights.chicken.total,50);assert.equal(snapshot.elements.length,1);assert.equal(snapshot.elements[0].count,50);assert.ok(!('assetUrl' in snapshot.elements[0]));
     for(const path of ['/api/chat','/api/visual/generate','/api/tts','/api/world-room/room/lease','/api/world-room/room/prepare','/api/world-room/room/element'])assert.equal((await f.request(path,{},guests[0])).status,403,path);
+    // Device-scoped exhibition calls still pass the guest guard for participant handoff.
+    const guestVisitor=guests[0]+'; __Host-vayria='+signed({id:'guest-device',exp:Date.now()+600000,purpose:'visitor'});
+    const handoff=await f.request('/api/exhibition/next',{requestId:crypto.randomUUID(),epoch:0},guestVisitor);
+    assert.equal(handoff.status,403);assert.equal((await handoff.json()).code,'exhibition_required');
     assert.equal((await f.request('/api/world-room/room/card',{eventId:'old',cardId:'crab',epoch:9},guests[0])).status,409);
   }finally{for(const s of sockets)s.close();await f.mf.dispose();}
 });

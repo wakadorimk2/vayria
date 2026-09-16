@@ -170,9 +170,8 @@ export default function PublicControls({ sharedWorld = false, queueStatus, gener
 
   return <aside className="public-controls" aria-label="会話の操作">
     <VoiceInputNotification notice={microphoneNotice} suppressed={expanded || noticeOpen} />
-    {exhibition && <div className="public-exhibition-handoff">
-      <button onClick={() => { cancelRequest(); window.dispatchEvent(new Event('vayria-exhibition-next')); }}>体験を終える</button>
-      {(!exhibition.available || status?.stopped || status?.enabled === false) && <span className="public-exhibition-paused" role="status">展示を休止しています。設定を確認してください。</span>}
+    {exhibition && (!exhibition.available || status?.stopped || status?.enabled === false) && <div className="public-exhibition-handoff">
+      <span className="public-exhibition-paused" role="status">展示を休止しています。設定を確認してください。</span>
     </div>}
     {!noticeOpen && !cardsOpen && !textOpen && !expanded && guideOpen && <div className="public-entry" aria-label="Vayriaとの会話を始める">
       <button className="public-entry__close" aria-label="案内を閉じる" onClick={() => { dismissTutorial(); document.querySelector<HTMLElement>('.public-controls__disclosure')?.focus(); }}>×</button>
@@ -212,7 +211,6 @@ export default function PublicControls({ sharedWorld = false, queueStatus, gener
     </div>
     <PublicSettingsPanel layout={settingsLayout} open={expanded} onClose={closeSettings}>
     <button onClick={() => { closeSettings(); setGuideOpen(true); setHelpOpen(true); }}>使い方</button>
-    {sharedWorld&&<button onClick={()=>{cancelRequest();window.dispatchEvent(new Event('vayria-exhibition-next'));closeSettings();}}>次の参加者</button>}
     <fieldset className="public-theme" data-resolved-theme={resolvedTheme}><legend>テーマ</legend>
       {(['auto', 'light', 'dark'] as const).map((value, index) => <label key={value} title={['自動（端末の設定に合わせる）', 'ライト', 'ダーク'][index]}>
         <input className="visually-hidden" aria-label={['自動', 'ライト', 'ダーク'][index]} type="radio" name="public-theme" value={value} checked={themePreference === value} onChange={() => onThemeChange(value)} />

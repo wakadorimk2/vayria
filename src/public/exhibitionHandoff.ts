@@ -10,7 +10,9 @@ export function readHandoff(storage: Pick<Storage, 'getItem'>): HandoffRequest |
   return value;
 }
 export function prepareHandoff(storage: Pick<Storage, 'getItem' | 'setItem'>, epoch: number): HandoffRequest {
-  const request = readHandoff(storage) ?? { requestId: crypto.randomUUID(), epoch };
+  let stored: HandoffRequest | null = null;
+  try { stored = readHandoff(storage); } catch { /* An unreadable request can never be confirmed; replace it. */ }
+  const request = stored ?? { requestId: crypto.randomUUID(), epoch };
   storage.setItem(pendingKey, JSON.stringify(request));
   return request;
 }
