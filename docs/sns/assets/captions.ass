@@ -1,0 +1,21 @@
+[Script Info]
+; Vayria SNS demo captions (styled)
+; Timings are relative to the edited cut (raw 123.0s-146.3s + 1.5s end card)
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Caption,BIZ UDPGothic,40,&H00FFFFFF,&H000000FF,&H64141414,&H78000000,-1,0,0,0,100,100,0.5,0,4,2.5,0,8,24,24,290,1
+Style: EndCard,BIZ UDPGothic,36,&H00FFFFFF,&H000000FF,&H64141414,&H78000000,-1,0,0,0,100,100,1,0,4,2,0,2,24,24,170,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.50,0:00:04.00,Caption,,0,0,0,,{\fad(180,220)\fscx108\fscy108\t(0,150,\fscx100\fscy100)}カードを渡すと{\c&HC3A7F4&}世界が変わる{\c}
+Dialogue: 0,0:00:04.50,0:00:09.00,Caption,,0,0,0,,{\fad(180,220)\fscx108\fscy108\t(0,150,\fscx100\fscy100)}{\c&HC3A7F4&}クラゲ{\c}がふわっと現れる
+Dialogue: 0,0:00:10.50,0:00:19.00,Caption,,0,0,0,,{\fad(180,220)\fscx108\fscy108\t(0,150,\fscx100\fscy100)}浮く・増えるが効いて{\c&HC3A7F4&}賑やかに{\c}
+Dialogue: 0,0:00:19.30,0:00:22.60,Caption,,0,0,0,,{\fad(180,220)\fscx108\fscy108\t(0,150,\fscx100\fscy100)}ヴェイリアが{\c&HC3A7F4&}応える{\c}
+Dialogue: 0,0:00:22.90,0:00:24.30,EndCard,,0,0,0,,{\fad(200,300)}9.23 展示 / vayria.me

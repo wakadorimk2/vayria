@@ -30,3 +30,6 @@ tools/stt/benchmarks/local/
 .public-assets/
 dist-public/
 .world-experiments/
+
+# SNS deliverable videos are distributed via Notion, not git
+docs/sns/assets/*.mp4
