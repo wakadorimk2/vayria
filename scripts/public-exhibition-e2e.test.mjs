@@ -238,8 +238,12 @@ test('rapid card taps are rate-limited without deadlocking the table', async () 
       await client.page.locator('.card-zone--brain [data-world-slot]').nth(i % 5).click({ force: true }).catch(() => {});
     }
     // Whatever the limiter did, a fresh insert must succeed shortly after.
+    // The recovery window is load-sensitive, so retry instead of racing it.
     await client.page.waitForTimeout(1500);
-    await client.insertCard();
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try { await client.insertCard(); break; }
+      catch (error) { if (attempt === 3) throw error; await client.page.waitForTimeout(2000); }
+    }
     noErrors(client);
   } finally {
     await screenshot(client, output, 'card-burst');

@@ -1,7 +1,7 @@
 # 公開版の展示モード
 
 展示でも一般公開と同じURL・ビルド・会話処理を使う。登録したブラウザーだけに展示枠を付ける。
-検証URL移行後は `https://vayria.me/staging/exhibition` で検証端末を登録する。移行手順は [検証URLの移行](staging-url-migration.md) を参照する。
+検証環境 `https://vayria.me/staging/` は検証用アクセスチケットを通った全ブラウザーを自動で展示端末として扱う。登録コードは不要。
 この機能の実装はローカル変更。配信、本番展示枠の作成、有料生成はまだ実施していない。
 
 ## 当日の操作
@@ -58,6 +58,19 @@ npm run public:admin -- exhibition-stop expo-20260923
 
 全体の緊急停止 `public:admin -- stop` とWorkerの `GENERATION_ENABLED=false` は展示にも適用する。
 本番の配信・認証設定は既存の公開手順に従う。検証環境では検証用アクセスチケットも必要。
+
+## 検証環境（staging）での確認
+
+`https://vayria.me/staging/` は「チケットで守られた自由な展示相当環境」として扱う。環境（本番/検証）と端末ロール（一般/展示）は直交するが、検証環境では以下のとおり展示相当を既定にする。
+
+- 検証用アクセスチケットを通ったブラウザーは `EXHIBITION_AUTO_ENROLL` により自動で展示端末へ登録される。登録コードとTurnstileは不要。
+- 自動登録はローリング日次イベント `open-YYYY-MM-DD`（JST）へ紐付ける。予算はイベントごと（現在は1日あたり1,000円相当）。日をまたぐと新しいイベントへ自動的に移る。
+- `PUBLIC_WORLD_ROOM=main-world` を検証環境にも設定し、本番と同じ共有ワールド構成にする。ワールド・台帳・R2は全て検証用の別Worker・別名前空間で、本番とは物理的に分離されている。
+- 世代番号・引き継ぎ・`exhibition_idle`（展示中の自律会話の制限）・イベント予算の規則は本番と同じ実レコードで動く。
+- `exhibition-stop` と `exhibition-revoke` は検証環境でも有効。revoke した端末は自動登録されない。stop した当日イベントは翌日のイベントまで戻らない。
+- 登録コード入力の導線そのものは、常に登録済みになる検証環境では試せない。実コードの登録試験は `test:e2e:exhibition` または本番で行う。
+- 検証環境は `staging-preview` ラベルを付けたPRのコードがデプロイされる。同時に1件だけ。ラベルが外れるとmainへ戻る。
+- チケットは24時間で失効する。再発行は `.wrangler/renew-staging-ticket.mjs`（要 1Password CLI と `CLOUDFLARE_API_TOKEN`・`STAGING_ADMIN`）。
 
 ## 利用枠と費用
 

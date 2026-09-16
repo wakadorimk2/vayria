@@ -54,6 +54,7 @@ export class PublicUsage extends DurableObject {
           case 'exhibition-create': return l.createExhibition(b.event, b.starts, b.expires, b.budget);
           case 'exhibition-code': return l.issueExhibitionCode(b.event, b.hash);
           case 'exhibition-enroll': return l.enrollExhibition(b.visitor, b.hash);
+          case 'exhibition-ensure': return l.ensureExhibition(b.visitor, b.budget);
           case 'exhibition-next': return l.nextExhibitionVisitor(b.visitor, b.requestId, b.epoch);
           case 'exhibition-revoke': return l.revokeExhibitionDevice(b.visitor);
           case 'exhibition-stop': return l.stopExhibition(b.event);
