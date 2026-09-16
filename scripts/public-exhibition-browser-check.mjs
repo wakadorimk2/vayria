@@ -77,7 +77,9 @@ await page.route('**/*', async route => {
   if (url.pathname === '/api/exhibition/enroll') { enrolled = true; return json(status()); }
   if (url.pathname === '/api/exhibition/next') {
     const input = request.postDataJSON(); handoffs.push(input);
+    if (!enrolled) return json({ code: 'exhibition_required' }, 403);
     if (failHandoff) return json({ code: 'network_error' }, 503);
+    if (input.epoch !== epoch) return json({ code: 'exhibition_stale' }, 409);
     epoch++; session = null; return json(status());
   }
   if (['/api/chat', '/api/card-preview', '/api/transcribe', '/api/tts'].includes(url.pathname)) {
@@ -119,6 +121,12 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.deepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
+  // A stored handoff the server can never confirm is replaced instead of trapping the screen.
+  await page.evaluate(key => sessionStorage.setItem(key, JSON.stringify({ requestId: '11111111-1111-4111-8111-111111111111', epoch: 0 })), mount ? 'staging:vayria-exhibition-handoff' : 'vayria-exhibition-handoff');
+  await page.goto(base + mount + '/?handoff');
+  await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
+  assert.equal(page.url(), base + mount + '/');
+  assert.notEqual(handoffs.at(-1).requestId, '11111111-1111-4111-8111-111111111111');
   await page.getByRole('button', { name: '文字で話す', exact: true }).click();
   const input = page.locator('.message-form input');
   await input.fill('前の参加者の入力');
@@ -195,6 +203,11 @@ try {
     await page.locator('.public-controls__actions').waitFor();
     assert.equal(await page.evaluate(() => sessionStorage.getItem('staging:vayria-exhibition-handoff')), null);
     enrolled = false;
+    // Without enrollment a pending handoff is dropped and the app resets locally.
+    await page.evaluate(key => sessionStorage.setItem(key, JSON.stringify({ requestId: '22222222-2222-4222-8222-222222222222', epoch: 0 })), mount ? 'staging:vayria-exhibition-handoff' : 'vayria-exhibition-handoff');
+    await page.goto(base + mount + '/?handoff');
+    await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), mount ? 'staging:vayria-exhibition-handoff' : 'vayria-exhibition-handoff'), null);
     await page.goto(base + mount + '/exhibition');
     await page.getByRole('button', { name: 'この端末を登録', exact: true }).waitFor();
     assert.equal(await page.getByRole('link', { name: '体験画面へ戻る' }).getAttribute('href'), mount + '/');
@@ -206,7 +219,7 @@ try {
     await rootPage.close();
   }
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
+  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests', 'unenrolled-handoff-local-reset'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'stale-handoff-replaced-via-handoff-param', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
 } catch (error) {
   console.error(JSON.stringify({ generations, errors, ui: await page.locator('body').innerText(), sources: await page.evaluate(() => window.exhibitSources) }));
   await page.screenshot({ path: resolve(output, 'failure.png') });
