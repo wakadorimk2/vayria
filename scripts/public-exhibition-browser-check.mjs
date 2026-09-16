@@ -96,7 +96,7 @@ await page.route('**/*', async route => {
 });
 try {
   await page.goto(base + mount + '/');
-  await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor();
+  await page.locator('.public-controls__actions').waitFor();
   await page.waitForTimeout(5000);
   assert.equal(generations.length, 0, JSON.stringify(generations)); assert.equal(microphoneAcquisitions, 0);
   const initialCards = await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId));
@@ -116,7 +116,7 @@ try {
   await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/chat')), tapCard('.card-zone--brain [data-card-id]')]);
   assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).mode === 'autonomous' && JSON.parse(g.body).forcedCardId));
   assert.notDeepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.deepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
   await page.getByRole('button', { name: '文字で話す', exact: true }).click();
@@ -125,7 +125,7 @@ try {
   await page.getByRole('button', { name: '送信', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.message-form button[type="submit"]')?.disabled === true);
   failHandoff = true;
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByRole('button', { name: 'もう一度確認する' }).waitFor();
   assert.equal(await page.locator('.app-shell').count(), 0);
   const first = handoffs.at(-1);
@@ -145,7 +145,7 @@ try {
   await input.fill('音声再生の停止を確認');
   await page.getByRole('button', { name: '送信', exact: true }).click();
   await page.waitForFunction(() => window.exhibitSources.some(s => s.started && !s.stopped && !s.ended));
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.exhibitSources.filter(s => s.started).every(s => s.stopped || s.ended)), true);
   await page.getByRole('button', { name: '文字で話す', exact: true }).click();
@@ -153,13 +153,13 @@ try {
   // Real browser capture of a fake microphone; stopping must end every acquired track.
   await page.getByRole('button', { name: /^マイクで話す/ }).click();
   await page.waitForFunction(() => window.exhibitTracks.length > 0);
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.exhibitTracks.every(t => t.readyState === 'ended')), true);
   await page.getByRole('button', { name: '挨拶してみる', exact: true }).click();
   await page.getByText('文字・マイク・カードから続けられます', { exact: true }).waitFor();
   assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).greeting === true));
-  await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByRole('button', { name: '挨拶してみる', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'カードで遊ぶ', exact: true }).getAttribute('aria-expanded'), 'false');
   usedYen = 8000;
@@ -192,7 +192,7 @@ try {
     assert.equal(await rootPage.evaluate(() => localStorage.getItem('vayria-public-theme')), 'dark');
     await page.evaluate(() => sessionStorage.setItem('vayria-exhibition-handoff', JSON.stringify({ requestId: 'production-only', epoch: 9 })));
     await page.reload();
-    await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor();
+    await page.locator('.public-controls__actions').waitFor();
     assert.equal(await page.evaluate(() => sessionStorage.getItem('staging:vayria-exhibition-handoff')), null);
     enrolled = false;
     await page.goto(base + mount + '/exhibition');
@@ -201,7 +201,7 @@ try {
     await page.locator('input').fill('a'.repeat(32));
     await page.getByRole('button', { name: 'この端末を登録', exact: true }).click();
     await page.waitForURL(base + mount + '/');
-    await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor();
+    await page.locator('.public-controls__actions').waitFor();
     assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('vayria-exhibition-handoff')).requestId), 'production-only');
     await rootPage.close();
   }

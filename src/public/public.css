@@ -324,12 +324,11 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-theme label:has(input:focus-visible) { outline: 2px solid var(--public-focus); outline-offset: 3px; }
 .public-theme input:focus-visible { outline: none; }
 
-.public-layout[data-exhibition="true"] { --public-controls-height: 116px; }
-.public-layout[data-exhibition="true"] .public-controls { flex-direction: column; align-items: center; }
+.public-layout:has(.public-exhibition-handoff) { --public-controls-height: 116px; }
+.public-layout:has(.public-exhibition-handoff) .public-controls { flex-direction: column; align-items: center; }
 .public-layout .public-exhibition-handoff { display: flex; justify-content: center; margin-bottom: 8px; pointer-events: auto; }
 .public-controls__disclosure { position: relative; }
 .public-exhibition-paused { align-self: center; max-width: 150px; padding: 4px 8px; border-radius: 12px; background: var(--public-surface); color: var(--public-ink); }
-.public-layout .public-exhibition-handoff button { min-height: 44px; padding: 8px 18px; border-radius: 24px; background: var(--public-surface); color: var(--public-ink); border: 1px solid currentColor; font: inherit; }
 .public-exhibition-notification { position: absolute; top: 0; right: 0; min-width: 18px; border-radius: 50%; background: var(--public-ink); color: var(--public-paper); font-size: 13px; text-align: center; }
 .public-exhibition-settings { margin: 16px 0; }
 .public-registration-layout { overflow-y: auto; padding: max(32px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom)); box-sizing: border-box; }

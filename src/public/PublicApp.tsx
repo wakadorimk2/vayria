@@ -1,14 +1,13 @@
 import { publicUrl } from './paths';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import App from '../App';
-import { pausePublic, publicExhibition, subscribePublic, updatePublicStatus } from './session';
+import { pausePublic, publicExhibition, updatePublicStatus } from './session';
 import { hasPendingHandoff, prepareHandoff, completeHandoff } from './exhibitionHandoff';
 
 const pendingHandoff = () => { try { return hasPendingHandoff(sessionStorage); } catch { return false; } };
 
 // Remount the same public app to discard all participant state, including cards and pending input.
 export default function PublicApp() {
-  const exhibition = useSyncExternalStore(subscribePublic, publicExhibition);
   const [handoff, setHandoff] = useState(pendingHandoff);
   const [error, setError] = useState(false);
   const [generation, setGeneration] = useState(0);
@@ -23,7 +22,14 @@ export default function PublicApp() {
       busy = true;
       pausePublic(); setHandoff(true); setError(false);
       try {
-        const request = prepareHandoff(sessionStorage, publicExhibition()?.epoch ?? -1);
+        // Enrollment may not be loaded yet at mount; confirm before choosing the reset path.
+        let device = publicExhibition();
+        if (!device) {
+          const statusResponse = await fetch(publicUrl('/api/session'), { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+          if (statusResponse.ok) { const value = await statusResponse.json(); if (disposed) return; updatePublicStatus(value); device = value.exhibition ?? null; }
+        }
+        if (!device && !hasPendingHandoff(sessionStorage)) { setGeneration(n => n + 1); setHandoff(false); setWelcome(true); return; }
+        const request = prepareHandoff(sessionStorage, device?.epoch ?? -1);
         const response = await fetch(publicUrl('/api/exhibition/next'), { method: 'POST',
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
@@ -39,10 +45,17 @@ export default function PublicApp() {
     const onNext = () => { void next(); };
     retryRef.current = onNext;
     window.addEventListener('vayria-exhibition-next', onNext);
-    if (pendingHandoff()) onNext();
+    const params = new URLSearchParams(location.search);
+    const handoffRequested = params.has('handoff');
+    if (handoffRequested) {
+      params.delete('handoff');
+      const query = params.toString();
+      history.replaceState(null, '', location.pathname + (query ? `?${query}` : '') + location.hash);
+    }
+    if (handoffRequested || pendingHandoff()) onNext();
     return () => { disposed = true; controller.abort(); window.removeEventListener('vayria-exhibition-next', onNext); };
   }, []);
-  return <div className="public-layout" data-exhibition={!!exhibition} onPointerDown={() => setWelcome(false)} onKeyDown={() => setWelcome(false)}>
+  return <div className="public-layout" onPointerDown={() => setWelcome(false)} onKeyDown={() => setWelcome(false)}>
     {handoff ? <main className="public-handoff" aria-live="polite">
       <h1>{error ? '参加者交代を完了できませんでした' : '次の方を迎える準備中です'}</h1>
       <p>{error ? '接続を確認してから、もう一度お試しください。前の会話は再開しません。' : '会話・カード・音声を初期化しています。'}</p>
