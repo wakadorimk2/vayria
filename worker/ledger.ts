@@ -143,6 +143,20 @@ export class Ledger {
     delete this.state.exhibitionCodes![hash];
     return this.status(visitor);
   }
+  ensureExhibition(visitor: string, budget: number) {
+    if (!Number.isSafeInteger(budget) || budget <= 0) throw new LimitError('invalid_request', 0, 400);
+    const device = this.state.exhibitionDevices![visitor];
+    if (device?.revoked) return this.status(visitor);
+    const bound = device ? this.state.exhibitions![device.event] : undefined;
+    if (bound && !bound.stopped && this.now < bound.expires) return this.status(visitor);
+    const { day, dayEnd } = periods(this.now);
+    const eventId = `open-${day}`;
+    const event = this.state.exhibitions![eventId] ?? this.createExhibition(eventId, dayEnd - 86400_000, dayEnd, budget);
+    if (event.stopped || this.now >= event.expires) return this.status(visitor);
+    this.endVisitorSessions(visitor);
+    this.state.exhibitionDevices![visitor] = { event: eventId, epoch: (device?.epoch ?? 0) + 1, revoked: false };
+    return this.status(visitor);
+  }
   private endVisitorSessions(visitor: string) {
     for (const s of Object.values(this.state.sessions)) if (s.visitor === visitor) this.close(s);
   }

@@ -67,3 +67,44 @@ test('exhibit enrollment, repeated handoff, revoked access and budget rejection 
     assert.equal(externalCalls.length, 0);
   } finally { await mf.dispose(); }
 });
+
+test('EXHIBITION_AUTO_ENROLL binds visitors to a rolling open event without a code or Turnstile', async () => {
+  const secret = 'exhibition-open-test-'.repeat(3), base = 'https://test.example';
+  const externalCalls = [];
+  const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: 'exhibition-open-test', modules: true,
+    script: bundle.outputFiles[0].text, compatibilityDate: '2026-09-07', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { USAGE: { className: 'PublicUsage', useSQLite: true } },
+    bindings: { COOKIE_SECRET: secret, IP_SECRET: secret, ADMIN_SECRET: secret, OPENAI_API_KEY: 'mock-openai', AIVIS_API_KEY: 'mock-aivis',
+      AIVIS_MODEL_UUID: 'mock-model', AIVIS_SPEAKER_UUID: 'mock-speaker', GENERATION_ENABLED: 'true',
+      REQUIRE_PREVIEW_ACCESS: 'false', PUBLIC_HOSTNAME: 'test.example', EXHIBITION_AUTO_ENROLL: 'true' },
+    serviceBindings: { ASSETS: () => new Response('public app') },
+    outboundService: request => { externalCalls.push(request.url); return Response.json({ error: 'Unexpected external request' }, { status: 502 }); },
+  }] }));
+  const payload = Buffer.from(JSON.stringify({ purpose: 'admin', exp: Date.now() + 600000 })).toString('base64url');
+  const token = payload + '.' + createHmac('sha256', secret).update(payload).digest('base64url');
+  const post = (path, input, cookie = '', extra = {}) => mf.dispatchFetch(base + path, { method: 'POST',
+    headers: { Origin: base, Cookie: cookie, 'Content-Type': 'application/json', 'CF-Connecting-IP': '192.0.2.1', ...extra }, body: JSON.stringify(input) });
+  const admin = input => post('/api/admin', input, '', { Authorization: `Bearer ${token}` });
+  try {
+    const first = await mf.dispatchFetch(base + '/api/session');
+    const cookie = first.headers.get('set-cookie').split(';')[0];
+    const visitor = JSON.parse(Buffer.from(cookie.split('=')[1].split('.')[0], 'base64url').toString()).id;
+    const status = await first.json();
+    assert.equal(status.exhibition.available, true);
+    assert.match(status.exhibition.id, /^open-\d{4}-\d{2}-\d{2}$/);
+    assert.equal(status.exhibition.epoch, 1);
+    const repeated = await (await mf.dispatchFetch(base + '/api/session', { headers: { Cookie: cookie } })).json();
+    assert.equal(repeated.cookieReady, true);
+    assert.equal(repeated.exhibition.epoch, 1);
+    const started = await (await post('/api/session', { epoch: 1 }, cookie)).json();
+    assert.ok(started.session.id);
+    assert.equal(externalCalls.length, 0); // No Turnstile for an auto-enrolled device.
+    await admin({ op: 'exhibition-revoke', visitor });
+    const revoked = await (await mf.dispatchFetch(base + '/api/session', { headers: { Cookie: cookie } })).json();
+    assert.equal(revoked.exhibition.revoked, true); // Operator revocation is respected.
+    assert.equal((await post('/api/session', { epoch: 2 }, cookie)).status, 403);
+    const report = await (await admin({ op: 'report' })).json();
+    assert.equal(report.dayYen, 0);
+    assert.equal(externalCalls.length, 0);
+  } finally { await mf.dispose(); }
+});

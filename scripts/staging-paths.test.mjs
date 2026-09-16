@@ -52,6 +52,7 @@ test('mounted Workers isolate Cookie and SQLite state, retain admission, and red
     compatibilityDate: '2026-09-07', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { USAGE: { className: 'PublicUsage', useSQLite: true } },
     bindings: { PUBLIC_BASE_PATH: base, PUBLIC_HOSTNAME: 'vayria.me', REQUIRE_PREVIEW_ACCESS: i ? 'true' : 'false',
+      EXHIBITION_AUTO_ENROLL: i ? 'true' : 'false',
       PREVIEW_SECRET: secret, COOKIE_SECRET: secret, IP_SECRET: secret, ADMIN_SECRET: secret, GENERATION_ENABLED: 'true' },
     serviceBindings: { ASSETS: request => { const path = new URL(request.url).pathname; assets.push({ base, path });
       if (path === '/redirect') return new Response(null, { status: 308, headers: { Location: '/redirect/' } });
@@ -75,17 +76,29 @@ test('mounted Workers isolate Cookie and SQLite state, retain admission, and red
     const admission = await get('/staging/'); assert.equal(admission.status, 401);
     assert.match(await admission.text(), /action="\/staging\/preview"/);
     assert.equal((await get('/staging/api/session')).status, 403);
+    // Public-room joins must not bypass the ticket gate on a protected mount.
+    assert.equal((await get('/staging/world/main-world')).status, 401);
+    assert.equal((await staging.fetch(origin + '/staging/api/world-room/main-world/join', { method: 'POST',
+      headers: { Origin: origin, 'Content-Type': 'application/json' }, body: '{}' })).status, 403);
     const submit = (ticket, requestOrigin = origin) => staging.fetch(origin + '/staging/preview', { method: 'POST', redirect: 'manual',
       headers: { Origin: requestOrigin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ticket }).toString() });
     const expired = await submit(signed('preview', 1)); assert.equal(expired.status, 401, await expired.text());
     assert.equal((await submit(signed('preview'), 'https://other.example')).status, 401);
-    const login = await submit(signed('preview')); assert.equal(login.status, 303); assert.equal(login.headers.get('location'), '/staging/');
+    const login = await submit(signed('preview')); assert.equal(login.status, 200);
+    assert.match(await login.text(), /http-equiv="refresh" content="0; url=\/staging\/"/);
+    assert.equal(login.headers.get('location'), null);
     const preview = login.headers.get('set-cookie').split(';')[0]; assert.ok(preview.startsWith('__Host-vayria-staging-preview='));
     const session = await get('/staging/api/session', preview);
     const stageCookie = session.headers.get('set-cookie').split(';')[0]; assert.ok(stageCookie.startsWith('__Host-vayria-staging='));
     for (const flag of ['Secure', 'HttpOnly', 'SameSite=Strict', 'Path=/']) assert.ok(session.headers.get('set-cookie').includes(flag));
+    // Auto-enroll binds the staging visitor to the rolling open exhibition event.
+    const stagingStatus = await session.json();
+    assert.match(stagingStatus.exhibition.id, /^open-\d{4}-\d{2}-\d{2}$/);
+    assert.equal(stagingStatus.exhibition.available, true);
+    assert.equal(stagingStatus.exhibition.epoch, 1);
     const prodSession = await production.fetch(origin + '/api/session', { headers: { Cookie: stageCookie } });
     const prodCookie = prodSession.headers.get('set-cookie').split(';')[0]; assert.ok(prodCookie.startsWith('__Host-vayria='));
+    assert.equal((await prodSession.json()).exhibition, null);
     const both = `${preview}; ${stageCookie}; ${prodCookie}`;
     assert.equal((await (await get('/staging/api/session', both)).json()).cookieReady, true);
     assert.equal((await (await production.fetch(origin + '/api/session', { headers: { Cookie: both } })).json()).cookieReady, true);
@@ -94,6 +107,9 @@ test('mounted Workers isolate Cookie and SQLite state, retain admission, and red
     assert.ok(assets.some(x => x.base === '/staging' && x.path === '/avatar/model.vrm'));
     assert.equal((await get('/staging/redirect', both)).headers.get('location'), '/staging/redirect/');
     assert.equal((await get('/staging/api/unknown', both)).status, 404);
+    // Past the gate, an authenticated join still reaches the world route (no room binding in this fixture).
+    assert.equal((await staging.fetch(origin + '/staging/api/world-room/main-world/join', { method: 'POST',
+      headers: { Origin: origin, Cookie: both, 'Content-Type': 'application/json' }, body: '{}' })).status, 404);
     const admin = (worker, path, input) => worker.fetch(origin + path, { method: 'POST', headers: { Origin: origin,
       Authorization: 'Bearer ' + signed('admin'), 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
     assert.equal((await admin(staging, '/staging/api/admin', { op: 'configure', stopped: true })).status, 200);

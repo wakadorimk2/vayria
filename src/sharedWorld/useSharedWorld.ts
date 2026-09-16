@@ -16,6 +16,7 @@ export function useSharedWorld(guestRoom?:string){
   const roomId=guestRoom??sharedWorldRoomId();const enabled=!!roomId;
   const [snapshot,setSnapshot]=useState<WorldSnapshot|null>(null);const [error,setError]=useState('');const [receipt,setReceipt]=useState('');
   const [connected,setConnected]=useState(false);const [role,setRole]=useState<'guest'|'host'>('guest');
+  const [leaseDenied,setLeaseDenied]=useState(false);
   useEffect(()=>{if(!receipt)return;const timer=setTimeout(()=>setReceipt(''),2200);return()=>clearTimeout(timer);},[receipt,snapshot?.sequence]);
   const [sweepElements,setSweepElements]=useState<WorldElement[]>([]);
   // A duplicated tab must not inherit the exhibition lease of its opener.
@@ -34,7 +35,7 @@ export function useSharedWorld(guestRoom?:string){
     const auth=worldAccess();if(auth&&auth.roomId===next.roomId&&auth.epoch!==next.epoch)setWorldAccess({...auth,epoch:next.epoch});
   },[]);
   const lease=useCallback(async(takeover=false)=>{
-    if(!roomId)return;const value=await worldFetch(roomId,'lease',{clientId,takeover});setWorldAccess({roomId,clientId,lease:value.token,epoch:value.epoch,until:Date.now()+value.until-value.serverNow});setError('');
+    if(!roomId)return;const value=await worldFetch(roomId,'lease',{clientId,takeover});setWorldAccess({roomId,clientId,lease:value.token,epoch:value.epoch,until:Date.now()+value.until-value.serverNow});setLeaseDenied(false);setError('');
   },[roomId,clientId]);
   useEffect(()=>{
     if(!roomId)return;let stopped=false;let socket:WebSocket|undefined;let reconnect:ReturnType<typeof setTimeout>|undefined;
@@ -50,14 +51,14 @@ export function useSharedWorld(guestRoom?:string){
       const joined=await worldFetch(roomId,'join',{grant});if(stopped)return;setRole(joined.role);receive(joined.state);
       if(grant)history.replaceState(null,'',location.pathname+location.search);
       if(joined.role==='host'&&!guestRoom){
-        await lease().catch(e=>{if(!current.current?.sharedConversation)setError(worldMessage(e.message));});
+        await lease().catch(e=>{if(e instanceof Error&&e.message==='host_already_active')setLeaseDenied(true);if(!current.current?.sharedConversation)setError(worldMessage(e.message));});
         if(stopped)return;
-        heartbeat=setInterval(()=>{void lease().catch(e=>{setWorldAccess(null);if(!current.current?.sharedConversation)setError(worldMessage(e.message));});},10000);
+        heartbeat=setInterval(()=>{void lease().catch(e=>{setWorldAccess(null);if(e instanceof Error&&e.message==='host_already_active')setLeaseDenied(true);if(!current.current?.sharedConversation)setError(worldMessage(e.message));});},10000);
       }
       connect();poll=setInterval(()=>{void worldFetch(roomId,'state').then(value=>{if(socket?.readyState===WebSocket.OPEN)receive(value);}).catch(()=>{});},15000);
     }catch(e){if(!stopped)setError(worldMessage(e instanceof Error?e.message:'world_unavailable'));}})();
     const jobs=activeJobs.current;
-    return()=>{stopped=true;socket?.close();clearTimeout(reconnect);clearInterval(heartbeat);clearInterval(poll);setWorldAccess(null);for(const controller of jobs.values())controller.abort();};
+    return()=>{stopped=true;socket?.close();clearTimeout(reconnect);clearInterval(heartbeat);clearInterval(poll);setWorldAccess(null);setLeaseDenied(false);for(const controller of jobs.values())controller.abort();};
   },[roomId,guestRoom,lease,receive]);
   useEffect(()=>{if(!roomId||!snapshot?.sharedConversation)return;const pulse=()=>{void worldFetch(roomId,'presence',{active:publicActive()&&!document.hidden}).catch(()=>{});};pulse();const timer=setInterval(pulse,10000);document.addEventListener('visibilitychange',pulse);window.addEventListener('vayria-public-start',pulse);window.addEventListener('vayria-public-stop',pulse);return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',pulse);window.removeEventListener('vayria-public-start',pulse);window.removeEventListener('vayria-public-stop',pulse);void worldFetch(roomId,'presence',{active:false}).catch(()=>{});};},[roomId,snapshot?.sharedConversation]);
   useEffect(()=>{const failed=(event:Event)=>setError(worldMessage((event as CustomEvent<string>).detail));window.addEventListener('vayria-world-input-error',failed);return()=>window.removeEventListener('vayria-world-input-error',failed);},[]);
@@ -101,7 +102,7 @@ export function useSharedWorld(guestRoom?:string){
     }
   },[roomId,role,snapshot]);
   const send=useCallback(async(text:string)=>{if(!roomId||!current.current)return false;try{receive(await worldFetch(roomId,'conversation',{id:crypto.randomUUID(),kind:'text',text,epoch:current.current.epoch}));setError('');return true;}catch(e){setError(worldMessage(e instanceof Error?e.message:'world_unavailable'));return false;}},[roomId,receive]);
-  return {send,enabled,roomId,snapshot,sweepElements,error,receipt,connected,role,insert,insertHand,nextParticipant,displayed,takeover:()=>lease(true)};
+  return {send,enabled,roomId,snapshot,sweepElements,error,receipt,connected,role,leaseDenied,insert,insertHand,nextParticipant,displayed,takeover:()=>lease(true)};
 }
 export type SharedWorldClient=ReturnType<typeof useSharedWorld>;
 export function worldElementIcon(element:WorldElement){return element.sourceCardIds[0]??element.concept;}

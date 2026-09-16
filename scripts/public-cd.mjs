@@ -14,6 +14,8 @@ export function validateTarget(config) {
   if (config.name !== 'vayria-public-staging' || config.account_id !== '7414797104d7aca62f03fbd4faf7e5df' ||
       JSON.stringify(config.routes) !== JSON.stringify([{ pattern: 'staging.vayria.me', custom_domain: true }, { pattern: 'vayria.me/staging*', zone_name: 'vayria.me' }]) ||
       config.vars?.PUBLIC_HOSTNAME !== 'vayria.me' || config.vars?.PUBLIC_BASE_PATH !== '/staging' || config.vars?.REQUIRE_PREVIEW_ACCESS !== 'true' ||
+      config.vars?.PUBLIC_WORLD_ROOM !== 'main-world' || config.vars?.EXHIBITION_AUTO_ENROLL !== 'true' ||
+      config.vars?.SHARED_WORLD_ENABLED !== 'true' || config.vars?.SHARED_CONVERSATION_ENABLED !== 'true' || config.vars?.GENERATION_ENABLED !== 'true' ||
       config.workers_dev !== false || config.preview_urls !== false) throw new Error('Deployment target must be the protected staging Worker.');
 }
 export function validateVrm(bytes, manifest) {
@@ -69,7 +71,7 @@ export async function productionSmoke(fetchImpl, pinned, expectedHtml, expectedS
   if (!resumed.ok) throw new Error('Production session status failed.');
   const status = await resumed.json();
   if (status.cookieReady !== true || status.enabled !== true || status.stopped !== false ||
-      status.siteKey !== '0x4AAAAAAErpgvhBvYpnRm71' || status.session != null)
+      status.siteKey !== '0x4AAAAAAErpgvhBvYpnRm71' || status.session != null || status.exhibition != null)
     throw new Error('Production generation or session configuration is not ready.');
 }
 
