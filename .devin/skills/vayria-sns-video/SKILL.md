@@ -27,7 +27,7 @@ SNS投稿用のVayria実演動画を制作する。手順の骨格・ffmpegレ�
 
 ## 素材と出力先
 
-- KV原素材: `docs/images/vayria-kv.png`（848×1200）、`docs/images/vayria-kv-poster.jpg`（1200×1694）。クレジットは「立ち絵：wakadori／キービジュアルデザイン：共同制作」。
+- KV原素材: `docs/images/vayria-kv.png`（848×1200）、`docs/images/vayria-kv-poster.jpg`（1200×1694）。クレジットは「立ち絵：wakadori／キービジュアルデザイン：suga」。
 - 制作物の保存先: `docs/sns/`（KV展開は `docs/sns/kv/`、動画・字幕は `docs/sns/assets/`）。
 - 台本は `docs/sns/video-storyboard.md`、字幕は `docs/sns/assets/captions.ass`（スタイル付き正本。srtが必要な場合は派生として生成）を正本とする。
 - 装飾レシピ（アクセント色・モーション・エンドカード・QA）はグローバルスキル `ffmpeg-usage` を参照する。
