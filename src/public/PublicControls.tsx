@@ -85,8 +85,8 @@ export default function PublicControls({ sharedWorld = false, queueStatus, gener
   useEffect(() => {
     let disposed = false;
     void (async () => {
-      let response = await fetch(publicUrl('/api/session')); let value = await response.json();
-      if (response.ok && !value.cookieReady) { response = await fetch(publicUrl('/api/session')); value = await response.json(); }
+      let response = await fetch(publicUrl('/api/session'), { signal: AbortSignal.timeout(15000) }); let value = await response.json();
+      if (response.ok && !value.cookieReady) { response = await fetch(publicUrl('/api/session'), { signal: AbortSignal.timeout(15000) }); value = await response.json(); }
       if (disposed) return;
       if (!response.ok) { setMessage('接続できませんでした。再読み込みしてください。'); finishRequest(false); return; }
       setStatus(value); updatePublicStatus(value); if (!request.current) setMessage(!value.enabled ? '会話機能は準備中です。カード操作を試せます。' : value.cookieReady ? 'カード交換や文字送信から始められます。' : '会話には匿名Cookieを有効にしてください。');
@@ -148,7 +148,7 @@ export default function PublicControls({ sharedWorld = false, queueStatus, gener
     const controller = new AbortController(); startAbort.current = controller; setPending(true);
     void (async () => {
       try {
-        const response = await fetch(publicUrl('/api/session'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, epoch: status.exhibition?.epoch }), signal: controller.signal });
+        const response = await fetch(publicUrl('/api/session'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, epoch: status.exhibition?.epoch }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
         const value = await response.json();
         if (controller.signal.aborted || document.hidden) return;
         if (!response.ok) { window.dispatchEvent(new CustomEvent('vayria-public-error', { detail: value })); return; }
@@ -161,7 +161,7 @@ export default function PublicControls({ sharedWorld = false, queueStatus, gener
   const end = async () => {
     const id = publicSessionId(); cancelRequest(); pausePublic(); setExpanded(false); setNoticeOpen(true);
     try {
-      const response = await fetch(publicUrl('/api/session'), { method: 'DELETE', headers: { 'X-Vayria-Session': id } });
+      const response = await fetch(publicUrl('/api/session'), { method: 'DELETE', headers: { 'X-Vayria-Session': id }, signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw new Error('Session end failed');
       const value = await response.json(); setStatus(s => ({ ...s, ...value })); updatePublicStatus(value); setStatusStale(false);
       setMessage('会話を終了しました。カード操作は続けられます。');

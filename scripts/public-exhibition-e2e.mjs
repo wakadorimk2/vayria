@@ -343,6 +343,28 @@ export async function newClient(browser, stack, { name = 'client' } = {}) {
   const worldSockets = [];
   page.on('pageerror', error => errors.push(String(error)));
   page.on('websocket', socket => { if (socket.url().includes('/api/world-room/')) worldSockets.push(socket); });
+  // Track every acquired microphone track and playback buffer source so tests
+  // can prove handoff and participant changes release real capture/playback.
+  await page.addInitScript(() => {
+    window.__vayriaTracks = [];
+    window.__vayriaSources = [];
+    const createSource = AudioContext.prototype.createBufferSource;
+    AudioContext.prototype.createBufferSource = function () {
+      const source = createSource.call(this), record = { started: false, stopped: false, ended: false };
+      window.__vayriaSources.push(record);
+      const start = source.start.bind(source), stop = source.stop.bind(source);
+      source.start = (...args) => { record.started = true; return start(...args); };
+      source.stop = (...args) => { record.stopped = true; return stop(...args); };
+      source.addEventListener('ended', () => { record.ended = true; });
+      return source;
+    };
+    const acquire = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async constraints => {
+      const stream = await acquire(constraints);
+      window.__vayriaTracks.push(...stream.getTracks());
+      return stream;
+    };
+  });
   // The exhibition must never contact third parties from the browser.
   await page.route('**/*', route => {
     const url = route.request().url();
@@ -362,7 +384,7 @@ export async function newClient(browser, stack, { name = 'client' } = {}) {
       await page.locator('#exhibition-code').fill(code);
       await page.getByRole('button', { name: 'この端末を登録', exact: true }).click();
       await page.waitForURL(url => url.pathname === '/', { timeout: 20000 });
-      await page.getByRole('button', { name: '体験を終える', exact: true }).waitFor({ timeout: 20000 });
+      await page.locator('.public-controls__actions').waitFor({ timeout: 20000 });
     },
     // Room membership + state API reachable (join completed, cookie stored).
     async waitWorldConnected(timeout = 15000) {
@@ -371,12 +393,14 @@ export async function newClient(browser, stack, { name = 'client' } = {}) {
         catch { return false; }
       }, ROOM_ID, { timeout });
     },
-    // Most recent world-room WebSocket that is still open.
-    async waitWorldSocket(timeout = 30000) {
+    // Most recent world-room WebSocket that is still open. `after` requires a
+    // socket created beyond an earlier watermark, so a reload cannot return a
+    // pre-navigation socket whose close has not propagated yet.
+    async waitWorldSocket(timeout = 30000, after = 0) {
       const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         const socket = worldSockets.at(-1);
-        if (socket && !socket.isClosed()) return socket;
+        if (socket && worldSockets.length > after && !socket.isClosed()) return socket;
         await new Promise(done => setTimeout(done, 100));
       }
       throw new Error(`world socket never connected (${name})`);
@@ -393,7 +417,13 @@ export async function newClient(browser, stack, { name = 'client' } = {}) {
       await client.openCards();
       await page.locator('.card-zone--hand [data-hand-card]').first().click({ force: true });
       await page.locator('.card-zone--brain [data-world-slot]').first().click({ force: true });
-      await page.locator('.shared-world-receipt').filter({ hasText: '受け付けました' }).waitFor({ timeout: 10000 });
+      try {
+        await page.locator('.shared-world-receipt').filter({ hasText: '受け付けました' }).waitFor({ timeout: 10000 });
+      } catch (error) {
+        const notice = await page.locator('.shared-world-receipt').first().textContent().catch(() => '');
+        if (notice?.trim()) throw new Error(`card insert rejected: ${notice.trim()}`);
+        throw error;
+      }
     },
     async sendText(text) {
       // The toggle event is fire-and-forget; only click it when the panel is
@@ -466,8 +496,9 @@ export async function newClient(browser, stack, { name = 'client' } = {}) {
     async state() {
       return page.evaluate(async roomId => (await fetch(`/api/world-room/${roomId}/state`)).json(), ROOM_ID);
     },
+    // The on-screen handoff button was removed (#121); operators open ?handoff.
     async handoff({ expectError = false } = {}) {
-      await page.getByRole('button', { name: '体験を終える', exact: true }).click();
+      await page.goto(stack.origin + '/?handoff', { waitUntil: 'domcontentloaded' });
       if (expectError) {
         await page.getByRole('button', { name: 'もう一度確認する', exact: true }).waitFor({ timeout: 20000 });
         return;
