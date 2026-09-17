@@ -18,7 +18,7 @@ AI Software Engineer & Illustrator. I create playful, conversational experiences
   <a href="https://github.com/wakadorimk2/vayria"><img src="https://raw.githubusercontent.com/wakadorimk2/vayria/main/docs/images/vayria-kv-poster.jpg" width="280" alt="カードを差し出すVayria。『カードを選ぶ。会話が変わる。』と書かれたキービジュアル"></a>
 </p>
 
-立ち絵：wakadori／キービジュアルデザイン：共同制作
+立ち絵：wakadori／キービジュアルデザイン：suga
 
 ## 制作への関心
 
