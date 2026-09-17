@@ -9,6 +9,7 @@ export function setWorldAccess(value:WorldAccess|null){access=value;}
 export function addWorldHeaders(headers:Headers){if(access){headers.set('X-World-Client',access.clientId);headers.set('X-World-Lease',access.lease);headers.set('X-World-Epoch',String(access.epoch));}}
 export async function worldFetch(roomId:string,op:string,body?:object,signal?:AbortSignal){
   const headers=new Headers({'Content-Type':'application/json'});addWorldHeaders(headers);headers.set('X-Vayria-Session',publicSessionId());
-  const response=await fetch(publicUrl(`/api/world-room/${roomId}/${op}`),{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal});
-  const result=await response.json();if(!response.ok)throw new Error(result.code??'world_unavailable');return result;
+  const requestSignal=signal?AbortSignal.any([signal,AbortSignal.timeout(30000)]):AbortSignal.timeout(30000);
+  const response=await fetch(publicUrl(`/api/world-room/${roomId}/${op}`),{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:requestSignal});
+  const result=await response.json().catch(()=>null);if(!response.ok)throw new Error(result?.code??'world_unavailable');return result;
 }

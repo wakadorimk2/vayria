@@ -42,13 +42,16 @@ export function useSharedWorld(guestRoom?:string){
     let heartbeat:ReturnType<typeof setInterval>|undefined;let poll:ReturnType<typeof setInterval>|undefined;let retryMs=1000;
     const connect=()=>{
       if(stopped)return;const url=new URL(publicUrl(`/api/world-room/${roomId}/events`),location.origin);url.protocol=url.protocol==='https:'?'wss:':'ws:';
-      feedBaseline.current=true;socket=new WebSocket(url);socket.onopen=()=>{retryMs=1000;setConnected(true);};socket.onmessage=e=>{const value=JSON.parse(e.data);if(value.roomId)receive(value);};
+      feedBaseline.current=true;socket=new WebSocket(url);socket.onopen=()=>{retryMs=1000;setConnected(true);};socket.onmessage=e=>{try{const value=JSON.parse(e.data);if(value.roomId)receive(value);}catch{/* Ignore malformed frames. */}};
       socket.onclose=()=>{feedBaseline.current=true;setConnected(false);if(!stopped){reconnect=setTimeout(connect,retryMs);retryMs=Math.min(15000,retryMs*2);}};
       socket.onerror=()=>socket?.close();
     };
     void(async()=>{try{
       const hash=new URLSearchParams(location.hash.slice(1));const grant=hash.get('host')??hash.get('invite')??'';
-      const joined=await worldFetch(roomId,'join',{grant});if(stopped)return;setRole(joined.role);receive(joined.state);
+      let joined:Awaited<ReturnType<typeof worldFetch>>|null=null;let joinError:unknown=null;
+      for(let attempt=0;attempt<3&&!stopped;attempt++){try{joined=await worldFetch(roomId,'join',{grant});break;}catch(e){joinError=e;if(attempt<2)await new Promise(done=>setTimeout(done,3000));}}
+      if(stopped)return;if(!joined)throw joinError instanceof Error?joinError:new Error('world_unavailable');
+      setRole(joined.role);receive(joined.state);
       if(grant)history.replaceState(null,'',location.pathname+location.search);
       if(joined.role==='host'&&!guestRoom){
         await lease().catch(e=>{if(e instanceof Error&&e.message==='host_already_active')setLeaseDenied(true);if(!current.current?.sharedConversation)setError(worldMessage(e.message));});

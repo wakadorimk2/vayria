@@ -33,6 +33,23 @@ const random = seed => {
 const roll = random(Number(process.env.SOAK_SEED ?? Date.now() % 0xffffffff));
 
 const action = name => diagnostics.actions.push({ name, at: new Date().toISOString() });
+// Random pacing hits designed rate limits (cooldowns, card taps); a real
+// visitor sees the notice and tries again, so the soak does the same.
+// A reconnect gap (offline→online, epoch reset) leaves the card UI briefly
+// blocked: taps are inert, no receipt appears, and the wait times out. A real
+// visitor taps again, so TimeoutError is retried like the designed rejections.
+const transient = error => /conversation_cooldown|already_waiting|conversation_full|card_rate_limited|slot_expired|少し待って|受付済み|順番待ちがいっぱい|休止|TimeoutError/.test(String(error));
+const retryTransient = async (run, timeout = 60000) => {
+  const until = Date.now() + timeout;
+  for (;;) {
+    try { await run(); return; }
+    catch (error) {
+      if (!transient(error) || Date.now() >= until) throw error;
+      await client.waitSlotDone(30000).catch(() => {});
+      await client.page.waitForTimeout(3600);
+    }
+  }
+};
 const fail = async (name, error) => {
   diagnostics.failures.push({ name, error: String(error), at: new Date().toISOString() });
   line(`FAIL ${name}: ${error}`);
@@ -44,7 +61,7 @@ const fail = async (name, error) => {
 await client.enroll(code);
 const links = await stack.admin({ op: 'world-create', roomId: ROOM_ID });
 await client.page.goto(links.hostUrl, { waitUntil: 'domcontentloaded' });
-await client.page.getByRole('button', { name: '体験を終える', exact: true }).waitFor({ timeout: 20000 });
+await client.page.locator('.public-controls__actions').waitFor({ timeout: 20000 });
 await client.waitWorldConnected();
 line(`exhibition ${event} enrolled; soaking for ${minutes}min`);
 
@@ -71,7 +88,7 @@ try {
     action(name);
     try {
       switch (name) {
-        case 'card': await client.insertCard(); break;
+        case 'card': await retryTransient(() => client.insertCard()); break;
         case 'text': {
           await client.say(`soak-${diagnostics.turns}`);
           break;
@@ -95,7 +112,7 @@ try {
           const [provider, mode] = failures[Math.floor(roll() * failures.length)];
           stack.providers.set(provider, mode);
           const calls = stack.providers.count('responses');
-          await client.sendText(`failure-${diagnostics.turns}`);
+          await retryTransient(() => client.sendText(`failure-${diagnostics.turns}`));
           if (mode === 'hang') {
             await client.page.waitForTimeout(2500);
             stack.providers.release();
@@ -112,7 +129,7 @@ try {
         case 'reload':
           await client.page.reload({ waitUntil: 'domcontentloaded' });
           await client.waitWorldConnected();
-          await client.page.getByRole('button', { name: '体験を終える', exact: true }).waitFor({ timeout: 20000 });
+          await client.page.locator('.public-controls__actions').waitFor({ timeout: 20000 });
           break;
         case 'offline':
           await client.context.setOffline(true);
@@ -134,7 +151,7 @@ try {
           await stack.admin({ op: 'configure', stopped: true });
           await client.page.locator('.public-exhibition-paused').waitFor({ timeout: 30000 });
           await stack.admin({ op: 'configure', stopped: false });
-          await client.page.getByRole('button', { name: '体験を終える', exact: true }).waitFor({ timeout: 30000 });
+          await client.page.locator('.public-controls__actions').waitFor({ timeout: 30000 });
           break;
         }
         case 'wait':

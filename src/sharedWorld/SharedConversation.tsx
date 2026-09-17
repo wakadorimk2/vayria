@@ -21,7 +21,7 @@ export function SharedConversation({snapshot,muted,play,stop,onEmotion,onMotion}
     // Reconnection may show the current caption; it never replays old speech.
     if(reply.startsAt<Date.now()+offset-1500||reply.endsAt<=Date.now()+offset)return;
     const controller=new AbortController();let started=false;
-    const audio=reply.audioUrl?fetch(reply.audioUrl,{signal:controller.signal}).then(async response=>response.ok?{kind:'buffer' as const,data:await response.arrayBuffer(),mimeType:response.headers.get('Content-Type')??'audio/mpeg'}:null).catch(()=>null):Promise.resolve(null);
+    const audio=reply.audioUrl?fetch(reply.audioUrl,{signal:AbortSignal.any([controller.signal,AbortSignal.timeout(20000)])}).then(async response=>response.ok?{kind:'buffer' as const,data:await response.arrayBuffer(),mimeType:response.headers.get('Content-Type')??'audio/mpeg'}:null).catch(()=>null):Promise.resolve(null);
     const cancel=()=>{if(controller.signal.aborted)return;controller.abort();if(started)current.current.stop();};
     const timer=setTimeout(()=>{if(!sharedReplyPlayback.claim(key,cancel)){controller.abort();return;}console.debug('[shared-speech]',JSON.stringify({key,event:'received'}));current.current.onEmotion(normalizeEmotion(reply.emotion));
       if(reply.motion==='speech-gentle')current.current.onMotion(reply.motion,reply.id.split('').reduce((n,c)=>(n*31+c.charCodeAt(0))>>>0,0));

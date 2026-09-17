@@ -5,7 +5,9 @@ import { resolve, extname, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
+let chromium;
+if (process.env.PLAYWRIGHT_MODULE_PATH) ({ chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH));
+else { try { ({ chromium } = require('playwright')); } catch { ({ chromium } = require('playwright-core')); } }
 const mount = process.env.VAYRIA_CHECK_BASE_PATH ?? '';
 if (!['', '/staging'].includes(mount)) throw new Error('Invalid browser check base');
 const root = resolve('dist-public'), output = resolve(mount ? '.project-view/staging-check' : '.project-view/exhibition-check');
@@ -110,18 +112,25 @@ try {
     const box = await page.locator(selector).first().boundingBox(); assert.ok(box);
     await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
   };
-  await page.getByRole('button', { name: 'カードで遊ぶ', exact: true }).click();
+  // Shared-world builds drive cards, text, voice, and greetings through the
+  // real room API; this mock serves none of it. Those paths are covered by
+  // test:e2e:exhibition against the real stack, so they are skipped here.
+  const sharedWorld = await page.locator('.app-shell').getAttribute('data-shared-world') === 'true';
+  if (sharedWorld) console.log('shared-world build: card/voice checks are covered by test:e2e:exhibition');
+  await page.getByRole('button', { name: sharedWorld ? '世界にいたずら' : 'カードで遊ぶ', exact: true }).click();
   await page.screenshot({ path: resolve(output, 'cards-landscape.png') });
   await page.setViewportSize({ width: 1024, height: 1366 });
   await page.screenshot({ path: resolve(output, 'cards-portrait.png') });
   await page.setViewportSize({ width: 1366, height: 1024 });
-  await tapCard('.card-zone--hand [data-card-id]');
-  await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/chat')), tapCard('.card-zone--brain [data-card-id]')]);
-  assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).mode === 'autonomous' && JSON.parse(g.body).forcedCardId));
-  assert.notDeepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
+  if (!sharedWorld) {
+    await tapCard('.card-zone--hand [data-card-id]');
+    await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/chat')), tapCard('.card-zone--brain [data-card-id]')]);
+    assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).mode === 'autonomous' && JSON.parse(g.body).forcedCardId));
+    assert.notDeepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
+  }
   await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
-  assert.deepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
+  if (!sharedWorld) assert.deepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
   // A stored handoff the server can never confirm is replaced instead of trapping the screen.
   await page.evaluate(key => sessionStorage.setItem(key, JSON.stringify({ requestId: '11111111-1111-4111-8111-111111111111', epoch: 0 })), mount ? 'staging:vayria-exhibition-handoff' : 'vayria-exhibition-handoff');
   await page.goto(base + mount + '/?handoff');
@@ -137,11 +146,13 @@ try {
   denyPreview = false;
   await page.goto(base + mount + '/');
   await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '文字で話す', exact: true }).click();
-  const input = page.locator('.message-form input');
-  await input.fill('前の参加者の入力');
-  await page.getByRole('button', { name: '送信', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.message-form button[type="submit"]')?.disabled === true);
+  if (!sharedWorld) {
+    await page.getByRole('button', { name: '文字で話す', exact: true }).click();
+    const input = page.locator('.message-form input');
+    await input.fill('前の参加者の入力');
+    await page.getByRole('button', { name: '送信', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.message-form button[type="submit"]')?.disabled === true);
+  }
   failHandoff = true;
   await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
   await page.getByRole('button', { name: 'もう一度確認する' }).waitFor();
@@ -157,29 +168,32 @@ try {
   delayedReply();
   delayManual = false;
   await page.waitForTimeout(1000);
-  assert.deepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
-  await page.getByRole('button', { name: '文字で話す', exact: true }).click();
-  assert.equal(await input.inputValue(), '');
-  await input.fill('音声再生の停止を確認');
-  await page.getByRole('button', { name: '送信', exact: true }).click();
-  await page.waitForFunction(() => window.exhibitSources.some(s => s.started && !s.stopped && !s.ended));
-  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
-  await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
-  assert.equal(await page.evaluate(() => window.exhibitSources.filter(s => s.started).every(s => s.stopped || s.ended)), true);
-  await page.getByRole('button', { name: '文字で話す', exact: true }).click();
-  await page.getByRole('button', { name: '文字で話す', exact: true }).click();
-  // Real browser capture of a fake microphone; stopping must end every acquired track.
-  await page.getByRole('button', { name: /^マイクで話す/ }).click();
-  await page.waitForFunction(() => window.exhibitTracks.length > 0);
-  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
-  await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
-  assert.equal(await page.evaluate(() => window.exhibitTracks.every(t => t.readyState === 'ended')), true);
-  await page.getByRole('button', { name: '挨拶してみる', exact: true }).click();
-  await page.getByText('文字・マイク・カードから続けられます', { exact: true }).waitFor();
-  assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).greeting === true));
-  await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
-  await page.getByRole('button', { name: '挨拶してみる', exact: true }).waitFor();
-  assert.equal(await page.getByRole('button', { name: 'カードで遊ぶ', exact: true }).getAttribute('aria-expanded'), 'false');
+  if (!sharedWorld) {
+    assert.deepEqual(await page.locator('.card-zone--brain [data-card-id]').evaluateAll(nodes => nodes.map(n => n.dataset.cardId)), initialCards);
+    await page.getByRole('button', { name: '文字で話す', exact: true }).click();
+    const input = page.locator('.message-form input');
+    assert.equal(await input.inputValue(), '');
+    await input.fill('音声再生の停止を確認');
+    await page.getByRole('button', { name: '送信', exact: true }).click();
+    await page.waitForFunction(() => window.exhibitSources.some(s => s.started && !s.stopped && !s.ended));
+    await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
+    await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.exhibitSources.filter(s => s.started).every(s => s.stopped || s.ended)), true);
+    await page.getByRole('button', { name: '文字で話す', exact: true }).click();
+    await page.getByRole('button', { name: '文字で話す', exact: true }).click();
+    // Real browser capture of a fake microphone; stopping must end every acquired track.
+    await page.getByRole('button', { name: /^マイクで話す/ }).click();
+    await page.waitForFunction(() => window.exhibitTracks.length > 0);
+    await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
+    await page.getByText('次の方もカードからどうぞ', { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.exhibitTracks.every(t => t.readyState === 'ended')), true);
+    await page.getByRole('button', { name: '挨拶してみる', exact: true }).click();
+    await page.getByText('文字・マイク・カードから続けられます', { exact: true }).waitFor();
+    assert.ok(generations.some(g => g.path === '/api/chat' && JSON.parse(g.body).greeting === true));
+    await page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
+    await page.getByRole('button', { name: '挨拶してみる', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'カードで遊ぶ', exact: true }).getAttribute('aria-expanded'), 'false');
+  }
   usedYen = 8000;
   await page.waitForTimeout(16000);
   await page.getByRole('button', { name: '設定：展示予算の通知あり', exact: true }).click();
@@ -229,7 +243,7 @@ try {
     await rootPage.close();
   }
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests', 'unenrolled-handoff-local-reset'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', 'card-reaction-request-and-reset', 'stale-handoff-replaced-via-handoff-param', 'preview-ticket-keeps-handoff', 'handoff-failure-reload-retry', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset', 'budget-notice', 'stale-status'], generations: generations.length }));
+  console.log(JSON.stringify({ passed: true, screenshots: output, checks: [...(mount ? ['same-origin-settings-isolation', 'handoff-storage-isolation', 'registration-returns-to-staging', 'no-production-api-requests', 'unenrolled-handoff-local-reset'] : []), 'idle-no-generation-or-microphone', 'portrait-landscape', ...(sharedWorld ? [] : ['card-reaction-request-and-reset', 'old-input-cleared', 'audio-playback-stopped', 'microphone-tracks-ended', 'greeting-and-panel-reset']), 'stale-handoff-replaced-via-handoff-param', 'preview-ticket-keeps-handoff', 'handoff-failure-reload-retry', 'budget-notice', 'stale-status'], generations: generations.length }));
 } catch (error) {
   console.error(JSON.stringify({ generations, errors, ui: await page.locator('body').innerText(), sources: await page.evaluate(() => window.exhibitSources) }));
   await page.screenshot({ path: resolve(output, 'failure.png') });

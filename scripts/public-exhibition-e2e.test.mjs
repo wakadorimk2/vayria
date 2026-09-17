@@ -28,7 +28,7 @@ async function makeClient(event, { host = true } = {}) {
   if (host) {
     const links = await stack.admin({ op: 'world-create', roomId: ROOM_ID });
     await client.page.goto(links.hostUrl, { waitUntil: 'domcontentloaded' });
-    await client.page.getByRole('button', { name: '体験を終える', exact: true }).waitFor({ timeout: 20000 });
+    await client.page.locator('.public-controls__actions').waitFor({ timeout: 20000 });
   }
   await client.waitWorldConnected();
   return client;
@@ -65,9 +65,9 @@ test('session and room membership survive a reload', async () => {
     await client.say('リロード前');
     const socketsBefore = client.worldSocketCount();
     await client.page.reload({ waitUntil: 'domcontentloaded' });
-    await client.page.getByRole('button', { name: '体験を終える', exact: true }).waitFor({ timeout: 20000 });
+    await client.page.locator('.public-controls__actions').waitFor({ timeout: 20000 });
     await client.waitWorldConnected();
-    await client.waitWorldSocket();
+    await client.waitWorldSocket(30000, socketsBefore);
     assert.ok(client.worldSocketCount() > socketsBefore, 'world socket reconnected after reload');
     await client.say('リロード後');
     noErrors(client);
@@ -206,14 +206,17 @@ test('failed handoff persists the same requestId and retries after reload', asyn
   const client = await makeClient(await makeExhibition());
   try {
     const handoffs = [];
+    // Fail the first handoff through the route itself: setOffline blocks the
+    // request before interception, so the attempt would never be observed.
+    let failHandoff = true;
     await client.page.route('**/api/exhibition/next', route => {
       handoffs.push(route.request().postDataJSON());
+      if (failHandoff) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: 'network_error' }) });
       return route.continue();
     });
-    await client.context.setOffline(true);
-    await client.page.getByRole('button', { name: '体験を終える', exact: true }).click();
+    await client.page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
     await client.page.getByRole('button', { name: 'もう一度確認する', exact: true }).waitFor({ timeout: 20000 });
-    await client.context.setOffline(false);
+    failHandoff = false;
     await client.page.reload({ waitUntil: 'domcontentloaded' });
     // A pending handoff retries automatically on load and reuses the requestId.
     await client.page.locator('.public-exhibition-welcome').waitFor({ timeout: 30000 });
@@ -259,11 +262,10 @@ test('repeated handoff presses collapse into one transition', async () => {
       handoffs.push(route.request().postDataJSON());
       return route.continue();
     });
-    // Fire three presses inside one JS turn so they race within a single
-    // handoff; IPC-spaced clicks can land on the remounted button instead.
+    // Fire three handoff events inside one JS turn so they race within a
+    // single transition; the on-screen handoff button no longer exists.
     await client.page.evaluate(() => {
-      const button = [...document.querySelectorAll('button')].find(b => b.textContent === '体験を終える');
-      for (let i = 0; i < 3; i++) button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      for (let i = 0; i < 3; i++) window.dispatchEvent(new Event('vayria-exhibition-next'));
     });
     await client.page.locator('.public-exhibition-welcome').waitFor({ timeout: 20000 });
     assert.equal(new Set(handoffs.map(h => h.requestId)).size, handoffs.length === 0 ? 0 : 1);
@@ -415,7 +417,7 @@ test('image generation failure marks the element failed and keeps the room alive
       await client.enroll(code);
       const links = await visual.admin({ op: 'world-create', roomId: ROOM_ID });
       await client.page.goto(links.hostUrl, { waitUntil: 'domcontentloaded' });
-      await client.page.getByRole('button', { name: '体験を終える', exact: true }).waitFor({ timeout: 20000 });
+      await client.page.locator('.public-controls__actions').waitFor({ timeout: 20000 });
       await client.waitWorldConnected();
       // Enable the generation mode on the device, then make the provider fail.
       await client.page.locator('.public-controls__generation').click();
@@ -444,5 +446,44 @@ test('image generation failure marks the element failed and keeps the room alive
   } finally {
     visual.providers.release();
     await visual.dispose().catch(() => {});
+  }
+});
+
+test('kiosk hygiene: idle stays quiet; handoff releases mic tracks and playback', async () => {
+  const client = await makeClient(await makeExhibition());
+  try {
+    // An idle booth must not touch the microphone or paid providers.
+    const providerCalls = () => stack.providers.count('responses') + stack.providers.count('transcribe') + stack.providers.count('aivis');
+    const before = providerCalls();
+    await client.page.waitForTimeout(4000);
+    assert.equal(await client.page.evaluate(() => window.__vayriaTracks.length), 0, 'idle page acquired the microphone');
+    assert.equal(providerCalls(), before, 'idle page called a provider');
+    // iPad portrait and landscape keep the controls usable.
+    for (const viewport of [{ width: 1366, height: 1024 }, { width: 1024, height: 1366 }]) {
+      await client.page.setViewportSize(viewport);
+      await client.page.waitForTimeout(600);
+      assert.ok(await client.page.locator('.public-controls__actions').isVisible(), `controls hidden at ${viewport.width}x${viewport.height}`);
+    }
+    // Real-path microphone capture, then an in-page handoff: every acquired
+    // track must end for the next participant.
+    await client.micOn();
+    await client.micSegment(700);
+    await client.page.waitForFunction(() => window.__vayriaTracks.length > 0, null, { timeout: 20000 });
+    await client.page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
+    await client.page.locator('.public-exhibition-welcome').waitFor({ timeout: 20000 });
+    assert.equal(await client.page.evaluate(() => window.__vayriaTracks.every(t => t.readyState === 'ended')), true, 'microphone tracks survived the handoff');
+    // Speech playing when the next participant arrives must be stopped, not
+    // left sounding under the reset session.
+    await client.waitWorldConnected();
+    await client.say('再生中の引き継ぎ');
+    await client.page.waitForFunction(() => window.__vayriaSources.some(s => s.started && !s.stopped && !s.ended), null, { timeout: 20000 }).catch(() => {});
+    await client.page.evaluate(() => window.dispatchEvent(new Event('vayria-exhibition-next')));
+    await client.page.locator('.public-exhibition-welcome').waitFor({ timeout: 20000 });
+    assert.equal(await client.page.evaluate(() => window.__vayriaSources.filter(s => s.started).every(s => s.stopped || s.ended)), true, 'playback sources survived the handoff');
+    noErrors(client);
+    assert.deepEqual(client.external, []);
+  } finally {
+    await screenshot(client, output, 'kiosk');
+    await client.close();
   }
 });

@@ -103,8 +103,9 @@ npm run public:build
 ```
 
 任意のブラウザー確認は `scripts/public-exhibition-browser-check.mjs`。
-Playwrightの場所を `PLAYWRIGHT_MODULE_PATH`、ブラウザーchannelを `PLAYWRIGHT_CHANNEL`（既定msedge）で指定できる。
+Playwrightの場所を `PLAYWRIGHT_MODULE_PATH`、ブラウザーchannelを `PLAYWRIGHT_CHANNEL`（既定msedge）で指定できる。`playwright` が無い環境では `playwright-core` へ自動で切り替わる。
 先に公開ビルドを作る。APIはすべて模擬応答へ置き換える。画面記録は `.project-view/exhibition-check/`。
+共有ワールド経由のカード・文字・音声・挨拶は模擬APIに部屋が無いため対象外で、実スタックE2E（`kiosk hygiene` テスト含む）で確認する。
 
 ### 実スタック E2E（`test:e2e:exhibition`）
 

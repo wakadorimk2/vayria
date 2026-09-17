@@ -51,7 +51,7 @@ export function useVisualGeneration(){
       if(!enabled){setVisualAccess(null);runtime.permission(false,runtime.getSnapshot().generation);}
       serial=serial.catch(()=>{}).then(async()=>{
         if(!publicSessionId())throw new VisualModeError(401,'session_required');
-        const response=await publicFetch(sharedConversationActive()?`/api/world-room/${sharedWorldRoomId()}/generation`:'/api/visual/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled,generation:runtime.getSnapshot().generation})});
+        const response=await publicFetch(sharedConversationActive()?`/api/world-room/${sharedWorldRoomId()}/generation`:'/api/visual/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled,generation:runtime.getSnapshot().generation}),signal:AbortSignal.timeout(15000)});
         if(!response.ok){const body=await response.json().catch(()=>null);const error=new VisualModeError(response.status,body?.code);console.info('[visual-mode]',JSON.stringify({status:error.status,code:error.code}));throw error;}const p=await response.json() as {enabled:boolean;generation:number};
         const active=requestedRevision===revision&&p.enabled;
         runtime.permission(active,p.generation);setVisualAccess(active?p.generation:null);
