@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import sharp from 'sharp';
+import sharp from './imageProcessing.js';
 import type { LocalApiConfig } from './localApiSupport.js';
 import { ManifestationLedger } from './manifestationLedger.js';
 import { generateManifestation } from './manifestationProvider.js';

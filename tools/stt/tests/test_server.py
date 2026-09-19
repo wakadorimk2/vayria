@@ -10,9 +10,12 @@ import wave
 import pytest
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
+from websockets.exceptions import ConnectionClosedError
 
 from vayria_stt.server import (
     DEFAULT_END_SILENCE_MS,
+    MAX_QUEUED_UTTERANCES,
+    WireProtocolError,
     END_SILENCE_MS_VALUES,
     SUPPORTED_CHUNK_MS,
     SUPPORTED_FORMAT,
@@ -86,6 +89,40 @@ class FakeConnection:
 
     async def send(self, message: str) -> None:
         self.messages.append(message)
+
+
+def test_browser_cannot_bypass_node_origin_guard(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with serve(
+            lambda connection: handle_connection(
+                connection, transcriber=FakeTranscriber(), capture_dir=tmp_path,
+            ), "127.0.0.1", 0,
+        ) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with connect(
+                f"ws://127.0.0.1:{port}/stream", origin="https://attacker.example",
+            ) as client:
+                with pytest.raises(ConnectionClosedError) as error:
+                    await client.recv()
+                assert error.value.rcvd.code == 1008
+        assert list(tmp_path.iterdir()) == []
+    asyncio.run(scenario())
+
+
+def test_transcription_queue_rejects_overflow_without_retaining_audio() -> None:
+    async def scenario() -> None:
+        queue = asyncio.Queue(maxsize=MAX_QUEUED_UTTERANCES)
+        connection = FakeConnection()
+        for index in range(MAX_QUEUED_UTTERANCES):
+            await _handle_detector_event(connection, queue, DetectorEvent(
+                "utterance_finalized", f"segment-{index}", b"\x00\x00",
+            ))
+        with pytest.raises(WireProtocolError, match="stt-backpressure"):
+            await _handle_detector_event(connection, queue, DetectorEvent(
+                "utterance_finalized", "overflow", b"\x00\x00",
+            ))
+        assert queue.qsize() == MAX_QUEUED_UTTERANCES
+    asyncio.run(scenario())
 
 
 def test_parse_args_accepts_comparison_compute_type_and_primary_profile(monkeypatch) -> None:

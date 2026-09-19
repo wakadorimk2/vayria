@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import sharp from 'sharp';
+import sharp from './imageProcessing.js';
 import { screenRectToImage, WORLD_IMAGE_SIZE, type WorldLayout } from '../src/world/worldLayout.js';
 import { WORLD_ART_STYLE, validPropAsset, type WorldPropAsset, type WorldPropSpec } from '../src/world/worldProps.js';
 

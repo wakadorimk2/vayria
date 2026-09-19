@@ -2,9 +2,12 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import type { Plugin, ViteDevServer } from 'vite';
+import { isAllowedLocalRequest } from './localRequestSecurity.js';
 
 const VOICE_STREAM_PATH = '/api/voice-stream';
 const MAX_QUEUED_MESSAGES = 8;
+// Match the Python STT service's per-message limit.
+const MAX_MESSAGE_BYTES = 64 * 1024;
 
 function readPath(request: IncomingMessage): string {
   return new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
@@ -42,13 +45,17 @@ function attachVoiceStreamBridge(
     throw new Error('Vite HTTP server is not available for voice streaming.');
   }
 
-  const webSocketServer = new WebSocketServer({ noServer: true });
+  const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
   const handleUpgrade = (
     request: IncomingMessage,
     socket: Duplex,
     head: Buffer,
   ) => {
     if (readPath(request) !== VOICE_STREAM_PATH) return;
+    if (!isAllowedLocalRequest(request)) {
+      socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      return;
+    }
 
     webSocketServer.handleUpgrade(request, socket, head, (client) => {
       let target: WebSocket | null = null;
@@ -64,7 +71,7 @@ function attachVoiceStreamBridge(
       };
 
       try {
-        target = new WebSocket(targetUrl);
+        target = new WebSocket(targetUrl, { maxPayload: MAX_MESSAGE_BYTES, handshakeTimeout: 10000 });
       } catch {
         sendFailure(client, 'voice-transport-unavailable');
         closeBoth();

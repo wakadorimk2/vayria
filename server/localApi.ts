@@ -33,12 +33,17 @@ import {
 
 import { handleWorldRequest } from './worldHandler.js';
 import { handleManifestationRequest } from './manifestationHandler.js';
+import { isAllowedLocalRequest } from './localRequestSecurity.js';
 
 export async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   config: LocalApiConfig,
 ): Promise<void> {
+  if (!isAllowedLocalRequest(request)) {
+    sendJson(response, 403, { error: 'Request origin or host is not allowed.' });
+    return;
+  }
   const pathname = new URL(
     request.url ?? '/',
     'http://127.0.0.1',
