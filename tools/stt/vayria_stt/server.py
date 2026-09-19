@@ -39,6 +39,7 @@ from .vad import (
 from .capture import DEFAULT_CAPTURE_DIR, SttCaptureWriter
 
 MAX_MESSAGE_BYTES = 64 * 1024
+MAX_QUEUED_UTTERANCES = 4
 SUPPORTED_FORMAT = "pcm_s16le"
 SUPPORTED_CHUNK_MS = 200
 END_SILENCE_MS_VALUES = (400, 600)
@@ -213,6 +214,10 @@ async def handle_connection(
     classifier: SpeechClassifier | None = None,
     capture_dir: Path = DEFAULT_CAPTURE_DIR,
 ) -> None:
+    # Browsers must use the same-origin Node bridge. Native clients omit Origin.
+    if connection.request is not None and "Origin" in connection.request.headers:
+        await connection.close(code=1008, reason="browser-origin-not-allowed")
+        return
     detector: PcmUtteranceDetector | None = None
     worker: asyncio.Task[None] | None = None
     queue: asyncio.Queue[tuple[str, bytes]] | None = None
@@ -243,7 +248,7 @@ async def handle_connection(
             classifier=classifier or WebRtcSpeechClassifier(),
             end_silence_frame_count=config.end_silence_ms // FRAME_DURATION_MS,
         )
-        queue = asyncio.Queue()
+        queue = asyncio.Queue(maxsize=MAX_QUEUED_UTTERANCES)
         worker = asyncio.create_task(
             _transcription_worker(
                 connection,
@@ -387,7 +392,10 @@ async def _handle_detector_event(
                     "at": _timestamp(),
                 },
             )
-        await queue.put((event.segment_id, event.audio))
+        try:
+            queue.put_nowait((event.segment_id, event.audio))
+        except asyncio.QueueFull as error:
+            raise WireProtocolError("stt-backpressure") from error
 
 
 def parse_args() -> argparse.Namespace:
@@ -469,6 +477,7 @@ async def run(args: argparse.Namespace) -> None:
         args.host,
         args.port,
         max_size=MAX_MESSAGE_BYTES,
+        origins=[None],
         ping_interval=20,
         ping_timeout=20,
     ):

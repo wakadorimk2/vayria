@@ -64,11 +64,22 @@ export async function visualRoute(request: Request, env: VisualEnv, visitor: str
     if(!asset){
       const ref=await ledger<{url:string}|null>('visualMediaLookup',{visitor,id:ticket.session,key:ticket.key});
       if(!ref)throw new LimitError('not_found',0,404);
-      const upstream=await fetch(safeVisualMediaUrl(ref.url),{headers:range?{Range:range}:{},redirect:'manual',signal:request.signal});
-      if(![200,206,416].includes(upstream.status))throw new LimitError('media_failed',0,502);
-      const headers=new Headers({'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Accept-Ranges':'bytes'});
-      for(const name of ['Content-Type','Content-Length','Content-Range']){const value=upstream.headers.get(name);if(value)headers.set(name,value);}
-      return new Response(upstream.body,{status:upstream.status,headers});
+      const upstream=await fetch(safeVisualMediaUrl(ref.url),{headers:range?{Range:range}:{},redirect:'manual',signal:AbortSignal.any([request.signal,AbortSignal.timeout(10000)])});
+      if(upstream.status===416){await upstream.body?.cancel();return new Response(null,{status:416,headers:{'Cache-Control':'no-store'}});}
+      const limit=32*1024*1024;
+      const contentRange=upstream.headers.get('Content-Range');
+      if(![200,206].includes(upstream.status)||!upstream.body||
+        upstream.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()!=='video/mp4'||
+        Number(upstream.headers.get('Content-Length'))>limit||
+        (upstream.status===206&&(!/^bytes \d+-\d+\/\d+$/.test(contentRange??'')||Number(contentRange?.split('/')[1])>limit))){
+        await upstream.body?.cancel();throw new LimitError('media_failed',0,502);
+      }
+      const headers=new Headers({'Content-Type':'video/mp4','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Accept-Ranges':'bytes'});
+      for(const name of ['Content-Length','Content-Range']){const value=upstream.headers.get(name);if(value)headers.set(name,value);}
+      let size=0;
+      return new Response(upstream.body.pipeThrough(new TransformStream<Uint8Array,Uint8Array>({transform(chunk,controller){
+        size+=chunk.byteLength;if(size>limit)throw new Error('media_too_large');controller.enqueue(chunk);
+      }})),{status:upstream.status,headers});
     }
     const headers=new Headers({'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Accept-Ranges':'bytes','Content-Length':String(asset.size)});asset.writeHttpMetadata(headers);
     if(asset.range && 'offset' in asset.range && 'length' in asset.range){headers.set('Content-Length',String(asset.range.length));headers.set('Content-Range',`bytes ${asset.range.offset}-${asset.range.offset!+asset.range.length!-1}/${asset.size}`);return new Response(asset.body,{status:206,headers});}

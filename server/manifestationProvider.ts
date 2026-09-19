@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import sharp from 'sharp';
+import sharp from './imageProcessing.js';
 import { createGenerationTrace, traceMark } from './manifestationTrace.js';
 import { type GenerationTrace } from '../src/manifestation/types.js';
 import type { GeneratedObject, ManifestationMode } from '../src/manifestation/types.js';
