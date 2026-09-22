@@ -349,7 +349,7 @@ html[data-public-theme="dark"] { background: #292331; }
 .public-layout .app-shell .conversation:has(.playback-permission){z-index:60}
 
 .public-controls .public-controls__actions .public-controls__social { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 48px; min-width: 48px; height: 48px; padding: 12px; margin: 0; border: 0; border-radius: 50%; background: transparent; text-decoration: none; transition: background-color 300ms ease, transform 300ms ease; }
-.public-controls__social img { display: block; width: 24px; height: 24px; object-fit: contain; filter: invert(1); }
+.public-controls__social img { display: block; width: 20px; height: 20px; object-fit: contain; opacity: .8; filter: invert(1); }
 html[data-public-theme="dark"] .public-controls__social img { filter: none; }
 .public-controls .public-controls__actions .public-controls__social:hover { background: var(--public-pressed); }
 .public-controls .public-controls__actions .public-controls__social:active { transform: scale(.94); background: var(--public-pressed); box-shadow: 0 0 10px rgb(255 231 250 / 40%); }
