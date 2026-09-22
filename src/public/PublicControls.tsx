@@ -1,4 +1,5 @@
 import { publicUrl } from './paths';
+import xLogo from '../assets/x-logo.svg';
 import type { SettingsLayout } from './settingsLayout';
 import { publicErrorMessage } from './errors';
 import { VoiceInputNotification } from './VoiceInputNotification';
@@ -208,6 +209,9 @@ export default function PublicControls({ sharedWorld = false, queueStatus, gener
         {status?.exhibition?.warning && <span className="public-exhibition-notification" aria-hidden="true">!</span>}
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polygon points="21.95,11.02 21.95,12.98 19.66,14.32 19.06,15.77 19.73,18.34 18.34,19.73 15.77,19.06 14.32,19.66 12.98,21.95 11.02,21.95 9.68,19.66 8.23,19.06 5.66,19.73 4.27,18.34 4.94,15.77 4.34,14.32 2.05,12.98 2.05,11.02 4.34,9.68 4.94,8.23 4.27,5.66 5.66,4.27 8.23,4.94 9.68,4.34 11.02,2.05 12.98,2.05 14.32,4.34 15.77,4.94 18.34,4.27 19.73,5.66 19.06,8.23 19.66,9.68" /><circle cx="12" cy="12" r="3.2" /></svg>
       </button>
+      <a className="public-controls__social" href="https://x.com/wakadori_Mk2" target="_blank" rel="noopener noreferrer" aria-label="制作者のX：@wakadori_Mk2（新しいタブで開く）" title="制作者のX：@wakadori_Mk2（新しいタブで開く）">
+        <img src={xLogo} width="24" height="24" alt="" />
+      </a>
     </div>
     <PublicSettingsPanel layout={settingsLayout} open={expanded} onClose={closeSettings}>
     <button onClick={() => { closeSettings(); setGuideOpen(true); setHelpOpen(true); }}>使い方</button>
