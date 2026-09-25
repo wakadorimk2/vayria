@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Headless sweep for the Stream VLM benchmark endpoint.
 // Requires a running dev server with VAYRIA_STREAM_BENCH=true.
-// Usage: node scripts/run-stream-vlm-bench.mjs [--port 5189] [--providers openai-nano,groq-vision] [--reps 2] [--out path]
+// Usage: node scripts/run-stream-vlm-bench.mjs [--port 5189] [--providers openai-nano,groq-vision] [--reps 2] [--out path] [--https]
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -25,7 +25,8 @@ const outPath = argValue(
   'out',
   `stream-bench/results/stream-vlm-bench-${Date.now()}.json`,
 );
-const baseUrl = `http://127.0.0.1:${port}`;
+const useTls = args.includes('--https');
+const baseUrl = `http${useTls ? 's' : ''}://127.0.0.1:${port}`;
 const benchPath = '/api/stream/vlm-bench';
 
 function percentile(values, rank) {

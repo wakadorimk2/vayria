@@ -2,7 +2,7 @@ export const STREAM_BENCH_PATH = '/api/stream/vlm-bench';
 
 export const STREAM_VISION_PROVIDER_IDS = [
   'openai-nano',
-  'groq-vision',
+  'openai-mini',
   'gemini-flash-lite',
 ] as const;
 
@@ -35,6 +35,25 @@ export interface StreamBenchFixtureSummary {
   category: string;
   expectedChanged: boolean | null;
   expectedEventKinds: string[];
+  notes: string;
+  reviewed?: boolean;
+  labelModel?: string;
+  midCount?: number;
+  source?: {
+    session: string;
+    beforeSec: number;
+    afterSec: number;
+    diffScore: number;
+    windowSec?: number;
+    frameCount?: number;
+  };
+}
+
+export interface StreamBenchLabelRequest {
+  fixtureId: string;
+  expectedChanged: boolean;
+  expectedEventKinds: string[];
+  category: string;
   notes: string;
 }
 

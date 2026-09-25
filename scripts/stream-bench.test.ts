@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
@@ -10,6 +16,7 @@ import {
   handleStreamRequest,
   parseStreamObservation,
 } from '../server/stream/streamBenchHandler.js';
+import sharp from '../server/imageProcessing.js';
 import {
   SEVEN_DAYS_TO_DIE_PROFILE,
   streamObservationSchema,
@@ -17,8 +24,12 @@ import {
 import { resolveStreamVisionProvider } from '../server/stream/visionProviders.js';
 import type { LocalApiConfig } from '../server/localApiSupport.js';
 
-// PNG magic bytes are enough for the fixture-image endpoint (no decode there).
-const FAKE_IMAGE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// Real tiny images are required: the sheet endpoint composites frames.
+const FAKE_IMAGE = await sharp({
+  create: { width: 64, height: 36, channels: 3, background: '#203050' },
+})
+  .png()
+  .toBuffer();
 
 function makeFixtureRoot(): { root: string; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'vayria-stream-bench-'));
@@ -125,6 +136,18 @@ test('fixture-image serves frame bytes and rejects bad input', async () => {
           '/api/stream/vlm-bench/fixture-image?id=..&which=before',
         );
         assert.equal(traversal.status, 404);
+        const badWhich = await get(
+          port,
+          '/api/stream/vlm-bench/fixture-image?id=combat-zombie-enters&which=evil',
+        );
+        assert.equal(badWhich.status, 400);
+        // No contact-sheet file exists, so the handler composes one.
+        const sheet = await get(
+          port,
+          '/api/stream/vlm-bench/fixture-image?id=combat-zombie-enters&which=sheet',
+        );
+        assert.equal(sheet.status, 200);
+        assert.equal(sheet.headers.get('content-type'), 'image/jpeg');
       },
     );
   } finally {
@@ -163,6 +186,74 @@ test('bench run validates the request before provider calls', async () => {
   } finally {
     cleanup();
   }
+});
+
+test('label endpoint writes meta.json and marks the fixture reviewed', async () => {
+  const { root, cleanup } = makeFixtureRoot();
+  try {
+    const dir = join(root, 'combat-zombie-enters');
+    writeFileSync(
+      join(dir, 'meta.json'),
+      JSON.stringify({
+        category: 'combat',
+        expectedChanged: true,
+        expectedEventKinds: ['enemy_visible'],
+        labelDraft: { model: 'gpt-5-mini', reviewed: false },
+      }),
+    );
+    await withServer(
+      { streamBenchEnabled: true, streamBenchRoot: root },
+      async (port) => {
+        const saved = await post(port, '/api/stream/vlm-bench/label', {
+          fixtureId: 'combat-zombie-enters',
+          expectedChanged: false,
+          expectedEventKinds: [],
+          category: 'static',
+          notes: 'Idle drift only.',
+        });
+        assert.equal(saved.status, 200);
+        const body = (await saved.json()) as {
+          fixture: { reviewed: boolean; expectedChanged: boolean };
+        };
+        assert.equal(body.fixture.reviewed, true);
+        assert.equal(body.fixture.expectedChanged, false);
+        const meta = JSON.parse(
+          readFileSync(join(dir, 'meta.json'), 'utf8'),
+        ) as { labelDraft: { reviewed: boolean } };
+        assert.equal(meta.labelDraft.reviewed, true);
+        const unknown = await post(port, '/api/stream/vlm-bench/label', {
+          fixtureId: 'no-such-fixture',
+          expectedChanged: true,
+          expectedEventKinds: [],
+          category: 'combat',
+          notes: '',
+        });
+        assert.equal(unknown.status, 404);
+        const badKind = await post(port, '/api/stream/vlm-bench/label', {
+          fixtureId: 'combat-zombie-enters',
+          expectedChanged: true,
+          expectedEventKinds: ['not_a_kind'],
+          category: 'combat',
+          notes: '',
+        });
+        assert.equal(badKind.status, 400);
+      },
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('event-kinds endpoint lists the profile event kinds', async () => {
+  await withServer(
+    { streamBenchEnabled: true, streamBenchRoot: tmpdir() },
+    async (port) => {
+      const response = await get(port, '/api/stream/vlm-bench/event-kinds');
+      assert.equal(response.status, 200);
+      const body = (await response.json()) as { eventKinds: string[] };
+      assert.ok(body.eventKinds.includes('enemy_visible'));
+    },
+  );
 });
 
 test('parseStreamObservation distinguishes JSON errors from schema errors', () => {
@@ -213,7 +304,7 @@ test('observation schema covers the contract enums', () => {
 });
 
 test('all advertised providers resolve', () => {
-  for (const id of ['openai-nano', 'groq-vision', 'gemini-flash-lite']) {
+  for (const id of ['openai-nano', 'openai-mini', 'gemini-flash-lite']) {
     assert.ok(resolveStreamVisionProvider(id));
   }
   assert.equal(resolveStreamVisionProvider('nope'), null);

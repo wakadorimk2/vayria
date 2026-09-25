@@ -27,12 +27,13 @@ export const SEVEN_DAYS_TO_DIE_PROFILE: GameProfile = {
   buildObservationInstruction() {
     return [
       `You observe gameplay of ${this.displayName}.`,
-      'You receive two screenshots: BEFORE (earlier) and AFTER (later), captured several seconds apart.',
-      'Report only meaningful gameplay or scene changes between the two frames.',
+      'You receive ONE image: a time-ordered strip of frames F1..Fn laid out left to right, each labeled with its index and timestamp.',
+      'The strip spans only a few seconds of gameplay.',
+      'Report only meaningful gameplay or scene changes across the sequence.',
       'Ignore:',
       '- ordinary camera movement, looking around, and viewpoint drift',
       '- HUD ticking (crosshair, compass motion, small number changes)',
-      '- continuing activity that was already in progress in BEFORE',
+      '- continuing activity that was already in progress in the first frame',
       'Set changed=false when nothing meaningful happened.',
       'List at most 4 events, most significant first.',
       'Keep every summary short, factual, and neutral. Do not role-play, do not address anyone, do not speculate beyond what is visible.',

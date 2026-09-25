@@ -1,8 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import sharp from '../imageProcessing.js';
+import { buildContactSheet } from './contactSheet.js';
 import type { LocalApiConfig } from '../localApiSupport.js';
 import {
   RequestError,
@@ -20,6 +21,7 @@ import {
 } from './visionProviders.js';
 import type {
   StreamBenchFixtureSummary,
+  StreamBenchLabelRequest,
   StreamBenchRunRequest,
   StreamBenchRunResult,
   StreamObservation,
@@ -38,12 +40,25 @@ interface FixtureMeta {
   expectedChanged: boolean | null;
   expectedEventKinds: string[];
   notes: string;
+  reviewed: boolean;
+  labelModel: string | null;
+  source: {
+    session: string;
+    beforeSec: number;
+    afterSec: number;
+    diffScore: number;
+    windowSec?: number;
+    frameCount?: number;
+  } | undefined;
 }
 
 interface StreamFixture {
   id: string;
+  dirPath: string;
   beforePath: string;
   afterPath: string;
+  midPaths: string[];
+  sheetPath: string | null;
   meta: FixtureMeta;
 }
 
@@ -76,6 +91,9 @@ function readFixtureMeta(dirPath: string): FixtureMeta {
     expectedChanged: null,
     expectedEventKinds: [],
     notes: '',
+    reviewed: false,
+    labelModel: null,
+    source: undefined,
   };
   let raw: unknown;
   try {
@@ -85,23 +103,62 @@ function readFixtureMeta(dirPath: string): FixtureMeta {
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback;
   const record = raw as Record<string, unknown>;
+  const draft =
+    record.labelDraft && typeof record.labelDraft === 'object'
+      ? (record.labelDraft as Record<string, unknown>)
+      : null;
+  const source =
+    record.source && typeof record.source === 'object'
+      ? (record.source as Record<string, unknown>)
+      : null;
+  const expectedChanged =
+    typeof record.expectedChanged === 'boolean' ? record.expectedChanged : null;
   return {
     category:
       typeof record.category === 'string' && record.category.trim()
         ? record.category.trim()
         : 'uncategorized',
-    expectedChanged:
-      typeof record.expectedChanged === 'boolean' ? record.expectedChanged : null,
+    expectedChanged,
     expectedEventKinds: Array.isArray(record.expectedEventKinds)
       ? record.expectedEventKinds.filter(
           (kind): kind is string => typeof kind === 'string',
         )
       : [],
     notes: typeof record.notes === 'string' ? record.notes : '',
+    // Draft-labeled fixtures are reviewed only after a human confirms them;
+    // fixtures without a draft are treated as human-authored.
+    reviewed: draft
+      ? draft.reviewed === true
+      : expectedChanged !== null || record.reviewed === true,
+    labelModel: typeof draft?.model === 'string' ? draft.model : null,
+    source:
+      source &&
+      typeof source.session === 'string' &&
+      typeof source.beforeSec === 'number' &&
+      typeof source.afterSec === 'number'
+        ? {
+            session: source.session,
+            beforeSec: source.beforeSec,
+            afterSec: source.afterSec,
+            diffScore:
+              typeof source.diffScore === 'number' ? source.diffScore : 0,
+            ...(typeof source.windowSec === 'number'
+              ? { windowSec: source.windowSec }
+              : {}),
+            ...(typeof source.frameCount === 'number'
+              ? { frameCount: source.frameCount }
+              : {}),
+          }
+        : undefined,
   };
 }
 
-function findFrameFile(dirPath: string, baseName: 'before' | 'after'): string | null {
+const MID_FRAME_PATTERN = /^mid-(\d{1,2})$/;
+
+function findFrameFile(
+  dirPath: string,
+  baseName: string,
+): string | null {
   for (const extension of IMAGE_EXTENSIONS) {
     const candidate = join(dirPath, `${baseName}.${extension}`);
     try {
@@ -113,13 +170,41 @@ function findFrameFile(dirPath: string, baseName: 'before' | 'after'): string | 
   return null;
 }
 
+function findMidFrames(dirPath: string): string[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(dirPath);
+  } catch {
+    return [];
+  }
+  return entries
+    .map((name) => {
+      const match = name.match(/^(mid-\d{1,2})\.[a-z]+$/i);
+      if (!match || !IMAGE_EXTENSIONS.includes(name.split('.').pop()!)) {
+        return null;
+      }
+      return { key: Number(match[1].split('-')[1]), name };
+    })
+    .filter((entry): entry is { key: number; name: string } => entry !== null)
+    .sort((a, b) => a.key - b.key)
+    .map((entry) => join(dirPath, entry.name));
+}
+
 function readFixture(root: string, id: string): StreamFixture | null {
   if (!isFixtureId(id)) return null;
   const dirPath = join(root, id);
   const beforePath = findFrameFile(dirPath, 'before');
   const afterPath = findFrameFile(dirPath, 'after');
   if (!beforePath || !afterPath) return null;
-  return { id, beforePath, afterPath, meta: readFixtureMeta(dirPath) };
+  return {
+    id,
+    dirPath,
+    beforePath,
+    afterPath,
+    midPaths: findMidFrames(dirPath),
+    sheetPath: findFrameFile(dirPath, 'contact-sheet'),
+    meta: readFixtureMeta(dirPath),
+  };
 }
 
 function listFixtures(root: string): StreamFixture[] {
@@ -145,6 +230,12 @@ function summarizeFixture(fixture: StreamFixture): StreamBenchFixtureSummary {
     expectedChanged: fixture.meta.expectedChanged,
     expectedEventKinds: fixture.meta.expectedEventKinds,
     notes: fixture.meta.notes,
+    reviewed: fixture.meta.reviewed,
+    midCount: fixture.midPaths.length,
+    ...(fixture.meta.labelModel
+      ? { labelModel: fixture.meta.labelModel }
+      : {}),
+    ...(fixture.meta.source ? { source: fixture.meta.source } : {}),
   };
 }
 
@@ -229,11 +320,133 @@ export function parseStreamObservation(
   return { jsonOk: true, observation: coerceStreamObservation(parsed) };
 }
 
-async function normalizeFrame(path: string): Promise<Buffer> {
-  return sharp(path)
-    .resize({ width: 768, withoutEnlargement: true })
+// The provider payload is a single contact-sheet image so frame ordering is
+// unambiguous. Fixtures extracted by scripts/extract-stream-fixtures.mjs
+// ship a prebuilt contact-sheet; fixtures without one are composed here
+// from before/mid-*/after.
+function fixtureFramePaths(fixture: StreamFixture): string[] {
+  return [fixture.beforePath, ...fixture.midPaths, fixture.afterPath];
+}
+
+async function fixtureSheet(fixture: StreamFixture): Promise<Buffer> {
+  if (fixture.sheetPath) return readFileSync(fixture.sheetPath);
+  const paths = fixtureFramePaths(fixture);
+  const source = fixture.meta.source;
+  const spacingSec =
+    source && source.windowSec && paths.length > 0
+      ? source.windowSec / paths.length
+      : null;
+  const labels = paths.map((_, index) =>
+    spacingSec === null
+      ? `F${index + 1}`
+      : `F${index + 1}  ${(index * spacingSec).toFixed(1)}s`,
+  );
+  const sheet = await buildContactSheet(
+    paths.map((path, index) => ({ path, label: labels[index] })),
+  );
+  return normalizeSheet(sheet);
+}
+
+async function normalizeSheet(image: Buffer | string): Promise<Buffer> {
+  return sharp(image)
+    .resize({ width: 2048, withoutEnlargement: true })
     .jpeg({ quality: 80 })
     .toBuffer();
+}
+
+const MAX_NOTES_LENGTH = 2_048;
+const CATEGORY_PATTERN = /^[\w][\w -]{0,62}$/u;
+
+function readLabelRequest(payload: unknown): StreamBenchLabelRequest {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new RequestError('Request body must be a JSON object.', 400);
+  }
+  const record = payload as Record<string, unknown>;
+  if (!isFixtureId(record.fixtureId)) {
+    throw new RequestError('fixtureId is invalid.', 400);
+  }
+  if (typeof record.expectedChanged !== 'boolean') {
+    throw new RequestError('expectedChanged must be a boolean.', 400);
+  }
+  const eventKinds = Array.isArray(record.expectedEventKinds)
+    ? record.expectedEventKinds
+    : null;
+  if (
+    !eventKinds ||
+    eventKinds.length > 8 ||
+    eventKinds.some(
+      (kind) =>
+        typeof kind !== 'string' ||
+        !SEVEN_DAYS_TO_DIE_PROFILE.eventKinds.includes(kind),
+    )
+  ) {
+    throw new RequestError(
+      'expectedEventKinds must be a list of known event kinds.',
+      400,
+    );
+  }
+  if (
+    typeof record.category !== 'string' ||
+    !CATEGORY_PATTERN.test(record.category)
+  ) {
+    throw new RequestError('category is invalid.', 400);
+  }
+  if (
+    typeof record.notes !== 'string' ||
+    record.notes.length > MAX_NOTES_LENGTH
+  ) {
+    throw new RequestError('notes is invalid.', 400);
+  }
+  return {
+    fixtureId: record.fixtureId,
+    expectedChanged: record.expectedChanged,
+    expectedEventKinds: eventKinds as string[],
+    category: record.category,
+    notes: record.notes,
+  };
+}
+
+async function handleLabelSave(
+  request: IncomingMessage,
+  response: ServerResponse,
+  service: BenchService,
+): Promise<void> {
+  const label = readLabelRequest(await readJsonBody(request));
+  const fixture = readFixture(service.root, label.fixtureId);
+  if (!fixture) {
+    throw new RequestError('Fixture not found.', 404);
+  }
+  const metaPath = join(service.root, label.fixtureId, 'meta.json');
+  let existing: Record<string, unknown> = {};
+  try {
+    const raw = JSON.parse(readFileSync(metaPath, 'utf8'));
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) existing = raw;
+  } catch {
+    // Keep going: a missing or broken meta.json gets replaced entirely.
+  }
+  const draft =
+    existing.labelDraft && typeof existing.labelDraft === 'object'
+      ? (existing.labelDraft as Record<string, unknown>)
+      : null;
+  const merged: Record<string, unknown> = {
+    ...existing,
+    category: label.category,
+    expectedChanged: label.expectedChanged,
+    expectedEventKinds: label.expectedEventKinds,
+    notes: label.notes,
+    ...(draft
+      ? {
+          labelDraft: {
+            ...draft,
+            reviewed: true,
+            reviewedAt: new Date().toISOString(),
+          },
+        }
+      : { reviewed: true }),
+  };
+  writeFileSync(metaPath, `${JSON.stringify(merged, null, 2)}\n`);
+  const updated = readFixture(service.root, label.fixtureId);
+  sendJson(response, 200, { fixture: summarizeFixture(updated!) });
 }
 
 function readRunRequest(payload: unknown): StreamBenchRunRequest {
@@ -315,16 +528,12 @@ async function handleBenchRun(
   service.active += 1;
   const startedAt = performance.now();
   try {
-    const [beforeImage, afterImage] = await Promise.all([
-      normalizeFrame(fixture.beforePath),
-      normalizeFrame(fixture.afterPath),
-    ]);
+    const image = await fixtureSheet(fixture);
     const result = await provider.observe(
       {
         instruction: SEVEN_DAYS_TO_DIE_PROFILE.buildObservationInstruction(),
         schema: streamObservationSchema(SEVEN_DAYS_TO_DIE_PROFILE),
-        beforeImage,
-        afterImage,
+        image,
         model,
         signal: controller.signal,
       },
@@ -372,16 +581,22 @@ async function handleBenchRun(
 
 function sendImage(
   response: ServerResponse,
-  path: string,
+  source: string | Buffer,
 ): void {
-  const extension = path.split('.').pop()?.toLowerCase();
-  const contentType =
-    extension === 'png'
-      ? 'image/png'
-      : extension === 'webp'
-        ? 'image/webp'
-        : 'image/jpeg';
-  const body = readFileSync(path);
+  let body: Buffer;
+  let contentType = 'image/jpeg';
+  if (typeof source === 'string') {
+    const extension = source.split('.').pop()?.toLowerCase();
+    contentType =
+      extension === 'png'
+        ? 'image/png'
+        : extension === 'webp'
+          ? 'image/webp'
+          : 'image/jpeg';
+    body = readFileSync(source);
+  } else {
+    body = source;
+  }
   response.writeHead(200, {
     'Cache-Control': 'no-store',
     'Content-Length': body.byteLength,
@@ -451,9 +666,18 @@ async function routeStreamRequest(
     pathname === `${STREAM_BENCH_PATH}/fixture-image`
   ) {
     const id = url.searchParams.get('id') ?? '';
-    const which = url.searchParams.get('which');
-    if (which !== 'before' && which !== 'after') {
-      sendJson(response, 400, { error: 'which must be before or after.' });
+    const which = url.searchParams.get('which') ?? '';
+    if (
+      which !== 'before' &&
+      which !== 'after' &&
+      which !== 'sheet' &&
+      !MID_FRAME_PATTERN.test(which)
+    ) {
+      sendJson(
+        response,
+        400,
+        { error: 'which must be before, after, mid-<n>, or sheet.' },
+      );
       return;
     }
     const fixture = readFixture(service.root, id);
@@ -462,13 +686,42 @@ async function routeStreamRequest(
       return;
     }
     try {
-      sendImage(
-        response,
-        which === 'before' ? fixture.beforePath : fixture.afterPath,
-      );
+      if (which === 'sheet') {
+        sendImage(response, fixture.sheetPath ?? (await fixtureSheet(fixture)));
+        return;
+      }
+      const framePath =
+        which === 'before'
+          ? fixture.beforePath
+          : which === 'after'
+            ? fixture.afterPath
+            : findFrameFile(join(service.root, id), which);
+      if (!framePath) {
+        sendJson(response, 404, { error: 'Fixture image not found.' });
+        return;
+      }
+      sendImage(response, framePath);
     } catch {
       sendJson(response, 404, { error: 'Fixture image is unreadable.' });
     }
+    return;
+  }
+
+  if (
+    request.method === 'GET' &&
+    pathname === `${STREAM_BENCH_PATH}/event-kinds`
+  ) {
+    sendJson(response, 200, {
+      eventKinds: SEVEN_DAYS_TO_DIE_PROFILE.eventKinds,
+    });
+    return;
+  }
+
+  if (
+    request.method === 'POST' &&
+    pathname === `${STREAM_BENCH_PATH}/label`
+  ) {
+    await handleLabelSave(request, response, service);
     return;
   }
 
