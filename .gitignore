@@ -33,3 +33,6 @@ dist-public/
 
 # SNS deliverable videos are distributed via Notion, not git
 docs/sns/assets/*.mp4
+
+# Stream Mode development artifacts (VLM benchmark fixtures and results)
+stream-bench/

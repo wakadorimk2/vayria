@@ -33,6 +33,10 @@ import {
 
 import { handleWorldRequest } from './worldHandler.js';
 import { handleManifestationRequest } from './manifestationHandler.js';
+import {
+  STREAM_API_PREFIX,
+  handleStreamRequest,
+} from './stream/streamBenchHandler.js';
 import { isAllowedLocalRequest } from './localRequestSecurity.js';
 
 export async function handleRequest(
@@ -55,6 +59,10 @@ export async function handleRequest(
   }
   if (pathname.startsWith('/api/world/')) {
     await handleWorldRequest(request, response, config);
+    return;
+  }
+  if (pathname.startsWith(STREAM_API_PREFIX)) {
+    await handleStreamRequest(request, response, config);
     return;
   }
   if (pathname === HEALTH_PATH) {
@@ -523,7 +531,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
           pathname !== EVENTS_PATH &&
           pathname !== VOICE_LAB_EVENTS_PATH &&
           pathname !== ROUTER_EVENTS_PATH &&
-          !pathname.startsWith('/api/world/') && !pathname.startsWith('/api/manifestation/')
+          !pathname.startsWith('/api/world/') && !pathname.startsWith('/api/manifestation/') && !pathname.startsWith('/api/stream/')
         ) {
           next();
           return;

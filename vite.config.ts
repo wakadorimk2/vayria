@@ -129,6 +129,18 @@ export default defineConfig(({ mode }) => {
       aivisCloudBaseUrl: serverEnvironment.AIVIS_CLOUD_BASE_URL,
       aivisCloudModelUuid: serverEnvironment.AIVIS_CLOUD_MODEL_UUID,
       playcheckRoot: serverEnvironment.VAYRIA_PLAYCHECK_ROOT,
+      streamBenchEnabled:
+        appMode === 'local' &&
+        serverEnvironment.VAYRIA_STREAM_BENCH === 'true',
+      streamBenchRoot:
+        serverEnvironment.VAYRIA_STREAM_BENCH_ROOT?.trim() || undefined,
+      groqApiKey:
+        process.env.GROQ_API_KEY || serverEnvironment.GROQ_API_KEY,
+      geminiApiKey:
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        serverEnvironment.GEMINI_API_KEY ||
+        serverEnvironment.GOOGLE_API_KEY,
       exhibitionCaptureEnabled: appMode === 'exhibition',
       mode: appMode,
       port: devPort,
