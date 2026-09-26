@@ -83,9 +83,18 @@ const ERROR_BACKOFF_MS = 15_000;
 const OBSERVE_TIMEOUT_MS = 20_000;
 // Reflex ("spinal cord") layer: Jev picks the reaction class only.
 // These limits keep involuntary yelps rare and non-repeating.
-const REFLEX_MIN_INTENSITY = 0.5;
+const REFLEX_MIN_INTENSITY = 0.3;
 const REFLEX_GLOBAL_GAP_MS = 5_000;
 const REFLEX_KIND_COOLDOWN_MS = 20_000;
+// Ambient evidence: quiet routine play emits one low-salience topic at
+// most this often, so long silent stretches still give the autonomy
+// gate something to fire on. Readiness grows only with silence, so it
+// surfaces mainly during lulls.
+const AMBIENT_EVIDENCE_MS = 60_000;
+// While an episode is open the VLM goes quiet on urgent kinds (ongoing
+// activity is not a change), so mid-fight narration needs its own
+// heartbeat or a whole combat can pass in silence.
+const COMBAT_HEARTBEAT_MS = 15_000;
 const OBSERVED_EVENT_KINDS = [
   'combat',
   'enemy_visible',
@@ -188,6 +197,8 @@ export class StreamObserver {
   private reflexInFlight = false;
   private reflexCooldowns = new Map<string, number>();
   private lastReflexAt = 0;
+  private lastAmbientAt = 0;
+  private lastCombatHeartbeatAt = 0;
   private status: StreamObserverStatus = initialStatus();
 
   constructor(private readonly options: StreamObserverOptions) {}
@@ -381,6 +392,38 @@ export class StreamObserver {
       this.options.onEvidence(evidence);
     }
 
+    // Ambient filler: during calm play nothing else produces evidence,
+    // which leaves the gate at no_candidate for minutes. One low-key
+    // topic per minute keeps companionship alive without spamming.
+    const activity = observation.player.activity.trim();
+    if (
+      activity &&
+      observation.player.healthState !== 'dead' &&
+      now - this.lastAmbientAt >= AMBIENT_EVIDENCE_MS
+    ) {
+      this.lastAmbientAt = now;
+      const semanticKey = `game:7dtd:ambient:${activity
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .slice(0, 48)}`;
+      this.options.onEvidence({
+        id: `ambient:${now}`,
+        kind: 'environment_change',
+        at: now,
+        semanticKey,
+        content: `Player is ${activity}`,
+        wakeConditions: ['new_evidence'],
+        reasonProposals: [
+          {
+            kind: 'environment_change',
+            content: `Player is ${activity}`,
+            semanticKey,
+            salience: SIGNIFICANCE_SALIENCE.low,
+          },
+        ],
+      });
+    }
+
     for (const transition of transitions) {
       const semanticKey = `game:7dtd:episode:${transition.kind}`;
       const transitionCooldown = TRANSITION_COOLDOWN_MS[transition.kind] ?? 0;
@@ -408,6 +451,31 @@ export class StreamObserver {
             content: transition.detail,
             semanticKey,
             salience: SIGNIFICANCE_SALIENCE[transition.significance],
+          },
+        ],
+      });
+    }
+
+    if (
+      this.episodes.inCombat &&
+      episodeSummary &&
+      now - this.lastCombatHeartbeatAt >= COMBAT_HEARTBEAT_MS
+    ) {
+      this.lastCombatHeartbeatAt = now;
+      const semanticKey = 'game:7dtd:episode:heartbeat';
+      this.options.onEvidence({
+        id: `episode:heartbeat:${now}`,
+        kind: 'environment_change',
+        at: now,
+        semanticKey,
+        content: episodeSummary,
+        wakeConditions: ['new_evidence'],
+        reasonProposals: [
+          {
+            kind: 'environment_change',
+            content: episodeSummary,
+            semanticKey,
+            salience: SIGNIFICANCE_SALIENCE.medium,
           },
         ],
       });

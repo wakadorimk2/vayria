@@ -220,6 +220,7 @@ export interface LocalApiConfig {
   aivisCloudModelUuid?: string;
   aivisCloudTimeoutMs?: number;
   playcheckRoot?: string;
+  eventLogPath?: string;
   streamBenchEnabled?: boolean;
   streamBenchRoot?: string;
   groqApiKey?: string;

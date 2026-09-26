@@ -20,6 +20,7 @@ import {
   resolveStreamVisionProvider,
 } from './visionProviders.js';
 import { evaluateStreamReflex, JevRequestError } from './jevClient.js';
+import { logStructuredEvent } from '../localApiTelemetry.js';
 import type {
   StreamBenchFixtureSummary,
   StreamBenchLabelRequest,
@@ -764,7 +765,12 @@ async function handleReflexRequest(
     throw new RequestError('Body must be { state: object }.', 400);
   }
   if (!config.jevApiKey) {
-    throw new RequestError('JEV_API_KEY is not configured.', 503);
+    logStructuredEvent('stream_reflex', {
+      origin: 'server',
+      kind: null,
+      error: 'TYPESAFE_API_KEY is not configured.',
+    });
+    throw new RequestError('TYPESAFE_API_KEY is not configured.', 503);
   }
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -776,6 +782,22 @@ async function handleReflexRequest(
       config.jevApiKey,
       controller.signal,
     );
+    const stateRecord = state as Record<string, unknown>;
+    logStructuredEvent('stream_reflex', {
+      origin: 'server',
+      kind: result.judgement.kind,
+      intensity: result.judgement.intensity,
+      model: result.model,
+      latencyMs: result.latencyMs,
+      player:
+        typeof stateRecord.player === 'string' ? stateRecord.player : undefined,
+      combat: stateRecord.combat,
+      events: Array.isArray(stateRecord.events)
+        ? stateRecord.events.filter(
+            (entry): entry is string => typeof entry === 'string',
+          )
+        : undefined,
+    });
     sendJson(response, 200, {
       judgement: result.judgement,
       model: result.model,
@@ -783,6 +805,12 @@ async function handleReflexRequest(
     } satisfies StreamReflexResult);
   } catch (error) {
     if (error instanceof JevRequestError) {
+      logStructuredEvent('stream_reflex', {
+        origin: 'server',
+        kind: null,
+        error: error.message,
+        ...(error.status !== null ? { status: error.status } : {}),
+      });
       sendJson(response, 200, {
         judgement: null,
         model: 'jev-latest',

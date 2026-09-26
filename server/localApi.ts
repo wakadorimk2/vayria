@@ -15,7 +15,7 @@ import {
   createExhibitionCapture
 } from './exhibitionCaptureStore.js';
 import { AivisSpeechError, CARD_PREVIEW_PATH, CHAT_PATH, DEFAULT_LLM_RUNTIME, EVENTS_PATH, HEALTH_PATH, ROUTER_EVENTS_PATH, RequestError, TTS_PATH, VOICE_LAB_EVENTS_PATH, bindLlmProviderAbort, createHealthResponse, providerRequestCounts, readJsonBody, readPlaycheckRunIdHeader, readTurnIdHeader, sendJson, sendNoContent, writeNdjson, type LlmRequestContext, type LocalApiConfig } from './localApiSupport.js';
-import { createRequestLlmProviderTracker, logStructuredEvent, recordStructuredEvent } from './localApiTelemetry.js';
+import { configureEventLog, createRequestLlmProviderTracker, logStructuredEvent, recordStructuredEvent } from './localApiTelemetry.js';
 import { OpenAiResponsesError } from './openAiResponses.js';
 import {
   appendRouterEvent,
@@ -446,6 +446,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
   return {
     name: 'performer-local-api',
     configureServer(server) {
+      configureEventLog(config.eventLogPath);
       const exhibitionCapture = config.exhibitionCaptureEnabled
         ? createExhibitionCapture(
           config.playcheckRoot ?? 'playcheck-results/local',

@@ -140,6 +140,7 @@ export default defineConfig(({ mode }) => {
       aivisCloudBaseUrl: serverEnvironment.AIVIS_CLOUD_BASE_URL,
       aivisCloudModelUuid: serverEnvironment.AIVIS_CLOUD_MODEL_UUID,
       playcheckRoot: serverEnvironment.VAYRIA_PLAYCHECK_ROOT,
+      eventLogPath: serverEnvironment.VAYRIA_EVENT_LOG?.trim() || 'logs/performer-events.log',
       streamBenchEnabled:
         appMode === 'local' &&
         serverEnvironment.VAYRIA_STREAM_BENCH === 'true',
@@ -154,7 +155,8 @@ export default defineConfig(({ mode }) => {
         serverEnvironment.GOOGLE_API_KEY,
       deepseekApiKey:
         process.env.DEEPSEEK_API_KEY || serverEnvironment.DEEPSEEK_API_KEY,
-      jevApiKey: process.env.JEV_API_KEY || serverEnvironment.JEV_API_KEY,
+      jevApiKey:
+        process.env.TYPESAFE_API_KEY || serverEnvironment.TYPESAFE_API_KEY,
       exhibitionCaptureEnabled: appMode === 'exhibition',
       mode: appMode,
       port: devPort,

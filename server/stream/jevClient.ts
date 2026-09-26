@@ -9,7 +9,7 @@ import {
   type StreamReflexKind,
 } from '../../src/stream/streamContract.js';
 
-export const JEV_ENDPOINT = 'https://thejevai.com/v1/systemone';
+export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 export const JEV_MODEL = 'jev-latest';
 const JEV_TIMEOUT_MS = 5_000;
 
@@ -71,11 +71,11 @@ export async function evaluateStreamReflex(
           reflex: {
             type: 'choice',
             instructions:
-              'An AI companion is watching a 7 Days to Die play session beside the player. Which involuntary vocal reaction fits this exact moment? Pick none for routine or unremarkable play.',
+              'An AI companion watches a live 7 Days to Die session beside the player. Pick the involuntary sound a startled friend would make at THIS moment. When the state says combat is active or enemies are present, that is danger — not routine.',
             criteria: {
               none: 'Routine play; nothing worth reacting to',
               surprise: 'Something unexpected just appeared or happened',
-              danger: 'The situation just turned threatening or the player is in trouble',
+              danger: 'Enemies are visible or a fight is underway; the player is in trouble',
               pain: 'The player just took damage or is being hurt',
               relief: 'The danger just passed or the situation clearly recovered',
               death: 'The player just died or is dying',

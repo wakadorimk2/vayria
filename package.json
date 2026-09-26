@@ -15,6 +15,7 @@
     "dev:exhibition": "vite --mode exhibition",
     "dev:stream": "vite --mode stream",
     "dev:stream:op": "pwsh -NoProfile -File .\\scripts\\Start-VayriaWithOnePassword.ps1 -CommandPath npm.cmd -CommandArguments \"run dev:stream\"",
+    "dev:stream:full": "pwsh -NoProfile -File .\\scripts\\Start-VayriaStream.ps1",
     "dev:stream:overlay": "electron overlay/main.cjs",
     "dev:exhibition:op": "pwsh -NoProfile -File .\\scripts\\Start-VayriaWithOnePassword.ps1 -CommandPath npm.cmd -CommandArguments \"run dev:exhibition\"",
     "aivis:start": "pwsh -NoProfile -File .\\scripts\\Start-VayriaAivisSpeech.ps1",

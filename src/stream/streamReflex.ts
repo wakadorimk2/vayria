@@ -36,7 +36,9 @@ export function buildReflexState(
     ...(observation.changeSummary
       ? { change: observation.changeSummary }
       : {}),
-    ...(episodeSummary ? { episode: episodeSummary } : {}),
+    ...(episodeSummary
+      ? { combat: 'active', episode: episodeSummary }
+      : {}),
   };
 }
 
