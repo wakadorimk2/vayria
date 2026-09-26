@@ -418,6 +418,9 @@ export async function handleRequest(
         phase: requestPhase,
         reason: 'provider_error',
         activeRequests: providerRequestCounts.active,
+        errorMessage: (
+          error instanceof Error ? error.message : String(error)
+        ).slice(0, 300),
       });
     }
 
