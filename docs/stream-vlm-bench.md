@@ -197,17 +197,21 @@ detail sent to providers that support it.
 | gemini-flash-lite (gemini-3.5-flash-lite) | 2 | 109/122 (89%) | 60/107 (56%) | 1841ms | 5912ms | $0.0221 |
 | groq-vision (qwen/qwen3.8-27b) | 0 | 87/122 (71%) | 54/107 (50%) | 881ms | 1167ms | $0.2940 |
 | deepseek-vision (deepseek-flash, detail low) | 0 | 106/122 (87%) | 70/107 (65%) | 511ms | 618ms | $0.0450 |
+| deepseek-vision (deepseek-flash, detail high) | 0 | 108/122 (89%) | 85/107 (79%) | 554ms | 670ms | $0.0563 |
 
 False-negative counts for `changed` (missed real changes — the failure
-mode that matters for silence): gpt-5-nano 2, gemini-3.5 10,
-gpt-5-mini 11, deepseek-flash (low) 14, qwen3.8-27b 27; re-running the
-16 misses with `detail: high` left 3. False positives: gpt-5-mini 1,
-gemini 1, deepseek 2, nano 5, groq 8.
+mode that matters for silence): gpt-5-nano 2, deepseek-flash (high) 6,
+gemini-3.5 10, gpt-5-mini 11, deepseek-flash (low) 14, qwen3.8-27b 27.
+False positives: gpt-5-mini 1, gemini 1, deepseek (low) 2, nano 5,
+groq 8, deepseek (high) 8.
 
-Re-running the 16 fixtures that detail-low missed with `detail: high`
-rescued 11/16 (14 FN -> 3 FN) at only ~7% added latency, so a
-low->high two-pass escalation is a viable accuracy option.
+`detail: high` trades a few false positives for a large FN and
+event-hit improvement at ~8% added latency — the realistic choice for
+this workload. DeepSeek at high detail is ~3x faster than gpt-5-nano
+with near-par accuracy (89% vs 94% changed, 79% vs 88% event hit).
 
 Reports: `stream-bench/results/stream-vlm-bench-3providers-*.json`,
 `stream-vlm-bench-gemini-*.json`, `stream-vlm-bench-groq-*.json`,
-`stream-vlm-bench-deepseek-*.json`, `stream-vlm-bench-deepseek-high.json`.
+`stream-vlm-bench-deepseek-*.json`,
+`stream-vlm-bench-deepseek-high.json`,
+`stream-vlm-bench-deepseek-high-full-*.json`.
