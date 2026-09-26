@@ -38,20 +38,14 @@ if ($null -eq $pwsh) {
 }
 
 $launcher = Join-Path $repoRoot 'scripts\Start-VayriaWithOnePassword.ps1'
-$launcherArguments = @(
-  '-NoProfile'
-  '-File'
-  $launcher
-  '-CommandPath'
-  'npm.cmd'
-  '-CommandArguments'
-  'run dev:stream'
-)
+# ArgumentList is passed as a single string: embedded quotes keep
+# multi-word values (e.g. "run dev:stream") grouped for the child script.
+$launcherArguments = '-NoProfile -File "{0}" -CommandPath npm.cmd -CommandArguments "run dev:stream"' -f $launcher
 if (-not [string]::IsNullOrWhiteSpace($OpCommand)) {
-  $launcherArguments += @('-OpCommand', $OpCommand)
+  $launcherArguments += ' -OpCommand "{0}"' -f $OpCommand
 }
 if ($PSBoundParameters.ContainsKey('ReferenceFile')) {
-  $launcherArguments += @('-ReferenceFile', $ReferenceFile)
+  $launcherArguments += ' -ReferenceFile "{0}"' -f $ReferenceFile
 }
 
 $electron = Join-Path $repoRoot 'node_modules\.bin\electron.cmd'
