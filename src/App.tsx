@@ -2154,6 +2154,7 @@ export default function App() {
     <main
       className="app-shell"
       data-shared-world={sharedWorld.enabled} data-app-mode={runtimeConfig.mode} data-world-ui={runtimeConfig.worldMutationEnabled} data-manifestation-ui={runtimeConfig.manifestationEnabled}
+      data-stream-ui={isStreamMode}
       data-ui-mode={usesExhibitionUi ? 'exhibition' : 'local'}
       data-public-text-input={publicTextInputOpen}
       data-exhibition-state={exhibitionPresentationState}
@@ -2276,7 +2277,7 @@ export default function App() {
       <section className="avatar-area" aria-label="VRM character">
         {runtimeConfig.worldMutationEnabled && <WorldStage snapshot={worldSnapshot} runtime={worldRuntime} stage={stageRef} />}
         <VrmStage
-          stageVariant={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled ? 'public' : 'default'}
+          stageVariant={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled || isStreamMode ? 'public' : 'default'}
           attentionReader={readAttention}
           emotion={displayEmotion}
           isExhibitionMode={usesExhibitionUi}
@@ -2298,7 +2299,7 @@ export default function App() {
             </p>
           </aside>
         )}
-        {sharedWorld.enabled && <><SharedConversation onMotion={(asset,id)=>{void stageRef.current?.playReactionMotion(asset,id);}} snapshot={sharedWorld.snapshot} muted={isMuted} play={play} stop={stop} onEmotion={emotion=>setActiveEmotionCue({emotion,intensity:.7})}/><SharedWorldStage world={sharedWorld} stage={stageRef}/><WorldCards world={sharedWorld} compact expanded={publicCardsOpen} onToggle={togglePublicCards}/></>}{!sharedWorld.enabled && runtimeConfig.manifestationEnabled && runtimeConfig.mode === 'public' && <VisualStage runtime={visual.runtime} snapshot={visual.snapshot} stage={stageRef} />}{runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public' && <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} />}{(!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') && <div style={sharedWorld.enabled ? {display:"none"} : undefined} ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
+        {sharedWorld.enabled && <><SharedConversation onMotion={(asset,id)=>{void stageRef.current?.playReactionMotion(asset,id);}} snapshot={sharedWorld.snapshot} muted={isMuted} play={play} stop={stop} onEmotion={emotion=>setActiveEmotionCue({emotion,intensity:.7})}/><SharedWorldStage world={sharedWorld} stage={stageRef}/><WorldCards world={sharedWorld} compact expanded={publicCardsOpen} onToggle={togglePublicCards}/></>}{!sharedWorld.enabled && runtimeConfig.manifestationEnabled && runtimeConfig.mode === 'public' && <VisualStage runtime={visual.runtime} snapshot={visual.snapshot} stage={stageRef} />}{runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public' && <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} />}{(!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') && <div style={sharedWorld.enabled ? {display:"none"} : undefined} ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' || isStreamMode ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
           isExchangeLocked={runtimeConfig.worldMutationEnabled && worldSnapshot.source === 'card' && (worldSnapshot.phase === 'pending' || worldSnapshot.phase === 'ready')}
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
           key={sessionGeneration}

@@ -1,7 +1,7 @@
 .stream-panel {
   position: fixed;
-  top: 12px;
   right: 12px;
+  bottom: 12px;
   z-index: 40;
   display: flex;
   align-items: center;
