@@ -224,6 +224,7 @@ export interface LocalApiConfig {
   streamBenchRoot?: string;
   groqApiKey?: string;
   geminiApiKey?: string;
+  deepseekApiKey?: string;
   exhibitionCaptureEnabled?: boolean;
   exhibitionCapture?: ExhibitionCaptureWriter;
   mode?: VayriaAppMode;

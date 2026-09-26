@@ -15,6 +15,7 @@ events, scene, player state).
   OPENAI_API_KEY=...        # via npm run dev:op, or plain env
   GROQ_API_KEY=...          # optional
   GEMINI_API_KEY=...        # optional (GOOGLE_API_KEY also accepted)
+  DEEPSEEK_API_KEY=...      # optional
   VAYRIA_STREAM_BENCH_ROOT= # optional, defaults to stream-bench/fixtures
   ```
 
@@ -176,6 +177,16 @@ diverse fixture set rather than a few images repeated.
   2026-09-14). Free tier is ~30 RPM; a dev account removes the 429 churn.
   It is the fastest provider but under-detects changes (27 false
   negatives vs 8 false positives on this fixture set).
+- `deepseek-vision` — `deepseek-flash` (DeepSeek V4.1-Flash). OpenAI-
+  compatible but without strict `json_schema`, so it uses
+  `response_format: json_object` and receives the schema inline in the
+  prompt; conformance is validated client-side. Thinking mode is
+  disabled for latency parity. Defaults to `image detail: low`;
+  `--detail high` overrides per run. Peak-tier list prices are used for
+  the estimate (off-peak is half).
+
+The sweep runner accepts `--detail low|high` to override the image
+detail sent to providers that support it.
 
 ## Latest results (2026-09-26, 122 reviewed fixtures, 1 rep)
 
@@ -185,6 +196,18 @@ diverse fixture set rather than a few images repeated.
 | openai-mini (gpt-5-mini) | 0 | 110/122 (90%) | 87/107 (81%) | 3577ms | 5218ms | $0.1130 |
 | gemini-flash-lite (gemini-3.5-flash-lite) | 2 | 109/122 (89%) | 60/107 (56%) | 1841ms | 5912ms | $0.0221 |
 | groq-vision (qwen/qwen3.8-27b) | 0 | 87/122 (71%) | 54/107 (50%) | 881ms | 1167ms | $0.2940 |
+| deepseek-vision (deepseek-flash, detail low) | 0 | 106/122 (87%) | 70/107 (65%) | 511ms | 618ms | $0.0450 |
+
+False-negative counts for `changed` (missed real changes — the failure
+mode that matters for silence): gpt-5-nano 2, gemini-3.5 10,
+gpt-5-mini 11, deepseek-flash (low) 14, qwen3.8-27b 27; re-running the
+16 misses with `detail: high` left 3. False positives: gpt-5-mini 1,
+gemini 1, deepseek 2, nano 5, groq 8.
+
+Re-running the 16 fixtures that detail-low missed with `detail: high`
+rescued 11/16 (14 FN -> 3 FN) at only ~7% added latency, so a
+low->high two-pass escalation is a viable accuracy option.
 
 Reports: `stream-bench/results/stream-vlm-bench-3providers-*.json`,
-`stream-vlm-bench-gemini-*.json`, `stream-vlm-bench-groq-*.json`.
+`stream-vlm-bench-gemini-*.json`, `stream-vlm-bench-groq-*.json`,
+`stream-vlm-bench-deepseek-*.json`, `stream-vlm-bench-deepseek-high.json`.

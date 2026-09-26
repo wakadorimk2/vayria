@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Headless sweep for the Stream VLM benchmark endpoint.
 // Requires a running dev server with VAYRIA_STREAM_BENCH=true.
-// Usage: node scripts/run-stream-vlm-bench.mjs [--port 5189] [--providers openai-nano,groq-vision] [--reps 2] [--out path] [--https]
+// Usage: node scripts/run-stream-vlm-bench.mjs [--port 5189] [--providers openai-nano,groq-vision] [--reps 2] [--detail low|high] [--out path] [--https]
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -21,6 +21,11 @@ const fixtureFilter = argValue('fixtures', '')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
+const imageDetail = argValue('detail', '');
+if (imageDetail && imageDetail !== 'low' && imageDetail !== 'high') {
+  console.error('--detail must be "low" or "high".');
+  process.exit(1);
+}
 const outPath = argValue(
   'out',
   `stream-bench/results/stream-vlm-bench-${Date.now()}.json`,
@@ -79,7 +84,11 @@ for (const provider of selectedProviders) {
       const response = await fetch(`${baseUrl}${benchPath}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixtureId: fixture.id, providerId: provider.id }),
+        body: JSON.stringify({
+          fixtureId: fixture.id,
+          providerId: provider.id,
+          ...(imageDetail ? { imageDetail } : {}),
+        }),
       });
       if (response.ok) {
         results.push(await response.json());

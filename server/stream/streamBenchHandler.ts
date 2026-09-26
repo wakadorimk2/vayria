@@ -466,10 +466,20 @@ function readRunRequest(payload: unknown): StreamBenchRunRequest {
   ) {
     throw new RequestError('model is invalid.', 400);
   }
+  if (
+    record.imageDetail !== undefined &&
+    record.imageDetail !== 'low' &&
+    record.imageDetail !== 'high'
+  ) {
+    throw new RequestError('imageDetail must be "low" or "high".', 400);
+  }
   return {
     fixtureId: record.fixtureId,
     providerId: record.providerId as StreamBenchRunRequest['providerId'],
     ...(typeof record.model === 'string' ? { model: record.model } : {}),
+    ...(typeof record.imageDetail === 'string'
+      ? { imageDetail: record.imageDetail as 'low' | 'high' }
+      : {}),
   };
 }
 
@@ -534,6 +544,9 @@ async function handleBenchRun(
         instruction: SEVEN_DAYS_TO_DIE_PROFILE.buildObservationInstruction(),
         schema: streamObservationSchema(SEVEN_DAYS_TO_DIE_PROFILE),
         image,
+        ...(runRequest.imageDetail
+          ? { imageDetail: runRequest.imageDetail }
+          : {}),
         model,
         signal: controller.signal,
       },

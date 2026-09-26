@@ -309,6 +309,7 @@ test('all advertised providers resolve', () => {
     'openai-mini',
     'gemini-flash-lite',
     'groq-vision',
+    'deepseek-vision',
   ]) {
     assert.ok(resolveStreamVisionProvider(id));
   }

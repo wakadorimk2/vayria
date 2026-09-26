@@ -34,6 +34,9 @@ export interface StreamVisionObserveRequest {
   // A single contact-sheet image: F1..Fn frames laid out left to right
   // with burned-in labels. One image keeps ordering unambiguous for VLMs.
   image: Buffer;
+  // OpenAI-style image detail hint; providers that ignore it simply
+  // discard the field. Used to measure low-vs-high resolution tradeoffs.
+  imageDetail?: 'low' | 'high';
   model?: string;
   signal?: AbortSignal;
 }
@@ -52,6 +55,7 @@ export interface StreamVisionSecrets {
   openAiApiKey?: string;
   groqApiKey?: string;
   geminiApiKey?: string;
+  deepseekApiKey?: string;
 }
 
 export interface StreamVisionProvider {
@@ -213,13 +217,22 @@ function parseChatCompletionsPayload(
   };
 }
 
+interface OpenAiCompatOptions {
+  // Plain json_object for providers without strict json_schema support.
+  responseFormat?: 'json_schema' | 'json_object';
+  // Some OpenAI-compatible APIs still expect the legacy max_tokens key.
+  tokenParam?: 'max_tokens' | 'max_completion_tokens';
+  extraBody?: Record<string, unknown>;
+}
+
 function chatCompletionsBody(
   model: string,
   request: StreamVisionObserveRequest,
+  options: OpenAiCompatOptions,
 ): Record<string, unknown> {
   return {
     model,
-    max_completion_tokens: 1_024,
+    [options.tokenParam ?? 'max_completion_tokens']: 1_024,
     messages: [
       { role: 'system', content: request.instruction },
       {
@@ -227,20 +240,32 @@ function chatCompletionsBody(
         content: [
           {
             type: 'text',
-            text: 'FRAME SEQUENCE (time-ordered, F1..Fn left to right):',
+            text:
+              options.responseFormat === 'json_object'
+                ? `FRAME SEQUENCE (time-ordered, F1..Fn left to right). Respond with a single JSON object that conforms to this JSON Schema: ${JSON.stringify(request.schema)}`
+                : 'FRAME SEQUENCE (time-ordered, F1..Fn left to right):',
           },
-          { type: 'image_url', image_url: { url: dataUrl(request.image) } },
+          {
+            type: 'image_url',
+            image_url: {
+              url: dataUrl(request.image),
+              ...(request.imageDetail ? { detail: request.imageDetail } : {}),
+            },
+          },
         ],
       },
     ],
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'stream_observation',
-        strict: true,
-        schema: request.schema,
-      },
-    },
+    response_format:
+      options.responseFormat === 'json_object'
+        ? { type: 'json_object' }
+        : {
+            type: 'json_schema',
+            json_schema: {
+              name: 'stream_observation',
+              strict: true,
+              schema: request.schema,
+            },
+          },
   };
 }
 
@@ -249,12 +274,15 @@ async function observeOpenAiCompatible(
   apiKey: string,
   model: string,
   request: StreamVisionObserveRequest,
-  extraBody: Record<string, unknown> = {},
+  options: OpenAiCompatOptions = {},
 ): Promise<StreamVisionProviderResult> {
   const { payload, latencyMs } = await postJson(
     url,
     { Authorization: `Bearer ${apiKey}` },
-    { ...chatCompletionsBody(model, request), ...extraBody },
+    {
+      ...chatCompletionsBody(model, request, options),
+      ...options.extraBody,
+    },
     request.signal,
   );
   const parsed = parseChatCompletionsPayload(payload);
@@ -320,7 +348,7 @@ const openAiNanoProvider: StreamVisionProvider = {
       apiKey,
       request.model ?? this.defaultModel,
       request,
-      { reasoning_effort: 'minimal' },
+      { extraBody: { reasoning_effort: 'minimal' } },
     );
   },
 };
@@ -338,7 +366,7 @@ const openAiMiniProvider: StreamVisionProvider = {
       apiKey,
       request.model ?? this.defaultModel,
       request,
-      { reasoning_effort: 'low' },
+      { extraBody: { reasoning_effort: 'low' } },
     );
   },
 };
@@ -358,6 +386,33 @@ const groqVisionProvider: StreamVisionProvider = {
       apiKey,
       request.model ?? this.defaultModel,
       request,
+    );
+  },
+};
+
+// DeepSeek V4.1-Flash: vision + JSON output on the OpenAI-compatible
+// endpoint. json_schema strict mode is not supported, so the schema is
+// enforced client-side after json_object output. Peak-tier list prices;
+// off-peak is half.
+const deepseekVisionProvider: StreamVisionProvider = {
+  id: 'deepseek-vision',
+  label: 'DeepSeek V4.1 Flash',
+  defaultModel: 'deepseek-flash',
+  usdPerMillionTokens: { input: 0.3, output: 1.2 },
+  apiKeyOf: (secrets) => secrets.deepseekApiKey,
+  async observe(request, apiKey) {
+    return observeOpenAiCompatible(
+      'https://api.deepseek.com/chat/completions',
+      apiKey,
+      request.model ?? this.defaultModel,
+      // Realtime streaming defaults to low-resolution input; the bench
+      // can override per request to measure the high-detail tradeoff.
+      { ...request, imageDetail: request.imageDetail ?? 'low' },
+      {
+        responseFormat: 'json_object',
+        tokenParam: 'max_tokens',
+        extraBody: { thinking: { type: 'disabled' } },
+      },
     );
   },
 };
@@ -442,6 +497,7 @@ export const STREAM_VISION_PROVIDERS: readonly StreamVisionProvider[] = [
   openAiMiniProvider,
   geminiFlashLiteProvider,
   groqVisionProvider,
+  deepseekVisionProvider,
 ];
 
 export function resolveStreamVisionProvider(

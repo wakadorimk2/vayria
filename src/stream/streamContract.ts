@@ -5,6 +5,7 @@ export const STREAM_VISION_PROVIDER_IDS = [
   'openai-mini',
   'gemini-flash-lite',
   'groq-vision',
+  'deepseek-vision',
 ] as const;
 
 export type StreamVisionProviderId =
@@ -95,4 +96,5 @@ export interface StreamBenchRunRequest {
   fixtureId: string;
   providerId: StreamVisionProviderId;
   model?: string;
+  imageDetail?: 'low' | 'high';
 }
