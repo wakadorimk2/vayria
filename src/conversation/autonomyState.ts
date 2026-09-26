@@ -800,7 +800,7 @@ function markEvidenceProcessed(
   };
 }
 
-const MAX_EVIDENCE_HISTORY = 512;
+export const MAX_EVIDENCE_HISTORY = 512;
 
 function appendEvidenceHistory(
   state: AutonomyState,

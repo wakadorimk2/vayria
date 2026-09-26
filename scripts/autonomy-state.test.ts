@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   MAX_DECISION_EVIDENCE_IDS,
+  MAX_EVIDENCE_HISTORY,
   MAX_ACTIVE_REASONS,
   MAX_EPISODE_DEPTH,
   MAX_REASON_UPDATES_PER_DELTA,
@@ -255,7 +256,7 @@ test('candidate decision evidence respects per-reason and global limits', () => 
   }
 });
 
-test('10,000 turns retain history without monotonically growing decision evidence', () => {
+test('10,000 turns keep a bounded history window without growing decision evidence', () => {
   let state = observeAutonomyEvidence(
     createInitialAutonomyState(),
     { ...evidence('endurance-0', 'topic:endurance', '開始'), at: 0 },
@@ -278,8 +279,11 @@ test('10,000 turns retain history without monotonically growing decision evidenc
     );
   }
 
-  assert.equal(state.evidenceHistory.length, 10_001);
-  assert.equal(state.evidenceHistory[0].id, 'endurance-0');
+  assert.equal(state.evidenceHistory.length, MAX_EVIDENCE_HISTORY);
+  assert.equal(
+    state.evidenceHistory[0].id,
+    `endurance-${10_001 - MAX_EVIDENCE_HISTORY}`,
+  );
   assert.equal(state.evidenceHistory.at(-1)?.id, 'endurance-10000');
   assert.ok(state.reasons[0].decisionEvidenceIds.length <= MAX_DECISION_EVIDENCE_IDS);
   assert.ok(state.processedEvidenceIds.length <= 128);
