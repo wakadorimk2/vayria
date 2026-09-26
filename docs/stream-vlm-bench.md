@@ -181,9 +181,10 @@ diverse fixture set rather than a few images repeated.
   compatible but without strict `json_schema`, so it uses
   `response_format: json_object` and receives the schema inline in the
   prompt; conformance is validated client-side. Thinking mode is
-  disabled for latency parity. Defaults to `image detail: low`;
-  `--detail high` overrides per run. Peak-tier list prices are used for
-  the estimate (off-peak is half).
+  disabled for latency parity. Defaults to `image detail: high` —
+  measured better on FN and event hit for ~8% latency; `--detail`
+  overrides per run. Peak-tier list prices are used for the estimate
+  (off-peak is half).
 
 The sweep runner accepts `--detail low|high` to override the image
 detail sent to providers that support it.

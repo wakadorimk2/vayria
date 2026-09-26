@@ -405,9 +405,10 @@ const deepseekVisionProvider: StreamVisionProvider = {
       'https://api.deepseek.com/chat/completions',
       apiKey,
       request.model ?? this.defaultModel,
-      // Realtime streaming defaults to low-resolution input; the bench
-      // can override per request to measure the high-detail tradeoff.
-      { ...request, imageDetail: request.imageDetail ?? 'low' },
+      // detail:high measured better on every axis that matters here
+      // (FN 6 vs 14, event hit 79% vs 65%) for ~8% latency, so it is
+      // the default; the bench can still override per request.
+      { ...request, imageDetail: request.imageDetail ?? 'high' },
       {
         responseFormat: 'json_object',
         tokenParam: 'max_tokens',
