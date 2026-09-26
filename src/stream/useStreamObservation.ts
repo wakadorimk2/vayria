@@ -4,13 +4,17 @@ import {
   type StreamEvidenceInput,
   type StreamObserverStatus,
 } from './streamObserver.js';
-import type { StreamObservation } from './streamContract.js';
+import type {
+  StreamObservation,
+  StreamReflexJudgement,
+} from './streamContract.js';
 
 export interface UseStreamObservationOptions {
   enabled: boolean;
   onEvidence: (evidence: StreamEvidenceInput) => void;
   onObservation?: (observation: StreamObservation) => void;
   onEpisodeSummary?: (summary: string | null) => void;
+  onReflex?: (judgement: StreamReflexJudgement) => void;
 }
 
 export interface UseStreamObservationResult {
@@ -41,16 +45,19 @@ export function useStreamObservation({
   onEvidence,
   onObservation,
   onEpisodeSummary,
+  onReflex,
 }: UseStreamObservationOptions): UseStreamObservationResult {
   const observerRef = useRef<StreamObserver | null>(null);
   const onEvidenceRef = useRef(onEvidence);
   const onObservationRef = useRef(onObservation);
   const onEpisodeSummaryRef = useRef(onEpisodeSummary);
+  const onReflexRef = useRef(onReflex);
   useEffect(() => {
     onEvidenceRef.current = onEvidence;
     onObservationRef.current = onObservation;
     onEpisodeSummaryRef.current = onEpisodeSummary;
-  }, [onEvidence, onObservation, onEpisodeSummary]);
+    onReflexRef.current = onReflex;
+  }, [onEvidence, onObservation, onEpisodeSummary, onReflex]);
   const [status, setStatus] = useState<StreamObserverStatus>(idleStatus);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
@@ -66,6 +73,7 @@ export function useStreamObservation({
       onEvidence: (evidence) => onEvidenceRef.current(evidence),
       onObservation: (observation) => onObservationRef.current?.(observation),
       onEpisodeSummary: (summary) => onEpisodeSummaryRef.current?.(summary),
+      onReflex: (judgement) => onReflexRef.current?.(judgement),
       onStatus: setStatus,
     });
     observerRef.current = observer;

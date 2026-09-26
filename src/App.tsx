@@ -25,7 +25,11 @@ import { useAudioControl } from './app/useAudioControl';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
 import { StreamPanel } from './stream/StreamPanel';
 import { useStreamObservation } from './stream/useStreamObservation';
-import type { StreamObservation } from './stream/streamContract';
+import { REFLEX_UTTERANCES } from './stream/streamReflex';
+import type {
+  StreamObservation,
+  StreamReflexJudgement,
+} from './stream/streamContract';
 import { publicActive, publicExhibition, runPublicAction, subscribePublic } from './public/session';
 import { allowExhibitionAutonomy } from './public/exhibitionHandoff';
 import { useBargeInControl } from './app/useBargeInControl';
@@ -114,7 +118,7 @@ import type {
   RouterSignal,
 } from './router/routerTypes.js';
 import { useConversationRouter } from './router/useConversationRouter';
-import { runtimeConfig } from './runtimeConfig';
+import { apiUrl, runtimeConfig } from './runtimeConfig';
 import { useNetworkState } from './useNetworkState';
 import {
   clampVadThreshold,
@@ -369,6 +373,10 @@ export default function App() {
   const [streamEpisodeSummary, setStreamEpisodeSummary] = useState<
     string | null
   >(null);
+  // Reflex playback gates on the latest speech state through a ref
+  // because ttsPlaying/isPerformerBusy are declared further below.
+  const streamSpeechBusyRef = useRef(true);
+  const reflexAudioRef = useRef(new Map<string, Promise<ArrayBuffer>>());
   const handleStreamObservation = useCallback(
     (observation: StreamObservation) => {
       const summaries = observation.events
@@ -559,6 +567,46 @@ export default function App() {
     onEpisodeSummary: useCallback(
       (summary: string | null) => setStreamEpisodeSummary(summary),
       [],
+    ),
+    onReflex: useCallback(
+      (judgement: StreamReflexJudgement) => {
+        if (judgement.kind === 'none') return;
+        // A reflex yelp must never stack on top of existing speech.
+        if (streamSpeechBusyRef.current) return;
+        const kind = judgement.kind;
+        let clip = reflexAudioRef.current.get(kind);
+        if (!clip) {
+          const emotion =
+            kind === 'relief'
+              ? 'joy'
+              : kind === 'death'
+                ? 'sorrow'
+                : 'surprised';
+          clip = fetch(apiUrl('/api/tts'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: REFLEX_UTTERANCES[kind],
+              emotion,
+            }),
+          }).then((response) => {
+            if (!response.ok) {
+              throw new Error('Reflex TTS failed.');
+            }
+            return response.arrayBuffer();
+          });
+          reflexAudioRef.current.set(kind, clip);
+        }
+        void clip
+          .then((audioData) => {
+            if (streamSpeechBusyRef.current) return;
+            void playReaction(audioData);
+          })
+          .catch(() => {
+            reflexAudioRef.current.delete(kind);
+          });
+      },
+      [playReaction],
     ),
   });
 
@@ -992,6 +1040,9 @@ export default function App() {
 
   const displayEmotion = activeEmotionCue?.emotion ?? performer.state.emotion.value;
   const isPerformerBusy = isBusy || activePlan !== null;
+  useEffect(() => {
+    streamSpeechBusyRef.current = isMuted || ttsPlaying || isPerformerBusy;
+  }, [isMuted, ttsPlaying, isPerformerBusy]);
   const autonomyCandidate = useMemo(
     () =>
       selectAutonomyCandidate(autonomyState, {

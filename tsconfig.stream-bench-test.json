@@ -14,6 +14,7 @@
     "server/stream/streamBenchHandler.ts",
     "server/stream/gameProfiles.ts",
     "server/stream/visionProviders.ts",
+    "server/stream/jevClient.ts",
     "server/localApiSupport.ts",
     "server/imageProcessing.ts",
     "src/stream/streamContract.ts",

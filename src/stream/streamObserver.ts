@@ -3,6 +3,7 @@ import {
   type StreamObserveResult,
   type StreamObservedEvent,
   type StreamObservation,
+  type StreamReflexJudgement,
 } from './streamContract.js';
 import { GameCapture } from './gameCapture.js';
 import { computeLumaDiff, isStaticFrame } from './staticFrameSkip.js';
@@ -10,6 +11,7 @@ import {
   isUrgentEventKind,
   StreamEpisodeTracker,
 } from './streamEpisode.js';
+import { buildReflexState, postReflex } from './streamReflex.js';
 
 export type StreamEventSignificance = 'low' | 'medium' | 'high';
 
@@ -61,6 +63,7 @@ export interface StreamObserverOptions {
   onEvidence: (evidence: StreamEvidenceInput) => void;
   onObservation?: (observation: StreamObservation) => void;
   onEpisodeSummary?: (summary: string | null) => void;
+  onReflex?: (judgement: StreamReflexJudgement) => void;
   onStatus?: (status: StreamObserverStatus) => void;
 }
 
@@ -78,6 +81,11 @@ const DEFAULT_MAX_STALE_MS = 120_000;
 const DEFAULT_EVENT_COOLDOWN_MS = 180_000;
 const ERROR_BACKOFF_MS = 15_000;
 const OBSERVE_TIMEOUT_MS = 20_000;
+// Reflex ("spinal cord") layer: Jev picks the reaction class only.
+// These limits keep involuntary yelps rare and non-repeating.
+const REFLEX_MIN_INTENSITY = 0.5;
+const REFLEX_GLOBAL_GAP_MS = 5_000;
+const REFLEX_KIND_COOLDOWN_MS = 20_000;
 const OBSERVED_EVENT_KINDS = [
   'combat',
   'enemy_visible',
@@ -177,6 +185,9 @@ export class StreamObserver {
   private lastChangeAt = 0;
   private eventCooldowns = new Map<string, number>();
   private episodes = new StreamEpisodeTracker();
+  private reflexInFlight = false;
+  private reflexCooldowns = new Map<string, number>();
+  private lastReflexAt = 0;
   private status: StreamObserverStatus = initialStatus();
 
   constructor(private readonly options: StreamObserverOptions) {}
@@ -293,6 +304,45 @@ export class StreamObserver {
     return this.options.cadenceMs ?? DEFAULT_CADENCE_MS;
   }
 
+  // Best-effort reflex probe: Jev sees only the observation text and
+  // returns an involuntary reaction class. Wording is never generated.
+  private maybeReflex(
+    observation: StreamObservation,
+    episodeSummary: string | null,
+  ): void {
+    if (!this.options.onReflex || this.reflexInFlight) return;
+    const interesting =
+      observation.changed ||
+      observation.events.length > 0 ||
+      observation.player.healthState === 'critical' ||
+      observation.player.healthState === 'dead';
+    if (!interesting) return;
+    this.reflexInFlight = true;
+    void postReflex(buildReflexState(observation, episodeSummary))
+      .then((judgement) => {
+        if (!judgement || judgement.kind === 'none') return;
+        if (judgement.intensity < REFLEX_MIN_INTENSITY) return;
+        const firedAt = Date.now();
+        if (firedAt - this.lastReflexAt < REFLEX_GLOBAL_GAP_MS) return;
+        if (
+          isEventCooldownActive(
+            this.reflexCooldowns.get(judgement.kind),
+            firedAt,
+            REFLEX_KIND_COOLDOWN_MS,
+          )
+        ) {
+          return;
+        }
+        this.reflexCooldowns.set(judgement.kind, firedAt);
+        this.lastReflexAt = firedAt;
+        this.options.onReflex?.(judgement);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.reflexInFlight = false;
+      });
+  }
+
   private handleObservation(observation: StreamObservation): void {
     const now = Date.now();
     this.status.lastObservation = observation;
@@ -309,6 +359,7 @@ export class StreamObserver {
     const episodeSummary = this.episodes.describe(now);
     this.status.episodeSummary = episodeSummary;
     this.options.onEpisodeSummary?.(episodeSummary);
+    this.maybeReflex(observation, episodeSummary);
 
     const minSignificance = this.options.minSignificance ?? 'medium';
     const cooldownMs =

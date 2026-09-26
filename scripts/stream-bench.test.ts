@@ -358,6 +358,38 @@ test('observe endpoint is gated by stream mode or bench flag', async () => {
   );
 });
 
+test('reflex endpoint is gated like observe', async () => {
+  await withServer({}, async (port) => {
+    const response = await post(port, '/api/stream/reflex', {
+      state: { scene: 'outdoor' },
+    });
+    assert.equal(response.status, 404);
+  });
+  await withServer(
+    { mode: 'public', streamBenchEnabled: true },
+    async (port) => {
+      const response = await post(port, '/api/stream/reflex', {
+        state: { scene: 'outdoor' },
+      });
+      assert.equal(response.status, 404);
+    },
+  );
+  await withServer({ mode: 'stream' }, async (port) => {
+    const wrongMethod = await fetch(
+      `http://127.0.0.1:${port}/api/stream/reflex`,
+    );
+    assert.equal(wrongMethod.status, 405);
+    const badBody = await post(port, '/api/stream/reflex', {
+      state: 'not an object',
+    });
+    assert.equal(badBody.status, 400);
+    const noKey = await post(port, '/api/stream/reflex', {
+      state: { scene: 'outdoor' },
+    });
+    assert.equal(noKey.status, 503);
+  });
+});
+
 test('observe endpoint validates method, provider and content type', async () => {
   await withServer({ mode: 'stream' }, async (port) => {
     const wrongMethod = await fetch(

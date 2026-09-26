@@ -19,6 +19,7 @@ import {
   StreamVisionError,
   resolveStreamVisionProvider,
 } from './visionProviders.js';
+import { evaluateStreamReflex, JevRequestError } from './jevClient.js';
 import type {
   StreamBenchFixtureSummary,
   StreamBenchLabelRequest,
@@ -26,10 +27,12 @@ import type {
   StreamBenchRunResult,
   StreamObservation,
   StreamObserveResult,
+  StreamReflexResult,
 } from '../../src/stream/streamContract.js';
 import {
   STREAM_BENCH_PATH,
   STREAM_OBSERVE_PATH,
+  STREAM_REFLEX_PATH,
 } from '../../src/stream/streamContract.js';
 
 export const STREAM_API_PREFIX = '/api/stream/';
@@ -745,6 +748,60 @@ async function handleObserveRequest(
   }
 }
 
+async function handleReflexRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  config: LocalApiConfig,
+): Promise<void> {
+  if (request.method !== 'POST') {
+    throw new RequestError('Method not allowed.', 405);
+  }
+  const payload = (await readJsonBody(request)) as {
+    state?: unknown;
+  } | null;
+  const state = payload?.state;
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    throw new RequestError('Body must be { state: object }.', 400);
+  }
+  if (!config.jevApiKey) {
+    throw new RequestError('JEV_API_KEY is not configured.', 503);
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  request.once('aborted', abort);
+  response.once('close', abort);
+  try {
+    const result = await evaluateStreamReflex(
+      state as Record<string, unknown>,
+      config.jevApiKey,
+      controller.signal,
+    );
+    sendJson(response, 200, {
+      judgement: result.judgement,
+      model: result.model,
+      latencyMs: result.latencyMs,
+    } satisfies StreamReflexResult);
+  } catch (error) {
+    if (error instanceof JevRequestError) {
+      sendJson(response, 200, {
+        judgement: null,
+        model: 'jev-latest',
+        latencyMs: 0,
+        error: {
+          kind: 'request',
+          message: error.message,
+          ...(error.status !== null ? { status: error.status } : {}),
+        },
+      } satisfies StreamReflexResult);
+      return;
+    }
+    throw error;
+  } finally {
+    request.off('aborted', abort);
+    response.off('close', abort);
+  }
+}
+
 async function routeStreamRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -755,6 +812,17 @@ async function routeStreamRequest(
 
   // The live observation endpoint is part of stream mode itself; the
   // bench endpoints stay gated behind VAYRIA_STREAM_BENCH.
+  if (pathname === STREAM_REFLEX_PATH) {
+    const reflexEnabled =
+      config.streamBenchEnabled || config.mode === 'stream';
+    if (!reflexEnabled || config.mode === 'public') {
+      sendJson(response, 404, { error: 'Not found.' });
+      return;
+    }
+    await handleReflexRequest(request, response, config);
+    return;
+  }
+
   if (pathname === STREAM_OBSERVE_PATH) {
     const observeEnabled =
       config.streamBenchEnabled || config.mode === 'stream';

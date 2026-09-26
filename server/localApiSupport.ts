@@ -225,6 +225,7 @@ export interface LocalApiConfig {
   groqApiKey?: string;
   geminiApiKey?: string;
   deepseekApiKey?: string;
+  jevApiKey?: string;
   exhibitionCaptureEnabled?: boolean;
   exhibitionCapture?: ExhibitionCaptureWriter;
   mode?: VayriaAppMode;

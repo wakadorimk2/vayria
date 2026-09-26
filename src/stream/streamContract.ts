@@ -1,5 +1,6 @@
 export const STREAM_BENCH_PATH = '/api/stream/vlm-bench';
 export const STREAM_OBSERVE_PATH = '/api/stream/observe';
+export const STREAM_REFLEX_PATH = '/api/stream/reflex';
 
 export const STREAM_VISION_PROVIDER_IDS = [
   'openai-nano',
@@ -98,6 +99,39 @@ export interface StreamBenchRunRequest {
   providerId: StreamVisionProviderId;
   model?: string;
   imageDetail?: 'low' | 'high';
+}
+
+// Reflex layer: a tiny typed decision (Jev System One) evaluated on the
+// observation text. It only picks an involuntary reaction class —
+// wording is never generated here.
+export const STREAM_REFLEX_KINDS = [
+  'none',
+  'surprise',
+  'danger',
+  'pain',
+  'relief',
+  'death',
+] as const;
+
+export type StreamReflexKind = (typeof STREAM_REFLEX_KINDS)[number];
+
+export interface StreamReflexJudgement {
+  kind: StreamReflexKind;
+  // 0..1 strength of the reaction; below the client threshold the
+  // judgement is treated as none.
+  intensity: number;
+  confidence: number;
+}
+
+export interface StreamReflexResult {
+  judgement: StreamReflexJudgement | null;
+  model: string;
+  latencyMs: number;
+  error?: {
+    kind: string;
+    message: string;
+    status?: number;
+  };
 }
 
 export interface StreamObserveResult {

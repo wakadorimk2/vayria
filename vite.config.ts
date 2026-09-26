@@ -154,6 +154,7 @@ export default defineConfig(({ mode }) => {
         serverEnvironment.GOOGLE_API_KEY,
       deepseekApiKey:
         process.env.DEEPSEEK_API_KEY || serverEnvironment.DEEPSEEK_API_KEY,
+      jevApiKey: process.env.JEV_API_KEY || serverEnvironment.JEV_API_KEY,
       exhibitionCaptureEnabled: appMode === 'exhibition',
       mode: appMode,
       port: devPort,
