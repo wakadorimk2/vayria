@@ -53,6 +53,11 @@ function readAppMode(value: string | undefined, viteMode: string):
   | 'exhibition'
   | 'public'
   | 'stream' {
+  // An explicit `--mode <app mode>` on the CLI wins over env files:
+  // `.env.local` pins VITE_APP_MODE=local in this repo, which would
+  // otherwise shadow `vite --mode stream`.
+  if (viteMode === 'exhibition') return 'exhibition';
+  if (viteMode === 'stream') return 'stream';
   const normalized = value?.trim();
   if (
     normalized === 'local' ||
@@ -62,8 +67,6 @@ function readAppMode(value: string | undefined, viteMode: string):
   ) {
     return normalized;
   }
-  if (viteMode === 'exhibition') return 'exhibition';
-  if (viteMode === 'stream') return 'stream';
   return 'local';
 }
 
