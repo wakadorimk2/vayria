@@ -220,6 +220,13 @@ export interface LocalApiConfig {
   aivisCloudModelUuid?: string;
   aivisCloudTimeoutMs?: number;
   playcheckRoot?: string;
+  eventLogPath?: string;
+  streamBenchEnabled?: boolean;
+  streamBenchRoot?: string;
+  groqApiKey?: string;
+  geminiApiKey?: string;
+  deepseekApiKey?: string;
+  jevApiKey?: string;
   exhibitionCaptureEnabled?: boolean;
   exhibitionCapture?: ExhibitionCaptureWriter;
   mode?: VayriaAppMode;

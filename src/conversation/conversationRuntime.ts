@@ -1318,10 +1318,16 @@ export function createConversationRuntime(playback: PerformancePlayback, options
         floorController.reset('take_floor_failed');
       }
       clearSubtitle();
-      setError(caughtError instanceof Error
-        ? caughtError.message
-        : '会話処理に失敗しました。');
-      setConversationState('error', null);
+      if (turnSource === 'autonomous') {
+        // Autonomous turns have no speaker to notify; the gate reopens
+        // on turn_failed so the next candidate can retry quietly.
+        setConversationState('idle', null);
+      } else {
+        setError(caughtError instanceof Error
+          ? caughtError.message
+          : '会話処理に失敗しました。');
+        setConversationState('error', null);
+      }
       requestController?.abort();
       playback.stop();
       emitOwnedResult(executionPlan, 'failed', { spokenText: deliveredText });

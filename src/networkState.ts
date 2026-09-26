@@ -1,6 +1,6 @@
 export type NetworkAvailability = 'available' | 'unavailable';
 
-export type VayriaAppMode = 'local' | 'exhibition' | 'public';
+export type VayriaAppMode = 'local' | 'exhibition' | 'public' | 'stream';
 
 export type MdnsStatus = 'available' | 'unavailable' | 'conflict';
 

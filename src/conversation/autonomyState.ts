@@ -800,6 +800,8 @@ function markEvidenceProcessed(
   };
 }
 
+export const MAX_EVIDENCE_HISTORY = 512;
+
 function appendEvidenceHistory(
   state: AutonomyState,
   evidence: AutonomyEvidence,
@@ -807,7 +809,9 @@ function appendEvidenceHistory(
   if (state.evidenceHistory.some((item) => item.id === evidence.id)) return state;
   return {
     ...state,
-    evidenceHistory: [...state.evidenceHistory, evidence],
+    evidenceHistory: [...state.evidenceHistory, evidence].slice(
+      -MAX_EVIDENCE_HISTORY,
+    ),
     version: state.version + 1,
   };
 }

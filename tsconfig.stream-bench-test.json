@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/stream-bench-test",
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/stream-bench-test.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "scripts/stream-bench.test.ts",
+    "server/stream/streamBenchHandler.ts",
+    "server/stream/gameProfiles.ts",
+    "server/stream/visionProviders.ts",
+    "server/stream/jevClient.ts",
+    "server/localApiSupport.ts",
+    "server/imageProcessing.ts",
+    "src/stream/streamContract.ts",
+    "src/stream/gameCapture.ts",
+    "src/stream/staticFrameSkip.ts",
+    "src/stream/streamObserver.ts",
+    "src/stream/streamEpisode.ts"
+  ]
+}

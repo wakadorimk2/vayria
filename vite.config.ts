@@ -51,12 +51,23 @@ function readBooleanEnvironment(
 function readAppMode(value: string | undefined, viteMode: string):
   | 'local'
   | 'exhibition'
-  | 'public' {
+  | 'public'
+  | 'stream' {
+  // An explicit `--mode <app mode>` on the CLI wins over env files:
+  // `.env.local` pins VITE_APP_MODE=local in this repo, which would
+  // otherwise shadow `vite --mode stream`.
+  if (viteMode === 'exhibition') return 'exhibition';
+  if (viteMode === 'stream') return 'stream';
   const normalized = value?.trim();
-  if (normalized === 'local' || normalized === 'exhibition' || normalized === 'public') {
+  if (
+    normalized === 'local' ||
+    normalized === 'exhibition' ||
+    normalized === 'public' ||
+    normalized === 'stream'
+  ) {
     return normalized;
   }
-  return viteMode === 'exhibition' ? 'exhibition' : 'local';
+  return 'local';
 }
 
 export default defineConfig(({ mode }) => {
@@ -129,6 +140,23 @@ export default defineConfig(({ mode }) => {
       aivisCloudBaseUrl: serverEnvironment.AIVIS_CLOUD_BASE_URL,
       aivisCloudModelUuid: serverEnvironment.AIVIS_CLOUD_MODEL_UUID,
       playcheckRoot: serverEnvironment.VAYRIA_PLAYCHECK_ROOT,
+      eventLogPath: serverEnvironment.VAYRIA_EVENT_LOG?.trim() || 'logs/performer-events.log',
+      streamBenchEnabled:
+        appMode === 'local' &&
+        serverEnvironment.VAYRIA_STREAM_BENCH === 'true',
+      streamBenchRoot:
+        serverEnvironment.VAYRIA_STREAM_BENCH_ROOT?.trim() || undefined,
+      groqApiKey:
+        process.env.GROQ_API_KEY || serverEnvironment.GROQ_API_KEY,
+      geminiApiKey:
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        serverEnvironment.GEMINI_API_KEY ||
+        serverEnvironment.GOOGLE_API_KEY,
+      deepseekApiKey:
+        process.env.DEEPSEEK_API_KEY || serverEnvironment.DEEPSEEK_API_KEY,
+      jevApiKey:
+        process.env.TYPESAFE_API_KEY || serverEnvironment.TYPESAFE_API_KEY,
       exhibitionCaptureEnabled: appMode === 'exhibition',
       mode: appMode,
       port: devPort,
@@ -163,6 +191,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins,
+    define: {
+      // Pin the client app mode to the resolved server-side mode so
+      // `vite --mode stream` works without a generated .env file.
+      'import.meta.env.VITE_APP_MODE': JSON.stringify(appMode),
+    },
     server: {
       host: devHost,
       port: devPort,

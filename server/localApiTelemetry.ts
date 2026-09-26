@@ -1,3 +1,5 @@
+import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { isPlaycheckRunId } from '../src/playcheck.js';
 import {
   type ExhibitionEventRecord
@@ -18,18 +20,40 @@ import {
   type PlaycheckRecord,
 } from './playcheckStore.js';
 
+let eventLogPath: string | null = null;
+const EVENT_LOG_MAX_BYTES = 32 * 1024 * 1024;
+
+export function configureEventLog(path: string | undefined): void {
+  eventLogPath = path?.trim() ? resolve(path) : null;
+  if (eventLogPath) {
+    console.info('[performer-event] event log:', eventLogPath);
+  }
+}
+
+function appendEventToLog(line: string): void {
+  if (!eventLogPath) return;
+  try {
+    if (existsSync(eventLogPath) && statSync(eventLogPath).size > EVENT_LOG_MAX_BYTES) {
+      renameSync(eventLogPath, `${eventLogPath}.old`);
+    }
+    mkdirSync(dirname(eventLogPath), { recursive: true });
+    appendFileSync(eventLogPath, `${line}\n`);
+  } catch {
+    // Event logging must never break the pipeline.
+  }
+}
+
 export function logStructuredEvent(
   event: string,
   fields: Record<string, unknown>,
 ): void {
-  console.info(
-    '[performer-event]',
-    JSON.stringify({
-      at: new Date().toISOString(),
-      event,
-      ...fields,
-    }),
-  );
+  const line = JSON.stringify({
+    at: new Date().toISOString(),
+    event,
+    ...fields,
+  });
+  console.info('[performer-event]', line);
+  appendEventToLog(line);
 }
 
 export async function recordStructuredEvent(

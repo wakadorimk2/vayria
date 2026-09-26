@@ -8,7 +8,7 @@ import {
 } from './voice/audioLab.js';
 import { readCardDropReactionMode } from './cards/cardDropReaction.js';
 
-const APP_MODES = ['local', 'exhibition', 'public'] as const;
+const APP_MODES = ['local', 'exhibition', 'public', 'stream'] as const;
 const VOICE_INPUT_TRANSPORTS = ['web-speech', 'remote'] as const;
 
 export type AppMode = (typeof APP_MODES)[number];

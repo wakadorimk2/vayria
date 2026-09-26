@@ -1,0 +1,22 @@
+.provider-list { display: flex; flex-wrap: wrap; gap: 14px; }
+.provider-option { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid #273345; border-radius: 8px; background: #0f1620; }
+.provider-option input { accent-color: #8fc2ff; }
+.provider-option .provider-label { font-weight: 700; }
+.provider-option .provider-model { color: #8796aa; font-size: 0.8rem; }
+.provider-option .provider-off { color: #f08383; font-size: 0.8rem; }
+.provider-option input.model-override { width: 220px; padding: 4px 8px; border: 1px solid #42526a; border-radius: 6px; color: #e7edf6; background: #121a25; font: inherit; font-size: 0.8rem; }
+.reps-field { display: flex; align-items: center; gap: 8px; }
+.reps-field input { width: 72px; padding: 6px 8px; border: 1px solid #42526a; border-radius: 6px; color: #e7edf6; background: #121a25; font: inherit; }
+.fixture-thumb { display: flex; gap: 4px; }
+.fixture-thumb img { width: 120px; height: auto; border-radius: 4px; border: 1px solid #273345; object-fit: cover; }
+.fixture-thumb figure { margin: 0; display: grid; gap: 2px; }
+.fixture-thumb figcaption { color: #8796aa; font-size: 0.66rem; text-transform: uppercase; text-align: center; }
+.fixture-check { text-align: center; }
+.fixture-check input { accent-color: #8fc2ff; }
+.obs-cell { max-width: 360px; white-space: normal; font-size: 0.8rem; color: #aebaca; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; }
+.badge.ok { color: #9fe6b8; background: #14301f; }
+.badge.bad { color: #f0a0a0; background: #33191c; }
+.badge.na { color: #8796aa; background: #1b2635; }
+.bench-note { color: #8796aa; font-size: 0.8rem; line-height: 1.5; }
+.run-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }

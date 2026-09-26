@@ -23,6 +23,13 @@ import { ExhibitionMicrophoneControl } from './app/ExhibitionMicrophoneControl';
 import { MuteVolumeControls } from './app/MuteVolumeControls';
 import { useAudioControl } from './app/useAudioControl';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
+import { StreamPanel } from './stream/StreamPanel';
+import { useStreamObservation } from './stream/useStreamObservation';
+import { REFLEX_UTTERANCES } from './stream/streamReflex';
+import type {
+  StreamObservation,
+  StreamReflexJudgement,
+} from './stream/streamContract';
 import { publicActive, publicExhibition, runPublicAction, subscribePublic } from './public/session';
 import { allowExhibitionAutonomy } from './public/exhibitionHandoff';
 import { useBargeInControl } from './app/useBargeInControl';
@@ -111,7 +118,7 @@ import type {
   RouterSignal,
 } from './router/routerTypes.js';
 import { useConversationRouter } from './router/useConversationRouter';
-import { runtimeConfig } from './runtimeConfig';
+import { apiUrl, runtimeConfig } from './runtimeConfig';
 import { useNetworkState } from './useNetworkState';
 import {
   clampVadThreshold,
@@ -360,9 +367,47 @@ export default function App() {
   const worldReactionKeyRef = useRef(new Set<string>());
   const worldReactionPendingRef = useRef(false);
   const worldReactionRunningRef = useRef(false);
+  const isStreamMode = runtimeConfig.mode === 'stream';
+  const streamRecentEventsRef = useRef<string[]>([]);
+  const [streamContext, setStreamContext] = useState('');
+  const [streamEpisodeSummary, setStreamEpisodeSummary] = useState<
+    string | null
+  >(null);
+  // Reflex playback gates on the latest speech state through a ref
+  // because ttsPlaying/isPerformerBusy are declared further below.
+  const streamSpeechBusyRef = useRef(true);
+  const reflexAudioRef = useRef(new Map<string, Promise<ArrayBuffer>>());
+  const handleStreamObservation = useCallback(
+    (observation: StreamObservation) => {
+      const summaries = observation.events
+        .map((event) => event.summary.trim())
+        .filter((summary) => summary.length > 0)
+        .slice(0, 3);
+      if (summaries.length > 0) {
+        streamRecentEventsRef.current = [
+          ...streamRecentEventsRef.current,
+          ...summaries,
+        ].slice(-6);
+      }
+      const parts = [
+        `Game: 7 Days to Die. Scene: ${observation.scene.setting}, ${observation.scene.timeOfDay}${observation.scene.bloodMoon ? ', Blood Moon' : ''}.`,
+        `Player: ${observation.player.activity}, health ${observation.player.healthState}.`,
+      ];
+      if (streamRecentEventsRef.current.length > 0) {
+        parts.push(
+          `Recent observations: ${streamRecentEventsRef.current.join(' / ')}`,
+        );
+      }
+      setStreamContext(parts.join(' '));
+    },
+    [],
+  );
+  const combinedStreamContext = [streamContext, streamEpisodeSummary]
+    .filter((part) => part && part.length > 0)
+    .join(' ');
   const programContext = useMemo(
-    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(runtimeConfig.manifestationEnabled ? { worldContext: runtimeConfig.mode === 'public' ? visualContext(visual.snapshot) : manifestationContext(manifestationSnapshot) } : runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
-    [visual.snapshot, manifestationSnapshot, programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
+    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(isStreamMode && combinedStreamContext ? { streamContext: combinedStreamContext } : {}), ...(runtimeConfig.manifestationEnabled ? { worldContext: runtimeConfig.mode === 'public' ? visualContext(visual.snapshot) : manifestationContext(manifestationSnapshot) } : runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
+    [isStreamMode, combinedStreamContext, visual.snapshot, manifestationSnapshot, programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
   );
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled;
@@ -509,6 +554,61 @@ export default function App() {
   }, [cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, dragAttentionControllerRef, readCameraSnapshot]);
 
   const { autonomyState, setAutonomyState, autonomyExternalEvent, autonomyStateRef, recordAutonomyEvidence, notifyMeaningfulAutonomyEvent, readAutonomyEvidenceContext, handleAutonomyDelta } = useAutonomyReasons();
+
+  const streamObservation = useStreamObservation({
+    enabled: isStreamMode,
+    onEvidence: useCallback(
+      (evidence) => {
+        recordAutonomyEvidence(evidence);
+      },
+      [recordAutonomyEvidence],
+    ),
+    onObservation: handleStreamObservation,
+    onEpisodeSummary: useCallback(
+      (summary: string | null) => setStreamEpisodeSummary(summary),
+      [],
+    ),
+    onReflex: useCallback(
+      (judgement: StreamReflexJudgement) => {
+        if (judgement.kind === 'none') return;
+        // A reflex yelp must never stack on top of existing speech.
+        if (streamSpeechBusyRef.current) return;
+        const kind = judgement.kind;
+        let clip = reflexAudioRef.current.get(kind);
+        if (!clip) {
+          const emotion =
+            kind === 'relief'
+              ? 'joy'
+              : kind === 'death'
+                ? 'sorrow'
+                : 'surprised';
+          clip = fetch(apiUrl('/api/tts'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: REFLEX_UTTERANCES[kind],
+              emotion,
+            }),
+          }).then((response) => {
+            if (!response.ok) {
+              throw new Error('Reflex TTS failed.');
+            }
+            return response.arrayBuffer();
+          });
+          reflexAudioRef.current.set(kind, clip);
+        }
+        void clip
+          .then((audioData) => {
+            if (streamSpeechBusyRef.current) return;
+            void playReaction(audioData);
+          })
+          .catch(() => {
+            reflexAudioRef.current.delete(kind);
+          });
+      },
+      [playReaction],
+    ),
+  });
 
   const [voiceValidationError, setVoiceValidationError] = useState('');
   const voiceEventHandlerRef = useRef<((event: VoiceInputEvent) => void) | null>(
@@ -940,6 +1040,9 @@ export default function App() {
 
   const displayEmotion = activeEmotionCue?.emotion ?? performer.state.emotion.value;
   const isPerformerBusy = isBusy || activePlan !== null;
+  useEffect(() => {
+    streamSpeechBusyRef.current = isMuted || ttsPlaying || isPerformerBusy;
+  }, [isMuted, ttsPlaying, isPerformerBusy]);
   const autonomyCandidate = useMemo(
     () =>
       selectAutonomyCandidate(autonomyState, {
@@ -985,10 +1088,14 @@ export default function App() {
         decisionEvidenceIds: autonomyCandidate.decisionEvidenceIds,
       }
       : null;
-  const autonomyTurnGateTiming = useMemo(
-    () => readAutonomyTurnGateTiming(performerProfile),
-    [performerProfile],
-  );
+  const autonomyTurnGateTiming = useMemo(() => {
+    const timing = readAutonomyTurnGateTiming(performerProfile);
+    // Game commentary needs a shorter post-speech pause or remarks land
+    // several seconds after the event they describe.
+    return isStreamMode
+      ? { ...timing, autonomyQuietTimeMinMs: 4_000, autonomyQuietTimeMaxMs: 10_000 }
+      : timing;
+  }, [performerProfile, isStreamMode]);
   const exhibitionPresentationState: ExhibitionPresentationState = isPerformerBusy
     ? 'reacting'
     : isCardSelectionActive
@@ -1960,6 +2067,7 @@ export default function App() {
     isMuted: isMuted && pendingCardStimulus === null,
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked || (isMuted && pendingCardStimulus !== null)),
+    ignoreVisibilityGate: isStreamMode,
     onCandidate: startAutonomous,
     onGateEvent: emitAutonomyGateEvent,
     sessionGeneration,
@@ -2111,6 +2219,7 @@ export default function App() {
     <main
       className="app-shell"
       data-shared-world={sharedWorld.enabled} data-app-mode={runtimeConfig.mode} data-world-ui={runtimeConfig.worldMutationEnabled} data-manifestation-ui={runtimeConfig.manifestationEnabled}
+      data-stream-ui={isStreamMode}
       data-ui-mode={usesExhibitionUi ? 'exhibition' : 'local'}
       data-public-text-input={publicTextInputOpen}
       data-exhibition-state={exhibitionPresentationState}
@@ -2221,10 +2330,19 @@ export default function App() {
         </header>
       )}
 
+      {isStreamMode && (
+        <StreamPanel
+          captureError={streamObservation.captureError}
+          onStart={streamObservation.start}
+          onStop={streamObservation.stop}
+          status={streamObservation.status}
+        />
+      )}
+
       <section className="avatar-area" aria-label="VRM character">
         {runtimeConfig.worldMutationEnabled && <WorldStage snapshot={worldSnapshot} runtime={worldRuntime} stage={stageRef} />}
         <VrmStage
-          stageVariant={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled ? 'public' : 'default'}
+          stageVariant={runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled || isStreamMode ? 'public' : 'default'}
           attentionReader={readAttention}
           emotion={displayEmotion}
           isExhibitionMode={usesExhibitionUi}
@@ -2246,7 +2364,7 @@ export default function App() {
             </p>
           </aside>
         )}
-        {sharedWorld.enabled && <><SharedConversation onMotion={(asset,id)=>{void stageRef.current?.playReactionMotion(asset,id);}} snapshot={sharedWorld.snapshot} muted={isMuted} play={play} stop={stop} onEmotion={emotion=>setActiveEmotionCue({emotion,intensity:.7})}/><SharedWorldStage world={sharedWorld} stage={stageRef}/><WorldCards world={sharedWorld} compact expanded={publicCardsOpen} onToggle={togglePublicCards}/></>}{!sharedWorld.enabled && runtimeConfig.manifestationEnabled && runtimeConfig.mode === 'public' && <VisualStage runtime={visual.runtime} snapshot={visual.snapshot} stage={stageRef} />}{runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public' && <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} />}{(!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') && <div style={sharedWorld.enabled ? {display:"none"} : undefined} ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
+        {sharedWorld.enabled && <><SharedConversation onMotion={(asset,id)=>{void stageRef.current?.playReactionMotion(asset,id);}} snapshot={sharedWorld.snapshot} muted={isMuted} play={play} stop={stop} onEmotion={emotion=>setActiveEmotionCue({emotion,intensity:.7})}/><SharedWorldStage world={sharedWorld} stage={stageRef}/><WorldCards world={sharedWorld} compact expanded={publicCardsOpen} onToggle={togglePublicCards}/></>}{!sharedWorld.enabled && runtimeConfig.manifestationEnabled && runtimeConfig.mode === 'public' && <VisualStage runtime={visual.runtime} snapshot={visual.snapshot} stage={stageRef} />}{runtimeConfig.manifestationEnabled && runtimeConfig.mode !== 'public' && <ManifestationStage runtime={manifestationRuntime} snapshot={manifestationSnapshot} stage={stageRef} onSelection={setIsCardSelectionActive} onReset={handleSessionReset} onNewExperiment={() => { handleSessionReset(); newManifestationExperiment(); }} brain={zones.brain.map(card => card.id)} />}{(!runtimeConfig.manifestationEnabled || runtimeConfig.mode === 'public') && <div style={sharedWorld.enabled ? {display:"none"} : undefined} ref={publicCardsRef} id="public-card-panel" className={runtimeConfig.mode === 'public' || isStreamMode ? 'public-card-panel' : undefined} data-open={publicCardsOpen}><CardGamePrototype
           isExchangeLocked={runtimeConfig.worldMutationEnabled && worldSnapshot.source === 'card' && (worldSnapshot.phase === 'pending' || worldSnapshot.phase === 'ready')}
           publicMicrophoneState={runtimeConfig.mode === 'public' ? publicMicrophoneState : undefined}
           key={sessionGeneration}

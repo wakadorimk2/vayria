@@ -15,7 +15,7 @@ import {
   createExhibitionCapture
 } from './exhibitionCaptureStore.js';
 import { AivisSpeechError, CARD_PREVIEW_PATH, CHAT_PATH, DEFAULT_LLM_RUNTIME, EVENTS_PATH, HEALTH_PATH, ROUTER_EVENTS_PATH, RequestError, TTS_PATH, VOICE_LAB_EVENTS_PATH, bindLlmProviderAbort, createHealthResponse, providerRequestCounts, readJsonBody, readPlaycheckRunIdHeader, readTurnIdHeader, sendJson, sendNoContent, writeNdjson, type LlmRequestContext, type LocalApiConfig } from './localApiSupport.js';
-import { createRequestLlmProviderTracker, logStructuredEvent, recordStructuredEvent } from './localApiTelemetry.js';
+import { configureEventLog, createRequestLlmProviderTracker, logStructuredEvent, recordStructuredEvent } from './localApiTelemetry.js';
 import { OpenAiResponsesError } from './openAiResponses.js';
 import {
   appendRouterEvent,
@@ -33,6 +33,10 @@ import {
 
 import { handleWorldRequest } from './worldHandler.js';
 import { handleManifestationRequest } from './manifestationHandler.js';
+import {
+  STREAM_API_PREFIX,
+  handleStreamRequest,
+} from './stream/streamBenchHandler.js';
 import { isAllowedLocalRequest } from './localRequestSecurity.js';
 
 export async function handleRequest(
@@ -55,6 +59,10 @@ export async function handleRequest(
   }
   if (pathname.startsWith('/api/world/')) {
     await handleWorldRequest(request, response, config);
+    return;
+  }
+  if (pathname.startsWith(STREAM_API_PREFIX)) {
+    await handleStreamRequest(request, response, config);
     return;
   }
   if (pathname === HEALTH_PATH) {
@@ -410,6 +418,9 @@ export async function handleRequest(
         phase: requestPhase,
         reason: 'provider_error',
         activeRequests: providerRequestCounts.active,
+        errorMessage: (
+          error instanceof Error ? error.message : String(error)
+        ).slice(0, 300),
       });
     }
 
@@ -438,6 +449,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
   return {
     name: 'performer-local-api',
     configureServer(server) {
+      configureEventLog(config.eventLogPath);
       const exhibitionCapture = config.exhibitionCaptureEnabled
         ? createExhibitionCapture(
           config.playcheckRoot ?? 'playcheck-results/local',
@@ -523,7 +535,7 @@ export function localApiPlugin(config: LocalApiConfig): Plugin {
           pathname !== EVENTS_PATH &&
           pathname !== VOICE_LAB_EVENTS_PATH &&
           pathname !== ROUTER_EVENTS_PATH &&
-          !pathname.startsWith('/api/world/') && !pathname.startsWith('/api/manifestation/')
+          !pathname.startsWith('/api/world/') && !pathname.startsWith('/api/manifestation/') && !pathname.startsWith('/api/stream/')
         ) {
           next();
           return;

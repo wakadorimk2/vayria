@@ -16,6 +16,9 @@ export type ProgramPhase = (typeof PROGRAM_PHASES)[number];
 
 export interface ProgramContext {
   worldContext?: string;
+  // Rolling game-observation summary for stream mode: current scene,
+  // ongoing activity, and the latest detected events.
+  streamContext?: string;
   format: ProgramFormat;
   participantRole: ProgramParticipantRole;
   objective: ProgramObjective;
@@ -43,8 +46,9 @@ export function isProgramContext(value: unknown): value is ProgramContext {
 
   const record = value as Record<string, unknown>;
   return (
-    Object.keys(record).every(key => ['format', 'participantRole', 'objective', 'phase', 'worldContext'].includes(key)) &&
+    Object.keys(record).every(key => ['format', 'participantRole', 'objective', 'phase', 'worldContext', 'streamContext'].includes(key)) &&
     (record.worldContext === undefined || (typeof record.worldContext === 'string' && record.worldContext.length <= 12000)) &&
+    (record.streamContext === undefined || (typeof record.streamContext === 'string' && record.streamContext.length <= 4000)) &&
     record.format === DEFAULT_PROGRAM_CONTEXT.format &&
     record.participantRole === DEFAULT_PROGRAM_CONTEXT.participantRole &&
     record.objective === DEFAULT_PROGRAM_CONTEXT.objective &&
