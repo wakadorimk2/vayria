@@ -304,7 +304,12 @@ test('observation schema covers the contract enums', () => {
 });
 
 test('all advertised providers resolve', () => {
-  for (const id of ['openai-nano', 'openai-mini', 'gemini-flash-lite']) {
+  for (const id of [
+    'openai-nano',
+    'openai-mini',
+    'gemini-flash-lite',
+    'groq-vision',
+  ]) {
     assert.ok(resolveStreamVisionProvider(id));
   }
   assert.equal(resolveStreamVisionProvider('nope'), null);

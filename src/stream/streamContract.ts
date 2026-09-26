@@ -4,6 +4,7 @@ export const STREAM_VISION_PROVIDER_IDS = [
   'openai-nano',
   'openai-mini',
   'gemini-flash-lite',
+  'groq-vision',
 ] as const;
 
 export type StreamVisionProviderId =

@@ -13,6 +13,7 @@ events, scene, player state).
   # .env.local or environment
   VAYRIA_STREAM_BENCH=true
   OPENAI_API_KEY=...        # via npm run dev:op, or plain env
+  GROQ_API_KEY=...          # optional
   GEMINI_API_KEY=...        # optional (GOOGLE_API_KEY also accepted)
   VAYRIA_STREAM_BENCH_ROOT= # optional, defaults to stream-bench/fixtures
   ```
@@ -142,7 +143,7 @@ Select providers and fixtures, set repetitions, run, download the JSON report.
 Headless sweep (needs the dev server running):
 
 ```powershell
-node scripts/run-stream-vlm-bench.mjs --port 5189 --reps 3 --providers openai-nano,openai-mini,gemini-flash-lite
+node scripts/run-stream-vlm-bench.mjs --port 5189 --reps 3 --providers openai-nano,openai-mini,gemini-flash-lite,groq-vision
 ```
 
 Writes `stream-bench/results/stream-vlm-bench-<timestamp>.json` and prints a
@@ -170,16 +171,20 @@ diverse fixture set rather than a few images repeated.
   `toGeminiSchema`; `thinkingBudget: 0` is rejected by gemini-3.5, so no
   thinking config is sent. Free-tier rate limits apply: `postJson` retries
   HTTP 429 up to 3 times with Retry-After/exponential backoff.
-- Groq is not in the provider list: no vision-capable model is offered on
-  Groq anymore (the Llama 4 multimodal models were retired).
+- `groq-vision` — `qwen/qwen3.8-27b`, Groq's only vision-capable model
+  (Llama 4 multimodal retired 2026-07-17, qwen3.6 replaced by 3.8 on
+  2026-09-14). Free tier is ~30 RPM; a dev account removes the 429 churn.
+  It is the fastest provider but under-detects changes (27 false
+  negatives vs 8 false positives on this fixture set).
 
-## Latest results (2026-09-25, 122 reviewed fixtures, 1 rep)
+## Latest results (2026-09-26, 122 reviewed fixtures, 1 rep)
 
 | provider | errors | changed acc | event hit | p50 | p95 | est. cost |
 |---|---|---|---|---|---|---|
 | openai-nano (gpt-5-nano) | 0 | 115/122 (94%) | 94/107 (88%) | 1701ms | 2356ms | $0.0154 |
 | openai-mini (gpt-5-mini) | 0 | 110/122 (90%) | 87/107 (81%) | 3577ms | 5218ms | $0.1130 |
 | gemini-flash-lite (gemini-3.5-flash-lite) | 2 | 109/122 (89%) | 60/107 (56%) | 1841ms | 5912ms | $0.0221 |
+| groq-vision (qwen/qwen3.8-27b) | 0 | 87/122 (71%) | 54/107 (50%) | 881ms | 1167ms | $0.2940 |
 
 Reports: `stream-bench/results/stream-vlm-bench-3providers-*.json`,
-`stream-vlm-bench-gemini-*.json`.
+`stream-vlm-bench-gemini-*.json`, `stream-vlm-bench-groq-*.json`.

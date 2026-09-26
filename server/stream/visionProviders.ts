@@ -325,8 +325,7 @@ const openAiNanoProvider: StreamVisionProvider = {
   },
 };
 
-// Groq no longer offers a vision-capable model (the Llama 4 multimodal
-// models were retired), so the second OpenAI tier is the comparison slot.
+// The second OpenAI tier is the comparison slot.
 const openAiMiniProvider: StreamVisionProvider = {
   id: 'openai-mini',
   label: 'OpenAI gpt-5-mini',
@@ -340,6 +339,25 @@ const openAiMiniProvider: StreamVisionProvider = {
       request.model ?? this.defaultModel,
       request,
       { reasoning_effort: 'low' },
+    );
+  },
+};
+
+// Groq's only vision-capable model (Llama 4 multimodal was retired on
+// 2026-07-17). OpenAI-compatible endpoint; free tier is ~30 RPM, so the
+// postJson 429 retry matters here.
+const groqVisionProvider: StreamVisionProvider = {
+  id: 'groq-vision',
+  label: 'Groq Qwen 3.8 27B',
+  defaultModel: 'qwen/qwen3.8-27b',
+  usdPerMillionTokens: { input: 0.8, output: 4.0 },
+  apiKeyOf: (secrets) => secrets.groqApiKey,
+  async observe(request, apiKey) {
+    return observeOpenAiCompatible(
+      'https://api.groq.com/openai/v1/chat/completions',
+      apiKey,
+      request.model ?? this.defaultModel,
+      request,
     );
   },
 };
@@ -423,6 +441,7 @@ export const STREAM_VISION_PROVIDERS: readonly StreamVisionProvider[] = [
   openAiNanoProvider,
   openAiMiniProvider,
   geminiFlashLiteProvider,
+  groqVisionProvider,
 ];
 
 export function resolveStreamVisionProvider(
