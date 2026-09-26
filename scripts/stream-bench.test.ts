@@ -34,6 +34,8 @@ import {
   streamEventSemanticKey,
 } from '../src/stream/streamObserver.js';
 import { STREAM_OBSERVE_PATH } from '../src/stream/streamContract.js';
+import type { StreamObservation } from '../src/stream/streamContract.js';
+import { StreamEpisodeTracker } from '../src/stream/streamEpisode.js';
 
 // Real tiny images are required: the sheet endpoint composites frames.
 const FAKE_IMAGE = await sharp({
@@ -428,4 +430,91 @@ test('stream evidence respects significance floor and cooldown', () => {
   assert.equal(isEventCooldownActive(1000, 5999, 5000), true);
   assert.equal(isEventCooldownActive(1000, 6000, 5000), false);
   assert.equal(isEventCooldownActive(undefined, 6000, 5000), false);
+});
+
+function makeObservation(
+  overrides: Partial<StreamObservation> = {},
+): StreamObservation {
+  return {
+    changed: true,
+    changeSummary: '',
+    events: [],
+    scene: { setting: 'outdoor', timeOfDay: 'day', bloodMoon: false },
+    player: { activity: 'walking', healthState: 'ok' },
+    ...overrides,
+  };
+}
+
+test('episode tracker folds combat events into one episode with transitions', () => {
+  const tracker = new StreamEpisodeTracker();
+  const combat = (
+    kind: string,
+    health: StreamObservation['player']['healthState'] = 'ok',
+  ) =>
+    makeObservation({
+      events: [{ kind, summary: `${kind} seen`, significance: 'medium' }],
+      player: { activity: 'fighting', healthState: health },
+    });
+
+  // Calm observation: no episode, no transitions.
+  assert.deepEqual(tracker.ingest(makeObservation(), 0), []);
+  assert.equal(tracker.inCombat, false);
+
+  // First urgent event starts the episode.
+  const start = tracker.ingest(combat('enemy_visible'), 1_000);
+  assert.equal(tracker.inCombat, true);
+  assert.deepEqual(
+    start.map((t) => t.kind),
+    ['episode_start'],
+  );
+
+  // Damage inside the episode counts hits.
+  const hit = tracker.ingest(combat('player_damaged', 'hurt'), 3_000);
+  assert.deepEqual(
+    hit.map((t) => t.kind),
+    ['damage_taken'],
+  );
+
+  // Critical health emits a high-significance transition; by now the
+  // sustained fight also reads as escalating.
+  const critical = tracker.ingest(combat('combat', 'critical'), 5_000);
+  assert.deepEqual(
+    critical.map((t) => t.kind),
+    ['health_critical', 'threat_rising'],
+  );
+  assert.equal(
+    critical.find((t) => t.kind === 'health_critical')?.significance,
+    'high',
+  );
+
+  // The rolling summary describes the episode state.
+  const summary = tracker.describe(6_000);
+  assert.ok(summary?.includes('1 hits taken'));
+  assert.ok(summary?.includes('critical'));
+
+  // Quiet after the end-gap closes the episode exactly once
+  // (last urgent observation was at t=5000; the gap is 8s).
+  const end = tracker.ingest(makeObservation(), 13_500);
+  assert.deepEqual(
+    end.map((t) => t.kind),
+    ['episode_end'],
+  );
+  assert.equal(tracker.inCombat, false);
+  assert.equal(tracker.describe(14_000), null);
+  assert.deepEqual(tracker.ingest(makeObservation(), 14_000), []);
+  assert.deepEqual(tracker.ingest(makeObservation(), 20_000), []);
+});
+
+test('episode tracker stays silent on routine scenes and dies once', () => {
+  const tracker = new StreamEpisodeTracker();
+  const death = makeObservation({
+    events: [{ kind: 'player_died', summary: 'Player died', significance: 'high' }],
+    player: { activity: 'dead', healthState: 'dead' },
+  });
+  const first = tracker.ingest(death, 1_000);
+  assert.ok(first.some((t) => t.kind === 'episode_start'));
+  assert.ok(first.some((t) => t.kind === 'player_died'));
+  // A second dead observation does not repeat the death.
+  const second = tracker.ingest(death, 2_000);
+  assert.equal(second.some((t) => t.kind === 'player_died'), false);
 });

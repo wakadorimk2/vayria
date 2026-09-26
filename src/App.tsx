@@ -366,6 +366,9 @@ export default function App() {
   const isStreamMode = runtimeConfig.mode === 'stream';
   const streamRecentEventsRef = useRef<string[]>([]);
   const [streamContext, setStreamContext] = useState('');
+  const [streamEpisodeSummary, setStreamEpisodeSummary] = useState<
+    string | null
+  >(null);
   const handleStreamObservation = useCallback(
     (observation: StreamObservation) => {
       const summaries = observation.events
@@ -391,9 +394,12 @@ export default function App() {
     },
     [],
   );
+  const combinedStreamContext = [streamContext, streamEpisodeSummary]
+    .filter((part) => part && part.length > 0)
+    .join(' ');
   const programContext = useMemo(
-    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(isStreamMode && streamContext ? { streamContext } : {}), ...(runtimeConfig.manifestationEnabled ? { worldContext: runtimeConfig.mode === 'public' ? visualContext(visual.snapshot) : manifestationContext(manifestationSnapshot) } : runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
-    [isStreamMode, streamContext, visual.snapshot, manifestationSnapshot, programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
+    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(isStreamMode && combinedStreamContext ? { streamContext: combinedStreamContext } : {}), ...(runtimeConfig.manifestationEnabled ? { worldContext: runtimeConfig.mode === 'public' ? visualContext(visual.snapshot) : manifestationContext(manifestationSnapshot) } : runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
+    [isStreamMode, combinedStreamContext, visual.snapshot, manifestationSnapshot, programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
   );
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled;
@@ -550,6 +556,10 @@ export default function App() {
       [recordAutonomyEvidence],
     ),
     onObservation: handleStreamObservation,
+    onEpisodeSummary: useCallback(
+      (summary: string | null) => setStreamEpisodeSummary(summary),
+      [],
+    ),
   });
 
   const [voiceValidationError, setVoiceValidationError] = useState('');
@@ -1027,10 +1037,14 @@ export default function App() {
         decisionEvidenceIds: autonomyCandidate.decisionEvidenceIds,
       }
       : null;
-  const autonomyTurnGateTiming = useMemo(
-    () => readAutonomyTurnGateTiming(performerProfile),
-    [performerProfile],
-  );
+  const autonomyTurnGateTiming = useMemo(() => {
+    const timing = readAutonomyTurnGateTiming(performerProfile);
+    // Game commentary needs a shorter post-speech pause or remarks land
+    // several seconds after the event they describe.
+    return isStreamMode
+      ? { ...timing, autonomyQuietTimeMinMs: 4_000, autonomyQuietTimeMaxMs: 10_000 }
+      : timing;
+  }, [performerProfile, isStreamMode]);
   const exhibitionPresentationState: ExhibitionPresentationState = isPerformerBusy
     ? 'reacting'
     : isCardSelectionActive

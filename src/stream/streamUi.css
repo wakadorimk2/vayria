@@ -41,6 +41,15 @@
   opacity: 0.8;
 }
 
+.stream-panel__episode {
+  flex: none;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ffd0a0;
+}
+
 .stream-panel__errors {
   flex: none;
   color: #ffb4b4;

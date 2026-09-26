@@ -10,6 +10,7 @@ export interface UseStreamObservationOptions {
   enabled: boolean;
   onEvidence: (evidence: StreamEvidenceInput) => void;
   onObservation?: (observation: StreamObservation) => void;
+  onEpisodeSummary?: (summary: string | null) => void;
 }
 
 export interface UseStreamObservationResult {
@@ -28,6 +29,7 @@ const idleStatus: StreamObserverStatus = {
   consecutiveErrors: 0,
   lastError: null,
   lastObservation: null,
+  episodeSummary: null,
 };
 
 // Manual-start stream observation: the player clicks "share screen",
@@ -38,14 +40,17 @@ export function useStreamObservation({
   enabled,
   onEvidence,
   onObservation,
+  onEpisodeSummary,
 }: UseStreamObservationOptions): UseStreamObservationResult {
   const observerRef = useRef<StreamObserver | null>(null);
   const onEvidenceRef = useRef(onEvidence);
   const onObservationRef = useRef(onObservation);
+  const onEpisodeSummaryRef = useRef(onEpisodeSummary);
   useEffect(() => {
     onEvidenceRef.current = onEvidence;
     onObservationRef.current = onObservation;
-  }, [onEvidence, onObservation]);
+    onEpisodeSummaryRef.current = onEpisodeSummary;
+  }, [onEvidence, onObservation, onEpisodeSummary]);
   const [status, setStatus] = useState<StreamObserverStatus>(idleStatus);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
@@ -60,6 +65,7 @@ export function useStreamObservation({
     const observer = new StreamObserver({
       onEvidence: (evidence) => onEvidenceRef.current(evidence),
       onObservation: (observation) => onObservationRef.current?.(observation),
+      onEpisodeSummary: (summary) => onEpisodeSummaryRef.current?.(summary),
       onStatus: setStatus,
     });
     observerRef.current = observer;

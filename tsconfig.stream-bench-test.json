@@ -19,6 +19,7 @@
     "src/stream/streamContract.ts",
     "src/stream/gameCapture.ts",
     "src/stream/staticFrameSkip.ts",
-    "src/stream/streamObserver.ts"
+    "src/stream/streamObserver.ts",
+    "src/stream/streamEpisode.ts"
   ]
 }

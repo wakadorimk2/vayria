@@ -6,6 +6,10 @@ import {
 } from './streamContract.js';
 import { GameCapture } from './gameCapture.js';
 import { computeLumaDiff, isStaticFrame } from './staticFrameSkip.js';
+import {
+  isUrgentEventKind,
+  StreamEpisodeTracker,
+} from './streamEpisode.js';
 
 export type StreamEventSignificance = 'low' | 'medium' | 'high';
 
@@ -33,6 +37,7 @@ export interface StreamObserverStatus {
   consecutiveErrors: number;
   lastError: string | null;
   lastObservation: StreamObservation | null;
+  episodeSummary: string | null;
 }
 
 export interface StreamObserverOptions {
@@ -43,6 +48,11 @@ export interface StreamObserverOptions {
   // Even a static scene gets re-observed at least this often so the
   // rolling context does not go stale.
   maxStaleMs?: number;
+  // Shorter cadence used right after a changed observation so evolving
+  // scenes stay fresh. Evidence cooldowns still bound speech volume.
+  activeCadenceMs?: number;
+  // Even shorter cadence while combat or damage events are on screen.
+  combatCadenceMs?: number;
   // Per event-kind: the same kind cannot raise evidence twice within
   // this window. This is the first brake on repeated narration.
   eventCooldownMs?: number;
@@ -50,10 +60,20 @@ export interface StreamObserverOptions {
   staticThreshold?: number;
   onEvidence: (evidence: StreamEvidenceInput) => void;
   onObservation?: (observation: StreamObservation) => void;
+  onEpisodeSummary?: (summary: string | null) => void;
   onStatus?: (status: StreamObserverStatus) => void;
 }
 
-const DEFAULT_CADENCE_MS = 10_000;
+const DEFAULT_CADENCE_MS = 6_000;
+const DEFAULT_ACTIVE_CADENCE_MS = 3_000;
+const DEFAULT_COMBAT_CADENCE_MS = 1_500;
+// Transition kinds re-emit only after this much time has passed;
+// episode_start/episode_end need no cooldown (state changes bound them).
+const TRANSITION_COOLDOWN_MS: Partial<Record<string, number>> = {
+  damage_taken: 6_000,
+  threat_rising: 15_000,
+  threat_falling: 15_000,
+};
 const DEFAULT_MAX_STALE_MS = 120_000;
 const DEFAULT_EVENT_COOLDOWN_MS = 180_000;
 const ERROR_BACKOFF_MS = 15_000;
@@ -145,6 +165,7 @@ const initialStatus = (): StreamObserverStatus => ({
   consecutiveErrors: 0,
   lastError: null,
   lastObservation: null,
+  episodeSummary: null,
 });
 
 export class StreamObserver {
@@ -155,6 +176,7 @@ export class StreamObserver {
   private lastLuma: Uint8ClampedArray | null = null;
   private lastChangeAt = 0;
   private eventCooldowns = new Map<string, number>();
+  private episodes = new StreamEpisodeTracker();
   private status: StreamObserverStatus = initialStatus();
 
   constructor(private readonly options: StreamObserverOptions) {}
@@ -182,7 +204,14 @@ export class StreamObserver {
     }
     this.capture?.stop();
     this.capture = null;
-    this.status = { ...this.status, running: false, capturing: false };
+    this.episodes.reset();
+    this.options.onEpisodeSummary?.(null);
+    this.status = {
+      ...this.status,
+      running: false,
+      capturing: false,
+      episodeSummary: null,
+    };
     this.publish();
   }
 
@@ -235,7 +264,7 @@ export class StreamObserver {
         this.handleObservation(result.observation);
       }
       this.publish();
-      this.schedule(this.options.cadenceMs ?? DEFAULT_CADENCE_MS);
+      this.schedule(this.nextCadence(result.observation));
     } catch (error) {
       if (!this.capture?.active) {
         this.stop();
@@ -250,6 +279,20 @@ export class StreamObserver {
     }
   }
 
+  private nextCadence(observation: StreamObservation | null | undefined): number {
+    const combat =
+      observation?.events.some((event) => isUrgentEventKind(event.kind)) ||
+      observation?.player.healthState === 'critical' ||
+      observation?.player.healthState === 'hurt';
+    if (combat) {
+      return this.options.combatCadenceMs ?? DEFAULT_COMBAT_CADENCE_MS;
+    }
+    if (observation?.changed) {
+      return this.options.activeCadenceMs ?? DEFAULT_ACTIVE_CADENCE_MS;
+    }
+    return this.options.cadenceMs ?? DEFAULT_CADENCE_MS;
+  }
+
   private handleObservation(observation: StreamObservation): void {
     const now = Date.now();
     this.status.lastObservation = observation;
@@ -259,10 +302,19 @@ export class StreamObserver {
     }
     this.options.onObservation?.(observation);
 
+    // Episode layer: combat-class events are folded into the running
+    // episode instead of raising one evidence each, so transitions
+    // ("escalating", "took a hit", "wound down") drive the narration.
+    const transitions = this.episodes.ingest(observation, now);
+    const episodeSummary = this.episodes.describe(now);
+    this.status.episodeSummary = episodeSummary;
+    this.options.onEpisodeSummary?.(episodeSummary);
+
     const minSignificance = this.options.minSignificance ?? 'medium';
     const cooldownMs =
       this.options.eventCooldownMs ?? DEFAULT_EVENT_COOLDOWN_MS;
     for (const event of observation.events) {
+      if (this.episodes.inCombat && isUrgentEventKind(event.kind)) continue;
       const evidence = buildStreamEvidence(event, now, minSignificance);
       if (!evidence) continue;
       if (
@@ -276,6 +328,38 @@ export class StreamObserver {
       }
       this.eventCooldowns.set(evidence.semanticKey, now);
       this.options.onEvidence(evidence);
+    }
+
+    for (const transition of transitions) {
+      const semanticKey = `game:7dtd:episode:${transition.kind}`;
+      const transitionCooldown = TRANSITION_COOLDOWN_MS[transition.kind] ?? 0;
+      if (
+        transitionCooldown > 0 &&
+        isEventCooldownActive(
+          this.eventCooldowns.get(semanticKey),
+          now,
+          transitionCooldown,
+        )
+      ) {
+        continue;
+      }
+      this.eventCooldowns.set(semanticKey, now);
+      this.options.onEvidence({
+        id: `episode:${transition.kind}:${now}`,
+        kind: 'environment_change',
+        at: now,
+        semanticKey,
+        content: transition.detail,
+        wakeConditions: ['new_evidence'],
+        reasonProposals: [
+          {
+            kind: 'environment_change',
+            content: transition.detail,
+            semanticKey,
+            salience: SIGNIFICANCE_SALIENCE[transition.significance],
+          },
+        ],
+      });
     }
   }
 }

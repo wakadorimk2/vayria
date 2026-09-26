@@ -45,6 +45,14 @@ export function StreamPanel({
           {summary}
         </span>
       )}
+      {sharing && status.episodeSummary && (
+        <span
+          className="stream-panel__episode"
+          title={status.episodeSummary}
+        >
+          ⚔ {status.episodeSummary}
+        </span>
+      )}
       {status.consecutiveErrors > 0 && (
         <span className="stream-panel__errors">
           エラー×{status.consecutiveErrors}
