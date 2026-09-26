@@ -91,6 +91,9 @@ interface UseAutonomousTalkOptions {
   isLoopEnabled: boolean;
   isMuted: boolean;
   isReady: boolean;
+  // Stream mode relaxes the document-visibility hard gate so the tab
+  // can keep speaking while the player has the game in front.
+  ignoreVisibilityGate?: boolean;
   onCandidate: () => Promise<AutonomousTurnOutcome>;
   onGateEvent?: (event: AutonomyTurnGateTelemetry) => void;
   now?: () => number;
@@ -153,6 +156,7 @@ export function useAutonomousTalk({
   isLoopEnabled,
   isMuted,
   isReady,
+  ignoreVisibilityGate = false,
   onCandidate,
   onGateEvent,
   now = Date.now,
@@ -265,10 +269,15 @@ export function useAutonomousTalk({
     [],
   );
 
+  const ignoreVisibilityGateRef = useRef(ignoreVisibilityGate);
+  useEffect(() => {
+    ignoreVisibilityGateRef.current = ignoreVisibilityGate;
+  }, [ignoreVisibilityGate]);
+
   useEffect(() => {
     const handleVisibilityChange = () => {
       const visible = document.visibilityState === 'visible';
-      if (!visible) cancelAutonomous();
+      if (!visible && !ignoreVisibilityGateRef.current) cancelAutonomous();
       setIsVisible(visible);
     };
 
@@ -352,7 +361,7 @@ export function useAutonomousTalk({
       isLoopEnabled,
       isMuted,
       isReady,
-      isVisible,
+      isVisible: ignoreVisibilityGate || isVisible,
       isTurnGateReady: isAutonomyTurnGateReady(gateState),
     };
 
@@ -543,6 +552,7 @@ export function useAutonomousTalk({
     emitGateEvent,
     gateState,
     hasCandidate,
+    ignoreVisibilityGate,
     isBusy,
     isLoopEnabled,
     isMuted,

@@ -23,6 +23,17 @@ import {
 } from '../server/stream/gameProfiles.js';
 import { resolveStreamVisionProvider } from '../server/stream/visionProviders.js';
 import type { LocalApiConfig } from '../server/localApiSupport.js';
+import {
+  computeLumaDiff,
+  isStaticFrame,
+} from '../src/stream/staticFrameSkip.js';
+import {
+  buildStreamEvidence,
+  isEventCooldownActive,
+  meetsMinSignificance,
+  streamEventSemanticKey,
+} from '../src/stream/streamObserver.js';
+import { STREAM_OBSERVE_PATH } from '../src/stream/streamContract.js';
 
 // Real tiny images are required: the sheet endpoint composites frames.
 const FAKE_IMAGE = await sharp({
@@ -314,4 +325,107 @@ test('all advertised providers resolve', () => {
     assert.ok(resolveStreamVisionProvider(id));
   }
   assert.equal(resolveStreamVisionProvider('nope'), null);
+});
+
+const postImage = (port: number, path: string, body: Buffer) =>
+  fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'image/jpeg' },
+    body: new Uint8Array(body),
+  });
+
+test('observe endpoint is gated by stream mode or bench flag', async () => {
+  // Neither stream mode nor bench enabled: hidden.
+  await withServer({}, async (port) => {
+    const response = await postImage(port, STREAM_OBSERVE_PATH, FAKE_IMAGE);
+    assert.equal(response.status, 404);
+  });
+  // Stream mode alone enables the endpoint.
+  await withServer({ mode: 'stream' }, async (port) => {
+    const response = await postImage(port, STREAM_OBSERVE_PATH, FAKE_IMAGE);
+    // No deepseek key configured in this harness -> 503, not 404.
+    assert.equal(response.status, 503);
+  });
+  // Public mode never exposes it.
+  await withServer(
+    { mode: 'public', streamBenchEnabled: true },
+    async (port) => {
+      const response = await postImage(port, STREAM_OBSERVE_PATH, FAKE_IMAGE);
+      assert.equal(response.status, 404);
+    },
+  );
+});
+
+test('observe endpoint validates method, provider and content type', async () => {
+  await withServer({ mode: 'stream' }, async (port) => {
+    const wrongMethod = await fetch(
+      `http://127.0.0.1:${port}${STREAM_OBSERVE_PATH}`,
+    );
+    assert.equal(wrongMethod.status, 405);
+    const badProvider = await postImage(
+      port,
+      `${STREAM_OBSERVE_PATH}?provider=nope`,
+      FAKE_IMAGE,
+    );
+    assert.equal(badProvider.status, 400);
+    const badDetail = await postImage(
+      port,
+      `${STREAM_OBSERVE_PATH}?detail=ultra`,
+      FAKE_IMAGE,
+    );
+    assert.equal(badDetail.status, 400);
+    const wrongType = await post(
+      port,
+      STREAM_OBSERVE_PATH,
+      { not: 'an image' },
+    );
+    assert.equal(wrongType.status, 400);
+  });
+});
+
+test('luma diff detects static frames at the threshold boundary', () => {
+  const base = new Uint8ClampedArray(64).fill(128);
+  assert.equal(computeLumaDiff(base, new Uint8ClampedArray(base)), 0);
+  const shifted = new Uint8ClampedArray(base);
+  // 2.55/255 = 0.01 mean diff when all pixels shift by ~2.55.
+  shifted.fill(128 + 5);
+  assert.ok(Math.abs(computeLumaDiff(base, shifted) - 5 / 255) < 1e-9);
+  // diff == threshold counts as a change: the frame is still sent.
+  assert.equal(isStaticFrame(0.02), false);
+  assert.equal(isStaticFrame(0.021), false);
+  assert.equal(isStaticFrame(0.019), true);
+  assert.equal(isStaticFrame(0.03, 0.02), false);
+});
+
+test('stream event semantic keys normalize unknown kinds', () => {
+  assert.equal(streamEventSemanticKey('enemy_visible'), 'game:7dtd:enemy_visible');
+  assert.equal(streamEventSemanticKey('combat'), 'game:7dtd:combat');
+  assert.equal(streamEventSemanticKey('not_a_kind'), 'game:7dtd:other');
+});
+
+test('stream evidence respects significance floor and cooldown', () => {
+  const high = {
+    kind: 'enemy_visible',
+    summary: '  A zombie entered the room.  ',
+    significance: 'high' as const,
+  };
+  const evidence = buildStreamEvidence(high, 1000);
+  assert.ok(evidence);
+  assert.equal(evidence.semanticKey, 'game:7dtd:enemy_visible');
+  assert.equal(evidence.content, 'A zombie entered the room.');
+  assert.equal(evidence.reasonProposals[0].salience, 0.85);
+  assert.equal(
+    buildStreamEvidence({ ...high, significance: 'low' }, 1000),
+    null,
+  );
+  assert.equal(
+    buildStreamEvidence({ ...high, significance: 'low' }, 1000, 'low') !== null,
+    true,
+  );
+  assert.equal(meetsMinSignificance('medium', 'high'), false);
+  assert.equal(meetsMinSignificance('high', 'medium'), true);
+  // Cooldown: fired at 1000, cooldown 5000 -> active until 6000.
+  assert.equal(isEventCooldownActive(1000, 5999, 5000), true);
+  assert.equal(isEventCooldownActive(1000, 6000, 5000), false);
+  assert.equal(isEventCooldownActive(undefined, 6000, 5000), false);
 });

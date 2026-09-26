@@ -1,4 +1,5 @@
 export const STREAM_BENCH_PATH = '/api/stream/vlm-bench';
+export const STREAM_OBSERVE_PATH = '/api/stream/observe';
 
 export const STREAM_VISION_PROVIDER_IDS = [
   'openai-nano',
@@ -97,4 +98,19 @@ export interface StreamBenchRunRequest {
   providerId: StreamVisionProviderId;
   model?: string;
   imageDetail?: 'low' | 'high';
+}
+
+export interface StreamObserveResult {
+  observation: StreamObservation | null;
+  model: string;
+  latencyMs: number;
+  usage?: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+  };
+  error?: {
+    kind: string;
+    message: string;
+    status?: number;
+  };
 }

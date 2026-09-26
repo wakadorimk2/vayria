@@ -51,12 +51,20 @@ function readBooleanEnvironment(
 function readAppMode(value: string | undefined, viteMode: string):
   | 'local'
   | 'exhibition'
-  | 'public' {
+  | 'public'
+  | 'stream' {
   const normalized = value?.trim();
-  if (normalized === 'local' || normalized === 'exhibition' || normalized === 'public') {
+  if (
+    normalized === 'local' ||
+    normalized === 'exhibition' ||
+    normalized === 'public' ||
+    normalized === 'stream'
+  ) {
     return normalized;
   }
-  return viteMode === 'exhibition' ? 'exhibition' : 'local';
+  if (viteMode === 'exhibition') return 'exhibition';
+  if (viteMode === 'stream') return 'stream';
+  return 'local';
 }
 
 export default defineConfig(({ mode }) => {
@@ -177,6 +185,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins,
+    define: {
+      // Pin the client app mode to the resolved server-side mode so
+      // `vite --mode stream` works without a generated .env file.
+      'import.meta.env.VITE_APP_MODE': JSON.stringify(appMode),
+    },
     server: {
       host: devHost,
       port: devPort,

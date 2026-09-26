@@ -25,8 +25,12 @@ import type {
   StreamBenchRunRequest,
   StreamBenchRunResult,
   StreamObservation,
+  StreamObserveResult,
 } from '../../src/stream/streamContract.js';
-import { STREAM_BENCH_PATH } from '../../src/stream/streamContract.js';
+import {
+  STREAM_BENCH_PATH,
+  STREAM_OBSERVE_PATH,
+} from '../../src/stream/streamContract.js';
 
 export const STREAM_API_PREFIX = '/api/stream/';
 
@@ -640,17 +644,132 @@ export async function handleStreamRequest(
   }
 }
 
+const MAX_OBSERVE_IMAGE_BYTES = 8 * 1024 * 1024;
+
+async function readImageBody(request: IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+    if (totalBytes > MAX_OBSERVE_IMAGE_BYTES) {
+      throw new RequestError('Image body is too large.', 400);
+    }
+    chunks.push(buffer);
+  }
+  const body = Buffer.concat(chunks);
+  if (body.byteLength === 0) {
+    throw new RequestError('Image body is empty.', 400);
+  }
+  return body;
+}
+
+async function handleObserveRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  config: LocalApiConfig,
+  url: URL,
+): Promise<void> {
+  if (request.method !== 'POST') {
+    throw new RequestError('Method not allowed.', 405);
+  }
+  const providerId = url.searchParams.get('provider') ?? 'deepseek-vision';
+  const provider = resolveStreamVisionProvider(providerId);
+  if (!provider) {
+    throw new RequestError('provider is invalid.', 400);
+  }
+  const detail = url.searchParams.get('detail');
+  if (detail !== null && detail !== 'low' && detail !== 'high') {
+    throw new RequestError('detail must be "low" or "high".', 400);
+  }
+  const contentType = String(request.headers['content-type'] ?? '');
+  if (!contentType.startsWith('image/')) {
+    throw new RequestError('Content-Type must be an image.', 400);
+  }
+  const image = await readImageBody(request);
+  const apiKey = provider.apiKeyOf(config);
+  if (!apiKey) {
+    throw new RequestError(
+      `API key for provider ${provider.id} is not configured.`,
+      503,
+    );
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  request.once('aborted', abort);
+  response.once('close', abort);
+  try {
+    const result = await provider.observe(
+      {
+        instruction: SEVEN_DAYS_TO_DIE_PROFILE.buildObservationInstruction(),
+        schema: streamObservationSchema(SEVEN_DAYS_TO_DIE_PROFILE),
+        image,
+        ...(detail ? { imageDetail: detail as 'low' | 'high' } : {}),
+        signal: controller.signal,
+      },
+      apiKey,
+    );
+    const parsed = parseStreamObservation(result.rawText);
+    sendJson(response, 200, {
+      observation: parsed.observation,
+      model: result.model,
+      latencyMs: result.latencyMs,
+      usage: result.usage,
+      ...(parsed.observation
+        ? {}
+        : {
+            error: {
+              kind: 'parse',
+              message: 'The observation did not match the schema.',
+            },
+          }),
+    } satisfies StreamObserveResult);
+  } catch (error) {
+    if (error instanceof StreamVisionError) {
+      sendJson(response, 200, {
+        observation: null,
+        model: provider.defaultModel,
+        latencyMs: 0,
+        error: {
+          kind: error.kind,
+          message: error.message,
+          ...(error.status !== null ? { status: error.status } : {}),
+        },
+      } satisfies StreamObserveResult);
+      return;
+    }
+    throw error;
+  } finally {
+    request.off('aborted', abort);
+    response.off('close', abort);
+  }
+}
+
 async function routeStreamRequest(
   request: IncomingMessage,
   response: ServerResponse,
   config: LocalApiConfig,
 ): Promise<void> {
+  const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+  const pathname = url.pathname;
+
+  // The live observation endpoint is part of stream mode itself; the
+  // bench endpoints stay gated behind VAYRIA_STREAM_BENCH.
+  if (pathname === STREAM_OBSERVE_PATH) {
+    const observeEnabled =
+      config.streamBenchEnabled || config.mode === 'stream';
+    if (!observeEnabled || config.mode === 'public') {
+      sendJson(response, 404, { error: 'Not found.' });
+      return;
+    }
+    await handleObserveRequest(request, response, config, url);
+    return;
+  }
+
   if (!config.streamBenchEnabled || config.mode === 'public') {
     sendJson(response, 404, { error: 'Not found.' });
     return;
   }
-  const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-  const pathname = url.pathname;
   const service = serviceFor(config);
 
   if (request.method === 'GET' && pathname === `${STREAM_BENCH_PATH}/providers`) {

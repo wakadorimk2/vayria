@@ -16,6 +16,9 @@
     "server/stream/visionProviders.ts",
     "server/localApiSupport.ts",
     "server/imageProcessing.ts",
-    "src/stream/streamContract.ts"
+    "src/stream/streamContract.ts",
+    "src/stream/gameCapture.ts",
+    "src/stream/staticFrameSkip.ts",
+    "src/stream/streamObserver.ts"
   ]
 }

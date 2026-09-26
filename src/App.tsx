@@ -23,6 +23,9 @@ import { ExhibitionMicrophoneControl } from './app/ExhibitionMicrophoneControl';
 import { MuteVolumeControls } from './app/MuteVolumeControls';
 import { useAudioControl } from './app/useAudioControl';
 import { useAutonomyReasons } from './app/useAutonomyReasons';
+import { StreamPanel } from './stream/StreamPanel';
+import { useStreamObservation } from './stream/useStreamObservation';
+import type { StreamObservation } from './stream/streamContract';
 import { publicActive, publicExhibition, runPublicAction, subscribePublic } from './public/session';
 import { allowExhibitionAutonomy } from './public/exhibitionHandoff';
 import { useBargeInControl } from './app/useBargeInControl';
@@ -360,9 +363,37 @@ export default function App() {
   const worldReactionKeyRef = useRef(new Set<string>());
   const worldReactionPendingRef = useRef(false);
   const worldReactionRunningRef = useRef(false);
+  const isStreamMode = runtimeConfig.mode === 'stream';
+  const streamRecentEventsRef = useRef<string[]>([]);
+  const [streamContext, setStreamContext] = useState('');
+  const handleStreamObservation = useCallback(
+    (observation: StreamObservation) => {
+      const summaries = observation.events
+        .map((event) => event.summary.trim())
+        .filter((summary) => summary.length > 0)
+        .slice(0, 3);
+      if (summaries.length > 0) {
+        streamRecentEventsRef.current = [
+          ...streamRecentEventsRef.current,
+          ...summaries,
+        ].slice(-6);
+      }
+      const parts = [
+        `Game: 7 Days to Die. Scene: ${observation.scene.setting}, ${observation.scene.timeOfDay}${observation.scene.bloodMoon ? ', Blood Moon' : ''}.`,
+        `Player: ${observation.player.activity}, health ${observation.player.healthState}.`,
+      ];
+      if (streamRecentEventsRef.current.length > 0) {
+        parts.push(
+          `Recent observations: ${streamRecentEventsRef.current.join(' / ')}`,
+        );
+      }
+      setStreamContext(parts.join(' '));
+    },
+    [],
+  );
   const programContext = useMemo(
-    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(runtimeConfig.manifestationEnabled ? { worldContext: runtimeConfig.mode === 'public' ? visualContext(visual.snapshot) : manifestationContext(manifestationSnapshot) } : runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
-    [visual.snapshot, manifestationSnapshot, programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
+    () => ({ ...DEFAULT_PROGRAM_CONTEXT, phase: programPhase, ...(isStreamMode && streamContext ? { streamContext } : {}), ...(runtimeConfig.manifestationEnabled ? { worldContext: runtimeConfig.mode === 'public' ? visualContext(visual.snapshot) : manifestationContext(manifestationSnapshot) } : runtimeConfig.worldMutationEnabled ? { worldContext: worldConversationContext(worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.phase === 'idle' && worldSnapshot.displayedAt !== null ? worldSnapshot.pendingProps.length : 0, worldSnapshot.layout) } : {}) }),
+    [isStreamMode, streamContext, visual.snapshot, manifestationSnapshot, programPhase, worldSnapshot.world, worldSnapshot.observation, worldSnapshot.phase, worldSnapshot.event, worldSnapshot.propObservation, worldSnapshot.displayedAt, worldSnapshot.pendingProps.length, worldSnapshot.layout],
   );
   const isExhibitionMode = runtimeConfig.mode === 'exhibition';
   const usesExhibitionUi = isExhibitionMode || runtimeConfig.mode === 'public' || runtimeConfig.worldMutationEnabled || runtimeConfig.manifestationEnabled;
@@ -509,6 +540,17 @@ export default function App() {
   }, [cardAttentionEnergyControllerRef, cardAttentionStartedAtRef, dragAttentionControllerRef, readCameraSnapshot]);
 
   const { autonomyState, setAutonomyState, autonomyExternalEvent, autonomyStateRef, recordAutonomyEvidence, notifyMeaningfulAutonomyEvent, readAutonomyEvidenceContext, handleAutonomyDelta } = useAutonomyReasons();
+
+  const streamObservation = useStreamObservation({
+    enabled: isStreamMode,
+    onEvidence: useCallback(
+      (evidence) => {
+        recordAutonomyEvidence(evidence);
+      },
+      [recordAutonomyEvidence],
+    ),
+    onObservation: handleStreamObservation,
+  });
 
   const [voiceValidationError, setVoiceValidationError] = useState('');
   const voiceEventHandlerRef = useRef<((event: VoiceInputEvent) => void) | null>(
@@ -1960,6 +2002,7 @@ export default function App() {
     isMuted: isMuted && pendingCardStimulus === null,
     isReady:
       isAvatarReady && (!isExhibitionMode || isAudioUnlocked || (isMuted && pendingCardStimulus !== null)),
+    ignoreVisibilityGate: isStreamMode,
     onCandidate: startAutonomous,
     onGateEvent: emitAutonomyGateEvent,
     sessionGeneration,
@@ -2219,6 +2262,15 @@ export default function App() {
             )}
           </div>
         </header>
+      )}
+
+      {isStreamMode && (
+        <StreamPanel
+          captureError={streamObservation.captureError}
+          onStart={streamObservation.start}
+          onStop={streamObservation.stop}
+          status={streamObservation.status}
+        />
       )}
 
       <section className="avatar-area" aria-label="VRM character">
